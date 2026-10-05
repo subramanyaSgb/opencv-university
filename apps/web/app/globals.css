@@ -818,3 +818,41 @@ button.nl-cell { cursor: pointer; }
 .fl-prev img { display: block; max-width: 100%; height: auto; border-radius: 6px; }
 .fl-cap { font-size: 0.78rem; color: var(--fg-faint); }
 @media (max-width: 560px) { .op .ax-label { font-size: 17px; } }
+
+/* ===================== Chapter 2.3 aperture visuals ===================== */
+.op-bright { fill: #fff3c4; } .op-dark { fill: #1f2630; }
+.op-wallbox { fill: var(--fg-soft); }
+.op-hole { fill: #fff7d6; }
+.ap-ring { fill: #2b2f35; stroke: var(--fg-soft); stroke-width: 2; }
+.ap-open { fill: #fff3c4; }
+.ap-dof { fill: var(--ok); fill-opacity: 0.22; stroke: var(--ok); stroke-width: 1.5; }
+.ap-dofband { fill: var(--ok); fill-opacity: 0.16; stroke: var(--ok); stroke-dasharray: 5 4; }
+.ap-part { fill-opacity: 0.85; }
+.ap-part.ok { fill: #7d8791; } .ap-part.bad { fill: var(--bad); }
+.ap-t-ok { fill: var(--ok); font: 700 12px var(--font); letter-spacing: 0.06em; }
+.ap-t-bad { fill: var(--bad); font: 700 12px var(--font); letter-spacing: 0.06em; }
+.ap-wave { fill: none; stroke: var(--accent); stroke-width: 2; opacity: 0.8; }
+.ap-blades { fill: #3a4048; stroke: var(--fg-soft); stroke-width: 2; }
+.ap-bladeline { stroke: #59616b; stroke-width: 2; }
+.ap-l-def { fill: none; stroke: #e0473b; stroke-width: 2.2; }
+.ap-l-dif { fill: none; stroke: #7d4cc2; stroke-width: 2.2; }
+.ap-l-tot { fill: none; stroke: var(--fg); stroke-width: 3; }
+.ap-best { fill: none; stroke: var(--ok); stroke-width: 3; }
+.ap-top { display: flex; flex-wrap: wrap; gap: 1rem 2rem; align-items: center; margin: 0.4rem 0 0.6rem; }
+.ap-iris { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
+.ap-iris svg { width: 6.5rem; height: 6.5rem; }
+.ap-stats { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.6rem 1.6rem; }
+.ap-stats li { display: flex; flex-direction: column; line-height: 1.3; }
+.ap-stats span { font-size: 0.8rem; color: var(--fg-soft); }
+.ap-stats strong { font: 700 1.05rem var(--mono); }
+.ap-stats em { font-style: normal; font-size: 0.78rem; color: var(--fg-faint); }
+.ap-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem; font-size: 0.8rem; color: var(--fg-soft); margin: 0.2rem 0 0.6rem; }
+.lg { display: inline-block; width: 1.3rem; height: 0.55rem; border-radius: 2px; margin-left: 0.5rem; }
+.lg-dof { background: color-mix(in srgb, var(--ok) 30%, transparent); border: 1px solid var(--ok); }
+.lg-part { background: #7d8791; }
+.lg-def { background: #e0473b; height: 3px; } .lg-dif { background: #7d4cc2; height: 3px; } .lg-tot { background: var(--fg); height: 4px; }
+.lg-best { width: 0.8rem; height: 0.8rem; border-radius: 50%; border: 3px solid var(--ok); }
+.aplab .sc-ctl { grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 0.6rem 1.5rem; }
+.aplab .ctl-full { grid-column: 1 / -1; flex-wrap: wrap; }
+.aplab .seg { flex-wrap: wrap; }
+.op-onsteel { fill: #1c1f24; font: 600 12px var(--font); }

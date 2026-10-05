@@ -365,3 +365,195 @@ export function SensorSizes({ caption }: { caption?: string }) {
     </Fig>
   );
 }
+
+/* ===================== Chapter 2.3: aperture ===================== */
+
+/** The eye's pupil: small in bright light, large in the dark. */
+export function PupilSketch({ caption }: { caption?: string }) {
+  const eye = (x: number, r: number, label: string, sub: string, dark: boolean) => (
+    <g>
+      <rect x={x - 120} y="10" width="240" height="150" rx="10" className={dark ? "op-dark" : "op-bright"} />
+      <path d={`M${x - 70} 85 Q${x} 35 ${x + 70} 85 Q${x} 135 ${x - 70} 85 Z`} className="op-eye" />
+      <circle cx={x} cy="85" r="26" className="op-iris" />
+      <circle cx={x} cy="85" r={r} className="op-pupil" />
+      <text x={x} y="182" textAnchor="middle" className="ax-label sz-strong">{label}</text>
+      <text x={x} y="200" textAnchor="middle" className="ax-label">{sub}</text>
+    </g>
+  );
+  return (
+    <Fig vb="0 0 600 210" label="In bright light the pupil is small; in the dark it is large" caption={caption}>
+      {eye(150, 6, "Bright light", "small pupil", false)}
+      {eye(450, 19, "Dark", "large pupil", true)}
+    </Fig>
+  );
+}
+
+/** A window with a small and a large opening: light through each. */
+export function WindowSketch({ caption }: { caption?: string }) {
+  const win = (x: number, w: number, label: string, sub: string) => (
+    <g>
+      <rect x={x - 110} y="20" width="220" height="44" rx="4" className="op-wallbox" />
+      <rect x={x - w / 2} y="20" width={w} height="44" className="op-hole" />
+      {Array.from({ length: Math.max(1, Math.round(w / 14)) }, (_: unknown, k: number) => {
+        const n = Math.max(1, Math.round(w / 14));
+        const xx = x - w / 2 + ((k + 0.5) * w) / n;
+        return <line key={k} x1={xx} y1="66" x2={xx} y2="132" className="op-light" markerEnd="url(#op-arr)" />;
+      })}
+      <text x={x} y="12" textAnchor="middle" className="ax-label sz-strong">{label}</text>
+      <text x={x} y="156" textAnchor="middle" className="ax-label">{sub}</text>
+    </g>
+  );
+  return (
+    <Fig vb="0 0 600 166" label="A small opening lets a little light through; a large opening lets much more through" caption={caption}>
+      {win(150, 14, "Small opening", "less light")}
+      {win(450, 100, "Large opening", "more light")}
+    </Fig>
+  );
+}
+
+/** Aperture openings to scale for one focal length: D = f / N. */
+export function ApertureRow({ f = 50, stops = [2, 2.8, 4, 5.6, 8, 11, 16], caption }: { f?: number; stops?: number[]; caption?: string }) {
+  const maxD = f / stops[0];
+  const step = 600 / stops.length;
+  return (
+    <Fig vb="0 0 600 150" label={`Aperture openings of a ${f} mm lens from f/${stops[0]} to f/${stops[stops.length - 1]}, drawn to scale`} caption={caption}>
+      {stops.map((N, k) => {
+        const cx = step * (k + 0.5);
+        const r = (f / N / maxD) * 36;
+        return (
+          <g key={N}>
+            <circle cx={cx} cy="56" r="38" className="ap-ring" />
+            <circle cx={cx} cy="56" r={Math.max(1.5, r)} className="ap-open" />
+            <text x={cx} y="116" textAnchor="middle" className="ax-label sz-strong">f/{N}</text>
+            <text x={cx} y="134" textAnchor="middle" className="ax-label">{(f / N).toFixed(1)} mm</text>
+          </g>
+        );
+      })}
+    </Fig>
+  );
+}
+
+/** Side view of light through a large and a small aperture. */
+export function ApertureCompare({ caption }: { caption?: string }) {
+  const panel = (x: number, half: number, label: string, sub: string, n: number) => (
+    <g>
+      <text x={x} y="16" textAnchor="middle" className="ax-label sz-strong">{label}</text>
+      {Array.from({ length: n }, (_, k) => {
+        const y = 100 - half + ((k + 0.5) * 2 * half) / n;
+        return <g key={k}><line x1={x - 120} y1={y} x2={x} y2={y} className="op-light" /><line x1={x} y1={y} x2={x + 110} y2="100" className="op-light" /></g>;
+      })}
+      <line x1={x} y1="28" x2={x} y2={100 - half} className="op-wall" />
+      <line x1={x} y1={100 + half} x2={x} y2="172" className="op-wall" />
+      <text x={x} y="196" textAnchor="middle" className="ax-label">{sub}</text>
+    </g>
+  );
+  return (
+    <Fig vb="0 0 600 206" label="f/2: a large opening passes many rays; f/8: a smaller opening passes fewer" caption={caption}>
+      {panel(160, 56, "f/2 · large opening", "lots of light", 8)}
+      {panel(450, 14, "f/8 · smaller opening", "less light", 2)}
+    </Fig>
+  );
+}
+
+function Bottle({ x, y, blur }: { x: number; y: number; blur: boolean }) {
+  return (
+    <g filter={blur ? "url(#op-dof-blur)" : undefined}>
+      <rect x={x - 12} y={y - 50} width="24" height="50" rx="6" fill="#2f63d6" />
+      <rect x={x - 5} y={y - 64} width="10" height="16" rx="2" fill="#2f63d6" />
+      <rect x={x - 6} y={y - 70} width="12" height="7" rx="2" fill="#e0473b" />
+      <rect x={x - 9} y={y - 36} width="18" height="14" rx="2" fill="#e9eef4" />
+    </g>
+  );
+}
+
+/** A row of objects at different distances; each is sharp or blurred. */
+export function DofRow({ items, title, caption }: { items: { label: string; sharp: boolean }[]; title?: string; caption?: string }) {
+  const step = 470 / items.length;
+  return (
+    <Fig vb="0 0 600 170" label={`${title ? title + ": " : ""}${items.map((it) => `${it.label} ${it.sharp ? "sharp" : "blurry"}`).join(", ")}`} caption={caption}>
+      <defs><filter id="op-dof-blur" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="3" /></filter></defs>
+      <Camera x={76} y={100} flip />
+      {title && <text x="20" y="20" className="ax-label sz-strong">{title}</text>}
+      <line x1="70" y1="124" x2="590" y2="124" className="op-axis" />
+      {items.map((it, k) => {
+        const x = 120 + step * (k + 0.5);
+        return (
+          <g key={k}>
+            <Bottle x={x} y={122} blur={!it.sharp} />
+            <text x={x} y="144" textAnchor="middle" className="ax-label">{it.label}</text>
+            <text x={x} y="162" textAnchor="middle" className={it.sharp ? "ap-t-ok" : "ap-t-bad"}>{it.sharp ? "SHARP" : "blur"}</text>
+          </g>
+        );
+      })}
+    </Fig>
+  );
+}
+
+/** Camera above an uneven part, with the sharp zone (depth of field) shaded. */
+export function DepthObject({ deep = false, caption }: { deep?: boolean; caption?: string }) {
+  const top = deep ? 80 : 112, bot = deep ? 196 : 148;
+  return (
+    <Fig vb="0 0 600 230" label={deep ? "Deep depth of field: the whole uneven part is inside the sharp zone" : "Shallow depth of field: only the middle of the uneven part is inside the sharp zone"} caption={caption}>
+      <rect x="270" y="6" width="60" height="32" rx="6" className="sk-cam" />
+      <rect x="288" y="38" width="24" height="10" className="sk-cam" />
+      <rect x="60" y={top} width="480" height={bot - top} className="ap-dofband" />
+      <text x="532" y={top + 16} textAnchor="end" className="ap-t-ok">SHARP ZONE</text>
+      <path d="M120 200 L200 88 L400 88 L480 200 Z" fill="url(#op-steel)" />
+      <text x="300" y="104" textAnchor="middle" className="op-onsteel">near (top)</text>
+      <text x="300" y="150" textAnchor="middle" className="op-onsteel">middle</text>
+      <text x="300" y="194" textAnchor="middle" className="op-onsteel">far (base)</text>
+      <text x="20" y="104" className={deep ? "ap-t-ok" : "ap-t-bad"}>{deep ? "sharp" : "blurry"}</text>
+      <text x="20" y="150" className="ap-t-ok">sharp</text>
+      <text x="20" y="194" className={deep ? "ap-t-ok" : "ap-t-bad"}>{deep ? "sharp" : "blurry"}</text>
+    </Fig>
+  );
+}
+
+/** Waves through a wide and a narrow opening: the narrow one makes the waves spread out. */
+export function WaveSlit({ caption }: { caption?: string }) {
+  const panel = (x: number, gap: number, label: string, sub: string) => (
+    <g>
+      <text x={x} y="16" textAnchor="middle" className="ax-label sz-strong">{label}</text>
+      {[40, 54, 68, 82].map((y) => <line key={y} x1={x - 110} y1={y} x2={x + 110} y2={y} className="ap-wave" />)}
+      <line x1={x - 120} y1="96" x2={x - gap / 2} y2="96" className="op-wall" />
+      <line x1={x + gap / 2} y1="96" x2={x + 120} y2="96" className="op-wall" />
+      {gap > 60
+        ? [112, 128, 144, 160].map((y) => <path key={y} d={`M${x - gap / 2 + 4} ${y} L${x + gap / 2 - 4} ${y}`} className="ap-wave" />)
+        : [18, 34, 50, 66].map((r) => <path key={r} d={`M${x - r} ${96 + 2} A${r} ${r} 0 0 0 ${x + r} ${96 + 2}`} className="ap-wave" />)}
+      <text x={x} y="188" textAnchor="middle" className="ax-label">{sub}</text>
+    </g>
+  );
+  return (
+    <Fig vb="0 0 600 198" label="Waves pass a wide opening almost unchanged, but spread out in circles after a narrow opening" caption={caption}>
+      {panel(150, 150, "Wide opening", "waves continue straight")}
+      {panel(450, 10, "Narrow opening", "waves spread out")}
+    </Fig>
+  );
+}
+
+/** An iris diaphragm: six blades, fully open and partly closed. */
+export function IrisSketch({ caption }: { caption?: string }) {
+  const iris = (cx: number, r: number, label: string) => {
+    const pts = Array.from({ length: 6 }, (_, k) => {
+      const a = (Math.PI / 3) * k + Math.PI / 6;
+      return `${cx + r * Math.cos(a)},${90 + r * Math.sin(a)}`;
+    }).join(" ");
+    return (
+      <g>
+        <circle cx={cx} cy="90" r="70" className="ap-blades" />
+        {Array.from({ length: 6 }, (_, k) => {
+          const a = (Math.PI / 3) * k + Math.PI / 6, b = a + Math.PI / 3;
+          return <line key={k} x1={cx + r * Math.cos(a)} y1={90 + r * Math.sin(a)} x2={cx + 70 * Math.cos(b - 0.35)} y2={90 + 70 * Math.sin(b - 0.35)} className="ap-bladeline" />;
+        })}
+        <polygon points={pts} className="ap-hole" />
+        <text x={cx} y="186" textAnchor="middle" className="ax-label sz-strong">{label}</text>
+      </g>
+    );
+  };
+  return (
+    <Fig vb="0 0 600 196" label="An iris diaphragm with six blades, fully open and partly closed" caption={caption}>
+      {iris(150, 54, "Fully open")}
+      {iris(450, 20, "Partly closed")}
+    </Fig>
+  );
+}

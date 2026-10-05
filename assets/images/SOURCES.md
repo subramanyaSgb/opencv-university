@@ -33,3 +33,5 @@ Customer-site images only after anonymisation and written approval.
 | generated/sample-pinhole-sensor.png | `cv2.flip(scene, -1)`: the inverted image a pinhole forms on the sensor | Project-owned | 2.1 |
 | generated/sample-pinhole-small.png, sample-pinhole-large.png | scene through a 5 px and 11 px pinhole: disk blur of the hole diameter, brightness × (d / 11)²; geometric optics only, no diffraction | Project-owned | 2.1 |
 | generated/sample-focus-sharp.png, sample-focus-blur.png | the 2.1 test scene in focus, and defocused: average over a 9 px disk (blur circle), same brightness | Project-owned | 2.2 |
+| generated/sample-diffraction-f4.png, sample-diffraction-f22.png | the 2.1 test scene convolved with the ideal Airy pattern at f/4 and f/22 (550 nm, 3.45 µm pixels) | Project-owned | 2.3 |
+| generated/sample-airy-point.png, sample-airy-f22.png | one bright pixel and its f/22 Airy pattern, enlarged 6× (nearest neighbour), square-root brightness to show the rings | Project-owned | 2.3 |

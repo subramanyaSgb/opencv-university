@@ -147,6 +147,35 @@ images["sample-pinhole-large.png"] = pinhole_image(chart, 11)
 images["sample-focus-sharp.png"] = chart.copy()
 images["sample-focus-blur.png"] = pinhole_image(chart, 9, d_ref=9)
 
+# Chapter 2.3: diffraction. The chart through an ideal f/4 and f/22 aperture (Airy pattern,
+# 550 nm light, 3.45 µm pixels). J1 is computed by numerical integration so SciPy is not needed.
+def bessel_j1(x):
+    t = np.linspace(0, np.pi, 401)
+    v = np.cos(t[None, :] - x.ravel()[:, None] * np.sin(t[None, :]))
+    return np.trapezoid(v, t, axis=1).reshape(x.shape) / np.pi
+
+
+def airy_kernel(N, pixel=0.00345, wavelength=0.00055, size=31):
+    r = np.hypot(*np.mgrid[-(size // 2):size // 2 + 1, -(size // 2):size // 2 + 1]) * pixel
+    x = np.pi * r / (wavelength * N)
+    x[x == 0] = 1e-9
+    psf = (2 * bessel_j1(x) / x) ** 2
+    return (psf / psf.sum()).astype(np.float32)
+
+
+for n_stop in (4, 22):
+    out = cv2.filter2D(chart.astype(np.float32), -1, airy_kernel(n_stop))
+    images[f"sample-diffraction-f{n_stop}.png"] = np.clip(np.rint(out), 0, 255).astype(np.uint8)
+# A single bright point and its f/22 Airy pattern, enlarged 6x so the rings are visible.
+spot = np.zeros((41, 41), np.float32)
+spot[20, 20] = 1.0
+airy = cv2.filter2D(spot, -1, airy_kernel(22, size=41))
+airy_vis = np.clip(255 * np.sqrt(airy / airy.max()), 0, 255).astype(np.uint8)  # sqrt to show faint rings
+images["sample-airy-f22.png"] = cv2.resize(airy_vis, None, fx=6, fy=6, interpolation=cv2.INTER_NEAREST)
+point = np.zeros((41, 41), np.uint8)
+point[20, 20] = 255
+images["sample-airy-point.png"] = cv2.resize(point, None, fx=6, fy=6, interpolation=cv2.INTER_NEAREST)
+
 for name, img in images.items():
     ok = cv2.imwrite(str(OUT / name), img)
     assert ok, f"could not write {name}"

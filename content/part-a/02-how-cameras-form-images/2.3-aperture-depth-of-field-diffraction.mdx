@@ -1,0 +1,853 @@
+export const meta = {
+  number: "2.3",
+  title: "Aperture, depth of field, diffraction",
+  minutes: 50,
+  objectives: [
+    "Read f-numbers correctly: a small f-number is a big opening",
+    "Compute the f-number from focal length and aperture diameter, and the change in light",
+    "Explain depth of field and what changes it besides aperture",
+    "Explain diffraction and why a very small aperture softens the image",
+    "Find the aperture sweet spot for a part with real depth",
+    "Explain why lighting and optics must be designed together",
+  ],
+};
+
+{/*
+  Lesson content: owner's text (5 Oct 2026), presented with visual components.
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+  Diffraction images are simulations (ideal Airy pattern, 550 nm, 3.45 µm pixels), not real camera images.
+*/}
+
+# 2.3 Aperture, depth of field, diffraction
+
+<Definition term="Aperture">the opening in the lens that controls how much light enters the camera.</Definition>
+
+Now we are going to learn **three very important camera concepts**. They are closely connected:
+
+<Columns>
+<Panel title="Aperture" tone="a">How much light enters?</Panel>
+<Panel title="Depth of field" tone="c">How much of the scene is acceptably sharp?</Panel>
+<Panel title="Diffraction" tone="b">What happens if the aperture becomes extremely small?</Panel>
+</Columns>
+
+## 1. What is aperture?
+
+Think about the lens we learned in 2.2. Inside a real camera lens, there is an **opening** through which light enters. That opening is called the **aperture**. Very simply:
+
+<Callout kind="key">
+
+**Aperture** = the opening that controls how much light enters the camera.
+
+</Callout>
+
+Imagine your eye. Your **pupil** becomes smaller in bright light and larger in darkness:
+
+<PupilSketch />
+
+A camera's aperture works in a similar way.
+
+## 2. Imagine a window
+
+Suppose we have a window. With a **small opening**, only a small amount of light comes through. With a **large opening**, much more light comes through:
+
+<WindowSketch />
+
+Same idea in a camera:
+
+<Columns>
+<Panel title="Small aperture" tone="warn"><Flow highlightLast={false} steps={["Small aperture", "Less light"]} /></Panel>
+<Panel title="Large aperture" tone="good"><Flow steps={["Large aperture", { label: "More light", tone: "result" }]} /></Panel>
+</Columns>
+
+## 3. How do we describe aperture?
+
+This is where beginners often get confused. You may see numbers such as:
+
+<Chips items={["f/1.4", "f/2", "f/2.8", "f/4", "f/5.6", "f/8", "f/11", "f/16"]} />
+
+These are called **f-numbers** or **f-stops**. And here is the confusing part:
+
+<Callout kind="key">
+
+A **smaller f-number** means a **larger aperture**.
+
+</Callout>
+
+For example, f/2 has a larger opening than f/8:
+
+<ApertureRow caption="Openings of a 50 mm lens, drawn to scale. Each step to the right halves the light." />
+
+<Columns>
+<Panel title="f/2" tone="good"><Flow steps={["BIG opening", { label: "MORE light", tone: "result" }]} /></Panel>
+<Panel title="f/8" tone="warn"><Flow highlightLast={false} steps={["SMALLER opening", "LESS light"]} /></Panel>
+</Columns>
+
+## 4. Why is it called f/number?
+
+The simplified relationship is:
+
+```text
+N = f / D
+```
+
+<Glossary
+  items={[
+    { term: "N", desc: "f-number", example: "2, 2.8, 4 …" },
+    { term: "f", desc: "focal length", example: "50 mm" },
+    { term: "D", desc: "aperture diameter (the opening)", example: "25 mm" },
+  ]}
+/>
+
+For example, focal length 50 mm and aperture diameter 25 mm:
+
+<Equation terms={[{ value: "50", label: "f (mm)" }, { op: "÷", value: "25", label: "D (mm)" }, { op: "=", value: "2", label: "N", result: true }, { op: "→", value: "f/2", result: true }]} />
+
+Now make the aperture smaller, 6.25 mm:
+
+<Equation terms={[{ value: "50", label: "f (mm)" }, { op: "÷", value: "6.25", label: "D (mm)" }, { op: "=", value: "8", label: "N", result: true }, { op: "→", value: "f/8", result: true }]} />
+
+Therefore:
+
+<Columns>
+<Panel title="Larger opening" tone="a"><Flow steps={["Larger D", { label: "Smaller f-number", tone: "result" }]} /></Panel>
+<Panel title="Smaller opening" tone="b"><Flow steps={["Smaller D", { label: "Larger f-number", tone: "result" }]} /></Panel>
+</Columns>
+
+That is why it is written **f/N**: the opening is the focal length *divided by* N. f/2 on a 50 mm lens is 50 / 2 = 25 mm across.
+
+## 5. The number system feels backward
+
+This is one of the most common beginner mistakes. Don't think *"f/16 = bigger opening"*. ❌ Wrong. Remember: **f/2 → large opening; f/16 → small opening**.
+
+<Callout kind="key">
+
+A simple memory trick: **small f-number = big hole.**
+
+</Callout>
+
+## 6. Aperture controls light
+
+Let's compare f/2 and f/8:
+
+<ApertureCompare />
+
+<Columns>
+<Panel title="f/2" tone="good"><Flow steps={[{ label: "More light", tone: "result" }]} /></Panel>
+<Panel title="f/8" tone="warn"><Flow highlightLast={false} steps={["Less light"]} /></Panel>
+</Columns>
+
+How much less? Light follows the **area** of the opening, so it goes with 1 / N². From f/2 to f/8 the f-number is 4× larger, so the light is **16× less** (Code example 1).
+
+## 7. But aperture does more than control light
+
+This is where things become interesting. Aperture also affects **depth of field**.
+
+## 8. What is depth of field?
+
+Suppose you have three objects at **1 m, 2 m and 4 m**. You focus on the middle object. The question is: **how much of the scene is still acceptably sharp?** That region is called the **depth of field (DOF)**.
+
+<Callout kind="key">
+
+**Depth of field** = the range of object distances that appear **acceptably sharp** in the image.
+
+</Callout>
+
+"Acceptably" matters: in 2.2 we saw that only one distance is perfectly sharp. Objects a little nearer or farther give a small blur circle; DOF is the range where that blur is still small enough for the job (for example, at most 2 pixels).
+
+## 9. Small depth of field
+
+Only a small region around the focused distance is sharp. That means **small DOF**:
+
+<DofRow items={[{ label: "1 m", sharp: false }, { label: "2 m", sharp: true }, { label: "4 m", sharp: false }]} />
+
+## 10. Large depth of field
+
+Now a larger range of distances is acceptably sharp. That means **large DOF**:
+
+<DofRow items={[{ label: "1 m", sharp: true }, { label: "2 m", sharp: true }, { label: "4 m", sharp: true }]} />
+
+## 11. How does aperture affect DOF?
+
+This is one of the most important relationships:
+
+<Columns>
+<Panel title="Larger aperture (smaller f-number)" tone="warn">
+<Flow highlightLast={false} steps={["e.g. f/2", "Shallower DOF", "Less depth is sharp"]} />
+</Panel>
+<Panel title="Smaller aperture (larger f-number)" tone="good">
+<Flow steps={["e.g. f/11", "Deeper DOF", { label: "More depth is sharp", tone: "result" }]} />
+</Panel>
+</Columns>
+
+Why? A smaller opening makes a **narrower cone of light**. When the object is not at the focus distance, a narrow cone cuts the sensor in a **smaller blur circle** (the blur circle is proportional to the aperture diameter D, from 2.2).
+
+## 12. Visual example
+
+Imagine a row of bottles at 1, 2, 3, 4 and 5 m, with the camera focused at 3 m.
+
+<DofRow title="f/2" items={[{ label: "1 m", sharp: false }, { label: "2 m", sharp: false }, { label: "3 m", sharp: true }, { label: "4 m", sharp: false }, { label: "5 m", sharp: false }]} />
+
+<DofRow title="f/11" items={[{ label: "1 m", sharp: true }, { label: "2 m", sharp: true }, { label: "3 m", sharp: true }, { label: "4 m", sharp: true }, { label: "5 m", sharp: true }]} caption="Illustration. Whether every bottle is really sharp at f/11 depends on the lens, the distance and how much blur you accept (section 23)." />
+
+This is the basic idea of depth of field.
+
+## 13. Why is DOF important in industrial vision?
+
+This is extremely important for industrial work. Imagine inspecting a steel object that is **not perfectly flat**. Different parts of the object may be at **different distances** from the camera.
+
+<Columns stack>
+<Panel title="Depth of field too small" tone="warn"><DepthObject /></Panel>
+<Panel title="Depth of field large enough" tone="good"><DepthObject deep /></Panel>
+</Columns>
+
+If the depth of field is too small, the near and far parts are blurry and your inspection may fail. For industrial inspection, we often want:
+
+<Callout kind="key">
+
+A **sufficiently large region of the object** to remain sharp.
+
+</Callout>
+
+## 14. Industrial example: rod counter
+
+Imagine a rod bundle seen from the end. The rod ends **aren't necessarily all at exactly the same distance**: some rods stick out, others are set back. If the DOF is too small:
+
+<Columns>
+<Panel title="Rods at the focus distance" tone="good"><Flow steps={["Sharp", { label: "Detection good", tone: "result" }]} /></Panel>
+<Panel title="Rods set back" tone="warn"><Flow highlightLast={false} steps={["Blurry", "Detection poor"]} /></Panel>
+</Columns>
+
+That can affect **counting**. So lens selection isn't only about *"can I see the whole object?"* We also ask: **"is the whole important region sufficiently sharp?"**
+
+## 15. Why not always use the smallest aperture?
+
+You might think: *"If a smaller aperture gives deeper DOF, let's just use f/22."* Sounds perfect. But there is another problem: **diffraction**.
+
+## 16. What is diffraction?
+
+Diffraction is a **wave phenomenon**. Light behaves like a wave, and when light passes through a very small opening, it doesn't simply travel as a perfect straight ray. **It spreads.** Imagine water waves passing through an opening:
+
+<WaveSlit caption="A wide opening lets the waves continue almost unchanged. A narrow one turns them into spreading circles." />
+
+Light can behave similarly.
+
+## 17. Large opening
+
+With a reasonably large aperture, the optical system can form a **relatively tight image point**: the light from one object point lands in a spot about one pixel wide or smaller (f/4: about 1.6 pixels with 3.45 µm pixels).
+
+## 18. Extremely small opening
+
+Make the aperture extremely small and **diffraction becomes significant**. The light spreads instead of forming an extremely tiny point. Instead of a dot we get a small disk with faint rings around it: a **diffraction pattern** (the **Airy pattern**).
+
+<ImageCompare
+  before={{ src: "/images/sample-airy-point.png", label: "Ideal point" }}
+  after={{ src: "/images/sample-airy-f22.png", label: "At f/22" }}
+  width={246}
+  height={246}
+  alt="A single bright pixel, and the same point as the f/22 diffraction pattern: a central disk with faint rings"
+  caption="Simulated, enlarged 6×, brightness boosted to show the rings. At f/22 the central disk is about 8.6 pixels wide (3.45 µm pixels, green light)."
+/>
+
+The same effect on the test chart: everything gets softer, and the thinnest bars lose contrast.
+
+<ImageCompare
+  before={{ src: "/images/sample-diffraction-f4.png", label: "f/4" }}
+  after={{ src: "/images/sample-diffraction-f22.png", label: "f/22" }}
+  width={320}
+  height={200}
+  alt="The test chart at f/4, crisp, and at f/22, visibly softer"
+  caption="Simulated diffraction only (perfect focus, perfect lens). f/22 is softer everywhere."
+/>
+
+## 19. So we have a trade-off
+
+This is a very important camera-design concept.
+
+<Columns>
+<Panel title="Aperture too large" tone="warn">
+<Flow highlightLast={false} steps={["Large aperture", "Shallow DOF", "More out-of-focus blur"]} />
+</Panel>
+<Panel title="Aperture too small" tone="warn">
+<Flow highlightLast={false} steps={["Very small aperture", "Deep DOF", "Diffraction increases", "Image becomes softer"]} />
+</Panel>
+</Columns>
+
+Therefore: **there is often a useful middle ground**.
+
+## 20. The sweet spot
+
+Think about image quality against aperture. With a **very large** aperture we have a DOF problem; with a **very small** aperture we have a diffraction problem; somewhere in between we get **good DOF + good sharpness**.
+
+**Try it.** Choose a lens, a focus distance and how deep your part is. The chart adds the two kinds of blur and marks the sweet spot.
+
+<ApertureLab caption="Ideal thin lens, 3.45 µm pixels, green light (550 nm). Sharp zone = blur at most 2 pixels. Total blur combines defocus and diffraction as a root-sum-square, a common rough estimate." />
+
+The exact best aperture depends on the **lens, sensor, object, lighting, required resolution and application**.
+
+## 21. Aperture and exposure
+
+Remember: a large aperture gives more light. That means if you make the aperture smaller, **f/2 → f/4 → f/8**, less light reaches the sensor: each of those steps is 4× less light.
+
+To compensate, a camera can change other exposure parameters such as **shutter speed** and **ISO / sensor gain**. We will study exposure and motion blur in **2.6**. For now, *aperture → light entering the camera* is enough.
+
+## 22. Aperture in industrial cameras
+
+Industrial cameras often have lenses with an **adjustable iris / aperture**. For example, a lens might specify **F1.4 – F16**: the aperture can be adjusted over that range.
+
+You might start with **f/4** and experimentally determine whether **f/5.6** or **f/8** gives better depth of field while maintaining sufficient sharpness and light.
+
+<Flow direction="right" steps={["Start at f/4", "Try f/5.6, f/8", "Check sharpness over the whole part", "Check brightness", { label: "Lock the iris", tone: "result" }]} />
+
+## 23. Important: DOF is not just about aperture
+
+A common beginner statement is *"Depth of field depends only on aperture."* ❌ Not true. DOF also depends on:
+
+<Equation
+  terms={[
+    { value: "Aperture" },
+    { op: "+", value: "Focal length" },
+    { op: "+", value: "Focus distance" },
+    { op: "+", value: "Sensor format" },
+    { op: "+", value: "Acceptable blur circle" },
+  ]}
+/>
+
+For practical industrial work, think:
+
+<Flow direction="right" steps={["Lens choice", "+ Camera position", "+ Object geometry", "+ Aperture", { label: "Depth of field", tone: "result" }]} />
+
+## 24. Focal length and DOF
+
+Suppose we compare a **25 mm lens** with a **100 mm lens**. Be careful about what "comparable" means:
+
+<VsTable
+  left="Same distance (camera stays put)"
+  right="Same framing (object fills the same part of the image)"
+  rows={[
+    ["The 100 mm lens magnifies 4× more", "The 100 mm camera is moved about 4× farther back"],
+    ["DOF becomes much shallower", "DOF stays about the same"],
+    ["25 mm at 2 m, f/4: about 350 mm", "100 mm at 8 m, f/4: about 350 mm"],
+    ["100 mm at 2 m, f/4: about 21 mm", ""],
+  ]}
+/>
+
+So a longer focal length gives a much shallower DOF **when the camera stays at the same distance**. That is one reason telephoto setups, which often magnify a small region from close by, can have a very narrow sharp region. When you move back to keep the same framing, DOF ends up roughly the same (for distances well short of the hyperfocal distance). Code example 2 prints these numbers.
+
+Don't memorize a single isolated rule: **DOF is affected by several variables together**.
+
+## 25. Why industrial cameras often stop down
+
+Suppose we have a camera inspecting a large component, and we want the **entire component sharp**. So we may reduce the aperture ("stop down"):
+
+<Flow direction="right" steps={["f/2.8", "f/5.6", "f/8", { label: "More DOF", tone: "result" }]} />
+
+But now we **lose light**: f/2.8 → f/8 is 8× less. So we might need **more powerful lighting**.
+
+<Callout kind="key">
+
+This is why **lighting and optics cannot be designed independently**.
+
+</Callout>
+
+## 26. Industrial vision lesson
+
+This is a very important engineering principle:
+
+<Callout kind="key">
+
+If you want a better image, **don't automatically increase camera resolution**.
+
+</Callout>
+
+Sometimes the real problem is:
+
+<Chips items={["Wrong aperture", "Insufficient lighting", "Wrong focus", "Wrong lens", "Object movement"]} />
+
+A 20 MP camera with poor optics and bad lighting can perform worse than a properly designed 5 MP vision system.
+
+## 27. Example: steel billet measurement
+
+Suppose a billet of **150 mm diameter**, with the camera **3 m** away. You want the entire visible edge to be sharp.
+
+<Columns>
+<Panel title="Aperture too large" tone="warn">
+<Flow highlightLast={false} steps={["Large aperture", "Shallow DOF", "Parts of the billet blur", "Edge localization less reliable", "Measurement error"]} />
+</Panel>
+<Panel title="Aperture too small" tone="warn">
+<Flow highlightLast={false} steps={["Very small aperture", "Diffraction", "Fine edges become softer", "Accuracy can suffer"]} />
+</Panel>
+</Columns>
+
+So you find an **appropriate operating point**: the sweet spot of section 20.
+
+## 28. Simple comparison table
+
+| Aperture | Light | DOF | Diffraction |
+| --- | --- | --- | --- |
+| Large, e.g. f/2 | High | Shallow | Low |
+| Medium, e.g. f/5.6 | Medium | More | Moderate |
+| Small, e.g. f/11 | Low | Deep | Higher |
+| Very small, e.g. f/22 | Very low | Very deep | Can be significant |
+
+These are **conceptual relationships**; the exact behaviour depends on the optical system.
+
+## 29. A simple mental picture
+
+Remember this:
+
+<Tree
+  root="APERTURE"
+  branches={[
+    { title: "Light", items: ["Large opening → more light", "Small opening → less light"] },
+    { title: "Depth of field", items: ["Large opening → shallow DOF", "Small opening → deep DOF"] },
+    { title: "Diffraction", items: ["Extremely small opening → softer image"] },
+  ]}
+/>
+
+## 30. One more important concept: iris
+
+The mechanical part that changes the aperture is often called the **iris diaphragm**. Its blades move to change the opening:
+
+<IrisSketch />
+
+This is why you'll often hear **iris, iris control, iris diaphragm, aperture, f-stop**. They are related, but technically they refer to different aspects of the system:
+
+<Glossary
+  items={[
+    { term: "Iris (diaphragm)", desc: "The mechanical blades inside the lens." },
+    { term: "Aperture", desc: "The opening the iris leaves for light." },
+    { term: "f-number / f-stop", desc: "The size of that opening expressed as f / D.", example: "f/5.6" },
+    { term: "Iris control", desc: "How the opening is set: by hand, or by a motor or video signal (auto-iris lenses)." },
+  ]}
+/>
+
+## 31. Don't confuse aperture with lens diameter
+
+Another common mistake. Suppose someone says *"lens diameter = 50 mm"*. That does **not** necessarily mean *aperture = 50 mm*. The physical lens may be much larger than the current effective aperture opening.
+
+<Nested
+  layers={[
+    { label: "Lens", side: "the glass and housing" },
+    { label: "Iris", side: "the blades" },
+    { label: "Effective aperture opening", side: "what sets the light and the f-number" },
+  ]}
+/>
+
+## 32. Connect 2.2 and 2.3
+
+In **2.2** we learned *lens → focus → sharp image*. Now in **2.3**:
+
+<Tree
+  root="LENS"
+  branches={[
+    { title: "Focus", items: ["Sharpness"] },
+    { title: "Aperture", items: ["Light", "Depth of field", "Very small → diffraction"] },
+    { title: "Focal length", items: ["FOV / geometry"] },
+  ]}
+/>
+
+These are all connected.
+
+## What you should remember from 2.3
+
+<Takeaways>
+<Takeaway n={1} title="Aperture">The opening through which light enters the lens.</Takeaway>
+<Takeaway n={2} title="Small f-number">Means a large aperture: f/2 → large opening; f/16 → small opening.</Takeaway>
+<Takeaway n={3} title="Large aperture">More light + shallower DOF.</Takeaway>
+<Takeaway n={4} title="Small aperture">Less light + deeper DOF.</Takeaway>
+<Takeaway n={5} title="Extremely small aperture">Can cause diffraction → image softening.</Takeaway>
+<Takeaway n={6} title="Depth of field">The range of object distances that appear acceptably sharp.</Takeaway>
+<Takeaway n={7} title="Industrial vision">We usually want a balanced optical setup: enough light + enough DOF + good sharpness + acceptable diffraction.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+Try these yourself.
+
+**Q1.** Which gives more light? A. f/2 · B. f/16
+
+<Solution>
+
+**A. f/2.** Smaller f-number = bigger opening. f/2 gives (16 / 2)² = **64×** the light of f/16.
+
+</Solution>
+
+**Q2.** Which generally gives deeper depth of field? A. f/2 · B. f/11
+
+<Solution>
+
+**B. f/11.** The smaller opening makes a narrower cone of light, so out-of-focus points make smaller blur circles.
+
+</Solution>
+
+**Q3.** Why does an extremely small aperture eventually reduce image sharpness?
+
+<Solution>
+
+Light is a wave. Passing a very small opening, it spreads (diffraction), so each point becomes a disk with rings, the Airy pattern, whose size grows with the f-number (about 2.44 × wavelength × N). At f/22 that disk is about 8.6 pixels wide on 3.45 µm pixels.
+
+</Solution>
+
+**Q4.** What is depth of field?
+
+<Solution>
+
+The range of object distances that appear acceptably sharp in the image, i.e. where the blur circle stays below what the application can accept.
+
+</Solution>
+
+**Q5.** Why might an industrial vision system intentionally use a smaller aperture?
+
+<Solution>
+
+To get enough depth of field so that the whole important region (an uneven part, rod ends at different depths, a curved billet) is sharp, at the cost of light, which is made up with stronger lighting.
+
+</Solution>
+
+**Q6.** You are inspecting a steel component where the front and back surfaces are at different distances. Would you prefer a very shallow or a deeper DOF? Why?
+
+<Solution>
+
+**Deeper DOF**, deep enough to cover the front-to-back depth, so both surfaces are sharp. But not deeper than needed, because stopping down further costs light and adds diffraction (the sweet spot, section 20).
+
+</Solution>
+
+**Q7.** Complete this: large aperture → more ____ → shallower ____ ; very small aperture → more ____ → image can become ____.
+
+<Solution>
+
+Large aperture → more **light** → shallower **depth of field**. Very small aperture → more **diffraction** → image can become **softer**.
+
+</Solution>
+
+### Next: 2.4 FOV and mm per pixel
+
+This one is **extremely important for industrial computer vision**, because we'll finally connect the camera to real-world measurements:
+
+<Flow direction="right" steps={["Camera", "Field of view: how much real-world area is visible?", { label: "mm per pixel: how much real distance does ONE pixel represent?", tone: "result" }]} />
+
+This is the foundation for measuring **billet length, rod diameter, slab width, cracks and object dimensions in millimetres**.
+
+## Code
+
+Four experiments: the f-number and light, depth-of-field limits, the aperture sweet spot for a real part, and diffraction simulated with OpenCV.
+
+### 1. From scratch: f-number and light
+
+```python
+import numpy as np
+
+f = 50.0                                   # focal length, mm
+for D in [25.0, 12.5, 6.25, 3.125]:        # aperture diameters, mm
+    N = f / D
+    light = (2.0 / N) ** 2                 # light relative to f/2 (area ~ D^2)
+    print(f"D = {D:6.3f} mm  ->  f/{N:<4g}  light x{light:.4f} of f/2")
+```
+
+Output:
+
+```text
+D = 25.000 mm  ->  f/2     light x1.0000 of f/2
+D = 12.500 mm  ->  f/4     light x0.2500 of f/2
+D =  6.250 mm  ->  f/8     light x0.0625 of f/2
+D =  3.125 mm  ->  f/16    light x0.0156 of f/2
+```
+
+- Halving the diameter doubles N and cuts the light to **¼** (the area of a circle goes with the diameter squared).
+- f/2 → f/8 is 1/16 of the light; f/2 → f/16 is 1/64.
+- The standard f-stops (1.4, 2, 2.8, 4, 5.6, 8 …) step by √2, so each step halves the light.
+
+### 2. From scratch: depth of field and the diffraction spot
+
+```python
+import numpy as np
+
+def dof(f, N, s, c):
+    # thin lens, all mm. c = acceptable blur circle on the sensor
+    H = f * f / (N * c) + f                  # hyperfocal distance
+    near = s * (H - f) / (H + s - 2 * f)
+    far = s * (H - f) / (H - s) if s < H else np.inf
+    return near, far
+
+pixel = 0.00345                              # 3.45 µm pixels
+c = 2 * pixel                                # accept a blur of 2 pixels
+wavelength = 0.00055                         # green light, mm
+
+s = 2000.0                                   # focused at 2 m
+for N in [2, 4, 8, 16]:
+    near, far = dof(25.0, N, s, c)
+    airy = 2.44 * wavelength * N             # diffraction spot diameter, mm
+    print(f"25 mm f/{N:<2}: sharp from {near:6.0f} to {far:6.0f} mm "
+          f"(DOF {far - near:4.0f} mm), diffraction spot {airy / pixel:.1f} px")
+
+# focal length: same distance vs same framing
+for f_mm, dist in [(25.0, 2000.0), (100.0, 2000.0), (100.0, 8000.0)]:
+    near, far = dof(f_mm, 4, dist, c)
+    print(f"{f_mm:.0f} mm at {dist / 1000:.0f} m, f/4: DOF {far - near:5.0f} mm")
+```
+
+Output:
+
+```text
+25 mm f/2 : sharp from   1916 to   2091 mm (DOF  175 mm), diffraction spot 0.8 px
+25 mm f/4 : sharp from   1840 to   2191 mm (DOF  352 mm), diffraction spot 1.6 px
+25 mm f/8 : sharp from   1703 to   2423 mm (DOF  720 mm), diffraction spot 3.1 px
+25 mm f/16: sharp from   1483 to   3072 mm (DOF 1589 mm), diffraction spot 6.2 px
+25 mm at 2 m, f/4: DOF   352 mm
+100 mm at 2 m, f/4: DOF    21 mm
+100 mm at 8 m, f/4: DOF   349 mm
+```
+
+- **c** is the blur you accept, here 2 pixels. Accept less blur and the DOF shrinks. That is how sensor format and pixel size enter DOF.
+- Doubling N roughly **doubles the DOF**. The sharp zone extends **farther behind** the focus distance than in front of it.
+- Look at f/8 and f/16: the DOF assumes at most 2 pixels of blur, but diffraction alone is already 3.1 and 6.2 pixels. The deep DOF is real, yet the whole image is softer. That is the trade-off.
+- The last three lines are section 24: same distance, the 100 mm lens has 21 mm of DOF; same framing (moved to 8 m), about the same as the 25 mm lens.
+
+### 3. The sweet spot for a part 1.8 m to 2.2 m away
+
+```python
+import numpy as np
+
+f, pixel, wavelength = 25.0, 0.00345, 0.00055
+
+def image_distance(f, s):
+    return 1.0 / (1.0 / f - 1.0 / s)
+
+sensor = image_distance(f, 2000.0)                    # focused at 2 m
+edges = [1800.0, 2200.0]                              # the part spans 1.8 m to 2.2 m
+
+print(" f/N   defocus  diffraction  total (px)")
+best = None
+for N in [1.4, 2, 2.8, 4, 5.6, 8, 11, 16, 22]:
+    D = f / N
+    defocus = max(D * abs(sensor - image_distance(f, s)) / image_distance(f, s) for s in edges)
+    airy = 2.44 * wavelength * N
+    total = np.hypot(defocus, airy) / pixel           # rough combination (root-sum-square)
+    print(f"f/{N:<4} {defocus / pixel:7.1f}  {airy / pixel:10.1f}  {total:9.1f}")
+    if best is None or total < best[1]:
+        best = (N, total)
+print("sweet spot: f/%g" % best[0])
+```
+
+Output:
+
+```text
+ f/N   defocus  diffraction  total (px)
+f/1.4      7.3         0.5        7.3
+f/2        5.1         0.8        5.2
+f/2.8      3.6         1.1        3.8
+f/4        2.5         1.6        3.0
+f/5.6      1.8         2.2        2.8
+f/8        1.3         3.1        3.4
+f/11       0.9         4.3        4.4
+f/16       0.6         6.2        6.3
+f/22       0.5         8.6        8.6
+sweet spot: f/5.6
+```
+
+- Defocus blur at the part edges **falls** as N grows; the diffraction spot **rises**. The total has a minimum: here **f/5.6**.
+- `np.hypot` combines the two as √(a² + b²). This is a rough engineering estimate, not an exact optical model; real lenses also have aberrations that are usually worst wide open.
+- This is exactly what the ApertureLab in section 20 computes.
+
+### 4. Diffraction with OpenCV: blur the chart with the Airy pattern
+
+```python
+import numpy as np
+import cv2
+
+chart = cv2.imread("sample-pinhole-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+
+def bessel_j1(x):
+    # J1(x) = (1/pi) * integral_0^pi cos(t - x sin t) dt  (numerical, no SciPy needed)
+    t = np.linspace(0, np.pi, 401)
+    return np.trapezoid(np.cos(t[None, :] - x.ravel()[:, None] * np.sin(t[None, :])), t, axis=1).reshape(x.shape) / np.pi
+
+def airy_kernel(N, pixel=0.00345, wavelength=0.00055, size=31):
+    # diffraction pattern of a circular aperture at f-number N, sampled on the pixel grid
+    r = np.hypot(*np.mgrid[-(size // 2):size // 2 + 1, -(size // 2):size // 2 + 1]) * pixel
+    x = np.pi * r / (wavelength * N)
+    x[x == 0] = 1e-9
+    psf = (2 * bessel_j1(x) / x) ** 2
+    return (psf / psf.sum()).astype(np.float32)
+
+for N in [4, 8, 16, 22]:
+    img = np.clip(np.rint(cv2.filter2D(chart, -1, airy_kernel(N))), 0, 255).astype(np.uint8)
+    score = cv2.Laplacian(img, cv2.CV_64F).var()
+    print(f"f/{N:<2}: focus score {score:7.1f}")
+```
+
+Output:
+
+```text
+f/4 : focus score  3757.1
+f/8 : focus score  1350.0
+f/16: focus score   222.4
+f/22: focus score    99.4
+```
+
+- The **Airy pattern** (2·J₁(x)/x)² is the image of a point through a perfect circular aperture. Its first dark ring has diameter 2.44·λ·N.
+- `cv2.filter2D` spreads every pixel into that pattern. The image is perfectly in focus, yet the focus score falls from f/4 to f/22 **only because of diffraction**.
+- The result is rounded back to `uint8` like a real camera image. That also matters for the API: see the notes below.
+
+## OpenCV API notes
+
+**OpenCV does not set the aperture.** The iris is set on the lens (by hand, or by an auto-iris or motorized lens through the camera). OpenCV only sees the result: brightness, blur and noise.
+
+**`cv2.filter2D(src, ddepth, kernel)`** applies any kernel, here a simulated point-spread function. With `ddepth = -1` the output has the input's type. Use a float32 input to keep precision, then round back to `uint8`.
+
+**`cv2.Laplacian` input and output types.** `cv2.Laplacian(img_float32, cv2.CV_64F)` raises *"Unsupported combination of source format (=5), and destination format (=6)"* in OpenCV 4.13.0. Use a `uint8` input with `CV_64F` output, or a float32 input with `CV_32F` output.
+
+**Measuring the sweet spot on the real system.** Mount the camera, focus at the working distance, then for each f-stop: adjust the lighting or exposure so the image brightness stays the same, and compute the focus score on regions at the near, middle and far parts of the object. Pick the f-stop where the **worst** region is best.
+
+## Where it fails
+
+- **Thin-lens DOF formulas** assume an ideal lens. Real lenses add aberrations (usually worst wide open) and their marked f-number may not equal the effective one at short working distances.
+- **"Acceptably sharp" is a choice.** DOF tables for photography use a blur circle sized for prints. For machine vision, size it from your pixels and accuracy (for example 1–2 pixels).
+- **The root-sum-square total** is a rule of thumb for comparing settings, not a prediction of the exact image.
+- **Diffraction depends on colour.** The 2.44·λ·N spot is larger for red and near-infrared light than for blue. With NIR lighting, diffraction appears at lower f-numbers.
+- **Motion and noise.** Stopping down needs more exposure time (motion blur, Chapter 2.6) or more gain (noise, Chapter 2.5). Check those before choosing the smallest aperture.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Reading f-numbers backwards.** f/16 is a small opening, not a large one.
+- **Stopping down without adding light.** The image gets darker; raising gain to compensate adds noise.
+- **Judging focus only at the centre.** Check sharpness at the nearest and farthest parts of the object too.
+- **Using f/16 or f/22 "for maximum sharpness".** Beyond the sweet spot the whole image gets softer from diffraction.
+- **Leaving the iris unlocked.** Vibration or a bumped ring changes brightness and DOF; lock it after setup.
+- **Calling the lens diameter the aperture.** The effective opening is set by the iris.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### f-numbers and stops
+
+Light through the aperture scales with its area, π(D/2)², so with 1/N². The standard sequence 1, 1.4, 2, 2.8, 4, 5.6, 8, 11, 16, 22 multiplies N by about √2 each step, halving the light. "One stop" means a factor of 2 in light [1].
+
+### Depth of field from the blur circle
+
+Using the thin-lens blur circle from 2.2 and requiring it to stay below an accepted value c gives the hyperfocal distance H = f²/(N·c) + f and the limits near = s(H − f)/(H + s − 2f), far = s(H − f)/(H − s) (far is infinite when s ≥ H) [1][2]. Focusing at H makes everything from H/2 to infinity acceptably sharp.
+
+### Diffraction and the Airy pattern
+
+A perfect lens with a circular aperture images a point as the Airy pattern, intensity ∝ (2J₁(x)/x)² with x = π·r/(λN). The first dark ring is at radius 1.22·λ·N, so the central disk is 2.44·λ·N across [1]. Two points closer than about the ring radius cannot be told apart (the Rayleigh criterion). For 550 nm light, the disk is about 1.34 µm × N.
+
+### Combining blur
+
+Defocus, diffraction, aberrations, pixel size and motion all add blur. For quick comparisons engineers often combine independent blur sizes as a root-sum-square. A proper treatment uses the modulation transfer function (MTF): the MTFs of the parts multiply [2][3].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A 50 mm lens has a 12.5 mm aperture opening. What is the f-number?",
+      options: ["f/12.5", "f/4", "f/0.25", "f/62.5"],
+      answer: 1,
+      explanation: "N = f / D = 50 / 12.5 = 4.",
+    },
+    {
+      question: "You stop down from f/2.8 to f/5.6. How much light reaches the sensor?",
+      options: ["The same", "Half", "One quarter", "Twice as much"],
+      answer: 2,
+      explanation: "N doubles, so the opening area falls by 2² = 4.",
+    },
+    {
+      question: "Which change makes the depth of field deeper (all else equal)?",
+      options: ["f/8 → f/2", "f/2 → f/8", "Accepting less blur", "Moving the camera closer to the object"],
+      answer: 1,
+      explanation: "A smaller opening gives a narrower light cone and smaller blur circles away from the focus distance.",
+    },
+    {
+      question: "Why can f/22 give a softer image than f/5.6 even when everything is in focus?",
+      options: ["Less light", "Diffraction spreads each point into a larger disk", "The lens distorts more", "Depth of field is too shallow"],
+      answer: 1,
+      explanation: "The diffraction spot grows with N: about 2.44 × λ × N.",
+    },
+    {
+      question: "A 25 mm lens is swapped for a 100 mm lens, and the camera stays at the same distance. What happens to the DOF?",
+      options: ["It stays the same", "It becomes much shallower", "It becomes deeper", "DOF does not depend on focal length"],
+      answer: 1,
+      explanation: "At the same distance the longer lens magnifies more, and DOF shrinks (352 mm → 21 mm in Code example 2). Only if you move back to keep the same framing does DOF stay about the same.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 35 mm lens has an opening of 12.5 mm. (a) What is the f-number? (b) You stop down to f/5.6. How much light do you keep? (c) How wide is the diffraction spot at f/5.6 for green light (550 nm), in µm and in 3.45 µm pixels?
+
+<Solution>
+
+(a) N = 35 / 12.5 = **2.8**: f/2.8.
+
+(b) N doubles (2.8 → 5.6), so the light falls to **¼**.
+
+(c) 2.44 × 0.55 µm × 5.6 ≈ **7.5 µm** ≈ **2.2 pixels**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+A 25 mm lens is focused at 2 m. The part spans 1.9 m to 2.1 m and you accept 2 pixels of blur (3.45 µm pixels). Using the `dof` function from Code example 2, find the **smallest f-number** in the standard sequence that keeps the whole part sharp, and its diffraction spot in pixels.
+
+<Solution>
+
+```python
+import numpy as np
+
+def dof(f, N, s, c):
+    H = f * f / (N * c) + f
+    near = s * (H - f) / (H + s - 2 * f)
+    far = s * (H - f) / (H - s) if s < H else np.inf
+    return near, far
+
+pixel = 0.00345
+for N in [1.4, 2, 2.8, 4, 5.6, 8, 11, 16, 22]:
+    near, far = dof(25.0, N, 2000.0, 2 * pixel)
+    if near <= 1900 and far >= 2100:
+        print(f"smallest f-number that covers 1.9-2.1 m: f/{N} ({near:.0f} to {far:.0f} mm)")
+        print(f"diffraction spot: {2.44 * 0.00055 * N / pixel:.1f} px")
+        break
+```
+
+Output:
+
+```text
+smallest f-number that covers 1.9-2.1 m: f/2.8 (1885 to 2130 mm)
+diffraction spot: 1.1 px
+```
+
+f/2.8 is enough, and its diffraction is small. There is no reason to stop down further unless you need more margin, because every extra stop halves the light.
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+A billet camera at 3 m was changed from f/2.8 to f/11 to get more depth of field. Now the images are dark and the edges look soft. (a) How much light was lost? (b) Name two likely reasons for the soft edges. (c) What would you do?
+
+<Solution>
+
+(a) 11 / 2.8 ≈ 3.9, squared ≈ **15×** less light (about 4 stops).
+
+(b) **Diffraction** at f/11 (about 4.3 pixels on 3.45 µm pixels), and **noise or motion blur** if gain or exposure time was raised to make up for the light.
+
+(c) Work out the depth you actually need, choose the sweet spot (often around f/5.6–f/8), lock the iris, and add **lighting** instead of gain or long exposure.
+
+</Solution>
+
+## References
+
+1. E. Hecht, *Optics*, 5th ed. Pearson, 2017. Ch. 5 (stops, f-numbers) and Ch. 10 (diffraction, the Airy pattern).
+2. W. J. Smith, *Modern Optical Engineering*, 4th ed. McGraw-Hill, 2008.
+3. C. Steger, M. Ulrich and C. Wiedemann, *Machine Vision Algorithms and Applications*, 2nd ed. Wiley-VCH, 2018. Ch. 2 (image acquisition: lenses).
+4. OpenCV 4.13.0 documentation, *Image Filtering* (`filter2D`, `Laplacian`): [docs.opencv.org/4.13.0/d4/d86/group__imgproc__filter.html](https://docs.opencv.org/4.13.0/d4/d86/group__imgproc__filter.html).
+5. European Machine Vision Association, *EMVA Standard 1288: Standard for Characterization of Image Sensors and Cameras*.
