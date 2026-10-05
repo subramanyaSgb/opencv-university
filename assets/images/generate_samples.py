@@ -119,6 +119,30 @@ cv2.putText(thermal, f"max {tmax:.0f} C", (mx + 12, my - 10), cv2.FONT_HERSHEY_S
 images["sample-thermal-gray.png"] = t8
 images["sample-thermal-inferno.png"] = thermal
 
+# Chapter 2.1: a pinhole camera. A sharp test scene, the inverted image on the sensor,
+# and the hole-size trade-off (geometric optics only: blur spot ~ hole diameter, light ~ hole area).
+chart = np.full((H, W), 25, np.uint8)
+for x0, bw in zip([20, 110, 180, 230], [16, 10, 6, 3]):
+    for k in range(3):
+        cv2.rectangle(chart, (x0 + k * 2 * bw, 24), (x0 + k * 2 * bw + bw - 1, 100), 230, -1)
+cv2.putText(chart, "OPENCV", (30, 170), cv2.FONT_HERSHEY_SIMPLEX, 1.6, 230, 4, cv2.LINE_AA)
+cv2.arrowedLine(chart, (292, 180), (292, 24), 230, 4, tipLength=0.15)
+images["sample-pinhole-scene.png"] = chart
+images["sample-pinhole-sensor.png"] = cv2.flip(chart, -1)
+
+
+def pinhole_image(scene, d, d_ref=11):
+    """Disk blur of diameter d pixels, brightness scaled by hole area relative to d_ref."""
+    k = np.zeros((d, d), np.float32)
+    cv2.circle(k, (d // 2, d // 2), d // 2, 1.0, -1)
+    k /= k.sum()
+    img = cv2.filter2D(scene.astype(np.float32), -1, k) * (d / d_ref) ** 2
+    return np.clip(np.rint(img), 0, 255).astype(np.uint8)
+
+
+images["sample-pinhole-small.png"] = pinhole_image(chart, 5)
+images["sample-pinhole-large.png"] = pinhole_image(chart, 11)
+
 for name, img in images.items():
     ok = cv2.imwrite(str(OUT / name), img)
     assert ok, f"could not write {name}"

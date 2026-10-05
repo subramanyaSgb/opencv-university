@@ -1,0 +1,17 @@
+{
+  "number": 2,
+  "title": "How cameras form images",
+  "summary": "Where pixels come from: light, optics, the sensor and the camera electronics that turn a scene into numbers.",
+  "chapters": [
+    { "number": "2.1", "slug": "2.1-light-and-the-pinhole-camera", "title": "Light and the pinhole camera" },
+    { "number": "2.2", "slug": "2.2-lenses-and-focus", "title": "Lenses and focus" },
+    { "number": "2.3", "slug": "2.3-aperture-depth-of-field-diffraction", "title": "Aperture, depth of field, diffraction" },
+    { "number": "2.4", "slug": "2.4-field-of-view-and-mm-per-pixel", "title": "Field of view and mm per pixel" },
+    { "number": "2.5", "slug": "2.5-the-sensor-and-noise", "title": "The sensor and noise" },
+    { "number": "2.6", "slug": "2.6-exposure-and-motion-blur", "title": "Exposure and motion blur" },
+    { "number": "2.7", "slug": "2.7-bayer-filter-and-demosaicing", "title": "Bayer filter and demosaicing" },
+    { "number": "2.8", "slug": "2.8-the-isp-pipeline", "title": "The ISP pipeline" },
+    { "number": "2.9", "slug": "2.9-rolling-shutter-and-flicker", "title": "Rolling shutter and flicker" },
+    { "number": "2.10", "slug": "2.10-area-scan-vs-line-scan-cameras", "title": "Area-scan vs line-scan cameras" }
+  ]
+}

@@ -35,3 +35,5 @@ export { KernelGrid } from "./KernelGrid";
 export { NeighborhoodLab } from "./NeighborhoodLab";
 export { ScaleCalc } from "./ScaleCalc";
 export { DimSketch, Conveyor, CrackSketch, DetectSketch, TrackSketch, LabelPlate } from "./Sketches";
+export { PinholeLab, PinholeDiagram } from "./PinholeLab";
+export { LightPath, OpenSensor, GateSketch, PerspectiveSketch, SensorGrid, CameraChain } from "./Optics";

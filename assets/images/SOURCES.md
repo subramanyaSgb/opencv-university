@@ -29,3 +29,6 @@ Customer-site images only after anonymisation and written approval.
 | generated/sample-plate-good.png | synthetic plate, controlled lighting: even, high contrast | Project-owned | 1.6 |
 | generated/sample-plate-poor-otsu.png, sample-plate-good-otsu.png | Otsu threshold (inverted) of each plate | Project-owned | 1.6 |
 | generated/sample-thermal-gray.png, sample-thermal-inferno.png | simulated temperature field (30 to 950 °C), 8-bit and INFERNO colour map; not real camera data | Project-owned | 1.6 |
+| generated/sample-pinhole-scene.png | synthetic test scene: bars 16/10/6/3 px wide, text "OPENCV", upward arrow | Project-owned | 2.1 |
+| generated/sample-pinhole-sensor.png | `cv2.flip(scene, -1)`: the inverted image a pinhole forms on the sensor | Project-owned | 2.1 |
+| generated/sample-pinhole-small.png, sample-pinhole-large.png | scene through a 5 px and 11 px pinhole: disk blur of the hole diameter, brightness × (d / 11)²; geometric optics only, no diffraction | Project-owned | 2.1 |

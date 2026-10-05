@@ -1,0 +1,886 @@
+export const meta = {
+  number: "2.1",
+  title: "Light and the pinhole camera",
+  minutes: 45,
+  objectives: [
+    "Explain what a camera does: collect light and turn it into numbers",
+    "Explain why a sensor needs a pinhole or a lens to form an image",
+    "Explain why the pinhole image is inverted, and the trade-off of hole size",
+    "Use x = f·X/Z to predict how image size changes with distance",
+    "Follow one pixel from the real world to a NumPy array",
+    "Tell the real camera from the mathematical pinhole model",
+  ],
+};
+
+{/*
+  Lesson content: owner's text (5 Oct 2026), presented with visual components.
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+  Pinhole images are simulations (geometric optics only), not real camera images.
+*/}
+
+# 2.1 Light and the pinhole camera
+
+<Definition term="Camera">a device that collects light from the real world and converts that light into electrical, then digital, information.</Definition>
+
+**Module 2: how cameras form images.**
+
+Before we learn more image processing, we need to answer something fundamental: **where does the image come from in the first place?** We already know:
+
+<Flow direction="right" steps={[{ label: "Image", tone: "data" }, { label: "Pixels", tone: "data" }, { label: "Numbers", tone: "result" }]} />
+
+But where did those pixels come from? The answer is:
+
+<CameraChain
+  direction="right"
+  steps={[
+    { icon: "world", label: "Real world" },
+    { icon: "light", label: "Light" },
+    { icon: "lens", label: "Lens" },
+    { icon: "sensor", label: "Camera sensor" },
+    { icon: "numbers", label: "Digital numbers" },
+    { icon: "image", label: "Image" },
+  ]}
+/>
+
+This entire process is what Module 2 is about. It has ten chapters, done one at a time like Module 1: light and the pinhole camera, lenses and focus, aperture and depth of field, field of view and mm per pixel, the sensor and noise, exposure and motion blur, Bayer filter and demosaicing, the ISP pipeline, rolling shutter and flicker, and area-scan vs line-scan cameras.
+
+## 1. First: what is a camera actually doing?
+
+Many beginners think: *"A camera takes a picture."* That's true, but technically incomplete. A camera is doing this:
+
+<Callout kind="key">
+
+A camera **collects light** from the real world and **converts that light** into electrical / digital information.
+
+</Callout>
+
+Think about your eyes. You look at a steel billet. Light hits the billet, and some of that light reflects from the billet and enters your eye:
+
+<LightPath to="eye" caption="Light from a source hits the billet; part of it reflects into your eye." />
+
+A camera does something similar:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Object", tone: "world" },
+    { label: "Reflected light", tone: "world" },
+    { label: "Camera", tone: "process" },
+    { label: "Sensor", tone: "process" },
+    { label: "Image", tone: "result" },
+  ]}
+/>
+
+So the fundamental ingredient of a camera is **light**. Without light, a normal camera cannot produce a normal visible image.
+
+## 2. What is light?
+
+For now, don't worry about the physics of electromagnetic waves. At our level, think:
+
+<Callout kind="note">
+
+**Light** is energy that travels from a source and allows objects to be seen.
+
+</Callout>
+
+<Chips label="Examples of light sources" items={["Sun", "LED", "Flame", "Flashlight"]} />
+
+Objects then reflect some of that light, and the camera receives the reflected light:
+
+<LightPath to="camera" object="STEEL" caption="The camera only ever sees light: the light that left the source and bounced off the steel towards it." />
+
+## 3. Why can't the camera simply capture everything?
+
+Imagine removing the lens. You have a box with a sensor inside and an open front. Light from **everywhere** would enter the camera, and every point of the sensor would receive light from every point of the scene:
+
+<OpenSensor caption="Red rays from the top of the object and blue rays from the bottom land on every sensor point. Each point gets the same mixture, so no picture forms." />
+
+The sensor would receive a **confusing mixture of light**. We need a way to control **where each ray of light goes**. That's where the camera's **optical system** comes in.
+
+## 4. The simplest possible camera: pinhole camera
+
+Before lenses existed, we can imagine a very simple camera. Take a box, put a sensor on the back wall, and make a **tiny hole** on the front side:
+
+<PinholeDiagram object={false} f={9} caption="A closed box, a sensor on the back wall, and one tiny hole in the front." />
+
+This is called a **pinhole camera**.
+
+## 5. Why does the tiny hole work?
+
+Imagine an object outside. Light travels **approximately in straight lines**. Some rays from the object enter the tiny hole. Because the hole is tiny, **only a small set of rays can pass through**, and the rays **cross at the hole**:
+
+<PinholeDiagram caption="Only the ray from the top that passes through the hole reaches the sensor (red), and likewise for the bottom (blue). They cross at the hole, so the image is inverted." />
+
+As a result, the image formed on the sensor is **inverted**. So one of the most important things to understand is:
+
+<Callout kind="key">
+
+A camera forms an image because **light rays from different points in the scene are directed to corresponding locations on the sensor**.
+
+</Callout>
+
+## 6. Why is the image upside down?
+
+Let's make it even simpler. Look at one object with a **top** (red) and a **base** (blue) in the diagram above:
+
+- Light from the **top** travels down through the pinhole and ends up at the **bottom** of the sensor.
+- Light from the **base** travels up through the pinhole and ends up at the **top** of the sensor.
+
+Therefore the image is **inverted**. The same happens left to right, so the image on the sensor is the scene turned through 180°:
+
+<ImageCompare
+  before={{ src: "/images/sample-pinhole-scene.png", label: "Real world" }}
+  after={{ src: "/images/sample-pinhole-sensor.png", label: "On the sensor" }}
+  width={320}
+  height={200}
+  alt="A test scene with bars, the word OPENCV and an upward arrow, and the same scene upside down and mirrored as it lands on the sensor"
+  caption="Simulated. The arrow points up in the world and down on the sensor; the text is also mirrored left to right."
+/>
+
+In a real digital camera, later processing and display handling make the final displayed image appear **upright**.
+
+## 7. The pinhole is like a traffic gate
+
+Here's a simple analogy. Imagine thousands of cars coming toward a road. If there is a **huge opening**, cars can go everywhere. But if there is a **tiny gate**, only a restricted set of paths can pass:
+
+<GateSketch caption="Through the tiny gate each car has one path. The pinhole does the same for light: each scene point gets one path to the sensor." />
+
+The pinhole does something similar with light.
+
+## 8. Why not make the hole extremely tiny?
+
+You might think: *"If a smaller hole gives a cleaner image, let's make it extremely tiny!"* But there's a problem. Very tiny holes allow **very little light** through.
+
+<Columns>
+<Panel title="Large hole" tone="good">
+<Flow steps={["Large hole", "More light", { label: "Brighter image", tone: "result" }]} />
+</Panel>
+<Panel title="Very tiny hole" tone="warn">
+<Flow highlightLast={false} steps={["Tiny hole", "Less light", "Darker image"]} />
+</Panel>
+</Columns>
+
+Here is the same scene through two holes, with the same exposure:
+
+<ImageCompare
+  before={{ src: "/images/sample-pinhole-small.png", label: "Small hole" }}
+  after={{ src: "/images/sample-pinhole-large.png", label: "Large hole" }}
+  width={320}
+  height={200}
+  alt="The test scene through a small hole, dark but sharp, and through a large hole, bright but blurred"
+  caption="Simulated, geometric optics only. Small hole: sharp but dark. Large hole: bright, but the thin bars blur together."
+/>
+
+**Try it.** Change the hole size and watch two things: the light collected and the size of the blur spot.
+
+<PinholeLab hole caption="Geometric optics only: each scene point becomes a small spot as wide as the light cone through the hole. Diffraction is ignored here." />
+
+And eventually another effect becomes important: **diffraction**. We'll study that later in *2.3 Aperture, depth of field and diffraction*. So there's a **trade-off**.
+
+## 9. Pinhole camera model
+
+The pinhole camera is extremely important because it gives us a **simple mathematical model of a camera**:
+
+<PinholeDiagram f={7} X={3} Z={11} caption="The pinhole is the camera centre. Every ray passes through it on its way to the image plane." />
+
+There are three important things:
+
+<Chips items={["Object", "Camera (centre / pinhole)", "Image plane / sensor"]} />
+
+This model is the foundation of:
+
+<Chips items={["Camera geometry", "Perspective projection", "Calibration", "3D reconstruction", "Robotics vision", "Measurement", "Computer graphics"]} />
+
+You'll encounter this idea repeatedly later.
+
+## 10. Perspective projection
+
+Now we reach an extremely important concept. Suppose you have two objects that are **physically the same size**, but one is **farther away**. The farther object **appears smaller**. Why? Because of **perspective projection**.
+
+## 11. Simple example
+
+Imagine two identical rods, **rod A** and **rod B**. One is close; the other is far:
+
+<PerspectiveSketch caption="Same physical size. The far rod fills a narrower angle at the camera, so it covers fewer pixels." />
+
+Same physical size. **Different apparent size** in the image. Therefore:
+
+<Callout kind="key">
+
+The size of an object **in pixels** depends not only on its physical size, but also on its **distance from the camera** and the **camera's optics**.
+
+</Callout>
+
+This will become extremely important when we learn mm per pixel (Chapter 2.4).
+
+## 12. Why this matters in industrial vision
+
+Suppose you want to measure a billet. In the image you see it span **1000 pixels**. Can you immediately say *length = 1000 mm*?
+
+<Equation terms={[{ value: "1000", label: "pixels" }, { op: "≠", value: "1000", label: "mm", result: true }]} />
+
+**No.** 1000 pixels does not automatically mean 1000 mm. You need to understand:
+
+<Chips items={["Camera geometry", "Lens", "Distance", "Field of view", "Calibration", "Perspective"]} />
+
+That's why Module 2 is so important.
+
+## 13. The camera's "eye"
+
+Think of the camera as having an eye:
+
+<CameraChain
+  steps={[
+    { icon: "world", label: "World" },
+    { icon: "light", label: "Light rays" },
+    { icon: "lens", label: "Lens", note: "controls how the light is projected" },
+    { icon: "sensor", label: "Sensor" },
+  ]}
+/>
+
+The **lens** controls how the light is projected onto the sensor. But before we get to lenses, let's understand the sensor.
+
+## 14. What is a camera sensor?
+
+The **sensor** is the component that receives light and converts it into electrical information. Conceptually:
+
+<SensorGrid caption="Each little element is sensitive to light. These eventually correspond to image pixels." />
+
+## 15. Pixel vs sensor pixel
+
+Don't confuse an **image pixel** with a **physical sensor pixel**. A digital image might be 1920 × 1080, so it contains:
+
+<Equation
+  terms={[
+    { value: "1920", label: "width" },
+    { op: "×", value: "1080", label: "height" },
+    { op: "=", value: "2,073,600", label: "image pixels", result: true },
+  ]}
+/>
+
+<VsTable
+  left="Image pixel"
+  right="Sensor pixel"
+  rows={[
+    ["A number in the image array", "A physical light-sensitive element on the chip"],
+    ["Lives in software: image[y, x]", "Lives in hardware: a few micrometres wide"],
+    ["Produced by camera processing", "Captures the light information"],
+  ]}
+/>
+
+The camera sensor has a corresponding array of photosensitive elements that capture the light information. Later, **camera processing** converts that captured information into the digital image we use in software.
+
+## 16. The complete journey of one pixel
+
+This is one of the best things to understand. Imagine **one tiny area** of the real world, and follow it all the way into your program:
+
+<CameraChain
+  direction="right"
+  steps={[
+    { icon: "world", label: "Real object", note: "physical world" },
+    { icon: "light", label: "Reflected light" },
+    { icon: "lens", label: "Lens", note: "optics" },
+    { icon: "sensor", label: "Sensor element" },
+    { icon: "electronics", label: "Electrical signal", note: "electronics" },
+    { icon: "numbers", label: "Digital value" },
+    { icon: "code", label: "Image pixel", note: "a NumPy array" },
+  ]}
+/>
+
+That's the complete chain.
+
+## 17. A camera is basically a measurement device
+
+This is a very important industrial mindset. Don't think only *"camera = picture"*. Think:
+
+<Callout kind="key">
+
+**Camera = a device that measures light spatially.** It measures how much light arrives at different locations on its sensor.
+
+</Callout>
+
+For example:
+
+<PixelMatrix size="lg" values={[[10, 20, 30], [40, 80, 90], [20, 60, 70]]} highlight={[[1, 1]]} caption="Captured light, after the camera's sensing and processing pipeline. The outlined value is image[1, 1]." />
+
+These numbers represent captured light information after the camera's sensing and processing pipeline. And then `image[1, 1]` might give you **80**.
+
+## 18. From light to pixel values
+
+Suppose a sensor receives very little light: the resulting pixel may be relatively dark, say **20**. More light: **100**. A lot of light: **220**.
+
+<IntensityScale
+  marks={[
+    { value: 20, label: "very little light" },
+    { value: 100, label: "more light" },
+    { value: 220, label: "a lot of light" },
+  ]}
+  caption="8-bit grayscale: 0 is black, 255 is white. Less light → smaller value; more light → larger value."
+/>
+
+<Callout kind="note">
+
+The exact relationship between incoming light and digital value depends on **sensor electronics and camera processing**; it's not always a simple one-to-one physical measurement. Chapters 2.5 and 2.8 explain why.
+
+</Callout>
+
+## 19. Why do we need a lens?
+
+Now let's replace our pinhole with a **lens**. A lens performs a much more useful job than a tiny pinhole: it **collects and redirects light** so that we can form an image efficiently.
+
+<Columns>
+<Panel title="Without useful optics" tone="warn">
+<Flow highlightLast={false} steps={["Little light", "Poor signal"]} />
+</Panel>
+<Panel title="With a lens" tone="good">
+<Flow steps={["More, controlled light", { label: "Better image", tone: "result" }]} />
+</Panel>
+</Columns>
+
+A lens lets us gather **much more light** than a tiny pinhole while still forming a **sharp image** when properly focused. That is Chapter 2.2.
+
+## 20. The basic camera structure
+
+A simplified camera looks like this. This diagram is worth remembering:
+
+<CameraChain
+  steps={[
+    { icon: "world", label: "Real world", note: "sends light" },
+    { icon: "lens", label: "Lens", note: "focuses the light" },
+    { icon: "sensor", label: "Sensor", note: "grid of light-sensitive elements" },
+    { icon: "electronics", label: "Electronics", note: "signal → numbers" },
+    { icon: "image", label: "Digital image" },
+  ]}
+/>
+
+## 21. What determines where an object appears?
+
+Suppose there's an object in front of the camera. The lens maps the **direction** of incoming light to a **location** on the sensor. Therefore:
+
+<Flow
+  steps={[
+    { label: "Object position", tone: "world" },
+    { label: "Light direction", tone: "world" },
+    { label: "Lens", tone: "process" },
+    { label: "Sensor position", tone: "data" },
+    { label: "Image coordinates", tone: "result" },
+  ]}
+/>
+
+This is the foundation of **camera geometry**.
+
+## 22. Perspective in a simple formula
+
+Eventually we'll study the pinhole camera mathematically. A simplified relationship is:
+
+```text
+x = f · X / Z
+y = f · Y / Z
+```
+
+Don't worry if this looks scary. Let's translate it into English:
+
+<Glossary
+  items={[
+    { term: "X, Y", desc: "The object's position (sideways and up), measured from the camera's axis.", example: "X = 2" },
+    { term: "Z", desc: "Distance from the camera.", example: "Z = 5" },
+    { term: "f", desc: "Focal length: the distance from the pinhole to the image plane.", example: "f = 10" },
+    { term: "x, y", desc: "Where the point lands in the image.", example: "x = 4" },
+  ]}
+/>
+
+The important part is that **x is proportional to X / Z** (and y to Y / Z). Meaning:
+
+<Callout kind="key">
+
+As distance **Z increases**, the projected object becomes **smaller**.
+
+</Callout>
+
+## 23. Simple numerical example
+
+Suppose f = 10, X = 2, Z = 5. Then:
+
+<Equation
+  terms={[
+    { value: "10", label: "f" },
+    { op: "×", value: "2", label: "X" },
+    { op: "÷", value: "5", label: "Z" },
+    { op: "=", value: "4", label: "x", result: true },
+  ]}
+/>
+
+Now move the object farther away, Z = 10:
+
+<Equation
+  terms={[
+    { value: "10", label: "f" },
+    { op: "×", value: "2", label: "X" },
+    { op: "÷", value: "10", label: "Z" },
+    { op: "=", value: "2", label: "x", result: true },
+  ]}
+/>
+
+The object moved farther away; its image projection became **smaller** (from 4 to 2). This simple relationship is fundamental to perspective vision.
+
+**Try it.** The lab starts at f = 10, X = 2, Z = 5. Drag Z to 10 and watch the image halve.
+
+<PinholeLab caption="Drawn to scale. Red rays come from the top of the object, blue from the bottom; they cross at the pinhole." />
+
+## 24. Why this matters for your industrial systems
+
+Imagine a camera looking at rods. If the rods move **closer** to the camera, their image size **grows**. If they move **farther**, it **shrinks**. Therefore, if you want **reliable measurement or counting**, you need a **controlled setup**. Industrial systems often try to control:
+
+<Chips items={["Camera position", "Camera angle", "Object position", "Working distance", "Lighting", "Lens"]} />
+
+This makes the visual measurement **more repeatable**.
+
+## 25. Pinhole camera: the key concepts
+
+For this chapter, remember these five things:
+
+<Takeaways>
+<Takeaway n={1} title="Light travels approximately in straight lines">That is why one ray from each scene point can be traced through the hole.</Takeaway>
+<Takeaway n={2} title="A camera collects light from the scene">Object → light → camera.</Takeaway>
+<Takeaway n={3} title="The pinhole is a simple model of image formation">Object → pinhole → sensor.</Takeaway>
+<Takeaway n={4} title="The image is inverted in the pinhole model">Object ▲ becomes image ▼.</Takeaway>
+<Takeaway n={5} title="Perspective makes distant objects appear smaller">Close → big; far → small.</Takeaway>
+</Takeaways>
+
+## 26. One more important concept: image plane
+
+You'll hear the term **image plane** frequently. Think of it as the plane where the camera forms the image. In a physical camera, this corresponds to the **sensor plane**.
+
+<PinholeDiagram f={8} X={2.5} Z={10} caption="The image plane is where the rays through the camera centre land. In a real camera it is the sensor surface." />
+
+Later, when we study calibration, projection, 3D vision, depth and stereo vision, the image plane will become extremely important.
+
+## 27. Real camera vs mathematical camera
+
+There's an important distinction.
+
+<Columns>
+<Panel title="Real camera" tone="a">
+<Flow steps={["Real world", "Lens", "Sensor", "Electronics", "ISP", { label: "JPEG / RAW / etc.", tone: "result" }]} />
+
+It has lens imperfections, distortion, sensor noise, exposure limitations, colour response and electronic effects.
+</Panel>
+<Panel title="Pinhole camera model" tone="b">
+<Flow steps={["Real world", "Pinhole", { label: "Image plane", tone: "result" }]} />
+
+A simplified mathematical model.
+</Panel>
+</Columns>
+
+Why do we use it? Because it's **simple enough to understand** and **mathematically useful enough** to model real cameras approximately. Later we add real-world effects such as **lens distortion** and **calibration**.
+
+## 28. Industrial example
+
+Suppose you're designing a **billet measurement system**. The light from the billet enters the lens. The lens projects the billet onto the sensor. The sensor produces a 1920 × 1080 image. Then your software receives it with `image = cv2.imread(...)`. Now your earlier topics connect:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Real world", tone: "world" },
+    { label: "Light", tone: "world" },
+    { label: "Camera", tone: "process" },
+    { label: "Sensor", tone: "process" },
+    { label: "Image", tone: "data" },
+    { label: "Pixels", tone: "data" },
+    { label: "NumPy / OpenCV", tone: "data" },
+    { label: "Image processing", tone: "process" },
+    { label: "Computer vision", tone: "process" },
+    { label: "Measurement", tone: "result" },
+  ]}
+/>
+
+This is the complete journey we've been building toward.
+
+### 🧠 The most important mental model
+
+Don't memorize complicated camera equations yet. Remember this:
+
+<CameraChain
+  steps={[
+    { icon: "world", label: "Real world", note: "light" },
+    { icon: "lens", label: "Lens", note: "focused light" },
+    { icon: "sensor", label: "Sensor" },
+    { icon: "electronics", label: "Electrical data" },
+    { icon: "image", label: "Digital image" },
+    { icon: "numbers", label: "Pixel values" },
+  ]}
+/>
+
+And the fundamental idea:
+
+<Callout kind="key">
+
+A camera converts the **spatial distribution of light** in the real world into **numerical image data**.
+
+</Callout>
+
+## Mini exercise
+
+Try these without looking back.
+
+**Q1.** Why can't a camera simply have a completely open hole instead of optics?
+
+<Solution>
+
+Every sensor point would receive light from every scene point, so each point gets the same mixture and no image forms (section 3). A pinhole or lens sends light from each scene point to its own place on the sensor.
+
+</Solution>
+
+**Q2.** What happens to the apparent size of an object when it moves farther from the camera? Object close → ? Object far → ?
+
+<Solution>
+
+Close → **bigger** in the image; far → **smaller**. With x = f·X/Z, doubling Z halves x.
+
+</Solution>
+
+**Q3.** What is the basic purpose of the camera sensor?
+
+<Solution>
+
+To receive light and convert it into electrical information, one light-sensitive element per location, which the camera then turns into pixel values.
+
+</Solution>
+
+**Q4.** In the pinhole camera model, why does the image become inverted?
+
+<Solution>
+
+Light travels in straight lines and all rays cross at the hole. Light from the top of the object travels down through the hole and lands at the bottom of the sensor; light from the bottom lands at the top (and left and right swap too).
+
+</Solution>
+
+**Q5.** Put these in the correct order: sensor, light, digital image, lens, real-world object.
+
+<Solution>
+
+<Flow direction="right" steps={["Real-world object", "Light", "Lens", "Sensor", "Digital image"]} />
+
+</Solution>
+
+**Q6 (industrial thinking).** You have a camera measuring billet length. The billet moves **twice as far** away from the camera. Would you expect its size in pixels to remain exactly the same?
+
+<Solution>
+
+**No.** With an ordinary (perspective) lens its length in pixels roughly **halves**, because x = f·X/Z. In the Code section, a 1.2 m billet spans 560 px at 3 m and 280 px at 6 m. That is why measurement systems fix the working distance and calibrate.
+
+</Solution>
+
+Think about this before moving to 2.2.
+
+### Next: 2.2 Lenses and focus
+
+We've now started Module 2 with **2.1 Light and the pinhole camera ✅**. Next we answer a very practical question: *if the pinhole camera works, why do real cameras use lenses, and how does a lens actually make an image sharp?* We'll also learn **focal length, focus, working distance, blur circles**, and why an industrial camera can produce a sharp image at one distance but a blurry image at another.
+
+## Code
+
+Three small experiments: the projection formula by hand, the same projection with OpenCV's camera model, and the hole-size trade-off. Then the inversion.
+
+### 1. From scratch: x = f · X / Z
+
+```python
+import numpy as np
+
+f = 10.0     # pinhole to image plane
+X = 2.0      # object height
+for Z in [5.0, 10.0, 20.0]:
+    x = f * X / Z
+    print(f"Z = {Z:4.0f}  ->  x = {x:.1f}")
+```
+
+Output:
+
+```text
+Z =    5  ->  x = 4.0
+Z =   10  ->  x = 2.0
+Z =   20  ->  x = 1.0
+```
+
+Every doubling of the distance halves the image size, exactly as in section 23.
+
+### 2. OpenCV: project a billet with the pinhole model
+
+OpenCV's camera model *is* the pinhole model. `cv2.projectPoints` takes 3-D points (in metres, say) and returns where they land in the image (in pixels).
+
+```python
+import numpy as np
+import cv2
+
+fx = fy = 1400.0           # focal length in pixels
+cx, cy = 960.0, 540.0      # image centre of a 1920 x 1080 image
+K = np.array([[fx, 0, cx],
+              [0, fy, cy],
+              [0,  0,  1]], dtype=np.float64)
+rvec = np.zeros(3)          # camera not rotated
+tvec = np.zeros(3)          # camera at the origin
+dist = None                 # no lens distortion (ideal pinhole)
+
+for Z in [3.0, 6.0]:
+    # the two ends of a 1.2 m billet, centred in front of the camera, Z metres away
+    ends = np.array([[-0.6, 0.0, Z],
+                     [ 0.6, 0.0, Z]], dtype=np.float64)
+    pts, _ = cv2.projectPoints(ends, rvec, tvec, K, dist)
+    u = pts[:, 0, 0]
+    print(f"Z = {Z} m: ends at u = {u.round(1)}, length = {u[1] - u[0]:.1f} px")
+print(pts.shape, pts.dtype)
+```
+
+Output:
+
+```text
+Z = 3.0 m: ends at u = [ 680. 1240.], length = 560.0 px
+Z = 6.0 m: ends at u = [ 820. 1100.], length = 280.0 px
+(2, 1, 2) float64
+```
+
+- `K` is the **camera matrix**. `fx`, `fy` are the focal length expressed **in pixels**; `cx`, `cy` is where the optical axis meets the image (here the centre).
+- `rvec`, `tvec` place the camera in the world. Zeros mean the camera sits at the origin looking along +Z.
+- `dist = None` means no lens distortion: a perfect pinhole. Real lenses need distortion coefficients (Module 41).
+- Check by hand: 1400 × 1.2 / 3 = 560 px, and 1400 × 1.2 / 6 = 280 px. Same billet, twice as far, half the pixels (Q6).
+- The result has shape (N, 1, 2): one (u, v) pair per point.
+
+### 3. The hole-size trade-off (simulation)
+
+A pinhole of diameter *d* turns every scene point into a small disk about *d* wide, and collects light in proportion to the hole's area. We simulate both effects on the test scene from section 6.
+
+```python
+import numpy as np
+import cv2
+
+scene = cv2.imread("sample-pinhole-scene.png", cv2.IMREAD_GRAYSCALE)
+
+def through_pinhole(scene, d, d_ref=11):
+    # geometric blur: each scene point spreads into a disk d pixels wide
+    k = np.zeros((d, d), np.float32)
+    cv2.circle(k, (d // 2, d // 2), d // 2, 1.0, -1)
+    k /= k.sum()
+    img = cv2.filter2D(scene.astype(np.float32), -1, k)
+    img *= (d / d_ref) ** 2               # light collected ~ hole area
+    return np.clip(np.rint(img), 0, 255).astype(np.uint8)
+
+fine = (slice(40, 90), slice(230, 245))   # the thinnest bars (3 px wide)
+for d in [1, 5, 11]:
+    img = through_pinhole(scene, d)
+    hi, lo = int(img[fine].max()), int(img[fine].min())
+    contrast = (hi - lo) / (hi + lo)       # 1.0 = bars fully separated, 0 = washed out
+    print(f"hole {d:2d} px: mean brightness {img.mean():5.1f}, thin-bar contrast {contrast:.2f}")
+```
+
+Output:
+
+```text
+hole  1 px: mean brightness   0.4, thin-bar contrast 1.00
+hole  5 px: mean brightness  12.9, thin-bar contrast 0.55
+hole 11 px: mean brightness  63.2, thin-bar contrast 0.22
+```
+
+- The 1-pixel hole keeps the bars perfectly separate but is almost black: the bars are only value 2 on a background of 0. That is section 8's problem.
+- The 11-pixel hole is bright, but the thin bars are almost washed out.
+- `cv2.filter2D` with a normalized disk is the blur; multiplying by (d / d_ref)² is the light. This ignores diffraction, which makes very small holes blur *more* (Chapter 2.3).
+
+### 4. The inverted image, and turning it back
+
+```python
+import numpy as np
+import cv2
+
+scene = np.array([[ 10,  20,  30],
+                  [ 40,  50,  60],
+                  [ 70,  80, 200]], dtype=np.uint8)
+
+on_sensor = scene[::-1, ::-1]           # NumPy: reverse rows and columns
+print(on_sensor)
+
+upright = cv2.flip(on_sensor, -1)        # OpenCV: flip both axes back
+print(np.array_equal(upright, scene))
+print(np.array_equal(on_sensor, cv2.flip(scene, -1)))
+print(cv2.flip(scene, 0))
+```
+
+Output:
+
+```text
+[[200  80  70]
+ [ 60  50  40]
+ [ 30  20  10]]
+True
+True
+[[ 70  80 200]
+ [ 40  50  60]
+ [ 10  20  30]]
+```
+
+- The pinhole image is the scene turned through 180°: row order **and** column order reversed. The bright 200 moves from bottom-right to top-left.
+- `cv2.flip(img, -1)` flips both axes and undoes it. `flipCode = 0` flips only up–down (the last print), and `1` only left–right.
+- You do **not** normally do this yourself: the camera's readout and processing already deliver an upright image.
+
+## OpenCV API notes
+
+**`cv2.projectPoints(objectPoints, rvec, tvec, cameraMatrix, distCoeffs) → imagePoints, jacobian`**
+
+- `objectPoints`: N × 3 float32 or float64 array of 3-D points.
+- `rvec`, `tvec`: rotation (Rodrigues vector) and translation from the world to the camera frame; 3 elements each.
+- `cameraMatrix`: 3 × 3 matrix `[[fx, 0, cx], [0, fy, cy], [0, 0, 1]]`, all in **pixels**.
+- `distCoeffs`: lens distortion coefficients; `None` (or zeros) gives an ideal pinhole.
+- Returns `imagePoints` with shape (N, 1, 2) and the same float type, plus a Jacobian (used in calibration; ignore it for now).
+- Points must be in front of the camera (Z > 0) for the result to mean anything.
+
+**`cv2.flip(src, flipCode) → dst`**
+
+- `flipCode = 0`: flip around the x-axis (up–down). `> 0`: around the y-axis (left–right). `< 0`: both (a 180° turn).
+- Works on any number of channels and dtypes; output has the same size and type.
+
+**Focal length in pixels.** `fx` = focal length (mm) ÷ pixel pitch (mm). A 16 mm lens on a sensor with 3.45 µm pixels gives fx ≈ 16 / 0.00345 ≈ 4638 px. In practice you get `fx`, `fy`, `cx`, `cy` from calibration (Module 41).
+
+## Where it fails
+
+- **Lens effects.** The pinhole model has no focus, no depth of field, no distortion. Real lenses bend straight lines near the edges and blur objects outside the focused distance (Chapters 2.2, 2.3; calibration in Module 41).
+- **Telecentric lenses.** These are built so that, within their working range, image size does **not** change with distance. x = f·X/Z does not apply; use an orthographic model instead. They are common in precision gauging.
+- **Very small pinholes.** The geometric model says smaller is sharper forever. In reality diffraction makes tiny holes blurrier again (Chapter 2.3).
+- **Objects with depth.** A billet that is tilted, or a pile of rods at different distances, has a different mm per pixel at each point. One scale for the whole image is wrong.
+- **Brightness.** The model says where light lands, not how bright the pixel will be. That depends on exposure, the sensor and processing (Chapters 2.5, 2.6, 2.8).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Treating pixels as millimetres.** 1000 px is not 1000 mm. You need distance, optics and calibration.
+- **Mixing units in x = f·X/Z.** X and Z must share a unit (both metres or both mm). Use f in pixels to get x in pixels.
+- **Measuring Z from the camera's front face.** Z is measured from the camera centre (the pinhole, or roughly the lens), not from the housing.
+- **Changing the working distance after calibration.** Move the camera or the conveyor height and every mm-per-pixel value changes.
+- **Flipping images "because the sensor image is inverted".** Cameras already deliver upright images. Flip only if your mounting really turns the camera.
+- **Passing integer or wrongly shaped arrays to `projectPoints`.** Use float32 or float64, shape N × 3.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Similar triangles
+
+Put the pinhole at the origin and the image plane a distance f behind it. A point at height X and distance Z sends a ray through the origin. The triangle in front (height X, length Z) and the one behind (height x, length f) have the same angles, so x / f = X / Z, which gives x = f·X/Z. The minus sign of the inversion is usually dropped by placing a **virtual image plane** at distance f *in front of* the centre: same size, upright. Hartley and Zisserman use this convention [3].
+
+### The camera matrix
+
+In homogeneous coordinates the projection becomes a matrix product. With focal lengths in pixels (fx, fy) and principal point (cx, cy), a point (X, Y, Z) maps to u = fx·X/Z + cx and v = fy·Y/Z + cy. That is exactly what `projectPoints` computed in the Code section: 1400 × (−0.6)/3 + 960 = 680. The 3 × 3 matrix K holds these intrinsic parameters; rvec and tvec are the extrinsic ones [3][5].
+
+### Why a pinhole has a best size
+
+Geometrically, the blur spot shrinks with the hole. Optically, light spreads after passing a small opening (diffraction), and that spread grows as the hole shrinks. The sharpest pinhole is where the two balance. Chapter 2.3 treats diffraction properly.
+
+### Light is the signal
+
+Each sensor element collects light for the exposure time and turns it into charge, then a voltage, then a number. The pixel value is therefore a measurement with noise and a limited range, not just a colour. Chapter 2.5 and the EMVA 1288 standard describe how to characterize it.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "With f = 10 and X = 2, an object moves from Z = 5 to Z = 10. What happens to its image height x?",
+      options: ["It stays 4", "It goes from 4 to 2", "It goes from 4 to 8", "It goes from 2 to 4"],
+      answer: 1,
+      explanation: "x = f·X/Z: 10 × 2 / 5 = 4, and 10 × 2 / 10 = 2. Double the distance, half the size.",
+    },
+    {
+      question: "How does the image on a pinhole camera's sensor compare with the scene?",
+      options: ["Identical", "Upside down only", "Upside down and left–right swapped (turned 180°)", "Left–right swapped only"],
+      answer: 2,
+      explanation: "All rays cross at the hole, so both axes reverse. cv2.flip(img, -1) undoes it.",
+    },
+    {
+      question: "You make the pinhole larger. What happens (geometric optics)?",
+      options: ["Darker and sharper", "Brighter and sharper", "Brighter but blurrier", "No change"],
+      answer: 2,
+      explanation: "Light grows with the hole area, but each scene point becomes a bigger spot on the sensor.",
+    },
+    {
+      question: "A billet spans 1000 pixels. What is its length?",
+      options: ["1000 mm", "100 mm", "It depends on distance, optics and calibration", "1 m, because 1 px = 1 mm"],
+      answer: 2,
+      explanation: "Pixel size depends on distance and optics. Without a calibrated scale you cannot convert.",
+    },
+    {
+      question: "Which OpenCV function maps 3-D points to image pixels with the pinhole model?",
+      options: ["cv2.flip", "cv2.projectPoints", "cv2.imread", "cv2.filter2D"],
+      answer: 1,
+      explanation: "projectPoints applies the camera matrix (and optional distortion) to 3-D points.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A pinhole camera has f = 10. An object is X = 3 tall. (a) What is its image height at Z = 6? (b) At Z = 12? (c) At what distance would the image be 10 tall?
+
+<Solution>
+
+(a) x = 10 × 3 / 6 = **5**.
+
+(b) x = 10 × 3 / 12 = **2.5**: twice the distance, half the size.
+
+(c) 10 = 10 × 3 / Z, so Z = **3**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+With the camera from Code example 2 (fx = 1400 px), at what distance does a 1.2 m billet span exactly 700 pixels? Work it out with x = f·X/Z, then confirm with `cv2.projectPoints`.
+
+<Solution>
+
+Rearranging: Z = fx × L / x = 1400 × 1.2 / 700 = 2.4 m.
+
+```python
+import numpy as np
+import cv2
+
+fx, L, target = 1400.0, 1.2, 700.0
+Z = fx * L / target
+
+K = np.array([[fx, 0, 960.0], [0, fx, 540.0], [0, 0, 1]], dtype=np.float64)
+ends = np.array([[-L / 2, 0.0, Z], [L / 2, 0.0, Z]], dtype=np.float64)
+pts, _ = cv2.projectPoints(ends, np.zeros(3), np.zeros(3), K, None)
+print(f"Z = {Z:.1f} m, length = {pts[1, 0, 0] - pts[0, 0, 0]:.1f} px")
+```
+
+Output:
+
+```text
+Z = 2.4 m, length = 700.0 px
+```
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+A pinhole camera looks at a distant scene. You **double the hole diameter**. (a) How much more light reaches the sensor? (b) Roughly how does the blur spot change? (c) What would you do instead to get both more light and a sharp image?
+
+<Solution>
+
+(a) Light follows the hole's **area**, which goes with the diameter squared: **4×** as much light.
+
+(b) For a distant scene the blur spot is about as wide as the hole, so it roughly **doubles**.
+
+(c) Use a **lens**: it collects light through a large opening and still focuses each scene point to a small spot (Chapter 2.2).
+
+</Solution>
+
+## References
+
+1. E. Hecht, *Optics*, 5th ed. Pearson, 2017. Ch. 5 (geometrical optics).
+2. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed. Pearson, 2018. Sec. 2.2 (light and the electromagnetic spectrum) and Sec. 2.3 (image sensing and acquisition).
+3. R. Hartley and A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed. Cambridge University Press, 2004. Ch. 6 (camera models).
+4. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. Springer, 2022. Ch. 2 (image formation). Free online edition: [szeliski.org/Book](https://szeliski.org/Book/).
+5. OpenCV 4.13.0 documentation, *Camera Calibration and 3D Reconstruction* (pinhole camera model, `projectPoints`): [docs.opencv.org/4.13.0/d9/d0c/group__calib3d.html](https://docs.opencv.org/4.13.0/d9/d0c/group__calib3d.html); *Operations on arrays* (`flip`): [docs.opencv.org/4.13.0/d2/de8/group__core__array.html](https://docs.opencv.org/4.13.0/d2/de8/group__core__array.html).
+6. European Machine Vision Association, *EMVA Standard 1288: Standard for Characterization of Image Sensors and Cameras*.

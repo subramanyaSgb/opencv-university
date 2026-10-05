@@ -1,6 +1,6 @@
 {
   "title": "OpenCV University",
   "parts": [
-    { "id": "part-a", "letter": "A", "title": "Foundations", "modules": ["01-introduction"] }
+    { "id": "part-a", "letter": "A", "title": "Foundations", "modules": ["01-introduction", "02-how-cameras-form-images"] }
   ]
 }
