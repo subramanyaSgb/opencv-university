@@ -1,0 +1,1174 @@
+export const meta = {
+  number: "1.4",
+  title: "Image processing vs computer vision",
+  minutes: 45,
+  objectives: [
+    "Tell image processing (work on the image) from computer vision (understand the image)",
+    "Split a real inspection system into image processing, computer vision and decision steps",
+    "Place machine learning, deep learning and AI relative to computer vision",
+    "Say where OpenCV and NumPy fit, and what OpenCV is not",
+    "Choose between a classical pipeline and deep learning for a given problem",
+    "Show in code that image processing returns an image and computer vision returns information",
+  ],
+};
+
+{/*
+  Lesson content: owner's text (5 Oct 2026), presented with visual components.
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 1.4 Image processing vs computer vision
+
+<Definition term="Computer vision">enabling a computer to extract useful information or meaning from images and videos.</Definition>
+
+This is a **very important topic**, because from this point onward you will see both terms everywhere. The easiest way to remember the difference:
+
+<Columns>
+<Panel title="Image processing" tone="a">
+
+**Work on the image.**
+
+</Panel>
+<Panel title="Computer vision" tone="c">
+
+**Understand something from the image.**
+
+</Panel>
+</Columns>
+
+Let's build this from absolute zero.
+
+## 1. First: what is image processing?
+
+We already learned: **image processing = using a computer to manipulate, improve, transform, or analyze an image.** Remember that a computer sees an image as numbers:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Image", tone: "data" },
+    { label: "Pixels", tone: "data" },
+    { label: "Numbers", tone: "data" },
+    { label: "Processing", tone: "process" },
+    { label: "New / improved image", tone: "result" },
+  ]}
+/>
+
+Suppose we have an image. We can perform operations such as:
+
+<Chips
+  items={[
+    "Make it brighter",
+    "Make it darker",
+    "Blur it",
+    "Sharpen it",
+    "Resize it",
+    "Rotate it",
+    "Crop it",
+    "Remove noise",
+    "Colour → grayscale",
+    "Detect edges",
+    "Threshold it",
+    "Enhance contrast",
+  ]}
+/>
+
+These are primarily **image processing operations**. Every one of them takes an image in and gives an image out.
+
+## 2. What is computer vision?
+
+Now imagine you give an image to a computer, and it has to tell you what is in it:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Camera", tone: "world" },
+    { label: "Image of a red ball", tone: "data" },
+    { label: "Computer vision", tone: "process" },
+    { label: "\"This is a ball\"", tone: "result" },
+  ]}
+/>
+
+The computer is no longer simply changing the image. It is trying to **understand what the image contains**:
+
+<Flow direction="right" steps={[{ label: "Image", tone: "data" }, { label: "Computer vision", tone: "process" }, { label: "Object detected", tone: "result" }]} />
+
+<Chips items={["Person", "Car", "Rod", "Ladle", "Crack", "Billet"]} />
+
+<Callout kind="key">
+
+**Computer vision** = enabling a computer to extract useful information or meaning from images and videos.
+
+</Callout>
+
+## 3. The easiest example
+
+Imagine you have a photograph of a person.
+
+<Columns>
+<Panel title="Image processing" tone="a">
+
+You tell the computer: *"Make this image brighter."*
+
+<Flow steps={["Original", "Brightness adjustment", "Brighter image"]} />
+
+The computer doesn't need to know that there is a person. It only changes pixel values.
+
+</Panel>
+<Panel title="Computer vision" tone="c">
+
+You tell the computer: *"Is there a person in this image?"*
+
+Now the computer has to analyze the image and determine:
+
+<Flow steps={[{ label: "Analyze the image", tone: "process" }, { label: "Person detected = YES", tone: "result" }]} />
+
+That is computer vision.
+
+</Panel>
+</Columns>
+
+The same difference on a real image. Both versions start from the same picture; only one of them answers a question:
+
+<ImageCompare
+  before={{ src: "/images/sample-color.png", label: "Original" }}
+  after={[
+    { src: "/images/sample-color-blurred.png", label: "Image processing: blurred" },
+    { src: "/images/sample-color-detected.png", label: "Computer vision: 4 objects found" },
+  ]}
+  width={320}
+  height={200}
+  alt="A colour scene, its blurred version, and the same scene with four detected objects boxed and counted"
+  caption="Blurring returns another image. Detection returns information: how many objects, and where."
+/>
+
+## 4. Another example
+
+Imagine this image of a street with a car and a person:
+
+<SceneSketch />
+
+<Columns stack>
+<Panel badge="Image processing" title="Can I make the image sharper?" tone="a">
+
+**YES.** That changes the image.
+
+</Panel>
+<Panel badge="Computer vision" title="How many cars are there?" tone="c">
+
+**1 car.**
+
+</Panel>
+<Panel badge="Computer vision" title="Where is the person?" tone="c">
+
+**x = 420, y = 180, width = 80, height = 210**
+
+<SceneSketch detect />
+
+</Panel>
+</Columns>
+
+Now we are extracting **information from the image**.
+
+## 5. A very important distinction
+
+Think about these two questions.
+
+<Columns>
+<Panel title='Image processing asks: "What can I do to this image?"' tone="a">
+
+Can I:
+
+- brighten it?
+- blur it?
+- sharpen it?
+- resize it?
+- remove noise?
+- change its colour?
+- detect edges?
+- enhance contrast?
+
+</Panel>
+<Panel title='Computer vision asks: "What can I understand or measure from this image?"' tone="c">
+
+Can I:
+
+- detect a person?
+- count objects?
+- recognize an object?
+- measure a part?
+- find a defect?
+- track an object?
+- determine its position?
+- understand a scene?
+
+</Panel>
+</Columns>
+
+## 6. But there is an important overlap
+
+This is where beginners often get confused. Image processing and computer vision are **not completely separate subjects**. They overlap:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Camera", tone: "world" },
+    { label: "Image", tone: "data" },
+    { label: "Noise removal", tone: "process", tag: "Image processing" },
+    { label: "Contrast enhancement", tone: "process", tag: "Image processing" },
+    { label: "Edge detection", tone: "process", tag: "Both" },
+    { label: "Object detection", tone: "result", tag: "Computer vision" },
+    { label: "Measurement", tone: "result", tag: "Computer vision" },
+  ]}
+/>
+
+The first operations may be considered image processing. The later operations are more clearly computer vision. So a real computer vision system often uses **image processing as part of the pipeline**.
+
+## 7. Real-world example: a rod counter
+
+Let's use an industrial **rod counter** system. Suppose a camera looks at a finished rod bundle, end-on.
+
+### Step 1: capture image
+
+The camera produces a **1920 × 1080** image. This is the input.
+
+### Step 2: image processing
+
+You might perform:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Image", tone: "data" },
+    { label: "Resize", tone: "process" },
+    { label: "Crop ROI", tone: "process" },
+    { label: "Brightness adjustment", tone: "process" },
+    { label: "Noise reduction", tone: "process" },
+    { label: "Grayscale", tone: "process" },
+    { label: "Thresholding", tone: "process" },
+    { label: "Morphology", tone: "process" },
+  ]}
+  highlightLast={false}
+/>
+
+These operations manipulate the image to make the relevant information easier to analyze.
+
+### Step 3: computer vision
+
+Now you ask: *"Where are the rod ends?"* The system might find:
+
+<DotGrid rows={3} cols={10} label="Detected rod ends = 30" />
+
+Now we're doing computer vision.
+
+### Step 4: decision
+
+<Equation
+  terms={[
+    { value: "30", label: "expected count" },
+    { op: "=", value: "30", label: "detected count" },
+    { op: "→", value: "PASS", label: "decision", result: true },
+  ]}
+/>
+
+So the complete industrial system might look like:
+
+<Flow
+  steps={[
+    { label: "Camera", tone: "world" },
+    { label: "Image", tone: "data" },
+    { label: "Image processing", tone: "process" },
+    { label: "Computer vision / AI", tone: "process" },
+    { label: "Measurement", tone: "result" },
+    { label: "Decision", tone: "result" },
+    { label: "PLC / Dashboard / Alarm", tone: "plain" },
+  ]}
+  highlightLast={false}
+/>
+
+## 8. Image processing vs computer vision
+
+Here's the comparison you should remember.
+
+<VsTable
+  left="Image processing"
+  right="Computer vision"
+  rows={[
+    ["Works on images", "Understands images"],
+    ["Manipulates pixels", "Extracts information"],
+    ["Enhances images", "Interprets images"],
+    ["Changes image appearance", "Determines what is present"],
+  ]}
+/>
+
+<Columns>
+<Panel title="Typical image processing" tone="a">
+
+<Chips items={["Blur", "Sharpen", "Resize", "Threshold", "Colour conversion", "Noise removal", "Contrast enhancement"]} />
+
+</Panel>
+<Panel title="Typical computer vision" tone="c">
+
+<Chips items={["Object detection", "Object recognition", "Object counting", "Tracking", "Classification", "Measurement", "Defect detection"]} />
+
+</Panel>
+</Columns>
+
+<Callout kind="note">
+
+These categories can overlap. For example, **thresholding** can be used as an image-processing operation and also as an important step inside a computer-vision system.
+
+</Callout>
+
+## 9. Now where does AI come into this?
+
+This is another extremely important distinction. You will frequently hear:
+
+<Chips items={["Image processing", "Computer vision", "Machine learning", "Deep learning", "AI"]} />
+
+They are related, but they are **not the same thing**. A common way to draw them is as layers:
+
+<Flow
+  title="A conceptual picture (not a strict hierarchy)"
+  steps={[
+    { label: "Artificial intelligence", tone: "world" },
+    { label: "Machine learning", tone: "process" },
+    { label: "Deep learning", tone: "process" },
+    { label: "Computer vision", tone: "result" },
+    { label: "Image processing", tone: "data" },
+  ]}
+  highlightLast={false}
+/>
+
+This diagram is useful conceptually, but don't interpret it as a strict hierarchy where every computer vision system must use AI. **Classical computer vision can work without machine learning or deep learning.** A better practical picture is:
+
+<Columns>
+<Panel title="How the AI terms nest" tone="plain">
+
+<Nested
+  layers={[
+    { label: "AI", side: "Other methods" },
+    { label: "Machine learning" },
+    { label: "Deep learning" },
+  ]}
+/>
+
+</Panel>
+<Panel title="Computer vision can use" tone="c">
+
+<Chips items={["Image processing", "Classical CV", "Machine learning", "Deep learning"]} />
+
+</Panel>
+</Columns>
+
+## 10. What is machine learning?
+
+Suppose you want to detect defective steel rods.
+
+<Columns>
+<Panel title="Rule-based: you write the rules" tone="warn">
+
+```text
+IF brightness < 50
+AND shape is abnormal
+AND width > X
+THEN defect
+```
+
+But what if there are thousands of different defect appearances?
+
+</Panel>
+<Panel title="Machine learning: you give examples" tone="good">
+
+```text
+Normal  → NORMAL
+Normal  → NORMAL
+Defect  → DEFECT
+Defect  → DEFECT
+Normal  → NORMAL
+Defect  → DEFECT
+```
+
+The model learns patterns from the examples.
+
+</Panel>
+</Columns>
+
+Then:
+
+<Flow direction="right" steps={[{ label: "New image", tone: "data" }, { label: "ML model", tone: "process" }, { label: "DEFECT", tone: "result" }]} />
+
+That's machine learning.
+
+## 11. What is deep learning?
+
+Deep learning uses neural networks to learn increasingly complex representations from data. For example:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Image", tone: "data" },
+    { label: "Neural network", tone: "process" },
+    { label: "Edges", tone: "process" },
+    { label: "Shapes", tone: "process" },
+    { label: "Patterns", tone: "process" },
+    { label: "Objects", tone: "process" },
+    { label: "Prediction", tone: "result" },
+  ]}
+/>
+
+A CNN (convolutional neural network), for example, can learn useful visual features automatically from training data. You don't necessarily have to manually specify *"Look for this exact edge"* or *"Look for this exact shape."* The network learns useful representations during training.
+
+## 12. Where does OpenCV fit?
+
+This is **very important for your course**. OpenCV is **not an AI model**. OpenCV is primarily a library for **computer vision and image processing**: `import cv2`. You can use OpenCV to:
+
+<Chips
+  items={[
+    "Read images",
+    "Capture camera frames",
+    "Resize images",
+    "Blur images",
+    "Convert colour spaces",
+    "Threshold",
+    "Detect edges",
+    "Find contours",
+    "Perform morphology",
+    "Transform images",
+    "Calibrate cameras",
+    "Track objects",
+  ]}
+/>
+
+OpenCV can also be used together with AI models:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Camera", tone: "world" },
+    { label: "OpenCV", tone: "data", note: "capture, preprocess" },
+    { label: "Deep learning model", tone: "process" },
+    { label: "Detection", tone: "result" },
+    { label: "OpenCV", tone: "data", note: "draw bounding boxes" },
+  ]}
+  highlightLast={false}
+/>
+
+So OpenCV can be part of an AI-based vision system without itself being the AI model.
+
+<Callout kind="note">
+
+To be precise: OpenCV also ships a classic machine-learning module (`cv2.ml`, for classifiers such as SVM and k-nearest neighbours) and a DNN module (`cv2.dnn`) that can **run** neural networks trained elsewhere. It does not train deep networks. We meet both in 8.7 and Module 36.
+
+</Callout>
+
+## 13. Where does NumPy fit?
+
+You already know Python. Soon you'll learn `import numpy as np`. NumPy is extremely important because an image can be represented as an **array of numbers**:
+
+<Columns>
+<Panel title="Grayscale image" tone="a">
+
+<PixelMatrix size="sm" values={[[10, 20, 30], [40, 50, 60], [70, 80, 90]]} />
+
+</Panel>
+<Panel title="NumPy array" tone="c">
+
+```text
+[[10, 20, 30],
+ [40, 50, 60],
+ [70, 80, 90]]
+```
+
+</Panel>
+</Columns>
+
+Therefore:
+
+<Flow direction="right" steps={["Python", "NumPy arrays", "Image data", "OpenCV", "Image processing / computer vision"]} />
+
+## 14. The complete ecosystem
+
+As you progress through this course, you'll encounter tools such as:
+
+<Tree
+  root="Python"
+  branches={[
+    { title: "NumPy", items: ["Numerical arrays"] },
+    { title: "OpenCV", items: ["Image processing", "Classical computer vision"] },
+    { title: "Matplotlib", items: ["Visualization"] },
+    { title: "PyTorch etc.", items: ["Deep learning"] },
+    { title: "AI models", items: ["Classification", "Detection", "Segmentation", "Tracking"] },
+  ]}
+/>
+
+Don't worry about learning all of this now. We're going to build it step by step.
+
+## 15. Classical computer vision vs AI vision
+
+There are two broad ways of building a vision system.
+
+### Approach 1: classical computer vision
+
+You design the processing pipeline yourself:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Camera", tone: "world" },
+    { label: "Grayscale", tone: "process" },
+    { label: "Blur", tone: "process" },
+    { label: "Threshold", tone: "process" },
+    { label: "Morphology", tone: "process" },
+    { label: "Contours", tone: "process" },
+    { label: "Object detection", tone: "process" },
+    { label: "Count", tone: "result" },
+  ]}
+/>
+
+You define the rules. This can work extremely well when the environment is controlled:
+
+<Chips items={["Fixed camera", "Fixed lighting", "Fixed object", "Fixed background"]} />
+
+Industrial systems often benefit from this approach.
+
+## 16. Approach 2: deep learning vision
+
+Instead of manually defining all visual rules:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Camera", tone: "world" },
+    { label: "Images", tone: "data" },
+    { label: "Annotated training data", tone: "data" },
+    { label: "Train neural network", tone: "process" },
+    { label: "Model", tone: "process" },
+    { label: "New image", tone: "data" },
+    { label: "Prediction", tone: "result" },
+  ]}
+/>
+
+For example, a YOLO-style detector looks at an image and puts a box around each rod it finds. The model might output:
+
+<Glossary
+  items={[
+    { term: "Class", desc: "What the object is.", example: "rod" },
+    { term: "Confidence", desc: "How sure the model is, 0 to 1.", example: "0.96" },
+    { term: "Bounding box", desc: "Where it is in the image.", example: "x, y, w, h" },
+  ]}
+/>
+
+## 17. Which one is better?
+
+There is **no universal answer**. A professional computer vision engineer chooses based on the problem.
+
+<Columns>
+<Panel title="Classical CV may be better when" tone="a">
+
+- Controlled lighting
+- Fixed camera
+- Simple geometry
+- High-speed processing required
+- Limited training data
+- Explainable rules are important
+
+</Panel>
+<Panel title="Deep learning may be better when" tone="b">
+
+- Large variation
+- Complex appearance
+- Difficult backgrounds
+- Many object types
+- Classical rules become too complicated
+- Enough training data is available
+
+</Panel>
+</Columns>
+
+And many real systems use **both**.
+
+## 18. Industrial example: steel billet measurement
+
+Suppose you want to measure billet length.
+
+<Flow steps={[{ label: "Camera", tone: "world" }, { label: "Image", tone: "data" }]} highlightLast={false} />
+
+<Arrow />
+
+<Columns>
+<Panel title="Image processing" tone="a">
+
+<Flow steps={["Undistort", "Crop ROI", "Filter noise", "Threshold"]} highlightLast={false} />
+
+</Panel>
+<Panel title="Computer vision" tone="c">
+
+<Flow steps={["Detect billet edges", "Determine endpoints", "Calculate length"]} />
+
+</Panel>
+</Columns>
+
+<Arrow />
+
+<Flow direction="right" steps={[{ label: "Measurement", tone: "result" }, { label: "PLC / Database", tone: "plain" }]} highlightLast={false} />
+
+Notice something important: **computer vision doesn't necessarily mean AI.** You can build a very capable vision system using:
+
+<Equation
+  terms={[
+    { value: "Camera" },
+    { op: "+", value: "OpenCV" },
+    { op: "+", value: "Geometry" },
+    { op: "+", value: "Calibration" },
+    { op: "+", value: "Mathematics" },
+  ]}
+/>
+
+No neural network required.
+
+## 19. Industrial example: crack detection
+
+Now imagine a steel surface with complicated defects.
+
+<Columns>
+<Panel title="A classical pipeline" tone="a">
+
+<Flow steps={["Image", "Enhancement", "Filtering", "Edge detection", "Morphology", "Contours", "Defect decision"]} />
+
+</Panel>
+<Panel title="If defects vary a lot in appearance" tone="b">
+
+<Flow steps={["Image", "Preprocessing", "Deep learning model", "Defect", "Location", "Severity"]} />
+
+</Panel>
+</Columns>
+
+**Both are computer vision.**
+
+## 20. The most important mental model
+
+Remember this pipeline:
+
+<Flow
+  steps={[
+    { label: "Real world", tone: "world" },
+    { label: "Camera", tone: "world" },
+    { label: "Image", tone: "data" },
+  ]}
+  highlightLast={false}
+/>
+
+<Arrow />
+
+<Columns>
+<Panel title="Image processing" tone="a">
+
+<Flow steps={["Clean / transform"]} highlightLast={false} />
+
+</Panel>
+<Panel title="Direct analysis" tone="plain">
+
+Some systems analyze the image directly.
+
+</Panel>
+</Columns>
+
+<Arrow />
+
+<Flow steps={[{ label: "Computer vision", tone: "process" }]} highlightLast={false} />
+
+<Arrow />
+
+<Columns>
+<Panel title="Classical CV" tone="a">
+</Panel>
+<Panel title="AI / ML / DL" tone="b">
+</Panel>
+</Columns>
+
+<Arrow />
+
+<Flow steps={[{ label: "Information", tone: "result" }, { label: "Decision / action", tone: "result" }]} />
+
+For example:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Camera sees 50 rods", tone: "world" },
+    { label: "Image", tone: "data" },
+    { label: "Preprocessing", tone: "process" },
+    { label: "Rod detection", tone: "process" },
+    { label: "Count = 50", tone: "result" },
+    { label: "Compare with PLC expected count", tone: "process" },
+    { label: "PASS / FAIL", tone: "result" },
+  ]}
+/>
+
+That entire thing is an **industrial computer vision system**.
+
+## 21. One very important correction to a common misconception
+
+<Callout kind="mistake">
+
+Don't think: *"Image processing = old technology and computer vision = AI."* That's wrong.
+
+</Callout>
+
+<Columns>
+<Panel title="No AI at all" tone="a">
+
+<Equation terms={[{ value: "Image processing" }, { op: "+", value: "Classical CV" }]} />
+
+</Panel>
+<Panel title="An AI-based system" tone="b">
+
+<Equation terms={[{ value: "Image processing" }, { op: "+", value: "Computer vision" }, { op: "+", value: "Deep learning" }]} />
+
+</Panel>
+</Columns>
+
+Modern systems frequently combine them.
+
+## 22. A simple analogy
+
+Imagine a human looking at a photograph.
+
+<Columns>
+<Panel badge="Image processing" title="Change the photo" tone="a">
+
+- *"Let me make this photograph brighter."*
+- *"Let me crop this part."*
+- *"Let me remove the noise."*
+
+</Panel>
+<Panel badge="Computer vision" title="Say what is in it" tone="c">
+
+- *"There is a car in the photograph."*
+- *"There are 5 people."*
+- *"That object is a red ball."*
+- *"The crack is 15 mm long."*
+
+</Panel>
+<Panel badge="Machine learning" title="Learn from examples" tone="b">
+
+*"Instead of giving me all the rules, show me many examples and I'll learn the pattern."*
+
+</Panel>
+<Panel badge="Deep learning" title="Learn with a large network" tone="warn">
+
+*"I'll use a large neural network to learn useful representations and patterns from the examples."*
+
+</Panel>
+</Columns>
+
+## 23. The four questions you should ask yourself
+
+Whenever you encounter a new technique, ask:
+
+<Takeaways>
+<Takeaway n={1} title="Am I changing the image?">
+
+<Chips items={["Blur", "Resize", "Rotate", "Sharpen", "Threshold", "Contrast"]} />
+
+→ Mostly **image processing**
+
+</Takeaway>
+<Takeaway n={2} title="Am I extracting information from the image?">
+
+<Chips items={["Find object", "Find contour", "Measure length", "Count objects", "Track object"]} />
+
+→ **Computer vision**
+
+</Takeaway>
+<Takeaway n={3} title="Am I learning patterns from examples?">
+
+<Flow direction="right" steps={["Training data", "Model", "Prediction"]} />
+
+→ **Machine learning**
+
+</Takeaway>
+<Takeaway n={4} title="Am I using neural networks to learn complex visual representations?">
+
+→ **Deep learning**
+
+</Takeaway>
+</Takeaways>
+
+**Try it.** Sort each task using the four questions.
+
+<TaskSorter
+  tasks={[
+    { task: "Make a dark camera frame brighter", answer: "ip", why: "Image in, image out: only pixel values change." },
+    { task: "Count the rod ends in a bundle image", answer: "cv", why: "The output is a number about the scene, not a new image." },
+    { task: "Convert a BGR frame to grayscale", answer: "ip", why: "It changes the image's representation; nothing is understood yet." },
+    { task: "Measure billet length from edges and calibration", answer: "cv", why: "A measurement extracted from the image, with no learning involved." },
+    { task: "Train a classifier on labelled NORMAL / DEFECT examples", answer: "ml", why: "The rules are learned from examples instead of written by hand." },
+    { task: "Train a YOLO network to find helmets in plant videos", answer: "dl", why: "A deep neural network learns its own visual features from annotated images." },
+    { task: "Remove sensor noise before thresholding", answer: "ip", why: "A cleaning step that changes the image to help later analysis." },
+    { task: "Track a ladle from frame to frame", answer: "cv", why: "Follows an object's position over time: information from video." },
+  ]}
+  caption="Some tasks sit in more than one box. The answer shows the best fit and why."
+/>
+
+## 24. One-line definitions for your notes
+
+Write these in your notebook:
+
+<Glossary
+  items={[
+    { term: "Image processing", desc: "Manipulating and analyzing digital images using computational operations." },
+    { term: "Computer vision", desc: "Extracting meaningful information, measurements, or understanding from images and videos." },
+    { term: "Machine learning", desc: "Learning patterns from data to make predictions or decisions." },
+    { term: "Deep learning", desc: "A machine-learning approach based primarily on multi-layer neural networks that can learn complex representations from data." },
+    { term: "OpenCV", desc: "A software library providing tools for image processing and computer vision." },
+  ]}
+/>
+
+## 25. Final picture
+
+If you remember only one diagram from this chapter, remember this:
+
+<Flow
+  title="From the real world to a decision"
+  steps={[
+    { label: "Real world", tone: "world" },
+    { label: "Camera", tone: "world" },
+    { label: "Digital image", tone: "data" },
+    { label: "Image processing", note: "Blur · Resize · Enhance · Filter · Threshold", tone: "process", tag: "Changes the image" },
+    { label: "Computer vision", note: "Detect · Count · Measure · Track · Recognize", tone: "result", tag: "Understands the image" },
+    { label: "AI / ML / DL", note: "when used", tone: "process" },
+    { label: "Information", tone: "result" },
+    { label: "Decision / action", tone: "result" },
+  ]}
+/>
+
+### The golden rules 🧠
+
+<Takeaways>
+<Takeaway n={1} title="Image processing changes the image">
+</Takeaway>
+<Takeaway n={2} title="Computer vision understands / extracts information from the image">
+</Takeaway>
+<Takeaway n={3} title="Computer vision does NOT require AI">
+</Takeaway>
+</Takeaways>
+
+That distinction will become extremely important when we reach **thresholding, contours, morphology, measurement, object detection, and deep learning** later in the course.
+
+## Code
+
+The difference in one sentence: **image processing returns an image; computer vision returns information.** The code below shows exactly that.
+
+### 1. From scratch: one image, two kinds of result
+
+```python
+import numpy as np
+
+img = np.array([
+    [10,  10,  10,  10,  10,  10],
+    [10, 200, 210,  10,  10,  10],
+    [10, 205, 220,  10,  10,  10],
+    [10,  10,  10,  10, 190,  10],
+    [10,  10,  10,  10,  10,  10]], dtype=np.uint8)
+
+# Image processing: brighten. Image in, image out.
+brighter = np.clip(img.astype(np.int16) + 40, 0, 255).astype(np.uint8)
+print("image processing result:", type(brighter).__name__, brighter.shape)
+
+# Computer vision: is there a bright object, and where?
+mask = img > 128
+rows, cols = np.nonzero(mask)
+print("bright pixels:", int(mask.sum()))
+print("rows", rows.min(), "to", rows.max(), "| columns", cols.min(), "to", cols.max())
+```
+
+Output:
+
+```text
+image processing result: ndarray (5, 6)
+bright pixels: 5
+rows 1 to 3 | columns 1 to 4
+```
+
+- The brighten step gives back an array of the same shape: a new image.
+- The second part gives back **numbers**: how many bright pixels, and the rows and columns they span.
+- But the box "rows 1 to 3, columns 1 to 4" is wrong for a person to read: there are really **two** objects, a 2 × 2 blob and a single pixel. Finding separate objects needs connectivity, which OpenCV does in one call.
+
+### 2. The OpenCV way: count separate objects
+
+```python
+import cv2
+
+_, binary = cv2.threshold(img, 128, 255, cv2.THRESH_BINARY)
+n, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
+
+print("objects:", n - 1)                 # label 0 is the background
+for i in range(1, n):
+    x, y, w, h, area = stats[i]
+    print(f"object {i}: x={x} y={y} w={w} h={h} area={area}")
+```
+
+Output:
+
+```text
+objects: 2
+object 1: x=1 y=1 w=2 h=2 area=4
+object 2: x=4 y=3 w=1 h=1 area=1
+```
+
+- `cv2.threshold(...)` is image processing: it returns another image (black and white).
+- `cv2.connectedComponentsWithStats(binary, connectivity=8)` is computer vision: it groups touching white pixels into objects and returns a count, a label image, and per-object statistics.
+- `n` includes the background, so the object count is `n - 1`.
+- Each `stats` row is `x, y, w, h, area`: an OpenCV box, so x (column) comes first.
+
+### 3. On a real image: blur vs detect
+
+Download [sample-color.png](/images/sample-color.png) into the folder you run Python from.
+
+```python
+import cv2
+
+img = cv2.imread("sample-color.png")
+if img is None:
+    raise FileNotFoundError("Could not read sample-color.png. Check the path.")
+
+# Image processing: image in, image out
+blurred = cv2.GaussianBlur(img, (9, 9), 0)
+print("blurred:", blurred.shape, blurred.dtype)
+
+# Computer vision: image in, information out
+gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+_, mask = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
+contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+print("objects found:", len(contours))
+for x, y, w, h in sorted(cv2.boundingRect(c) for c in contours):
+    print(f"  box x={x} y={y} w={w} h={h}")
+```
+
+Output:
+
+```text
+blurred: (200, 320, 3) uint8
+objects found: 4
+  box x=20 y=165 w=281 h=21
+  box x=28 y=53 w=85 h=85
+  box x=135 y=45 w=61 h=101
+  box x=225 y=45 w=71 h=101
+```
+
+- `cv2.GaussianBlur(src, ksize, sigmaX)` smooths the image. `(9, 9)` is the size of the neighbourhood; `0` lets OpenCV choose the blur strength from that size. The result has the same shape as the input.
+- `cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)` traces the outline of each white region. `RETR_EXTERNAL` keeps only outer outlines; `CHAIN_APPROX_SIMPLE` stores just the corner points of straight runs.
+- `cv2.boundingRect(contour)` returns the upright box `(x, y, w, h)` around one outline.
+- Four boxes: the orange bar, the red disc, the green block and the blue triangle. Every step before `findContours` was image processing; counting and boxing is computer vision. There is no machine learning anywhere in this code.
+
+## OpenCV API notes
+
+Versions: OpenCV 4.13.0 (`opencv-python==4.13.0.92`), NumPy 2.5.3. Signatures are copied from the installed library's help text.
+
+| Function | Python signature | Returns | Kind |
+|---|---|---|---|
+| `cv2.GaussianBlur` | `GaussianBlur(src, ksize, sigmaX[, dst[, sigmaY[, borderType[, hint]]]]) -> dst` | image | image processing |
+| `cv2.threshold` | `threshold(src, thresh, maxval, type[, dst]) -> retval, dst` | threshold, image | image processing |
+| `cv2.findContours` | `findContours(image, mode, method[, contours[, hierarchy[, offset]]]) -> contours, hierarchy` | list of outlines | computer vision |
+| `cv2.boundingRect` | `boundingRect(array) -> retval` | `(x, y, w, h)` | computer vision |
+| `cv2.connectedComponentsWithStats` | `connectedComponentsWithStats(image[, labels[, stats[, centroids[, connectivity[, ltype]]]]]) -> retval, labels, stats, centroids` | count, label image, stats | computer vision |
+
+**Inputs and types.**
+
+- `findContours` and `connectedComponentsWithStats` expect a single-channel 8-bit image in which objects are non-zero: usually the output of a threshold.
+- `connectedComponentsWithStats` returns statistics for every label **including the background label** (label 0). `connectivity` is 8 (diagonal neighbours count as touching) or 4.
+- Boxes and centroids from OpenCV are in (x, y) order. To read a pixel inside a box with NumPy, index `[y, x]`.
+
+**Where these live in the documentation.** Blur is in *Image Filtering*; contours, bounding boxes and connected components are in *Structural Analysis and Shape Descriptors* [6]. OpenCV's `ml` module covers statistical classification, regression and clustering [7]; its `dnn` module runs neural-network inference only and does not train networks [8].
+
+**Speed.** In one test on a 2-core cloud machine (OpenCV 4.13.0), the grayscale → threshold → contours → boxes pipeline above took a median of about 0.12 ms on the 320 × 200 image, with no GPU. That speed, and the absence of training data, is why classical pipelines remain common in controlled industrial settings. (Chapter 7.7 shows how to measure it yourself.)
+
+## Where it fails
+
+- **Hand-written rules break when conditions change.** The threshold of 50 in the code works because the background is dark and even. Change the lighting, background or camera, and the count goes wrong. *Instead:* control the scene (59.3), use adaptive methods (13.5), or learn the rules from data (Parts F and J).
+- **Touching objects merge.** Contours and connected components count one object where two touch. Rods packed tightly in a bundle are exactly this case. *Instead:* morphology (23), distance transform and watershed (23.5, 27.4), or a trained detector (54).
+- **Deep learning needs data and can fail silently.** A trained model needs many labelled images, and on images unlike its training data it may give confident wrong answers. *Instead:* collect representative data (58), monitor drift (58.5), and keep simple rule-based checks as a safety net.
+- **Detection is not measurement.** A box around a billet does not give its length in millimetres. *Instead:* camera calibration and pixel-to-mm conversion (41, 49).
+- **No method rescues a bad image.** Motion blur, glare or poor focus defeat both classical CV and deep learning. *Instead:* fix the camera, lens and lighting first (Module 2, 59).
+
+## ⚠️ Common mistakes
+
+**1. Equating computer vision with AI.** Most of this chapter's code is computer vision with no learning at all. Ask "Does a simple pipeline solve this in controlled conditions?" before reaching for a neural network.
+
+**2. Jumping to deep learning before fixing the image.** Poor lighting and a moving camera make *every* method worse. Spend the first effort on the camera, lens and lighting.
+
+**3. Using a heavy model where a threshold works.** A detector needs training data, a GPU or more CPU time, and maintenance. A fixed pipeline on a fixed scene can be faster, cheaper and easier to explain to the plant.
+
+**4. Feeding a model differently from how it was trained.** Deep models expect the same size, channel order (often RGB, while OpenCV gives BGR) and value scaling as their training images. A mismatch quietly lowers accuracy.
+
+**5. Counting every contour.** Noise specks become "objects". Filter by area or shape before counting (24.3).
+
+**6. Forgetting the background label.** `connectedComponentsWithStats` returns `n` labels including the background. The object count is `n - 1`.
+
+**7. Reading a confidence score as accuracy.** A detection with confidence 0.96 is the model's own score for that box, not a guarantee. Measure accuracy on labelled test images (54.5, 58.4).
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### A continuum, not two boxes
+
+Gonzalez and Woods describe image processing and computer vision as ends of a continuum: low-level processes (image in, image out), mid-level processes (image in, attributes out: segmentation, description, recognition of individual objects), and high-level processes ("making sense" of recognized objects) [1, Ch. 1]. The threshold-then-count code above spans low and mid level.
+
+### Vision as an inverse problem
+
+Szeliski describes computer vision as recovering properties of the world, such as shape, illumination and the objects present, from one or more images. Because many different scenes can produce the same image, this is an *inverse problem*, and it needs models and assumptions to solve [2, Ch. 1]. Image processing has no such inverse step: its input and output are both images.
+
+### Representations: from Marr to deep networks
+
+David Marr's influential book *Vision* (1982) framed seeing as building a sequence of representations, from intensity changes and edges ("primal sketch") up to surfaces and full three-dimensional object models [3]. Deep convolutional networks learn a comparable progression from data: visualizations of trained networks show early layers responding to edges and colour blobs, middle layers to textures and parts, and later layers to whole objects [5].
+
+### Learning, defined
+
+A widely quoted definition: a program *learns* from experience E with respect to some task T and performance measure P if its performance at T, as measured by P, improves with experience E [4]. In the defect example, T = classify rods, E = labelled examples, P = the fraction classified correctly.
+
+### Deep learning and the 2012 turning point
+
+Deep learning uses networks with many layers that learn representations at several levels of abstraction directly from data [9]. In 2012 a deep convolutional network (later called AlexNet) won the ImageNet image-classification challenge by a large margin [10]. That result started the shift of many vision tasks to deep learning. Detectors such as YOLO, which predicts boxes and classes in a single pass over the image, followed [11].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which of these is image processing rather than computer vision?",
+      options: ["Counting bottles on a conveyor", "Removing noise from a frame", "Measuring a crack's length", "Finding where a person stands"],
+      answer: 1,
+      explanation: "Noise removal takes an image and returns a cleaner image. The other three return information: a count, a length, a position.",
+    },
+    {
+      question: "Is this statement true? \"Every computer vision system uses AI.\"",
+      options: ["True", "False"],
+      answer: 1,
+      explanation: "Classical pipelines (threshold, contours, geometry, calibration) are computer vision with no learning at all. The Code section counts four objects without any model.",
+    },
+    {
+      question: "What does OpenCV's `dnn` module do?",
+      options: ["Trains deep networks", "Runs (infers with) trained networks", "Labels training images", "Replaces NumPy"],
+      answer: 1,
+      explanation: "The DNN module provides inference: it loads models trained in other frameworks and runs them. It does not train networks.",
+    },
+    {
+      question: "A plant has fixed cameras, fixed lighting and one part type, and needs 1 ms per frame. Which approach is the natural first choice?",
+      options: ["A large deep-learning detector", "A classical pipeline", "No camera at all", "Manual inspection"],
+      answer: 1,
+      explanation: "Controlled conditions, simple geometry and a tight time budget favour a classical pipeline. Deep learning earns its cost when appearance varies a lot.",
+    },
+    {
+      question: "`connectedComponentsWithStats` returns `n = 5`. How many objects did it find?",
+      options: ["5", "4", "6", "It depends on the image size"],
+      answer: 1,
+      explanation: "Label 0 is the background, so there are n − 1 = 4 objects.",
+    },
+    {
+      question: "Machine learning differs from a rule-based system mainly because…",
+      options: ["it uses colour images", "it learns the rules from examples", "it is always faster", "it does not need a camera"],
+      answer: 1,
+      explanation: "In machine learning the decision rule is learned from labelled data instead of being written by hand.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Label each task **IP** (image processing), **CV** (computer vision), **ML** or **DL**. Where two labels fit, give both and say which is the main one.
+
+```text
+a) Rotate a frame by 90°
+b) Find how many billets are on a cooling bed
+c) Learn to tell good welds from bad ones using 5,000 labelled photos with a neural network
+d) Sharpen a blurry label before reading it
+e) Read the billet ID number from an image
+f) Convert BGR to HSV
+```
+
+<Solution>
+
+a) **IP**: image in, image out.
+
+b) **CV**: the output is a count. (With a trained detector it is also DL.)
+
+c) **DL** (and therefore ML): a neural network learns from labelled examples.
+
+d) **IP**: a preparation step that changes the image.
+
+e) **CV**: it extracts information (characters). Many modern readers use DL; classical OCR uses IP + CV.
+
+f) **IP**: a change of colour representation.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Load `sample-color.png`. Using threshold + `findContours`, count the objects whose area is above 4000 pixels, and print the area of each object. Explain why the area filter changes the count.
+
+<Solution>
+
+```python
+import cv2
+
+img = cv2.imread("sample-color.png")
+if img is None:
+    raise FileNotFoundError("Could not read sample-color.png. Check the path.")
+
+gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+_, mask = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
+contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+areas = sorted(cv2.contourArea(c) for c in contours)
+print("areas:", areas)
+print("objects above 4000 px:", sum(a > 4000 for a in areas))
+```
+
+Output:
+
+```text
+areas: [3500.0, 5406.0, 5600.0, 6000.0]
+objects above 4000 px: 3
+```
+
+The triangle (area 3500) falls below the limit, so 3 objects remain. In real systems an area filter removes noise specks; here it shows that the rule you choose decides the count. Choosing such limits by hand is classical CV; learning them from data would be ML.
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+Design, as a list of steps, a **classical** system that checks whether every rod in a bundle has been cut (each rod end visible as a bright circle). Mark each step IP or CV, and name one condition under which you would switch to deep learning.
+
+<Solution>
+
+1. Capture a frame with a fixed camera and fixed lighting (set-up).
+2. Crop the ROI around the bundle face (**IP**).
+3. Convert to grayscale and reduce noise (**IP**).
+4. Threshold the bright rod ends (**IP**).
+5. Separate touching ends with morphology or a distance transform (**IP** / **CV**).
+6. Find connected components and filter by area and roundness (**CV**).
+7. Count and compare with the expected count from the PLC (**CV** → decision).
+
+Switch to deep learning if, for example, the rod ends vary a lot in appearance (scale, rust, paint marks, glare) and no single threshold separates them reliably, and labelled images are available.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed. Pearson, 2018. Ch. 1 (low-, mid- and high-level processes).
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. Springer, 2022. Ch. 1 (what computer vision is; vision as an inverse problem). Free online edition: [szeliski.org/Book](https://szeliski.org/Book/).
+3. D. Marr, *Vision: A Computational Investigation into the Human Representation and Processing of Visual Information*. W. H. Freeman, 1982.
+4. T. M. Mitchell, *Machine Learning*. McGraw-Hill, 1997. Ch. 1 (definition of learning).
+5. M. D. Zeiler and R. Fergus, "Visualizing and Understanding Convolutional Networks," *ECCV*, 2014.
+6. OpenCV 4.13.0 documentation, *Structural Analysis and Shape Descriptors* (`findContours`, `boundingRect`, `connectedComponentsWithStats`, `contourArea`): [docs.opencv.org/4.13.0/d3/dc0/group__imgproc__shape.html](https://docs.opencv.org/4.13.0/d3/dc0/group__imgproc__shape.html).
+7. OpenCV 4.13.0 documentation, *Machine Learning* module: [docs.opencv.org/4.13.0/dd/ded/group__ml.html](https://docs.opencv.org/4.13.0/dd/ded/group__ml.html).
+8. OpenCV 4.13.0 documentation, *Deep Neural Network* module: [docs.opencv.org/4.13.0/d6/d0f/group__dnn.html](https://docs.opencv.org/4.13.0/d6/d0f/group__dnn.html).
+9. Y. LeCun, Y. Bengio and G. Hinton, "Deep learning," *Nature*, vol. 521, pp. 436–444, 2015.
+10. A. Krizhevsky, I. Sutskever and G. E. Hinton, "ImageNet Classification with Deep Convolutional Neural Networks," *NeurIPS (NIPS)*, 2012.
+11. J. Redmon, S. Divvala, R. Girshick and A. Farhadi, "You Only Look Once: Unified, Real-Time Object Detection," *CVPR*, 2016.

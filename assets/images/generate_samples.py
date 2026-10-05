@@ -62,6 +62,18 @@ cv2.circle(rg, (160, 100), 60, (0, 0, 200), -1)                    # red,   gray
 images["sample-redgreen.png"] = rg
 images["sample-redgreen-gray.png"] = cv2.cvtColor(rg, cv2.COLOR_BGR2GRAY)
 
+# Chapter 1.4: image processing (image out) vs computer vision (information out).
+images["sample-color-blurred.png"] = cv2.GaussianBlur(color, (9, 9), 0)
+gray14 = cv2.cvtColor(color, cv2.COLOR_BGR2GRAY)
+_, mask14 = cv2.threshold(gray14, 50, 255, cv2.THRESH_BINARY)
+contours14, _ = cv2.findContours(mask14, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+detected = color.copy()
+for cnt in contours14:
+    x, y, w, h = cv2.boundingRect(cnt)
+    cv2.rectangle(detected, (x, y), (x + w - 1, y + h - 1), (255, 255, 255), 2)
+cv2.putText(detected, f"{len(contours14)} objects", (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+images["sample-color-detected.png"] = detected
+
 for name, img in images.items():
     ok = cv2.imwrite(str(OUT / name), img)
     assert ok, f"could not write {name}"

@@ -17,3 +17,5 @@ Customer-site images only after anonymisation and written approval.
 | generated/sample-color-average.png | plain average of the three channels | Project-owned | 1.3 |
 | generated/sample-redgreen.png | red disc (0,0,200) on green (0,102,0), equal gray value | Project-owned | 1.3 |
 | generated/sample-redgreen-gray.png | `cv2.cvtColor(rg, COLOR_BGR2GRAY)`: the disc disappears | Project-owned | 1.3 |
+| generated/sample-color-blurred.png | `cv2.GaussianBlur(color, (9, 9), 0)` (image processing: image out) | Project-owned | 1.4 |
+| generated/sample-color-detected.png | threshold + `findContours` + `boundingRect` boxes, count text (computer vision: information out) | Project-owned | 1.4 |

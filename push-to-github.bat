@@ -19,12 +19,19 @@ if not exist ".git" (
 git config user.name >nul 2>&1 || git config user.name "Subramanya GB"
 git config user.email >nul 2>&1 || git config user.email "subramanya.bellary@deeviasoftware.com"
 
-git remote get-url origin >nul 2>&1
-if errorlevel 1 (
-  echo.
+set "REPO_URL="
+for /f "delims=" %%u in ('git remote get-url origin 2^>nul') do set "REPO_URL=%%u"
+echo.
+if defined REPO_URL (
+  echo Current GitHub repository: %REPO_URL%
+  set /p NEW_URL=Press Enter to keep it, or paste a different repository URL: 
+) else (
   echo Create an EMPTY repository on github.com first ^(no README, no .gitignore^).
-  set /p REPO_URL=Paste its URL, e.g. https://github.com/subramanyabellary-lang/opencv-university.git : 
-  call git remote add origin %%REPO_URL%%
+  set /p NEW_URL=Paste its URL, e.g. https://github.com/subramanyabellary-lang/opencv-university.git : 
+)
+if defined NEW_URL (
+  git remote remove origin >nul 2>&1
+  call git remote add origin %%NEW_URL%%
 )
 
 echo.
@@ -41,7 +48,11 @@ git remote get-url origin
 git push -u origin main
 if errorlevel 1 (
   echo.
-  echo [ERROR] Push failed. If a sign-in window opened, sign in to GitHub and run this file again.
+  echo [ERROR] Push failed.
+  echo  - "Repository not found": open the URL above in your browser. If GitHub shows 404,
+  echo    the repository does not exist under that name, or you are signed in as another account.
+  echo  - Wrong account saved on this PC: Control Panel ^> Credential Manager ^> Windows Credentials,
+  echo    remove the entries for git:https://github.com, then run this file again and sign in.
   pause
   exit /b 1
 )

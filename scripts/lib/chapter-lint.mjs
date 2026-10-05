@@ -20,7 +20,7 @@ export const TAIL_SECTIONS = [
 const LESSON = /^(\d+)\. \S/;
 const MINI = /^Mini exercise/;
 const REMEMBER = /^What you should remember/;
-const FIGURES = /<(PixelGrid|ImageCompare|BitBuilder|IndexExplorer|RgbMixer)\b/;
+const FIGURES = /<(PixelGrid|ImageCompare|BitBuilder|IndexExplorer|RgbMixer|TaskSorter)\b/;
 
 /** Remove fenced code blocks so headings inside code are ignored. */
 export function stripFences(src) {

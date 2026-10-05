@@ -642,3 +642,59 @@ button.pg-cell { cursor: pointer; }
 .mx-swatch { width: 8rem; height: 8rem; border-radius: 14px; border: 1px solid var(--line); display: flex; align-items: flex-end; justify-content: center; padding-bottom: 0.5rem; font-weight: 700; text-transform: capitalize; }
 .mx-note { font-size: 0.82rem; color: var(--ok); font-weight: 600; }
 .mx-gray { display: inline-flex; align-items: center; justify-content: center; min-width: 2.6rem; padding: 0.1rem 0.4rem; border-radius: 6px; border: 1px solid var(--line); font: 700 0.85rem var(--mono); }
+
+/* ===================== Chapter 1.4 visuals ===================== */
+/* TaskSorter */
+.sorter-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; counter-reset: st; }
+.sorter-item { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); padding: 0.6rem 0.8rem; margin: 0 !important; }
+.sorter-item.is-ok { border-color: var(--ok); }
+.sorter-item.is-bad { border-color: var(--bad); }
+.sorter-task { font-weight: 600; margin-bottom: 0.4rem; }
+.sorter-btns { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.sorter-btn { font: inherit; font-size: 0.82rem; padding: 0.3rem 0.65rem; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-soft); color: var(--fg-soft); cursor: pointer; }
+.sorter-btn.is-on { color: var(--fg); border-width: 2px; }
+.sorter-btn.k-ip.is-on, .sorter-btn.k-ip.is-answer { background: var(--t-data-bg); border-color: var(--t-data); }
+.sorter-btn.k-cv.is-on, .sorter-btn.k-cv.is-answer { background: var(--t-res-bg); border-color: var(--t-res); }
+.sorter-btn.k-ml.is-on, .sorter-btn.k-ml.is-answer { background: var(--t-proc-bg); border-color: var(--t-proc); }
+.sorter-btn.k-dl.is-on, .sorter-btn.k-dl.is-answer { background: var(--t-world-bg); border-color: var(--t-world); }
+.sorter-why { margin-top: 0.45rem; font-size: 0.9rem; color: var(--fg-soft); }
+.sorter-item.is-ok .sorter-why strong { color: var(--ok); }
+.sorter-item.is-bad .sorter-why strong { color: var(--bad); }
+.sorter .quiz-summary { margin-top: 0.8rem; }
+/* VsTable */
+.vs-grid { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.vs-row { display: contents; }
+.vs-head { padding: 0.6rem 0.9rem; font-weight: 700; }
+.vs-head.vs-l { background: var(--t-data-bg); color: var(--t-data); }
+.vs-head.vs-r { background: var(--t-res-bg); color: var(--t-res); }
+.vs-cell { padding: 0.45rem 0.9rem; border-top: 1px solid var(--line); font-size: 0.95rem; }
+.vs-cell.vs-l { border-right: 1px solid var(--line); }
+/* Nested */
+.nest { border: 2px solid var(--line); border-radius: 14px; padding: 0.6rem 0.8rem 0.8rem; }
+.nest-0 { background: var(--t-world-bg); border-color: var(--t-world-line); }
+.nest-1 { background: var(--t-proc-bg); border-color: var(--t-proc-line); }
+.nest-2 { background: var(--t-data-bg); border-color: var(--t-data-line); }
+.nest-3 { background: var(--t-res-bg); border-color: var(--t-res-line); }
+.nest-head { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; align-items: baseline; margin-bottom: 0.5rem; }
+.nest-label { font-weight: 700; }
+.nest-note { font-size: 0.82rem; color: var(--fg-soft); }
+.nest-body { display: flex; gap: 0.75rem; align-items: stretch; flex-wrap: wrap; }
+.nest-body > .nest { flex: 1 1 14rem; }
+.nest-side { flex: 0 1 10rem; display: flex; align-items: center; justify-content: center; text-align: center; border: 2px dashed var(--line); border-radius: 12px; padding: 0.6rem; font-size: 0.88rem; color: var(--fg-soft); }
+/* SceneSketch */
+.scene svg { width: 100%; max-width: 36rem; height: auto; display: block; }
+.sc-sky { fill: #dbe9f6; } .sc-ground { fill: #b7c3cf; }
+@media (prefers-color-scheme: dark) { .sc-sky { fill: #1c2a38; } .sc-ground { fill: #2a3540; } }
+.sc-det rect { fill: none; stroke: #2fbf62; stroke-width: 3; }
+.sc-det rect.sc-tag { fill: #2fbf62; stroke: none; }
+.sc-det text { fill: #0b1a10; font: 700 13px var(--mono); }
+.sc-det text.sc-dim { fill: #17703a; font-weight: 600; }
+@media (prefers-color-scheme: dark) { .sc-det text.sc-dim { fill: #5fd08a; } }
+/* DotGrid */
+.dots svg { width: 100%; max-width: 26rem; height: auto; display: block; }
+.dots-label { margin-top: 0.5rem; font-weight: 700; color: var(--ok); }
+.vis-arrow { display: flex; flex-direction: column; align-items: center; color: var(--fg-faint); margin: -0.5rem 0; line-height: 1; }
+.vis-arrow span { font-size: 0.78rem; }
+.tree-branch ul { padding-left: 1rem; font-size: 0.88rem; overflow-wrap: normal; word-break: normal; hyphens: manual; }
+.tree-branches { gap: 0.5rem; }
+.tree-branch { padding: 0.55rem 0.6rem; min-width: 0; }
