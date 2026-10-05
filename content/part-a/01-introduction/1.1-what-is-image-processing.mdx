@@ -1,0 +1,1125 @@
+export const meta = {
+  number: "1.1",
+  title: "What is image processing?",
+  minutes: 40,
+  objectives: [
+    "Explain why a computer sees an image as numbers",
+    "Describe a pixel, and what 0, 128 and 255 mean in a grayscale image",
+    "Explain why an 8-bit image runs from 0 to 255",
+    "Tell manipulating an image apart from extracting information from it",
+    "Trace an industrial pipeline from camera to decision",
+    "Run the same pixel operations in NumPy and in OpenCV",
+  ],
+};
+
+{/*
+  Lesson content: owner's text (5 Oct 2026), presented with visual components.
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 1.1 What is image processing?
+
+<Definition term="Image processing">using a computer to manipulate or analyze an image.</Definition>
+
+<p className="lead">Let's start from absolute zero.</p>
+
+## 1. What is an image?
+
+When you look at a picture from a steel plant, you might see: *"A steel billet."*
+
+But a computer doesn't naturally understand "steel billet". A computer sees something much simpler: **numbers**.
+
+<Columns>
+<Panel title="What you see" tone="a">
+
+<PixelMatrix
+  numbers={false}
+  size="sm"
+  values={[
+    [28, 31, 30, 33, 29, 32, 30, 27],
+    [30, 34, 36, 35, 37, 33, 31, 29],
+    [32, 38, 205, 214, 218, 209, 36, 30],
+    [31, 40, 212, 228, 231, 216, 39, 33],
+    [33, 39, 215, 230, 233, 219, 41, 31],
+    [30, 37, 208, 217, 221, 211, 38, 32],
+    [29, 35, 37, 39, 40, 36, 34, 30],
+    [27, 30, 32, 31, 33, 30, 29, 28],
+  ]}
+/>
+
+A bright billet end on a dark background.
+
+</Panel>
+<Panel title="What the computer sees" tone="c">
+
+<PixelMatrix
+  size="sm"
+  values={[
+    [28, 31, 30, 33, 29, 32, 30, 27],
+    [30, 34, 36, 35, 37, 33, 31, 29],
+    [32, 38, 205, 214, 218, 209, 36, 30],
+    [31, 40, 212, 228, 231, 216, 39, 33],
+    [33, 39, 215, 230, 233, 219, 41, 31],
+    [30, 37, 208, 217, 221, 211, 38, 32],
+    [29, 35, 37, 39, 40, 36, 34, 30],
+    [27, 30, 32, 31, 33, 30, 29, 28],
+  ]}
+/>
+
+The same 8 × 8 picture: 64 numbers.
+
+</Panel>
+</Columns>
+
+An image is basically a large collection of numbers.
+
+## 2. Think of an image as a giant grid
+
+Imagine we have a very small image:
+
+<PixelMatrix size="lg" values={[[20, 80, 120], [40, 150, 200], [10, 100, 255]]} highlight={[[1, 1]]} caption="A 3 × 3 image. The outlined square is one pixel; its value is 150." />
+
+This is an image. Each little square is called a **pixel**.
+
+<Callout kind="key">
+
+**Pixel** = **Pi**cture **El**ement
+
+</Callout>
+
+So:
+
+<Flow direction="right" steps={["Image", "Many pixels", "Each pixel contains numbers"]} />
+
+## 3. What is a pixel?
+
+A pixel is the smallest individual element of a digital image.
+
+For a grayscale image, one pixel might contain the number `128`. That number represents its **brightness**.
+
+- `0` means **black**.
+- `255` means **white**.
+- `128` is approximately **gray**.
+
+<IntensityScale
+  marks={[
+    { value: 0, label: "Black" },
+    { value: 128, label: "≈ Gray" },
+    { value: 255, label: "White" },
+  ]}
+  caption="Everything between 0 and 255 represents a different brightness level."
+/>
+
+## 4. Why 255?
+
+This is extremely important.
+
+A normal 8-bit grayscale image uses **8 bits** for each pixel. One bit can contain `0` or `1`.
+
+With 8 bits, we can represent 2⁸ = **256** different values. Those values are **0 → 255**: 256 possible intensity values.
+
+<BitBuilder initial={128} />
+
+<Flow direction="right" steps={["8-bit image", "256 possible values", "0 to 255"]} />
+
+This is why you constantly see `255` in OpenCV.
+
+## 5. So what exactly is image processing?
+
+Now we can define it properly:
+
+<Callout kind="key">
+
+**Image processing** is the use of computational operations to manipulate, improve, transform, measure, or analyze digital images.
+
+</Callout>
+
+In beginner language: *we take an image, perform operations on its pixels, and produce a useful result.*
+
+<Flow
+  steps={[
+    { label: "Original image", tone: "data" },
+    { label: "Image processing", tone: "process" },
+    { label: "Improved / transformed / analyzed image", tone: "result" },
+  ]}
+/>
+
+## 6. Example: making an image darker
+
+Suppose our image contains these pixels, and we want to make it darker. One simple operation is:
+
+```text
+new pixel = old pixel × 0.5
+```
+
+So `100 → 50`, `150 → 75`, `200 → 100`, and so on for every pixel:
+
+<MatrixTransform
+  before={[[100, 150, 200], [50, 120, 250], [20, 80, 180]]}
+  after={[[50, 75, 100], [25, 60, 125], [10, 40, 90]]}
+  rule="× 0.5"
+  beforeLabel="Original"
+  afterLabel="Darker"
+/>
+
+We have processed the image.
+
+**Try it.** Tap any pixel, change its value, or move the factor slider. Every output pixel follows the same rule.
+
+<PixelGrid
+  values={[[100, 150, 200], [50, 120, 250], [20, 80, 180]]}
+  operations={["multiply", "brighten", "threshold"]}
+  caption="Multiply uses the same rounding as cv2.multiply (round half to even, then clip to 0 to 255)."
+/>
+
+## 7. Image processing is basically mathematics on pixels
+
+This is one of the most important ideas in the entire course.
+
+<Flow
+  steps={[
+    { label: "Image", tone: "data" },
+    { label: "Pixels", tone: "data" },
+    { label: "Numbers", tone: "data" },
+    { label: "Mathematical operations", tone: "process" },
+    { label: "New pixels", tone: "data" },
+    { label: "New image / information", tone: "result" },
+  ]}
+/>
+
+For example, take one pixel with the value 100. We could:
+
+<PixelMath
+  value={100}
+  ops={[
+    { label: "Add", expr: "100 + 30", result: 130 },
+    { label: "Multiply", expr: "100 × 2", result: 200 },
+    { label: "Subtract", expr: "100 − 50", result: 50 },
+    { label: "Compare", expr: "100 > 128 ?", result: "NO" },
+  ]}
+/>
+
+Those simple operations eventually become:
+
+<Chips
+  items={[
+    "Brightness adjustment",
+    "Contrast enhancement",
+    "Thresholding",
+    "Edge detection",
+    "Segmentation",
+    "Filtering",
+    "Object detection",
+    "Measurement",
+  ]}
+/>
+
+## 8. Image processing isn't only about changing images
+
+This is an important distinction. Suppose we have:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Factory", tone: "world" },
+    { label: "Camera", tone: "world" },
+    { label: "Image", tone: "data" },
+    { label: "Processing", tone: "process" },
+    { label: "\"There are 17 rods\"", tone: "result" },
+  ]}
+/>
+
+We didn't necessarily create a beautiful new image. Instead, we **extracted information** from the image. So image processing can mean:
+
+<Columns>
+<Panel title="Manipulating an image" tone="a">
+
+<Chips items={["Blur", "Sharpen", "Resize", "Rotate", "Change brightness"]} />
+
+</Panel>
+<Panel title="Extracting information" tone="c">
+
+<Chips items={["Count objects", "Measure dimensions", "Find edges", "Find temperature", "Detect defects"]} />
+
+</Panel>
+</Columns>
+
+Here is manipulation on a real image. Drag the divider, and hover or tap to read pixel values.
+
+<ImageCompare
+  before={{ src: "/images/sample-scene.png", label: "Original" }}
+  after={[
+    { src: "/images/sample-scene-inverted.png", label: "Inverted" },
+    { src: "/images/sample-scene-brighter.png", label: "Brighter (+80)" },
+    { src: "/images/sample-scene-threshold.png", label: "Threshold 128" },
+  ]}
+  width={320}
+  height={200}
+  alt="Synthetic grayscale test scene with a disc, a block, a triangle and the word OpenCV"
+  caption="Test image generated by assets/images/generate_samples.py; each version made with OpenCV 4.13.0."
+/>
+
+## 9. A real industrial example
+
+Imagine a steel mill camera looking at a bundle of rods. The camera captures:
+
+<RodBundle caption="Schematic camera view of a rod bundle." />
+
+The computer receives an image. But we want: **Detected rods = 124**.
+
+The processing pipeline could be:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Camera", tone: "world" },
+    { label: "Image", tone: "data" },
+    { label: "Grayscale", tone: "process" },
+    { label: "Noise reduction", tone: "process" },
+    { label: "Threshold", tone: "process" },
+    { label: "Morphology", tone: "process" },
+    { label: "Contours / blobs", tone: "process" },
+    { label: "Count", tone: "process" },
+    { label: "124 rods", tone: "result" },
+  ]}
+/>
+
+Every step manipulates or analyzes image data.
+
+## 10. Image processing vs human vision
+
+Humans are extremely good at looking at an image and saying: *"That's a red car."*
+
+A computer doesn't automatically know that. It starts with **pixels**. For example, a colour pixel might contain `[120, 50, 30]`.
+
+Depending on the colour representation, those numbers describe the colour information:
+
+<ColorPixel values={[120, 50, 30]} />
+
+The computer needs algorithms to transform those numbers into useful information.
+
+## 11. What happens when a camera captures an image?
+
+At a very high level:
+
+<Flow
+  steps={[
+    { label: "Real world", tone: "world", tag: "Scene" },
+    { label: "Light", tone: "world" },
+    { label: "Lens", tone: "world", tag: "Camera" },
+    { label: "Camera sensor", tone: "world" },
+    { label: "Electrical signals", tone: "process" },
+    { label: "Digital values", tone: "data", tag: "Data" },
+    { label: "Image", tone: "data" },
+    { label: "Pixels", tone: "data" },
+  ]}
+  highlightLast={false}
+/>
+
+For now, don't worry about the details. We'll study the camera itself in **Module 2: How cameras form images**, which covers lenses, exposure, sensor noise, Bayer filters, rolling shutter, line-scan cameras, and more.
+
+## 12. What does a computer actually store?
+
+Suppose we have a tiny 3 × 3 grayscale image. It could be represented as:
+
+<Columns>
+<Panel title="As a picture" tone="a">
+
+<PixelMatrix values={[[0, 50, 100], [100, 150, 200], [200, 250, 255]]} />
+
+</Panel>
+<Panel title="As stored numbers" tone="c">
+
+```text
+[
+ [  0,  50, 100 ],
+ [100, 150, 200 ],
+ [200, 250, 255 ]
+]
+```
+
+</Panel>
+</Columns>
+
+This is essentially a **matrix of numbers**. Later, when we study NumPy, you'll see something like:
+
+```python
+import numpy as np
+
+image = np.array([
+    [0, 50, 100],
+    [100, 150, 200],
+    [200, 250, 255]
+])
+```
+
+That is already an image representation.
+
+## 13. Why NumPy is so important
+
+Python itself is not designed specifically for handling millions of pixels efficiently. NumPy gives us powerful numerical arrays.
+
+<Columns>
+<Panel title="Instead of thinking" tone="warn">
+
+pixel 1, pixel 2, pixel 3, pixel 4, …
+
+</Panel>
+<Panel title="We work with the whole array" tone="good">
+
+```python
+image = image + 20
+```
+
+</Panel>
+</Columns>
+
+<Flow direction="right" steps={["Every pixel", "Increase by 20"]} />
+
+That's one of the reasons NumPy is fundamental to computer vision. We'll study this properly in **Module 6: Python and NumPy for images**.
+
+<Callout kind="mistake">
+
+Images loaded by OpenCV use the type `uint8` (0 to 255). With that type, NumPy `+` **wraps around** past 255 instead of stopping at white: 250 + 20 gives 14. The Code section below shows the problem and the fix.
+
+</Callout>
+
+## 14. What is OpenCV then?
+
+You might now ask: *"If an image is just numbers, why do we need OpenCV?"*
+
+Because doing everything manually would be painful. Imagine you want to:
+
+<Chips items={["Read an image", "Resize it", "Blur it", "Detect edges", "Find contours", "Detect objects", "Work with cameras", "Process video"]} />
+
+You could write everything yourself. That would be enormous work. Instead, OpenCV provides ready-made tools:
+
+<Columns stack>
+<Panel badge="Step 1" title="Load the image" tone="a">
+
+```python
+import cv2
+
+image = cv2.imread("image.jpg")
+```
+
+OpenCV loads the image into memory.
+
+</Panel>
+<Panel badge="Step 2" title="Convert to grayscale" tone="b">
+
+```python
+gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+```
+
+</Panel>
+<Panel badge="Step 3" title="Detect edges" tone="c">
+
+```python
+edges = cv2.Canny(gray, 100, 200)
+```
+
+</Panel>
+</Columns>
+
+Eventually you'll understand exactly what every one of these operations does internally.
+
+## 15. Three levels of understanding
+
+As we progress through this course, I want you to understand image processing at three levels.
+
+<Columns stack>
+<Panel badge="Level 1" title="User" tone="a">
+
+You know `cv2.Canny()`, and you know: *"It detects edges."*
+
+</Panel>
+<Panel badge="Level 2" title="Developer" tone="b">
+
+You understand the steps inside:
+
+<Flow direction="right" steps={["Image", "Gradient", "Non-maximum suppression", "Double threshold", "Hysteresis", "Edges"]} />
+
+</Panel>
+<Panel badge="Level 3" title="Engineer" tone="c">
+
+You understand:
+
+- why edges are needed
+- how noise affects them
+- how threshold selection affects results
+- what camera and lighting conditions affect them
+- when Canny is inappropriate
+- what alternative technique to use
+- how fast it runs
+- how to deploy it in a production pipeline
+
+</Panel>
+</Columns>
+
+<Callout kind="key">
+
+Our goal is **Level 3**.
+
+</Callout>
+
+## 16. The three big things image processing does
+
+Almost everything we'll learn can initially be grouped into three ideas.
+
+<Tree
+  root="Image processing"
+  branches={[
+    { title: "IMPROVE", items: ["Remove noise", "Sharpen", "Contrast"] },
+    { title: "TRANSFORM", items: ["Rotate", "Resize", "Warp", "etc."] },
+    { title: "EXTRACT", items: ["Detect edges", "Count", "Measure"] },
+  ]}
+/>
+
+We'll formally study these families later in Chapter 1.5.
+
+## 17. Image processing vs computer vision
+
+Don't confuse these two.
+
+<Columns>
+<Panel title="Image processing" tone="b">
+
+Mostly asks: ***"What can I do with this image?"***
+
+<Chips items={["Blur it", "Sharpen it", "Resize it", "Remove noise", "Increase contrast", "Find edges"]} />
+
+</Panel>
+<Panel title="Computer vision" tone="c">
+
+Asks: ***"What can I understand from this image?"***
+
+- What object is this?
+- Where is the object?
+- How many objects are there?
+- Is there a defect?
+- How large is it?
+- Is the person wearing a helmet?
+
+</Panel>
+</Columns>
+
+There is a lot of overlap between them. Think:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Image processing", note: "prepare / transform the image", tone: "process" },
+    { label: "Computer vision", note: "understand the scene", tone: "result" },
+  ]}
+/>
+
+We'll study the distinction properly in 1.4.
+
+## 18. A complete example
+
+Suppose we want to detect a crack on a steel component. We start with:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Real object", tone: "world" },
+    { label: "Camera", tone: "world" },
+    { label: "Image", tone: "data" },
+  ]}
+  highlightLast={false}
+/>
+
+<Chips label="The image contains" items={["Background", "+ Steel", "+ Crack", "+ Noise"]} />
+
+Then:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Image", tone: "data" },
+    { label: "Crop ROI", tone: "process" },
+    { label: "Grayscale", tone: "process" },
+    { label: "Noise reduction", tone: "process" },
+    { label: "Contrast enhancement", tone: "process" },
+    { label: "Edge detection", tone: "process" },
+    { label: "Morphology", tone: "process" },
+    { label: "Segmentation", tone: "process" },
+    { label: "Contour analysis", tone: "process" },
+    { label: "Crack measurement", tone: "process" },
+    { label: "PASS / FAIL", tone: "result" },
+  ]}
+/>
+
+This is where image processing becomes a real engineering system.
+
+## 19. The most important mental model
+
+Remember this:
+
+<Flow
+  title="From the real world to a decision"
+  steps={[
+    { label: "Real world", tone: "world", tag: "Physical" },
+    { label: "Camera", tone: "world" },
+    { label: "Image", tone: "data", tag: "Data" },
+    { label: "Pixels", tone: "data" },
+    { label: "Numbers", tone: "data" },
+    { label: "Image processing", tone: "process", tag: "Processing" },
+    { label: "Information", tone: "result", tag: "Outcome" },
+    { label: "Decision / action", tone: "result" },
+  ]}
+/>
+
+For example:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Steel billet", tone: "world" },
+    { label: "Camera", tone: "world" },
+    { label: "Pixels", tone: "data" },
+    { label: "Image processing", tone: "process" },
+    { label: "Length = 12.4 m", tone: "result" },
+    { label: "PLC / database / dashboard", tone: "plain" },
+  ]}
+  highlightLast={false}
+/>
+
+That is the foundation of industrial computer vision.
+
+## 20. What you should remember from 1.1
+
+If you remember only these 7 things, you're good:
+
+<Takeaways>
+<Takeaway n={1} title="An image is data">
+
+```text
+Image = numbers
+```
+
+</Takeaway>
+<Takeaway n={2} title="An image is made of pixels">
+
+```text
+Image → Pixels
+```
+
+</Takeaway>
+<Takeaway n={3} title="A grayscale pixel represents brightness">
+
+```text
+0   → black
+255 → white
+```
+
+</Takeaway>
+<Takeaway n={4} title="8-bit means 256 possible values">
+
+```text
+2⁸ = 256    →    0 to 255
+```
+
+</Takeaway>
+<Takeaway n={5} title="Image processing operates on those numbers">
+
+```text
+Pixels → Mathematics → New pixels / information
+```
+
+</Takeaway>
+<Takeaway n={6} title="It can manipulate OR analyze images">
+
+```text
+Manipulate → blur, sharpen, resize
+Analyze    → detect, count, measure
+```
+
+</Takeaway>
+<Takeaway n={7} title="The ultimate goal is useful information">
+
+```text
+Image → Processing → Information → Decision
+```
+
+</Takeaway>
+</Takeaways>
+
+## Mini exercise 🧠
+
+Before moving to **1.2 Pixels and the image grid**, try to answer these without looking back:
+
+1. Why does a computer represent an image using numbers?
+2. What is a pixel?
+3. Why does an 8-bit grayscale image have values from `0` to `255`?
+4. If a pixel has value `0`, what does it represent?
+5. If a pixel has value `255`, what does it represent?
+6. Is image processing only about improving an image?
+7. In this pipeline, what is happening in the **???** stage?
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Camera", tone: "world" },
+    { label: "Image", tone: "data" },
+    { label: "???", tone: "process" },
+    { label: "Number of rods = 120", tone: "result" },
+  ]}
+/>
+
+<Solution>
+
+1. A computer can only store and calculate with numbers. The brightness (or colour) of every small square of the picture is stored as a number, so the whole image becomes a grid of numbers.
+2. The smallest individual element of a digital image: one square of the grid (**pi**cture **el**ement). In a grayscale image it holds one number, its brightness.
+3. Each pixel is stored in 8 bits. 8 bits give 2⁸ = 256 different values, numbered 0 to 255.
+4. Black.
+5. White.
+6. No. Image processing can also **extract information**: count objects, measure dimensions, find edges, find temperature, detect defects.
+7. Image processing: for example grayscale, noise reduction, threshold, morphology, contours or blobs, then counting. Pixels go in; a number (information) comes out.
+
+</Solution>
+
+Once these are clear, the next chapter is **1.2 Pixels and the image grid**, where we go much deeper into rows, columns, coordinates, width, height, indexing, neighbours, and how OpenCV and NumPy actually address a pixel.
+
+## Code
+
+First we write the logic ourselves, so nothing is hidden. Then we use OpenCV, which does the same thing faster and more safely.
+
+### 1. The image as a NumPy array
+
+```python
+import numpy as np
+
+img = np.array([[ 50,  80, 120],
+                [ 90, 200, 230],
+                [ 30, 160, 255]], dtype=np.uint8)
+
+print(img.shape, img.dtype)
+```
+
+Output:
+
+```text
+(3, 3) uint8
+```
+
+- `np.array([...])` builds the grid of numbers, one inner list per row.
+- `dtype=np.uint8` means *unsigned 8-bit integer*: whole numbers from 0 to 255. This is the type OpenCV uses for ordinary images.
+- `img.shape` is `(rows, columns)`, which is `(height, width)`.
+
+### 2. From scratch: a loop over every pixel
+
+```python
+inverted = np.zeros_like(img)          # an empty image of the same size and type
+rows, cols = img.shape
+for r in range(rows):                  # every row …
+    for c in range(cols):              # … and every column in that row
+        inverted[r, c] = 255 - img[r, c]
+print(inverted)
+```
+
+Output:
+
+```text
+[[205 175 135]
+ [165  55  25]
+ [225  95   0]]
+```
+
+Dark pixels became bright and bright pixels became dark. Note the index order: `img[r, c]` is `img[row, column]`.
+
+### 3. The same with NumPy, without a loop
+
+NumPy applies a rule to every pixel at once. This is called *vectorization*.
+
+```python
+inverted = 255 - img                                              # invert
+brighter = np.clip(img.astype(np.int16) + 50, 0, 255).astype(np.uint8)  # brighten, clipped
+binary = np.where(img > 128, 255, 0).astype(np.uint8)             # threshold
+
+print(brighter)
+print(binary)
+print("bright pixels:", np.count_nonzero(img > 128), "of", img.size)
+print("mean:", img.mean())
+```
+
+Output:
+
+```text
+[[100 130 170]
+ [140 250 255]
+ [ 80 210 255]]
+[[  0   0   0]
+ [  0 255 255]
+ [  0 255 255]]
+bright pixels: 4 of 9
+mean: 135.0
+```
+
+The brighten line needs care. `astype(np.int16)` moves the numbers into a bigger type, so 230 + 50 can really be 280. `np.clip(..., 0, 255)` then limits it to 255, and `astype(np.uint8)` returns to an image type.
+
+Without that care, NumPy gets it wrong:
+
+```python
+print(img + 50)      # ⚠️ uint8 + 50 wraps around
+```
+
+Output:
+
+```text
+[[100 130 170]
+ [140 250  24]
+ [ 80 210  49]]
+```
+
+280 became 24 and 305 became 49. NumPy `uint8` arithmetic *wraps around* past 255, like a car odometer rolling over: 280 − 256 = 24.
+
+### 4. The OpenCV way
+
+```python
+import cv2
+
+inverted = cv2.bitwise_not(img)
+brighter = cv2.add(img, 50)
+retval, binary = cv2.threshold(img, 128, 255, cv2.THRESH_BINARY)
+
+print(inverted)
+print(brighter)
+print(retval)
+print(binary)
+```
+
+Output:
+
+```text
+[[205 175 135]
+ [165  55  25]
+ [225  95   0]]
+[[100 130 170]
+ [140 250 255]
+ [ 80 210 255]]
+128.0
+[[  0   0   0]
+ [  0 255 255]
+ [  0 255 255]]
+```
+
+Every parameter:
+
+- `cv2.bitwise_not(img)`: flips every bit of every pixel. For 8-bit images this equals 255 − p (see Go deeper for why).
+- `cv2.add(img, 50)`: adds 50 to every pixel and **saturates**: results above 255 become 255, results below 0 become 0. This is the safe way to brighten.
+- `cv2.threshold(img, 128, 255, cv2.THRESH_BINARY)`:
+  - `img`: the source image.
+  - `128`: the threshold. A pixel must be **strictly greater** than 128 to pass.
+  - `255`: the value given to pixels that pass (OpenCV calls it `maxval`).
+  - `cv2.THRESH_BINARY`: the rule "maxval if p > thresh, else 0".
+  - It returns two things: the threshold that was used (`retval`, here `128.0`) and the result image.
+
+### 5. On a real image file
+
+Download [sample-scene.png](/images/sample-scene.png) into the folder you run Python from.
+
+```python
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+if img is None:
+    raise FileNotFoundError("Could not read sample-scene.png. Check the path.")
+
+inverted = cv2.bitwise_not(img)
+brighter = cv2.add(img, 80)
+_, binary = cv2.threshold(img, 128, 255, cv2.THRESH_BINARY)
+
+cv2.imwrite("inverted.png", inverted)
+cv2.imwrite("brighter.png", brighter)
+cv2.imwrite("binary.png", binary)
+print("image size:", img.shape)
+print("bright pixels:", cv2.countNonZero(binary), "of", img.size)
+```
+
+Output:
+
+```text
+image size: (200, 320)
+bright pixels: 28106 of 64000
+```
+
+- `cv2.imread(path, cv2.IMREAD_GRAYSCALE)` loads the file as one 8-bit channel. Without the flag you get a 3-channel colour image.
+- `if img is None` is not optional. When the file is missing, `imread` does **not** raise an error; it prints a warning and returns `None`.
+- `cv2.imwrite(path, image)` saves the result. The file type comes from the extension (`.png`). It returns `True` on success.
+- `cv2.countNonZero(binary)` counts the white pixels: information out, in one call.
+
+## OpenCV API notes
+
+Versions: OpenCV 4.13.0 (`opencv-python==4.13.0.92`). Signatures are copied from the installed library's own help text.
+
+| Function | Python signature | Returns |
+|---|---|---|
+| `cv2.imread` | `imread(filename[, flags]) -> retval` | image array, or `None` if the file cannot be read |
+| `cv2.imwrite` | `imwrite(filename, img[, params]) -> retval` | `True` / `False` |
+| `cv2.bitwise_not` | `bitwise_not(src[, dst[, mask]]) -> dst` | inverted image |
+| `cv2.add` | `add(src1, src2[, dst[, mask[, dtype]]]) -> dst` | saturated sum |
+| `cv2.threshold` | `threshold(src, thresh, maxval, type[, dst]) -> retval, dst` | threshold used, result image |
+
+**Inputs and types.**
+
+- Images are NumPy arrays. Grayscale: shape `(height, width)`. Colour: `(height, width, 3)` in **B, G, R** order.
+- The usual type is `uint8` (0 to 255). Industrial and thermal cameras often deliver `uint16`; OpenCV handles both, but check `img.dtype` before you assume 255 is "white".
+- `cv2.threshold` accepts 8-bit, 16-bit and floating-point inputs, and processes each channel separately. Most of the time you give it one grayscale channel.
+- `cv2.add` and `bitwise_not` work on any number of channels, each channel independently.
+
+**Defaults.**
+
+- `imread` without a flag loads a 3-channel colour image (`cv2.IMREAD_COLOR`).
+- `mask` (in `add` and `bitwise_not`) is optional. When you give one, only pixels where the mask is non-zero are changed.
+
+**Speed.**
+
+- Never loop over pixels in Python for real work. In one test on a 1920×1080 image (a 2-core cloud machine, OpenCV 4.13.0), the Python loop took about 0.55 s; `255 - img` and `cv2.bitwise_not(img)` each took about 0.13 to 0.15 ms. That is roughly 4,000 times faster. Your numbers will differ; Chapter 7.7 shows how to measure.
+- NumPy and OpenCV are similar for simple per-pixel maths. OpenCV is the safer default because it saturates.
+
+## Where it fails
+
+Pixel rules are powerful, but they have clear limits.
+
+- **The same object gives different numbers.** Pixel values depend on lighting, exposure and the camera. A threshold tuned at noon can fail at night. *Instead:* control the lighting (59.3), normalise the image (Part B), or use adaptive methods (13.5).
+- **It cannot recover what the camera never captured.** If a pixel is saturated at 255, the detail inside is gone. If the image is badly blurred, fine detail is lost. *Instead:* fix the camera, lens and exposure first (Module 2).
+- **One pixel at a time ignores its neighbours.** Invert, brighten and threshold look at each pixel alone, so they cannot remove noise or find edges. *Instead:* use neighbourhood operations such as filters (Part C).
+- **No understanding.** Pixel maths does not know what a "person" or a "billet" is. For objects that vary a lot in shape, pose and appearance, hand-written rules break. *Instead:* use learned models (Part J, deep learning). Image processing still matters there: it prepares the images.
+
+## ⚠️ Common mistakes
+
+**1. Overflow with NumPy `uint8` arithmetic.** `img + 50` wraps around: 230 + 50 gives 24, not 255. Bright areas suddenly turn dark. Use `cv2.add`, or convert to a bigger type, compute, then `np.clip` and convert back. The same happens with subtraction: with NumPy, 50 − 80 gives 226; `cv2.subtract` gives 0.
+
+<ImageCompare
+  before={{ src: "/images/sample-scene-brighter.png", label: "cv2.add(img, 80)" }}
+  after={{ src: "/images/sample-scene-wrapped.png", label: "img + 80 (NumPy)" }}
+  width={320}
+  height={200}
+  alt="The same brightening done with saturation and with wrap-around"
+  caption="Both sides add 80. On the right, every pixel that went past 255 wrapped around: the bright disc and the right edge became dark."
+/>
+
+**2. Not checking `imread`.** A wrong path does not raise an error. `imread` returns `None`, and the crash happens later, far from the real cause. Always check `if img is None`.
+
+**3. Mixing up x and y.** NumPy indexes `img[row, column]`, which is `img[y, x]`. And `img.shape` is `(height, width)`, not `(width, height)`.
+
+**4. Assuming RGB order.** OpenCV loads colour images as **B, G, R**. Showing them with matplotlib (which expects R, G, B) swaps red and blue. Chapter 7.3 covers this.
+
+**5. Thinking `b = img` makes a copy.** It does not. Both names point to the same pixels, so changing `b` changes `img`. Use `b = img.copy()`.
+
+**6. Assuming 255 is always white.** A 16-bit image runs from 0 to 65535. Check `img.dtype` before you hard-code 255.
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### An image as a function
+
+Gonzalez and Woods define an image as a two-dimensional function f(x, y). Here x and y are coordinates in the plane, and the value of f at a point is the *intensity* (or gray level) there. When the coordinates and the intensity values are all finite, discrete numbers, the image is a **digital image** [1, Ch. 1].
+
+Turning a continuous scene into a digital image takes two steps: *sampling* (choosing the grid of points) and *quantization* (rounding each brightness to a whole number). Chapters 3.1 and 3.2 cover them.
+
+### Intensity levels
+
+With k bits per pixel there are L = 2ᵏ intensity levels, from 0 to L − 1 [1, Sec. 2.4].
+
+```text
+k = 8   →  L = 256     →  0 … 255      (ordinary images)
+k = 12  →  L = 4096    →  0 … 4095     (many industrial cameras)
+k = 16  →  L = 65536   →  0 … 65535    (16-bit files, thermal data)
+```
+
+### Point operations
+
+Every operation in the Code section (invert, brighten, multiply, threshold) is a **point operation**: the output pixel depends only on the input pixel at the same place. In Gonzalez and Woods' notation, s = T(r), where r is the input intensity and s the output [1, Ch. 3]. Szeliski calls these *point operators* and writes them as g(x) = h(f(x)) [2, Sec. 3.1].
+
+- Invert is the image negative: s = L − 1 − r, which for 8-bit images is s = 255 − r [1, Sec. 3.2].
+- Brighten is a *bias* (an added constant). Multiplying by a constant is a *gain*. Together they give g = a·f + b [2, Sec. 3.1].
+- Threshold is a step function: s = 255 if r > t, else 0. OpenCV's `THRESH_BINARY` uses a strict "greater than" [3].
+
+### Saturation and wrap-around, formally
+
+OpenCV's `add` is defined as dst(I) = saturate(src1(I) + src2(I)) [3]. For 8-bit output, saturate(v) = min(max(round(v), 0), 255).
+
+NumPy fixed-size integer types overflow instead [7]. For `uint8` the result is v mod 256: 280 mod 256 = 24. The OpenCV tutorial shows the same contrast with 250 + 10, which gives 255 in OpenCV and 4 in NumPy [6].
+
+### Why bitwise NOT equals 255 − p
+
+A `uint8` value is 8 bits. NOT flips every bit, so p and NOT p together have every bit set:
+
+```text
+p          = 0011 0010   (50)
+NOT p      = 1100 1101   (205)
+p + NOT p  = 1111 1111   (255)
+```
+
+So NOT p = 255 − p, for every 8-bit value.
+
+### Pixel numbers are not amounts of light
+
+In ordinary photos and screens, values are *gamma-encoded* (usually sRGB). The value 128 is not half the light of 255. Under the sRGB transfer function, 128 corresponds to about 22 % of the light of 255 [8]. This matters for measurement and blending. Chapter 11.3 explains gamma.
+
+### Three levels of processing
+
+Gonzalez and Woods describe a continuum [1, Ch. 1]:
+
+- **Low-level:** image in, image out (noise reduction, contrast enhancement, sharpening). The Code section of this chapter.
+- **Mid-level:** image in, attributes out (segmentation, edges, contours, object identity). The rod count in section 9 is an example.
+- **High-level:** "making sense" of recognised objects, which shades into computer vision. Chapter 1.4 draws the line.
+
+### A little history
+
+Gonzalez and Woods trace early digital images to the Bartlane cable picture transmission system of the early 1920s, which sent newspaper pictures across the Atlantic and cut transmission time from more than a week to less than three hours. Computer image processing proper began in the early 1960s; a landmark was the processing of the Moon images sent back by the Ranger 7 probe in 1964 at the Jet Propulsion Laboratory [1, Ch. 1].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "In an 8-bit grayscale image, a pixel has the value 0. What does it look like?",
+      options: ["Black", "White", "Middle gray", "Transparent"],
+      answer: 0,
+      explanation: "0 is the darkest value and 255 the brightest. 128 is a middle gray. Grayscale pixels have no transparency.",
+    },
+    {
+      question: "You invert an 8-bit pixel with value 70. What is the result?",
+      options: ["70", "185", "-70", "186"],
+      answer: 1,
+      explanation: "Invert is 255 − p, so 255 − 70 = 185.",
+    },
+    {
+      question: "`a` is a NumPy `uint8` array holding 200. What does `a + np.uint8(100)` give?",
+      options: ["300", "255", "44", "An error"],
+      answer: 2,
+      explanation: "NumPy uint8 arithmetic wraps around: 300 − 256 = 44. `cv2.add` would give 255 instead, because it saturates.",
+    },
+    {
+      question: "Which of these is an information-out result rather than an image-out result?",
+      options: ["An inverted image", "A brighter image", "\"There are 17 rods\"", "A thresholded black-and-white image"],
+      answer: 2,
+      explanation: "The count is information about the image, not a new image (section 8). The thresholded image is still an image; counting the rods in it turns it into information.",
+    },
+    {
+      question: "`img.shape` returns `(480, 640)`. How wide is the image, in pixels?",
+      options: ["480", "640", "307200", "It depends on the colour order"],
+      answer: 1,
+      explanation: "Shape is (rows, columns) = (height, width). The image is 640 pixels wide and 480 tall; 307200 is the number of pixels.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Process this 3×3 image with two rules: (a) invert, (b) threshold at 100 (output 255 if p > 100, else 0). Then say how many pixels are bright.
+
+```text
+ 10  100  200
+ 60  101  255
+120   90    0
+```
+
+<Solution>
+
+(a) Invert, 255 − p:
+
+```text
+245  155   55
+195  154    0
+135  165  255
+```
+
+(b) Threshold at 100. Note that 100 is **not** greater than 100, so it becomes 0. But 101 is.
+
+```text
+  0    0  255
+  0  255  255
+255    0    0
+```
+
+**4 of 9** pixels are bright (200, 101, 255, 120).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Load [sample-scene.png](/images/sample-scene.png) in grayscale. Print its shape, dtype, minimum, maximum and mean brightness, and count how many pixels are brighter than 200. Remember to check that the file loaded.
+
+<Solution>
+
+```python
+import cv2
+import numpy as np
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+if img is None:
+    raise FileNotFoundError("Could not read sample-scene.png. Check the path.")
+
+print("shape:", img.shape)
+print("dtype:", img.dtype)
+print("min:", img.min(), "max:", img.max())
+print("mean:", round(float(img.mean()), 1))
+print("pixels > 200:", np.count_nonzero(img > 200))
+```
+
+Output:
+
+```text
+shape: (200, 320)
+dtype: uint8
+min: 0 max: 255
+mean: 120.3
+pixels > 200: 7800
+```
+
+</Solution>
+
+### Exercise 3 (coding)
+
+A colleague brightens an image with `out = img + 100` and finds dark blotches where the image should be brightest. Explain the cause, then write two correct versions: one with OpenCV, one with NumPy only. Test both on the 3×3 image from the Code section.
+
+<Solution>
+
+**Cause:** `img` is `uint8`. Any result above 255 wraps around (for example 200 + 100 = 300 becomes 44), so the brightest pixels turn dark.
+
+```python
+import cv2
+import numpy as np
+
+img = np.array([[ 50,  80, 120],
+                [ 90, 200, 230],
+                [ 30, 160, 255]], dtype=np.uint8)
+
+out_cv = cv2.add(img, 100)                                              # OpenCV: saturates
+out_np = np.clip(img.astype(np.int16) + 100, 0, 255).astype(np.uint8)  # NumPy: widen, clip, narrow
+
+print(out_cv)
+print(np.array_equal(out_cv, out_np))
+```
+
+Output:
+
+```text
+[[150 180 220]
+ [190 255 255]
+ [130 255 255]]
+True
+```
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed. Pearson, 2018. Ch. 1 (definition of a digital image, levels of processing, history); Sec. 2.4 (sampling, quantization, L = 2ᵏ); Ch. 3 and Sec. 3.2 (intensity transformations, image negatives).
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. Springer, 2022. Sec. 3.1 (point operators, gain and bias). Free online edition: [szeliski.org/Book](https://szeliski.org/Book/).
+3. OpenCV 4.13.0 documentation, *Operations on arrays* (`add`, `bitwise_not`): [docs.opencv.org/4.13.0/d2/de8/group__core__array.html](https://docs.opencv.org/4.13.0/d2/de8/group__core__array.html); *Miscellaneous image transformations* (`threshold`, `THRESH_BINARY`): [docs.opencv.org/4.13.0/d7/d1b/group__imgproc__misc.html](https://docs.opencv.org/4.13.0/d7/d1b/group__imgproc__misc.html).
+4. OpenCV 4.13.0 documentation, *Image file reading and writing* (`imread`, `imwrite`, BGR channel order): [docs.opencv.org/4.13.0/d4/da8/group__imgcodecs.html](https://docs.opencv.org/4.13.0/d4/da8/group__imgcodecs.html).
+5. OpenCV 4.13.0 tutorials, *Basic Operations on Images* (pixel access, shape, dtype, avoid per-pixel loops): [docs.opencv.org/4.13.0/d3/df2/tutorial_py_basic_ops.html](https://docs.opencv.org/4.13.0/d3/df2/tutorial_py_basic_ops.html); *Image Thresholding*: [docs.opencv.org/4.13.0/d7/d4d/tutorial_py_thresholding.html](https://docs.opencv.org/4.13.0/d7/d4d/tutorial_py_thresholding.html).
+6. OpenCV 4.13.0 tutorials, *Arithmetic Operations on Images* (saturated vs modulo addition): [docs.opencv.org/4.13.0/d0/d86/tutorial_py_image_arithmetics.html](https://docs.opencv.org/4.13.0/d0/d86/tutorial_py_image_arithmetics.html).
+7. NumPy documentation, *Data types*, section on overflow errors: [numpy.org/doc/stable/user/basics.types.html](https://numpy.org/doc/stable/user/basics.types.html).
+8. IEC 61966-2-1:1999, *Multimedia systems and equipment: Colour measurement and management, Part 2-1: Default RGB colour space, sRGB*.

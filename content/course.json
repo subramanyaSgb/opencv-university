@@ -1,0 +1,6 @@
+{
+  "title": "OpenCV University",
+  "parts": [
+    { "id": "part-a", "letter": "A", "title": "Foundations", "modules": ["01-introduction"] }
+  ]
+}

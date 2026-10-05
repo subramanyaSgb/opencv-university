@@ -1,0 +1,5 @@
+# OpenCV University - Docker Compose
+# Phase 0/1: the web app runs with `npm run dev` (see README.md); no containers yet.
+# Phase 2 adds: api (FastAPI, services/api) and db (PostgreSQL).
+# Phase 3 adds: labs (services/labs).
+services: {}

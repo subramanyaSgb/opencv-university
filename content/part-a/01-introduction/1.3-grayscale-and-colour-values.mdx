@@ -1,0 +1,1167 @@
+export const meta = {
+  number: "1.3",
+  title: "Grayscale and colour values",
+  minutes: 50,
+  objectives: [
+    "Explain what one number means in a grayscale pixel, from 0 (black) to 255 (white)",
+    "Build colours from red, green and blue values, and recognise grays (R = G = B)",
+    "Work out how many colours 8 bits per channel can store, and what 24-bit colour means",
+    "Read a colour pixel in OpenCV's BGR order and convert it to RGB",
+    "Convert colour to grayscale with the weighted formula, and decide when not to",
+    "Access one channel of one pixel with image[row, column, channel]",
+  ],
+};
+
+{/*
+  Lesson content: owner's text (5 Oct 2026), presented with visual components.
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 1.3 Grayscale and colour values
+
+<Definition term="Pixel value">the number (grayscale) or numbers (colour) stored in one pixel that describe its brightness or colour.</Definition>
+
+<Columns>
+<Panel badge="1.1" title="An image is data made of pixels" tone="a">
+</Panel>
+<Panel badge="1.2" title="Pixels sit in rows and columns" tone="b">
+
+We access them with `image[row, column]`.
+
+</Panel>
+</Columns>
+
+Now we answer a very important question: **what numbers are actually stored inside a pixel?** This is where we go from:
+
+<Flow direction="right" steps={["Black and white", "Grayscale", "Colour", "RGB", "BGR", "OpenCV"]} />
+
+## 1. Start with the simplest possible image
+
+Imagine an image containing only **black**. A computer needs some number to represent that. We could define **0 = black** and **255 = white**. Everything between them represents different brightness levels:
+
+<IntensityScale />
+
+<SwatchRow
+  items={[
+    { value: 0, label: "black" },
+    { value: 30, label: "very dark gray" },
+    { value: 80, label: "dark gray" },
+    { value: 128, label: "medium gray" },
+    { value: 180, label: "light gray" },
+    { value: 230, label: "very light gray" },
+    { value: 255, label: "white" },
+  ]}
+/>
+
+This is a **grayscale** image.
+
+## 2. What is grayscale?
+
+**Grayscale** means an image containing different levels of brightness from black to white, without colour information.
+
+<PixelMatrix size="lg" values={[[0, 50, 100], [80, 150, 200], [120, 220, 255]]} caption="Every pixel contains one number." />
+
+<Flow direction="right" steps={["Grayscale pixel", "One number", "Brightness"]} />
+
+For an 8-bit grayscale image, that number runs from **0 → 255**.
+
+## 3. Why doesn't grayscale need colour?
+
+Think about a black-and-white photograph.
+
+<Columns>
+<Panel title="You don't need" tone="warn">
+
+<Chips items={["Red", "Green", "Blue"]} />
+
+for every pixel.
+
+</Panel>
+<Panel title="You only need: how bright is this pixel?" tone="good">
+
+<SwatchRow size="sm" items={[{ value: 20, label: "dark area" }, { value: 128, label: "medium area" }, { value: 240, label: "bright area" }]} />
+
+</Panel>
+</Columns>
+
+That's enough to represent the brightness information.
+
+## 4. One grayscale pixel
+
+Suppose `pixel = 128`. That means:
+
+<Flow direction="right" steps={["pixel", "128", "medium brightness", "gray"]} />
+
+Compare:
+
+<SwatchRow items={[{ value: 0, label: "BLACK", sub: "pixel = 0" }, { value: 128, label: "GRAY", sub: "pixel = 128" }, { value: 255, label: "WHITE", sub: "pixel = 255" }]} />
+
+## 5. Now let's introduce colour
+
+Real-world images aren't just black and white. We see:
+
+<SwatchRow
+  size="sm"
+  items={[
+    { value: [230, 30, 30], label: "Red" },
+    { value: [40, 170, 70], label: "Green" },
+    { value: [40, 90, 220], label: "Blue" },
+    { value: [245, 200, 40], label: "Yellow" },
+    { value: [140, 60, 190], label: "Purple" },
+    { value: [245, 130, 30], label: "Orange" },
+  ]}
+/>
+
+So we need a way to represent colour numerically. One of the most important ideas in computer vision is **RGB**:
+
+<ChannelOrder order="RGB" />
+
+**R** → Red, **G** → Green, **B** → Blue.
+
+## 6. Why red, green and blue?
+
+This is based on how we can combine light. Imagine three lights: red, green and blue. If we control their intensities, we can create many colours.
+
+<Columns>
+<Panel title="Three lights, overlapping" tone="plain">
+
+<AdditiveMix />
+
+</Panel>
+<Panel title="What they make" tone="plain">
+
+<ColorMix
+  items={[
+    { parts: [[255, 0, 0], [0, 255, 0]], partLabels: ["Red", "Green"], result: [255, 255, 0], label: "Yellow" },
+    { parts: [[255, 0, 0], [0, 0, 255]], partLabels: ["Red", "Blue"], result: [255, 0, 255], label: "Magenta" },
+    { parts: [[0, 255, 0], [0, 0, 255]], partLabels: ["Green", "Blue"], result: [0, 255, 255], label: "Cyan" },
+    { parts: [[255, 0, 0], [0, 255, 0], [0, 0, 255]], partLabels: ["Red", "Green", "Blue"], result: [255, 255, 255], label: "White" },
+  ]}
+/>
+
+</Panel>
+</Columns>
+
+This is called **additive colour mixing**.
+
+## 7. RGB values
+
+Each colour channel can usually have a value from **0 → 255**. So a colour pixel contains **[R, G, B]**. For example, `[255, 0, 0]` means R = 255, G = 0, B = 0. Therefore: **red**.
+
+<ChannelOrder order="RGB" values={[255, 0, 0]} />
+
+## 8. Pure green
+
+Consider `[0, 255, 0]`: R = 0, G = 255, B = 0. So: **green**.
+
+<ChannelOrder order="RGB" values={[0, 255, 0]} />
+
+## 9. Pure blue
+
+`[0, 0, 255]` means R = 0, G = 0, B = 255. Therefore: **blue**.
+
+<ChannelOrder order="RGB" values={[0, 0, 255]} />
+
+## 10. Black in RGB
+
+What if all three channels are zero? `[0, 0, 0]`: there is no red light, no green light and no blue light. Therefore: **black**.
+
+<ChannelOrder order="RGB" values={[0, 0, 0]} />
+
+## 11. White in RGB
+
+Now `[255, 255, 255]`: R = 255, G = 255, B = 255. All three are at maximum intensity. Therefore: **white**.
+
+<ChannelOrder order="RGB" values={[255, 255, 255]} />
+
+## 12. Gray in RGB
+
+Here's something interesting. Consider `[128, 128, 128]`: all three channels have the same value. The result is **gray**.
+
+<SwatchRow
+  items={[
+    { value: [50, 50, 50], label: "dark gray", sub: "[50, 50, 50]" },
+    { value: [128, 128, 128], label: "gray", sub: "[128, 128, 128]" },
+    { value: [220, 220, 220], label: "light gray", sub: "[220, 220, 220]" },
+  ]}
+/>
+
+<Callout kind="key">
+
+When **R = G = B**, the colour is a shade of gray.
+
+</Callout>
+
+## 13. Let's visualize RGB as three controls
+
+Imagine a pixel has three knobs: red, green and blue.
+
+<Columns stack>
+<Panel title="Red" tone="plain">
+
+<ChannelOrder order="RGB" values={[255, 0, 0]} />
+
+</Panel>
+<Panel title="Yellow" tone="plain">
+
+<ChannelOrder order="RGB" values={[255, 255, 0]} />
+
+</Panel>
+<Panel title="Cyan" tone="plain">
+
+<ChannelOrder order="RGB" values={[0, 255, 255]} />
+
+</Panel>
+</Columns>
+
+So colour is basically controlled by the **relative intensity** of the channels.
+
+**Try it.** Turn the three knobs, or pick a preset. Watch the colour, the RGB list, the same pixel as OpenCV stores it, and its gray value.
+
+<RgbMixer />
+
+## 14. How many colours can RGB represent?
+
+Each channel has **256 possible values** (0 → 255), and there are three channels:
+
+<Equation
+  terms={[
+    { value: "256", label: "red values" },
+    { op: "×", value: "256", label: "green values" },
+    { op: "×", value: "256", label: "blue values" },
+    { op: "=", value: "16,777,216", label: "colours", result: true },
+  ]}
+/>
+
+So an 8-bit-per-channel RGB image can represent approximately **16.7 million colours**. That's why you often hear **24-bit colour**:
+
+<BitBar
+  groups={[
+    { label: "8 bits R", bits: 8, tone: "r" },
+    { label: "8 bits G", bits: 8, tone: "g" },
+    { label: "8 bits B", bits: 8, tone: "b" },
+  ]}
+  total="= 24 bits per pixel"
+/>
+
+## 15. Important: 8-bit image doesn't always mean 8-bit colour
+
+This is a common source of confusion.
+
+<Columns>
+<Panel title='"8-bit grayscale"' tone="a">
+
+usually means **8 bits per pixel**:
+
+<BitBar groups={[{ label: "8 bits", bits: 8, tone: "gray" }]} total="256 intensity values" />
+
+</Panel>
+<Panel title='"8-bit RGB"' tone="c">
+
+often means **8 bits per channel**:
+
+<BitBar groups={[{ label: "R", bits: 8, tone: "r" }, { label: "G", bits: 8, tone: "g" }, { label: "B", bits: 8, tone: "b" }]} total="24 bits per pixel" />
+
+</Panel>
+</Columns>
+
+Keep that distinction in mind.
+
+## 16. RGB image as a grid
+
+Remember our previous chapter? A colour image becomes:
+
+<Flow direction="right" steps={["Image", "Rows + Columns", "Pixels", "Each pixel contains 3 values"]} />
+
+For example:
+
+<ColorGrid values={[[[255, 0, 0], [0, 255, 0]], [[0, 0, 255], [255, 255, 255]]]} caption="Each location contains [R, G, B]." />
+
+## 17. So what does shape look like now?
+
+<Columns stack>
+<Panel title="Grayscale: (height, width)" tone="a">
+
+<ShapeTuple values={[480, 640]} labels={["rows", "columns"]} />
+
+</Panel>
+<Panel title="Colour: (height, width, channels)" tone="c">
+
+<ShapeTuple values={[480, 640, 3]} labels={["rows", "columns", "channels"]} />
+
+</Panel>
+</Columns>
+
+This is one of the most important things to remember when working with OpenCV and NumPy.
+
+## 18. Accessing a colour pixel
+
+Suppose `image.shape` is `(480, 640, 3)`. We can access one pixel with `image[100, 200]`. The result might be:
+
+```text
+[50, 120, 200]
+```
+
+This means that pixel contains three channel values. But now we have an important OpenCV issue.
+
+## 19. RGB vs BGR
+
+You will often hear RGB. But when you load a normal colour image using OpenCV, OpenCV traditionally uses **BGR** instead.
+
+<Columns>
+<Panel title="RGB" tone="plain">
+
+<ChannelOrder order="RGB" />
+
+</Panel>
+<Panel title="BGR (OpenCV)" tone="b">
+
+<ChannelOrder order="BGR" />
+
+</Panel>
+</Columns>
+
+## 20. Why is this confusing?
+
+Suppose the actual colour is **pure red**.
+
+<Columns stack>
+<Panel title="RGB red" tone="plain">
+
+<ChannelOrder order="RGB" values={[255, 0, 0]} />
+
+</Panel>
+<Panel title="OpenCV BGR red" tone="b">
+
+<ChannelOrder order="BGR" values={[0, 0, 255]} />
+
+</Panel>
+</Columns>
+
+<Callout kind="key">
+
+Same colour. Different order. This causes many beginner bugs.
+
+</Callout>
+
+## 21. Example: cv2.imread()
+
+When you load an image with OpenCV, it normally arrives in **BGR**:
+
+```python
+import cv2
+
+image = cv2.imread("image.jpg")
+print(image[100, 200])
+```
+
+you might see `[20, 100, 240]`. The order is **B = 20, G = 100, R = 240**, not R = 20, G = 100, B = 240:
+
+<ColorPixel values={[20, 100, 240]} />
+
+## 22. Why did OpenCV choose BGR?
+
+This is mostly a historical / software convention rather than something fundamental about how colours work. You do not need to think *"BGR is a better colour model than RGB."* It isn't. They're simply different channel orderings.
+
+<Columns>
+<Panel title="RGB → [Red, Green, Blue]" tone="plain">
+
+<ChannelOrder order="RGB" />
+
+</Panel>
+<Panel title="BGR → [Blue, Green, Red]" tone="b">
+
+<ChannelOrder order="BGR" />
+
+</Panel>
+</Columns>
+
+Same three pieces of information. Different order.
+
+## 23. Converting BGR to RGB
+
+OpenCV provides:
+
+```python
+rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+```
+
+Conceptually: **BGR → swap channel order → RGB**. For example, BGR `[0, 0, 255]` becomes RGB `[255, 0, 0]`, which is red:
+
+<ChannelSwap bgr={[0, 0, 255]} />
+
+## 24. Why does this matter with Matplotlib?
+
+This is a classic problem. OpenCV gives **BGR**; Matplotlib generally expects **RGB**. So if you do:
+
+```python
+import cv2
+import matplotlib.pyplot as plt
+
+image = cv2.imread("image.jpg")
+
+plt.imshow(image)
+```
+
+you may see incorrect colours: red may appear **blue**, because the red and blue channels are reversed. Drag the divider:
+
+<ImageCompare
+  before={{ src: "/images/sample-color.png", label: "Correct colours" }}
+  after={{ src: "/images/sample-color-swapped.png", label: "plt.imshow(BGR image)" }}
+  width={320}
+  height={200}
+  alt="A red disc, green block, blue triangle and orange bar, and the same image with red and blue swapped"
+  caption="Right side: the same pixels with red and blue swapped. The red disc turns blue, the blue triangle turns red, the orange bar turns blue."
+/>
+
+Correct approach:
+
+```python
+image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+plt.imshow(image_rgb)
+```
+
+Now the colours are interpreted correctly.
+
+## 25. Grayscale conversion
+
+Now suppose we have a colour image (R, G, B) and we want grayscale (one brightness value). We cannot simply say `gray = R + G + B`, because that could exceed 255.
+
+And more importantly, humans don't perceive all colours as equally bright. For example, **pure green** appears brighter to our eyes than **pure blue**.
+
+<SwatchRow items={[{ value: [0, 255, 0], label: "pure green", sub: "looks brighter" }, { value: [0, 0, 255], label: "pure blue", sub: "looks darker" }]} />
+
+So grayscale conversion uses a **weighted** combination of the colour channels. A common luminance approximation is:
+
+```text
+Y ≈ 0.299 R + 0.587 G + 0.114 B
+```
+
+Don't worry about memorizing the formula yet. The important idea is:
+
+<Flow
+  steps={[
+    { label: "R contributes · G contributes more · B contributes less", tone: "data" },
+    { label: "Combined brightness", tone: "process" },
+    { label: "Grayscale value", tone: "result" },
+  ]}
+/>
+
+## 26. Why are the weights different?
+
+Because our visual system is more sensitive to some wavelengths than others. Very roughly:
+
+<WeightBars caption="Green gives the strongest contribution, red a medium one, blue the smallest." />
+
+<Callout kind="key">
+
+**Grayscale ≠ simple average of R, G, B** in many standard conversions.
+
+</Callout>
+
+You can see the difference on a real image. The green block is much brighter with the weighted formula than with a plain average:
+
+<ImageCompare
+  before={{ src: "/images/sample-color.png", label: "Colour" }}
+  after={[
+    { src: "/images/sample-color-gray.png", label: "cv2 grayscale (weighted)" },
+    { src: "/images/sample-color-average.png", label: "Plain average" },
+  ]}
+  width={320}
+  height={200}
+  alt="The colour scene converted to grayscale two ways"
+  caption="Hover over the green block: weighted gray 106, plain average 60."
+/>
+
+OpenCV handles the conversion for you:
+
+```python
+gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+```
+
+## 27. What happens internally?
+
+Suppose a pixel in RGB is **R = 200, G = 100, B = 50**. A grayscale conversion calculates a weighted brightness:
+
+<Equation
+  terms={[
+    { value: "59.8", label: "0.299 × 200" },
+    { op: "+", value: "58.7", label: "0.587 × 100" },
+    { op: "+", value: "5.7", label: "0.114 × 50" },
+    { op: "≈", value: "124", label: "gray", result: true },
+  ]}
+/>
+
+<SwatchRow items={[{ value: [200, 100, 50], label: "colour pixel", sub: "[200, 100, 50]" }, { value: 124, label: "gray pixel", sub: "124" }]} caption="The three colour values become one intensity value. cv2.cvtColor gives exactly 124 for this pixel." />
+
+## 28. Why convert colour images to grayscale?
+
+Many computer vision algorithms don't need colour. For example:
+
+<Chips items={["Edge detection", "Thresholding", "Contours", "Morphology", "Shape detection"]} />
+
+often primarily care about **brightness differences** rather than colour information. So we can simplify:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Colour image", note: "3 values per pixel", tone: "data" },
+    { label: "Grayscale", note: "1 value per pixel", tone: "result" },
+  ]}
+/>
+
+This can reduce the amount of data we process.
+
+## 29. But don't convert everything to grayscale
+
+This is also important. Suppose you're detecting a **red object** against a **green background**. Colour information may be extremely useful. If you throw away colour, you may lose an important distinction.
+
+Here is an extreme case: a red disc on a green background, chosen so both have the same gray value (60).
+
+<ImageCompare
+  before={{ src: "/images/sample-redgreen.png", label: "Colour" }}
+  after={{ src: "/images/sample-redgreen-gray.png", label: "Grayscale" }}
+  width={320}
+  height={200}
+  alt="A red disc on a green background, and its grayscale version where the disc vanishes"
+  caption="In grayscale the disc disappears completely: every pixel becomes 60."
+/>
+
+<Callout kind="key">
+
+Convert to grayscale when the task doesn't need colour, not automatically.
+
+</Callout>
+
+Later, when we study HSV, LAB and colour segmentation, this becomes very important.
+
+## 30. A simple industrial example
+
+Suppose we want to detect a glowing hot steel object. The original camera image might contain a dark background plus orange / yellow hot steel.
+
+<Columns>
+<Panel title="Colour information may be useful" tone="c">
+
+<Flow steps={["BGR", "HSV", "Colour / intensity threshold", "Hot region"]} />
+
+</Panel>
+<Panel title="A simple shape boundary" tone="a">
+
+<Flow steps={["Object", "Grayscale", "Blur", "Edge detection"]} />
+
+may be enough.
+
+</Panel>
+</Columns>
+
+So the correct question isn't *"Should I always use grayscale?"* It's:
+
+<Callout kind="key">
+
+**"What information does my problem actually need?"** That's an engineering mindset.
+
+</Callout>
+
+## 31. One pixel vs one image
+
+Let's compare everything we've learned.
+
+<Columns>
+<Panel title="Grayscale pixel" tone="a">
+
+<PixelValue value={128} />
+
+</Panel>
+<Panel title="Grayscale image" tone="a">
+
+<PixelMatrix size="sm" values={[[0, 100, 200], [50, 150, 250], [20, 120, 220]]} />
+
+</Panel>
+<Panel title="Colour pixel [B, G, R]" tone="c">
+
+<PixelValue value={[50, 100, 200]} />
+
+</Panel>
+<Panel title="Colour image" tone="c">
+
+<ShapeTuple expr="shape" values={[1080, 1920, 3]} labels={["height", "width", "channels"]} />
+
+</Panel>
+</Columns>
+
+## 32. The data hierarchy
+
+This is worth memorizing:
+
+<Flow
+  steps={[
+    { label: "Image", tone: "data" },
+    { label: "Grid", tone: "data" },
+    { label: "Pixels", tone: "data" },
+    { label: "Channels", tone: "process" },
+    { label: "Numbers", tone: "result" },
+  ]}
+/>
+
+<Columns stack>
+<Panel title="Grayscale" tone="a">
+
+<Flow direction="right" steps={["Image", "Pixels", "1 channel", "1 number"]} />
+
+</Panel>
+<Panel title="Colour" tone="c">
+
+<Flow direction="right" steps={["Image", "Pixels", "3 channels", "3 numbers"]} />
+
+</Panel>
+</Columns>
+
+## 33. The NumPy perspective
+
+Suppose `image.shape` returns `(1080, 1920, 3)`. You can mentally visualize **1080 rows × 1920 columns × 3 channels**.
+
+<ShapeTuple values={[1080, 1920, 3]} labels={["rows", "columns", "channels"]} />
+
+`image[500, 700]` returns **[B, G, R]**, while `image[500, 700, 0]` means pixel at row 500, column 700, **channel 0**. For OpenCV's normal BGR image:
+
+<ChannelOrder order="BGR" indices highlight={2} />
+
+So `image[500, 700, 2]` gets the **red** channel value at that pixel.
+
+## 34. This is where 1.2 connects to 1.3
+
+In Chapter 1.2 we learned `image[row, column]`. Now we can extend it for a colour image:
+
+```python
+image[row, column, channel]
+```
+
+For example, `image[100, 200, 0]` means **row = 100, column = 200, channel = 0**. In an OpenCV BGR image:
+
+<ChannelOrder order="BGR" indices highlight={0} />
+
+So the three-dimensional array is not mysterious anymore.
+
+## 35. The big picture
+
+Put everything together:
+
+<Flow
+  steps={[
+    { label: "Image", tone: "data" },
+    { label: "Grid", tone: "data" },
+    { label: "Row + Column", tone: "data" },
+    { label: "Pixel", tone: "process" },
+  ]}
+  highlightLast={false}
+/>
+
+<Columns>
+<Panel title="Grayscale" tone="a">
+
+<Flow steps={["1 channel", "Brightness", "0–255"]} />
+
+</Panel>
+<Panel title="Colour" tone="c">
+
+<Flow steps={["3 channels", "B + G + R", "0–255 each"]} />
+
+</Panel>
+</Columns>
+
+## 36. What you should remember from 1.3
+
+If you remember these 12 things, you've got the foundation.
+
+<Takeaways>
+<Takeaway n={1} title="Grayscale has one value per pixel">
+
+```text
+0 → 255
+```
+
+</Takeaway>
+<Takeaway n={2} title="0 means black">
+
+<SwatchRow size="sm" items={[{ value: 0, label: "black" }]} />
+
+</Takeaway>
+<Takeaway n={3} title="255 means white">
+
+<SwatchRow size="sm" items={[{ value: 255, label: "white" }]} />
+
+</Takeaway>
+<Takeaway n={4} title="Colour pixels contain multiple channel values">
+
+</Takeaway>
+<Takeaway n={5} title="RGB means Red, Green, Blue">
+
+```text
+R = Red   G = Green   B = Blue
+```
+
+</Takeaway>
+<Takeaway n={6} title="Pure red in RGB">
+
+<SwatchRow size="sm" items={[{ value: [255, 0, 0], label: "red", sub: "[255, 0, 0]" }]} />
+
+</Takeaway>
+<Takeaway n={7} title="Pure green">
+
+<SwatchRow size="sm" items={[{ value: [0, 255, 0], label: "green", sub: "[0, 255, 0]" }]} />
+
+</Takeaway>
+<Takeaway n={8} title="Pure blue">
+
+<SwatchRow size="sm" items={[{ value: [0, 0, 255], label: "blue", sub: "[0, 0, 255]" }]} />
+
+</Takeaway>
+<Takeaway n={9} title="White">
+
+<SwatchRow size="sm" items={[{ value: [255, 255, 255], label: "white", sub: "[255, 255, 255]" }]} />
+
+</Takeaway>
+<Takeaway n={10} title="Black">
+
+<SwatchRow size="sm" items={[{ value: [0, 0, 0], label: "black", sub: "[0, 0, 0]" }]} />
+
+</Takeaway>
+<Takeaway n={11} title="OpenCV normally uses BGR">
+
+```text
+[B, G, R]   not   [R, G, B]
+```
+
+</Takeaway>
+<Takeaway n={12} title="A colour pixel channel is image[row, column, channel]">
+
+```text
+image[row, column, channel]
+```
+
+</Takeaway>
+</Takeaways>
+
+## Mini exercise 🧠
+
+Try these yourself.
+
+1. What does `[255, 0, 0]` represent in **RGB**?
+2. What does `[255, 0, 0]` represent in **OpenCV BGR**?
+3. What does `[128, 128, 128]` represent?
+4. How many possible colours can an RGB image have when each channel uses 8 bits?
+5. What does `image[300, 400, 2]` mean, assuming the image is an OpenCV BGR image?
+6. Why can converting an image to grayscale sometimes be useful?
+7. Why might converting an image to grayscale be a bad idea for detecting a red object?
+
+<Solution>
+
+1. **Red**: R = 255, G = 0, B = 0.
+2. **Blue**: in BGR the first number is blue, so B = 255, G = 0, R = 0.
+3. **Medium gray**: R = G = B, so it is a shade of gray. The order does not matter.
+4. 256 × 256 × 256 = **16,777,216** colours (24-bit colour).
+5. The **red** value of the pixel at **row 300, column 400**. In BGR, channel 2 is red.
+6. Many tasks (edges, thresholds, contours, morphology, shapes) need only brightness. One value per pixel instead of three means less data and simpler processing.
+7. Grayscale keeps only brightness. A red object and its background can have the same brightness, and then the object disappears (section 29: red and green both became 60). Colour is the information that separates them.
+
+</Solution>
+
+### Next: 1.4 Image processing vs computer vision
+
+This is an important conceptual chapter. We'll clearly separate:
+
+<Flow direction="right" steps={["Image processing", "Computer vision", "Machine learning", "Deep learning", "AI"]} highlightLast={false} />
+
+and show where OpenCV, YOLO, PyTorch, NumPy and industrial vision systems fit into that whole picture.
+
+## Code
+
+We now build colour pixels ourselves, then let OpenCV do the same work.
+
+### 1. A colour image from scratch, in OpenCV's order
+
+```python
+import numpy as np
+
+# A 2 × 2 colour image in OpenCV order: [B, G, R] per pixel
+image = np.zeros((2, 2, 3), dtype=np.uint8)
+image[0, 0] = [0, 0, 255]       # red
+image[0, 1] = [0, 255, 0]       # green
+image[1, 0] = [255, 0, 0]       # blue
+image[1, 1] = [255, 255, 255]   # white
+
+print(image.shape)
+print(image[0, 0])
+print(image[0, 0, 2], "is the red value of pixel (0, 0)")
+```
+
+Output:
+
+```text
+(2, 2, 3)
+[  0   0 255]
+255 is the red value of pixel (0, 0)
+```
+
+- `np.zeros((2, 2, 3), dtype=np.uint8)` makes 2 rows × 2 columns × 3 channels, all black.
+- `image[0, 0] = [0, 0, 255]` writes all three channels of one pixel. In BGR, `[0, 0, 255]` is red.
+- `image[0, 0, 2]` reads one channel of one pixel: channel 2 is red.
+
+### 2. From scratch: BGR to RGB
+
+```python
+rgb = np.zeros_like(image)
+rows, cols, _ = image.shape
+for r in range(rows):
+    for c in range(cols):
+        b, g, red = image[r, c]          # unpack the three channels
+        rgb[r, c] = [red, g, b]          # write them back in reverse order
+
+print(rgb[0, 0])
+print(np.array_equal(rgb, image[:, :, ::-1]))
+```
+
+Output:
+
+```text
+[255   0   0]
+True
+```
+
+`image[:, :, ::-1]` does the same swap without a loop: it reads the channel axis backwards.
+
+### 3. From scratch: the grayscale formula
+
+```python
+b = image[:, :, 0].astype(np.float64)
+g = image[:, :, 1].astype(np.float64)
+r = image[:, :, 2].astype(np.float64)
+gray = np.rint(0.299 * r + 0.587 * g + 0.114 * b).astype(np.uint8)
+print(gray)
+```
+
+Output:
+
+```text
+[[ 76 150]
+ [ 29 255]]
+```
+
+Pure red becomes 76, pure green 150, pure blue only 29: the weights at work. The channels are converted to `float64` first so the sum cannot overflow.
+
+### 4. The OpenCV way
+
+```python
+import cv2
+
+rgb_cv = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+gray_cv = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+print(np.array_equal(rgb_cv, rgb))
+print(gray_cv)
+
+b, g, r = cv2.split(image)
+print(r)
+```
+
+Output:
+
+```text
+True
+[[ 76 150]
+ [ 29 255]]
+[[255   0]
+ [  0 255]]
+```
+
+- `cv2.cvtColor(src, code)` converts between colour representations. `cv2.COLOR_BGR2RGB` swaps the order; `cv2.COLOR_BGR2GRAY` applies the weighted formula and returns one channel.
+- The code names the input order: use `BGR2...` for images from `cv2.imread`.
+- `cv2.split(image)` returns the three channels as three separate grayscale images, in B, G, R order.
+
+### 5. On real images
+
+Download [sample-color.png](/images/sample-color.png) and [sample-redgreen.png](/images/sample-redgreen.png) into the folder you run Python from.
+
+```python
+import cv2
+import numpy as np
+
+img = cv2.imread("sample-color.png")
+if img is None:
+    raise FileNotFoundError("Could not read sample-color.png. Check the path.")
+
+print(img.shape, img.dtype)
+print("red disc pixel   [95, 70]: ", img[95, 70])
+print("orange bar pixel [175, 100]:", img[175, 100])
+
+gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+print(gray.shape, "gray at [175, 100]:", gray[175, 100])
+
+rg = cv2.imread("sample-redgreen.png")
+rg_gray = cv2.cvtColor(rg, cv2.COLOR_BGR2GRAY)
+print("red disc:", rg[100, 160], "green background:", rg[10, 10])
+print("gray values in the whole image:", np.unique(rg_gray))
+```
+
+Output:
+
+```text
+(200, 320, 3) uint8
+red disc pixel   [95, 70]:  [  0   0 220]
+orange bar pixel [175, 100]: [ 40 150 255]
+(200, 320) gray at [175, 100]: 169
+red disc: [  0   0 200] green background: [  0 102   0]
+gray values in the whole image: [60]
+```
+
+- The red disc prints as `[0, 0, 220]`: BGR order, so red is last.
+- The orange bar `[40, 150, 255]` is B = 40, G = 150, R = 255.
+- The gray image has 2 dimensions: one value per pixel.
+- `np.unique(rg_gray)` lists every distinct value: only 60. The red disc and the green background became the same gray.
+
+## OpenCV API notes
+
+Versions: OpenCV 4.13.0 (`opencv-python==4.13.0.92`), NumPy 2.5.3. Signatures are copied from the installed library's help text.
+
+| Function | Python signature | Notes |
+|---|---|---|
+| `cv2.imread` | `imread(filename[, flags]) -> retval` | default `IMREAD_COLOR`: 3 channels, **B, G, R** |
+| `cv2.cvtColor` | `cvtColor(src, code[, dst[, dstCn[, hint]]]) -> dst` | `COLOR_BGR2RGB`, `COLOR_BGR2GRAY`, `COLOR_GRAY2BGR`, … |
+| `cv2.split` | `split(m[, mv]) -> mv` | one single-channel image per channel |
+| `cv2.merge` | `merge(mv[, dst]) -> dst` | the reverse of `split` |
+
+**Facts from the documentation.**
+
+- OpenCV's default colour format "is often referred to as RGB but it is actually BGR": in a standard 24-bit colour image the first byte is blue, then green, then red [4].
+- RGB to gray: Y ← 0.299·R + 0.587·G + 0.114·B [3].
+- Conventional channel ranges: 0 to 255 for 8-bit (`CV_8U`), 0 to 65535 for 16-bit (`CV_16U`), 0 to 1 for 32-bit float (`CV_32F`) [4].
+
+**Inputs and types.**
+
+- `cv2.imread` without a flag returns 3 channels even for a grayscale file (the gray value is copied into B, G and R). Use `cv2.IMREAD_GRAYSCALE` to get one channel, and `cv2.IMREAD_UNCHANGED` to keep an alpha channel.
+- `COLOR_BGR2GRAY` needs a 3- or 4-channel input. A 1-channel input raises an error.
+- Grayscale result: 2-D array `(height, width)`. Colour: 3-D `(height, width, 3)`.
+
+**Speed.**
+
+- `image[:, :, ::-1]` is a view (no copy) but not contiguous in memory. Some OpenCV functions need a contiguous array; `cv2.cvtColor(..., COLOR_BGR2RGB)` or `np.ascontiguousarray` gives one.
+- A grayscale image is a third of the data of a colour image: three times fewer values to process.
+
+## Where it fails
+
+- **Colour values depend on light and camera, not just the object.** The same orange billet gives different RGB values under different lamps, exposure and white balance. *Instead:* control lighting (59.3), fix camera settings, and correct white balance (10.6).
+- **RGB mixes colour with brightness.** In shadow, "red" pixels get lower R, G and B together, so a fixed RGB rule for "red" breaks. *Instead:* colour spaces that separate them, such as HSV and LAB (10.2, 10.3).
+- **Saturated pixels lose their colour.** A very bright glowing surface can reach 255 in all channels and become plain white. *Instead:* reduce exposure (2.6), or measure temperature with a thermal camera (Module 46).
+- **A colour camera's three values are partly guessed.** Most colour sensors measure one colour per pixel through a Bayer filter, and the other two are interpolated (2.7). Fine colour detail at edges is unreliable. *Instead:* a monochrome camera when colour is not needed (59.1).
+- **Gray values are a perception convention, not a light meter.** The weights describe how bright colours *look*, on gamma-encoded values. *Instead:* for physical measurement use linear or radiometric data (see Go deeper; 46.3).
+
+## ⚠️ Common mistakes
+
+**1. Showing a BGR image with Matplotlib.** `plt.imshow(cv2.imread(...))` swaps red and blue. Convert first with `cv2.cvtColor(img, cv2.COLOR_BGR2RGB)`.
+
+**2. Using the wrong conversion code.** `COLOR_RGB2GRAY` on a BGR image applies the red weight to blue and the blue weight to red. For the pixel R = 200, G = 100, B = 50 it gives **96** instead of **124**. Images from `cv2.imread` need `COLOR_BGR2GRAY`.
+
+**3. Converting an image that is already gray.** `cv2.cvtColor(gray, cv2.COLOR_BGR2GRAY)` fails with:
+
+```text
+Invalid number of channels in input image:
+    'VScn::contains(scn)'
+where
+    'scn' is 1
+```
+
+Check `img.ndim` (2 = gray, 3 = colour) before converting.
+
+**4. Showing a grayscale image with Matplotlib's defaults.** `plt.imshow(gray)` maps single values through a colour map (and stretches them between the image's own min and max), so the picture appears in false colours. Use `plt.imshow(gray, cmap="gray", vmin=0, vmax=255)`.
+
+**5. Adding channels in uint8.** `img[:, :, 0] + img[:, :, 1] + img[:, :, 2]` wraps around: three channels of 200 give **88**, not 600. Convert to a larger type first, or use `cv2.cvtColor`.
+
+**6. Indexing a channel that is not there.** On a grayscale image, `img[0, 0, 0]` raises `IndexError: too many indices for array: array is 2-dimensional, but 3 were indexed`.
+
+**7. Reading a colour pixel as RGB.** `[20, 100, 240]` from `cv2.imread` is orange (R = 240), not blue. Say "B, G, R" out loud when you read OpenCV pixels.
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why three numbers are enough
+
+The human retina has three types of cone cells, most sensitive to long, medium and short wavelengths. Because colour vision is built on three responses, three well-chosen primaries mixed in different amounts can match a large range of the colours people see. This is the basis of the RGB model used by cameras and displays [1, Ch. 6], [2, Sec. 2.3.2].
+
+### Additive and subtractive colour
+
+Light adds: red + green + blue light gives white (screens, projectors). Inks and paints subtract: they absorb parts of white light, so printers use cyan, magenta and yellow (plus black), and mixing all inks gives dark [1, Ch. 6].
+
+### Where the gray weights come from
+
+The weights 0.299, 0.587, 0.114 come from the television standard ITU-R BT.601 [7]. OpenCV uses them for `COLOR_BGR2GRAY` and `COLOR_RGB2GRAY` [3]. The HD standard ITU-R BT.709 uses different weights: 0.2126, 0.7152, 0.0722 [8]. Both give green the largest share.
+
+These weights are applied to **gamma-encoded** values, so the result is called *luma* (written Y′). It is a good match to perceived brightness, but it is not proportional to the physical amount of light (*luminance*). Chapter 11.3 explains gamma.
+
+### How exactly does OpenCV round?
+
+OpenCV computes 8-bit conversions with integer arithmetic. We checked every one of the 16,777,216 possible 8-bit colours on OpenCV 4.13.0: rounding 0.299 R + 0.587 G + 0.114 B to the nearest integer matched `cv2.cvtColor(..., COLOR_BGR2GRAY)` for all but 22,906 colours, and those differed by exactly 1. For teaching and most applications, the formula is the conversion.
+
+### How the bytes sit in memory
+
+An OpenCV colour image is stored *interleaved*: pixel by pixel, B G R B G R … [4]. For a `uint8` image of width W, channel k of pixel (r, c) is at byte
+
+```text
+(r × W + c) × 3 + k
+```
+
+so `image.strides` is `(3W, 3, 1)`.
+
+### More bits per channel
+
+16 bits per channel gives 65,536 levels per channel and 48 bits per pixel. OpenCV handles `uint16` images; its conventional range for them is 0 to 65535 [4]. Many industrial and thermal cameras deliver 10, 12 or 16 bits per pixel (see 3.2 and Module 46).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "You read a pixel from `cv2.imread` and get `[0, 0, 255]`. What colour is it?",
+      options: ["Blue", "Red", "Green", "Black"],
+      answer: 1,
+      explanation: "OpenCV order is B, G, R. B = 0, G = 0, R = 255: pure red.",
+    },
+    {
+      question: "Which pixel is a shade of gray?",
+      options: ["`[128, 0, 128]`", "`[90, 90, 90]`", "`[255, 255, 0]`", "`[0, 128, 255]`"],
+      answer: 1,
+      explanation: "R = G = B means gray, whatever the channel order. [90, 90, 90] is dark gray.",
+    },
+    {
+      question: "How many colours can 8 bits per channel RGB represent?",
+      options: ["256", "768", "65,536", "16,777,216"],
+      answer: 3,
+      explanation: "256 × 256 × 256 = 16,777,216, which is 24-bit colour.",
+    },
+    {
+      question: "For an OpenCV BGR image, what is `image[300, 400, 2]`?",
+      options: ["The blue value at row 300, column 400", "The red value at row 300, column 400", "The red value at x = 300, y = 400", "The pixel at row 2"],
+      answer: 1,
+      explanation: "Index order is [row, column, channel], and channel 2 in BGR is red.",
+    },
+    {
+      question: "`plt.imshow(cv2.imread(\"part.png\"))` shows a red part as blue. What is the fix?",
+      options: ["Use `cv2.COLOR_BGR2GRAY`", "Use `cv2.cvtColor(img, cv2.COLOR_BGR2RGB)` before `plt.imshow`", "Multiply the image by 0.5", "Use `cv2.IMREAD_GRAYSCALE`"],
+      answer: 1,
+      explanation: "Matplotlib expects R, G, B. Converting BGR to RGB puts red back in the first position.",
+    },
+    {
+      question: "A red disc (R 200) on a green background (G 102) disappears after `COLOR_BGR2GRAY`. Why?",
+      options: ["OpenCV has a bug", "Both colours have the same weighted brightness, 60", "Grayscale always removes circles", "The image was saved as JPEG"],
+      answer: 1,
+      explanation: "0.299 × 200 ≈ 60 and 0.587 × 102 ≈ 60. Grayscale keeps only brightness, so they become identical.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+These pixels come from `cv2.imread` (BGR order). For each, (a) name the colour, (b) write it in RGB order. Then (c) work out the gray value of the first one.
+
+```text
+[0, 255, 255]     [255, 0, 255]     [100, 100, 100]     [0, 0, 0]
+```
+
+<Solution>
+
+(a) and (b):
+
+```text
+BGR [0, 255, 255]     → RGB [255, 255, 0]     yellow
+BGR [255, 0, 255]     → RGB [255, 0, 255]     magenta
+BGR [100, 100, 100]   → RGB [100, 100, 100]   dark gray
+BGR [0, 0, 0]         → RGB [0, 0, 0]         black
+```
+
+(c) R = 255, G = 255, B = 0:
+
+```text
+0.299 × 255 + 0.587 × 255 + 0.114 × 0  =  76.2 + 149.7 + 0  ≈  226
+```
+
+`cv2.cvtColor` gives 226 too.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Load `sample-color.png`. Using the three channels, count the pixels that are clearly red (R above 200, G and B below 50). Then print the gray value of a red pixel and of a background pixel, and explain why a single gray threshold would be a weak way to find "red".
+
+<Solution>
+
+```python
+import cv2
+import numpy as np
+
+img = cv2.imread("sample-color.png")
+if img is None:
+    raise FileNotFoundError("Could not read sample-color.png. Check the path.")
+
+b, g, r = cv2.split(img)
+red_mask = (r > 200) & (g < 50) & (b < 50)
+print("red pixels:", np.count_nonzero(red_mask))
+
+gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+print("gray of red disc:", gray[95, 70], "gray of background:", gray[10, 10], "gray of blue triangle:", gray[120, 260])
+```
+
+Output:
+
+```text
+red pixels: 5525
+gray of red disc: 66 gray of background: 32 gray of blue triangle: 72
+```
+
+The colour rule finds the disc directly. In grayscale the red disc (66) and the blue triangle (72) are almost the same, so any threshold that keeps the disc also keeps the triangle.
+
+</Solution>
+
+### Exercise 3 (coding)
+
+Fix the Matplotlib colour bug without using `cv2.cvtColor`: build the RGB image with NumPy slicing, check it matches OpenCV's conversion, and print the red disc pixel in both orders.
+
+<Solution>
+
+```python
+import cv2
+import numpy as np
+
+img = cv2.imread("sample-color.png")
+if img is None:
+    raise FileNotFoundError("Could not read sample-color.png. Check the path.")
+
+rgb = img[:, :, ::-1]
+print("BGR:", img[95, 70], " RGB:", rgb[95, 70])
+print("same as cvtColor:", np.array_equal(rgb, cv2.cvtColor(img, cv2.COLOR_BGR2RGB)))
+```
+
+Output:
+
+```text
+BGR: [  0   0 220]  RGB: [220   0   0]
+same as cvtColor: True
+```
+
+Pass `rgb` to `plt.imshow` and the disc shows red.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed. Pearson, 2018. Ch. 6 (colour fundamentals, colour models, the RGB model).
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. Springer, 2022. Sec. 2.3.2 (colour). Free online edition: [szeliski.org/Book](https://szeliski.org/Book/).
+3. OpenCV 4.13.0 documentation, *Color conversions* (RGB ↔ GRAY formula): [docs.opencv.org/4.13.0/de/d25/imgproc_color_conversions.html](https://docs.opencv.org/4.13.0/de/d25/imgproc_color_conversions.html).
+4. OpenCV 4.13.0 documentation, *Color Space Conversions*, `cvtColor` (BGR byte order, channel value ranges): [docs.opencv.org/4.13.0/d8/d01/group__imgproc__color__conversions.html](https://docs.opencv.org/4.13.0/d8/d01/group__imgproc__color__conversions.html).
+5. OpenCV 4.13.0 documentation, *Image file reading and writing* (`imread`, B G R channel order): [docs.opencv.org/4.13.0/d4/da8/group__imgcodecs.html](https://docs.opencv.org/4.13.0/d4/da8/group__imgcodecs.html).
+6. Matplotlib documentation, `matplotlib.pyplot.imshow` ((M, N, 3) arrays are RGB; scalar data uses a colour map and normalization): [matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.imshow.html](https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.imshow.html).
+7. ITU-R Recommendation BT.601-7, *Studio encoding parameters of digital television for standard 4:3 and wide-screen 16:9 aspect ratios*, 2011.
+8. ITU-R Recommendation BT.709-6, *Parameter values for the HDTV standards for production and international programme exchange*, 2015.

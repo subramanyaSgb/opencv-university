@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+apps/web/generated/
+apps/web/public/images/
+*.tsbuildinfo
+next-env.d.ts
+.env*
+__pycache__/
+.venv/
+.DS_Store
+Thumbs.db

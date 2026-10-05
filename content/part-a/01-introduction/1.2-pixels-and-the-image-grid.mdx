@@ -1,0 +1,1002 @@
+export const meta = {
+  number: "1.2",
+  title: "Pixels and the image grid",
+  minutes: 45,
+  objectives: [
+    "Describe an image as a grid of rows and columns, counted from 0",
+    "Read and write a pixel with image[row, column], and explain why that is image[y, x]",
+    "Tell width from height, and read image.shape for gray and colour images",
+    "Work out total pixels and megapixels from a resolution",
+    "Select a region of interest with slicing, and stay inside the image boundary",
+    "Explain why neighbouring pixels matter for edges and filters",
+  ],
+};
+
+{/*
+  Lesson content: owner's text (5 Oct 2026), presented with visual components.
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 1.2 Pixels and the image grid
+
+<Definition term="Image grid">the arrangement of an image's pixels into rows and columns, so every pixel has an address.</Definition>
+
+In 1.1, we learned the most important idea: **an image is basically a collection of numbers called pixels.**
+
+Now we're going to understand where those pixels live, how they are arranged, and how a computer finds a specific pixel.
+
+This is extremely important because later you'll write things like `image[100, 200]`, and you need to understand exactly what `100, 200` means.
+
+## 1. An image is a grid
+
+Forget about a complicated photograph for a moment. Imagine a tiny image containing only 9 pixels:
+
+<PixelMatrix size="lg" values={[[10, 50, 100], [20, 80, 150], [30, 120, 200]]} caption="A 3 × 3 image: 3 rows and 3 columns." />
+
+So:
+
+<Flow direction="right" steps={["Image", "Grid", "Rows + Columns", "Pixels"]} />
+
+## 2. What is a row?
+
+A row goes **horizontally** (→).
+
+<IndexedGrid values={[[10, 50, 100], [20, 80, 150], [30, 120, 200]]} colLabels={false} arrows="rows" caption="Our image has 3 rows: Row 0, Row 1 and Row 2." />
+
+## 3. What is a column?
+
+A column goes **vertically** (↓).
+
+<IndexedGrid values={[[10, 50, 100], [20, 80, 150], [30, 120, 200]]} rowLabels={false} arrows="cols" caption="Our image has 3 columns: Col 0, Col 1 and Col 2." />
+
+## 4. The most important rule: computers start counting from 0
+
+This is one of the first things you must become comfortable with.
+
+<Columns>
+<Panel title="Humans often count" tone="warn">
+
+<Chips items={["1", "2", "3", "4", "5"]} />
+
+</Panel>
+<Panel title="Python and NumPy normally use" tone="good">
+
+<Chips items={["0", "1", "2", "3", "4"]} />
+
+</Panel>
+</Columns>
+
+This is called **zero-based indexing**. So our 3 × 3 image has rows 0, 1, 2 and columns 0, 1, 2:
+
+<IndexedGrid values={[[10, 50, 100], [20, 80, 150], [30, 120, 200]]} />
+
+## 5. Let's label every pixel
+
+Take our image and write each pixel's address inside it:
+
+<IndexedGrid values={[[10, 50, 100], [20, 80, 150], [30, 120, 200]]} show="coords" shade={false} />
+
+Each pixel has a coordinate. The coordinate is **(row, column)**.
+
+<Columns>
+<Panel title="(0,0)" tone="a">
+
+means **row 0**, **column 0**
+
+</Panel>
+<Panel title="(2,1)" tone="c">
+
+means **row 2**, **column 1**
+
+</Panel>
+</Columns>
+
+## 6. Where is the first pixel?
+
+The first pixel is **(0, 0)**, at the **top-left**.
+
+<IndexedGrid values={[[10, 50, 100], [20, 80, 150], [30, 120, 200]]} show="coords" shade={false} highlight={[[0, 0]]} caption="(0,0) is the top-left pixel." />
+
+## 7. Why (row, column)?
+
+This is very important for Python and OpenCV. When you write `image[row, column]`, you are saying: *"Give me the pixel at this row and this column."*
+
+For example, `image[2, 1]` means **row = 2, column = 1**. Looking at our image:
+
+<IndexedGrid values={[[10, 50, 100], [20, 80, 150], [30, 120, 200]]} show="both" highlight={[[2, 1]]} />
+
+Therefore `image[2, 1]` gives **120**.
+
+## 8. Don't confuse (x, y) with (row, column)
+
+This causes a lot of confusion for beginners.
+
+<Columns>
+<Panel title="Mathematics and graphics: (x, y)" tone="b">
+
+- **x** → horizontal
+- **y** → vertical
+
+</Panel>
+<Panel title="NumPy image indexing: [row, column]" tone="c">
+
+which corresponds conceptually to **[y, x]**.
+
+So in NumPy: `image[y, x]`, not `image[x, y]`.
+
+</Panel>
+</Columns>
+
+For example, `image[100, 200]` means **y = 100, x = 200**, or **row = 100, column = 200**:
+
+<CoordAxes width={640} height={480} points={[{ row: 100, col: 200, label: "image[100, 200] → x = 200, y = 100" }]} />
+
+This becomes extremely important when drawing boxes, detecting objects, calculating coordinates, etc.
+
+**Try it.** Tap any pixel. The explorer shows the NumPy index, the (x, y) it means, and the point you would give to an OpenCV drawing function.
+
+<IndexExplorer />
+
+## 9. Think of it like a spreadsheet
+
+A very easy mental model is Excel:
+
+<IndexedGrid values={[[10, 50, 100], [20, 80, 150], [30, 120, 200]]} shade={false} colWord="Column" colLabelsTop />
+
+You can think of `image[row, column]` just like `spreadsheet[row][column]`.
+
+## 10. Image width and height
+
+Now let's make the image bigger. Suppose **width = 1920** and **height = 1080**. The image contains **1920 columns** and **1080 rows**.
+
+<SizeDiagram width={1920} height={1080} />
+
+## 11. Width vs height
+
+This is another very common beginner mistake. Remember:
+
+<Columns>
+<Panel title="WIDTH" tone="a">
+
+**horizontal** → number of columns
+
+</Panel>
+<Panel title="HEIGHT" tone="c">
+
+**vertical** → number of rows
+
+</Panel>
+</Columns>
+
+So **1920 × 1080** means **1920 → width** and **1080 → height**. Not the other way around.
+
+## 12. How many pixels are there?
+
+If an image has width = 1920 and height = 1080, then total pixels are:
+
+<Equation
+  terms={[
+    { value: "1920", label: "width" },
+    { op: "×", value: "1080", label: "height" },
+    { op: "=", value: "2,073,600", label: "pixels", result: true },
+    { op: "≈", value: "2 MP", label: "megapixels", result: true },
+  ]}
+/>
+
+That's about **2.07 million pixels**, which is why we call it approximately a **2 megapixel image**.
+
+## 13. What does "5 MP camera" mean?
+
+Suppose an industrial camera is advertised as **5 MP**. MP means **megapixel**: approximately 5 million pixels. For example, 2448 × 2048:
+
+<Equation
+  terms={[
+    { value: "2448", label: "width" },
+    { op: "×", value: "2048", label: "height" },
+    { op: "=", value: "5,013,504", label: "pixels", result: true },
+    { op: "≈", value: "5 MP", label: "megapixels", result: true },
+  ]}
+/>
+
+This is why camera resolution matters in industrial vision. More pixels can allow you to see smaller details, but more pixels don't automatically mean better inspection.
+
+<Chips label="Also matters" items={["Lighting", "Lens", "Sensor quality", "Motion", "Working distance", "Other factors"]} />
+
+We'll study those later.
+
+## 14. What does image.shape mean?
+
+When we start using NumPy and OpenCV, you'll frequently see `print(image.shape)`. For a grayscale image, you might get:
+
+<ShapeTuple values={[1080, 1920]} labels={["rows /\nheight", "columns /\nwidth"]} />
+
+## 15. For a colour image, something changes
+
+A colour image usually contains multiple values per pixel. For a normal 3-channel image with height = 1080, width = 1920 and channels = 3, `image.shape` might give:
+
+<ShapeTuple values={[1080, 1920, 3]} labels={["rows", "columns", "channels"]} />
+
+Don't worry yet about exactly what those 3 channels represent. We'll study colour values properly in 1.3.
+
+## 16. A colour pixel is not just one number
+
+<Columns>
+<Panel title="Grayscale: one pixel → one number" tone="a">
+
+<PixelValue value={128} />
+
+</Panel>
+<Panel title="Colour: one pixel → multiple numbers" tone="c">
+
+<PixelValue value={[100, 150, 200]} />
+
+</Panel>
+</Columns>
+
+Those numbers represent the **colour channels**. We'll later learn why OpenCV commonly stores colour images as **BGR** rather than **RGB**.
+
+## 17. Think of a colour image as multiple grids
+
+A useful mental model:
+
+<ChannelStack caption="One grid per channel. Stacked together, they make the colour image." />
+
+So each location has multiple values. For example, the pixel at **(row = 100, column = 200)** could contain `[B, G, R]`, such as:
+
+<PixelValue value={[50, 120, 200]} />
+
+Again, we'll go deeply into this in 1.3.
+
+## 18. What happens at the image boundary?
+
+Suppose our image is 3 × 3. Valid rows are 0, 1, 2. Valid columns are 0, 1, 2.
+
+<IndexedGrid values={[[10, 50, 100], [20, 80, 150], [30, 120, 200]]} ghost caption="Row 3 and column 3 do not exist: the dashed cells are outside the image." />
+
+<Columns>
+<Panel title="Valid" tone="good">
+
+```python
+image[2, 2]
+```
+
+</Panel>
+<Panel title="Outside the image" tone="warn">
+
+```python
+image[3, 2]   # there is no row 3
+image[2, 3]   # there is no column 3
+```
+
+</Panel>
+</Columns>
+
+Our rows are only 0, 1, 2, so there is no row 3. Similarly, there is no column 3.
+
+## 19. A very important coordinate example
+
+Imagine an image with **width = 640** and **height = 480**. Therefore rows run **0 → 479** and columns run **0 → 639**.
+
+<CoordAxes
+  width={640}
+  height={480}
+  guides={false}
+  points={[
+    { row: 0, col: 0, label: "top-left (0,0)" },
+    { row: 0, col: 639, label: "top-right (0,639)" },
+    { row: 479, col: 0, label: "bottom-left (479,0)" },
+    { row: 479, col: 639, label: "bottom-right (479,639)" },
+  ]}
+/>
+
+Notice something? The coordinate is written **(row, column)**, not (x, y). So the bottom-right in NumPy indexing is `image[479, 639]`.
+
+## 20. Let's create an image ourselves
+
+We can create a tiny grayscale image using NumPy:
+
+```python
+import numpy as np
+
+image = np.array([
+    [0, 50, 100],
+    [50, 100, 150],
+    [100, 150, 255]
+])
+```
+
+<Columns>
+<Panel title="Our image" tone="a">
+
+<IndexedGrid values={[[0, 50, 100], [50, 100, 150], [100, 150, 255]]} />
+
+</Panel>
+<Panel title="print(image.shape)" tone="c">
+
+<ShapeTuple expr="shape" values={[3, 3]} labels={["rows", "columns"]} />
+
+</Panel>
+</Columns>
+
+## 21. Accessing one pixel
+
+Let's get the middle pixel: `image[1, 1]`. The coordinates are **row = 1, column = 1**.
+
+<IndexedGrid values={[[0, 50, 100], [50, 100, 150], [100, 150, 255]]} highlight={[[1, 1]]} caption="image[1, 1] → 100" />
+
+## 22. Changing a pixel
+
+Here's where image processing becomes interesting. We can do `image[1, 1] = 255`. Previously **100**, now **255**:
+
+<MatrixTransform
+  before={[[0, 50, 100], [50, 100, 150], [100, 150, 255]]}
+  after={[[0, 50, 100], [50, 255, 150], [100, 150, 255]]}
+  rule="image[1, 1] = 255"
+  highlight={[[1, 1]]}
+/>
+
+We literally changed one pixel. That is image processing at its most basic level.
+
+## 23. Changing a region
+
+We don't have to change only one pixel. We can change a whole region:
+
+```python
+image[0:2, 0:2] = 255
+```
+
+This means **rows 0 → 1** and **columns 0 → 1** (the end number, 2, is not included).
+
+<MatrixTransform
+  before={[[0, 50, 100], [50, 100, 150], [100, 150, 255]]}
+  after={[[255, 255, 100], [255, 255, 150], [100, 150, 255]]}
+  rule="image[0:2, 0:2] = 255"
+  highlight={[[0, 0], [0, 1], [1, 0], [1, 1]]}
+/>
+
+This idea of selecting part of an image is called **slicing**. We'll study NumPy slicing much more deeply in Module 6.
+
+## 24. Why this matters for computer vision
+
+Suppose your camera sees a steel billet. You don't always need to process the entire image. Maybe the important region is only part of it:
+
+<RoiSketch />
+
+**ROI** means **Region Of Interest**. Instead of processing millions of pixels, you process only the region that matters:
+
+<Columns>
+<Panel title="Entire image" tone="warn">
+
+<Flow steps={["Entire image", "2 million pixels"]} highlightLast={false} />
+
+</Panel>
+<Panel title="ROI only" tone="good">
+
+<Flow steps={["ROI", "200,000 pixels"]} />
+
+</Panel>
+</Columns>
+
+<Chips label="This can make your system" items={["Faster", "Easier to analyze", "Less sensitive to irrelevant areas", "Easier to develop"]} />
+
+**Try it.** Switch to region mode and tap two opposite corners. The explorer shows the NumPy slice, the ROI shape, and the same box as OpenCV rectangle corners.
+
+<IndexExplorer mode="region" />
+
+## 25. Pixels have neighbours
+
+A pixel isn't isolated. Look at the centre pixel:
+
+<IndexedGrid
+  values={[[128, 128, 128], [128, 128, 128], [128, 128, 128]]}
+  text={[["", "↑", ""], ["←", "X", "→"], ["", "↓", ""]]}
+  shade={false}
+  highlight={[[1, 1]]}
+  rowLabels={false}
+  colLabels={false}
+/>
+
+The pixels around it are its **neighbours**. This becomes extremely important later for:
+
+<Chips items={["Convolution", "Blur", "Edge detection", "Morphology", "Segmentation"]} />
+
+For example, when detecting an edge, we often compare a pixel with nearby pixels.
+
+## 26. Why neighbours matter
+
+<Columns>
+<Panel title="Everything is similar" tone="a">
+
+<PixelMatrix values={[[100, 100, 100], [100, 100, 100], [100, 100, 100]]} />
+
+There is probably no strong edge.
+
+</Panel>
+<Panel title="A strong brightness change" tone="c">
+
+<PixelMatrix values={[[0, 0, 0], [0, 0, 255], [0, 0, 255]]} />
+
+That change can indicate an edge.
+
+</Panel>
+</Columns>
+
+So eventually:
+
+<Flow direction="right" steps={["Pixels", "Neighbouring pixels", "Compare them", "Find changes", "Edges"]} />
+
+This is one of the foundations of computer vision.
+
+## 27. A powerful mental model
+
+Whenever you see an image, imagine this underneath it:
+
+<Flow
+  steps={[
+    { label: "Image", tone: "data" },
+    { label: "Grid", tone: "data" },
+    { label: "Rows + Columns", tone: "data" },
+    { label: "Pixels", tone: "data" },
+    { label: "Numbers", tone: "result" },
+  ]}
+/>
+
+And each pixel has a location, **(row, column)**. For example, **(250, 430)**:
+
+<Columns>
+<Panel title="As (row, column)" tone="c">
+
+**250** → row · **430** → column
+
+</Panel>
+<Panel title="Conceptually, as (x, y)" tone="b">
+
+**y = 250** · **x = 430**
+
+</Panel>
+</Columns>
+
+## 28. One important terminology issue
+
+You'll hear these terms constantly:
+
+<Glossary
+  items={[
+    { term: "Pixel", desc: "One individual image element.", example: "[128]" },
+    { term: "Image dimensions", desc: "Usually written height × width.", example: "1080 × 1920" },
+    { term: "Resolution", desc: "How many pixels are available to represent the image.", example: "1920 × 1080" },
+    { term: "Pixel coordinate", desc: "The location of a pixel.", example: "(row, column)" },
+    { term: "ROI", desc: "Region Of Interest: a selected portion of an image.", example: "image[y1:y2, x1:x2]" },
+  ]}
+/>
+
+## 29. Connect this to OpenCV
+
+When you eventually write:
+
+```python
+import cv2
+
+image = cv2.imread("steel.jpg")
+
+print(image.shape)
+```
+
+you might get `(1080, 1920, 3)`. You should immediately think:
+
+<ShapeTuple values={[1080, 1920, 3]} labels={["height\n= rows", "width\n= columns", "colour\nchannels"]} />
+
+And if you write `pixel = image[500, 700]`, you should immediately think:
+
+<Columns>
+<Panel title="Correct" tone="good">
+
+**row = 500**, **column = 700**
+
+</Panel>
+<Panel title="Not" tone="warn">
+
+~~x = 500, y = 700~~
+
+</Panel>
+</Columns>
+
+That distinction will save you a lot of debugging later.
+
+## 30. The complete picture
+
+We can now connect 1.1 + 1.2:
+
+<Flow
+  steps={[
+    { label: "Real world", tone: "world" },
+    { label: "Camera", tone: "world" },
+    { label: "Image", tone: "data" },
+    { label: "Grid", tone: "data" },
+    { label: "Rows + Columns", tone: "data" },
+    { label: "Pixels", tone: "data" },
+    { label: "Numbers", tone: "data" },
+    { label: "Processing", tone: "process" },
+  ]}
+  highlightLast={false}
+/>
+
+<Columns>
+<Panel title="Grayscale" tone="a">
+
+<Flow steps={["Pixel", "One intensity value", "0–255"]} />
+
+</Panel>
+<Panel title="Colour" tone="c">
+
+<Flow steps={["Pixel", "Multiple channel values", "e.g. B + G + R"]} />
+
+</Panel>
+</Columns>
+
+## What you should remember from 1.2
+
+If you remember these 10 things, you've understood the chapter:
+
+<Takeaways>
+<Takeaway n={1} title="An image is arranged as a grid">
+
+</Takeaway>
+<Takeaway n={2} title="The grid contains rows and columns">
+
+</Takeaway>
+<Takeaway n={3} title="A pixel is one element of that grid">
+
+</Takeaway>
+<Takeaway n={4} title="Python and NumPy use zero-based indexing">
+
+```text
+0, 1, 2, 3 …
+```
+
+</Takeaway>
+<Takeaway n={5} title="Image indexing is image[row, column]">
+
+```text
+image[row, column]
+```
+
+</Takeaway>
+<Takeaway n={6} title="Conceptually, row = y and column = x">
+
+```text
+image[y, x]
+```
+
+</Takeaway>
+<Takeaway n={7} title="Image height = number of rows">
+
+</Takeaway>
+<Takeaway n={8} title="Image width = number of columns">
+
+</Takeaway>
+<Takeaway n={9} title="Total pixels = width × height">
+
+```text
+1920 × 1080 = 2,073,600
+```
+
+</Takeaway>
+<Takeaway n={10} title="Colour images have multiple values per pixel">
+
+```text
+[B, G, R]
+```
+
+</Takeaway>
+</Takeaways>
+
+## Mini exercise 🧠
+
+Try these before moving to 1.3. Given: **image size = 640 × 480**.
+
+1. How many rows are there?
+2. How many columns are there?
+3. What is the coordinate of the top-left pixel?
+4. What is the coordinate of the bottom-right pixel?
+5. What does `image[200, 300]` mean?
+6. If `image.shape` returns `(720, 1280, 3)`, what does each of the three numbers mean?
+7. If you write `image[100, 200] = 255`, what exactly are we changing?
+
+<Solution>
+
+1. **480** rows (the height).
+2. **640** columns (the width).
+3. **(0, 0)**: row 0, column 0.
+4. **(479, 639)**, so `image[479, 639]`. The last index is always one less than the size.
+5. The pixel at **row 200, column 300**, which is y = 200, x = 300.
+6. **720** rows (height), **1280** columns (width), **3** colour channels.
+7. The pixel at **row 100, column 200** (x = 200, y = 100) is set to 255. In a grayscale image it becomes white. In a colour image, NumPy sets all three channel values at that pixel to 255, which is also white.
+
+</Solution>
+
+### Next: 1.3 Grayscale and colour values
+
+Here we'll answer a very important question: *if a pixel is just a number, how does a computer represent red, green, blue, white, black, and every other colour?* We'll build it step by step:
+
+<Flow direction="right" steps={["Black", "Grayscale", "RGB", "BGR", "Colour pixel", "Colour image", "NumPy representation", "OpenCV representation"]} highlightLast={false} />
+
+And you'll understand exactly why OpenCV uses BGR instead of RGB.
+
+## Code
+
+We now write the indexing ideas as real code. To make rows and columns easy to tell apart, the first image has 3 rows and **4** columns.
+
+### 1. Shape, rows, columns, pixels
+
+```python
+import numpy as np
+
+image = np.array([[10,  20,  30, 250],
+                  [50,  60,  70,  80],
+                  [90, 100, 110, 120]], dtype=np.uint8)
+
+print(image.shape)
+print(image.shape[0], "rows (height)")
+print(image.shape[1], "columns (width)")
+print(image.size, "pixels")
+```
+
+Output:
+
+```text
+(3, 4)
+3 rows (height)
+4 columns (width)
+12 pixels
+```
+
+- `dtype=np.uint8` makes this a real 8-bit image, the same type `cv2.imread` returns.
+- `image.shape` is always rows first: `(height, width)`.
+- `image.size` is the total number of values: 3 × 4 = 12.
+
+### 2. From scratch: find the brightest pixel with a loop
+
+```python
+best_value, best_row, best_col = -1, -1, -1
+rows, cols = image.shape
+for r in range(rows):            # every row (y) …
+    for c in range(cols):        # … and every column (x) in that row
+        if image[r, c] > best_value:
+            best_value, best_row, best_col = image[r, c], r, c
+
+print("brightest:", best_value, "at row", best_row, "column", best_col)
+```
+
+Output:
+
+```text
+brightest: 250 at row 0 column 3
+```
+
+The loop visits pixels row by row, left to right: the same order the pixels are stored in memory.
+
+### 3. The same with NumPy
+
+```python
+r, c = np.unravel_index(np.argmax(image), image.shape)
+print(r, c, image[r, c])
+```
+
+Output:
+
+```text
+0 3 250
+```
+
+- `np.argmax(image)` returns the position of the largest value as if the grid were one long row (here 3).
+- `np.unravel_index(..., image.shape)` turns that position back into `(row, column)`.
+
+### 4. The OpenCV way, and the (x, y) trap
+
+```python
+import cv2
+
+min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(image)
+print(max_val, max_loc)
+```
+
+Output:
+
+```text
+250.0 (3, 0)
+```
+
+The same pixel, but OpenCV reports its location as **(x, y) = (3, 0)**: column first. NumPy said row 0, column 3. Both are right; they use different orders.
+
+- `cv2.minMaxLoc(src)` returns the smallest value, the largest value, and their locations. It works on single-channel images.
+- Location results and drawing points in OpenCV are **(x, y)**. NumPy indexing is **[y, x]**. To read the pixel back: `image[max_loc[1], max_loc[0]]`.
+
+### 5. Corners, ROI and drawing on a real image
+
+Download [sample-scene.png](/images/sample-scene.png) into the folder you run Python from.
+
+```python
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+if img is None:
+    raise FileNotFoundError("Could not read sample-scene.png. Check the path.")
+
+h, w = img.shape
+print("height:", h, "width:", w)
+print("top-left:", img[0, 0], "bottom-right:", img[h - 1, w - 1])
+
+x1, y1, x2, y2 = 35, 55, 126, 146        # a box around the bright disc
+roi = img[y1:y2, x1:x2]                  # NumPy: rows (y) first, then columns (x)
+print("roi shape:", roi.shape)
+print("roi mean:", round(float(roi.mean()), 1), "image mean:", round(float(img.mean()), 1))
+
+marked = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+cv2.rectangle(marked, (x1, y1), (x2 - 1, y2 - 1), (0, 0, 255), 2)   # OpenCV points: (x, y)
+cv2.imwrite("roi-marked.png", marked)
+```
+
+Output:
+
+```text
+height: 200 width: 320
+top-left: 40 bottom-right: 200
+roi shape: (91, 91)
+roi mean: 206.2 image mean: 120.3
+```
+
+![The sample scene with a red box around the bright disc](/images/sample-scene-roi.png)
+
+- The last pixel is `img[h - 1, w - 1]`: index 199, 319 for a 200 × 320 image.
+- `img[y1:y2, x1:x2]` keeps rows 55 to 145 and columns 35 to 125. The end of a slice is not included.
+- The ROI's mean (206.2) is much higher than the whole image's (120.3): the ROI holds mostly the bright disc.
+- `cv2.rectangle(image, pt1, pt2, color, thickness)` takes two corner points as **(x, y)**. Its corners are inclusive, so the box that matches the slice ends at `(x2 - 1, y2 - 1)`.
+- `(0, 0, 255)` is red, because OpenCV colour order is B, G, R.
+
+## OpenCV API notes
+
+Versions: OpenCV 4.13.0 (`opencv-python==4.13.0.92`), NumPy 2.5.3. OpenCV signatures are copied from the installed library's help text.
+
+| Tool | Form | Gives |
+|---|---|---|
+| `image.shape` | NumPy attribute | `(rows, cols)` or `(rows, cols, channels)` |
+| `image.size` | NumPy attribute | total number of values (rows × cols × channels) |
+| `image[r, c]` | NumPy index | one value (gray) or a length-3 array (colour) |
+| `image[r0:r1, c0:c1]` | NumPy slice | a region, rows `r0` to `r1 - 1`, columns `c0` to `c1 - 1` |
+| `cv2.minMaxLoc` | `minMaxLoc(src[, mask]) -> minVal, maxVal, minLoc, maxLoc` | values and **(x, y)** locations |
+| `cv2.rectangle` | `rectangle(img, pt1, pt2, color[, thickness[, lineType[, shift]]]) -> img` | draws in place; points are **(x, y)** |
+
+**Order cheat sheet.**
+
+- Anything NumPy (`shape`, indexing, slicing): **rows first**, `[y, x]`.
+- OpenCV points, locations and sizes such as `minMaxLoc` results and `rectangle` corners: **x first**, `(x, y)`.
+- People and camera datasheets: **width × height**, e.g. 1920 × 1080.
+
+**Inputs and types.**
+
+- `cv2.imread` returns rows × columns (× 3 for colour, in **B, G, R** order) of type `uint8`.
+- Indexing a colour image with two numbers, `image[r, c]`, returns all three channel values at that pixel.
+- `cv2.minMaxLoc` needs a single-channel image. For a colour image, split or convert it first.
+
+**Speed.**
+
+- A slice such as `img[y1:y2, x1:x2]` is a **view**: no pixels are copied, so taking an ROI costs almost nothing.
+- Processing an ROI instead of the whole frame reduces work roughly in proportion to its pixel count.
+
+## Where it fails
+
+- **Pixel coordinates are not real-world positions.** `[100, 200]` says where a pixel is in the image, not where the object is on the shop floor. Turning pixels into millimetres needs calibration. *Instead:* 2.4 (mm per pixel) and 41.6 (pixel to mm).
+- **A pixel is the smallest step on the grid.** Indices are whole numbers, so a plain index cannot say "this edge is at column 120.4". *Instead:* sub-pixel methods (22.5, 49.2).
+- **A fixed ROI assumes the object stays put.** If the billet moves or the camera is knocked, the ROI looks at the wrong place. *Instead:* find the object first (detection or tracking, Parts F, G and J), then place the ROI around it.
+- **More megapixels do not guarantee more detail.** Lens sharpness, focus, motion and lighting can blur away what extra pixels would show. *Instead:* choose camera and lens together (Module 2, 59.1, 59.2).
+
+## ⚠️ Common mistakes
+
+**1. Swapping x and y.** `image[x, y]` silently reads the wrong pixel when the image is not square, and fails with an `IndexError` near the right edge. Always write `image[y, x]`, or better, name them `image[row, col]`.
+
+**2. Mixing NumPy and OpenCV order.** `cv2.minMaxLoc` gave `(3, 0)` for the pixel NumPy calls `[0, 3]`. Convert explicitly: `x, y = loc` then `image[y, x]`.
+
+**3. Writing size the wrong way round.** A 1920 × 1080 camera gives `shape == (1080, 1920)`. Code like `width, height = image.shape` swaps them. Use `height, width = image.shape[:2]`.
+
+**4. Off-by-one at the edge.** The last pixel is `image[h - 1, w - 1]`. `image[h, w]` raises:
+
+```text
+IndexError: index 3 is out of bounds for axis 0 with size 3
+```
+
+**5. Negative indices do not fail.** `image[-1, -1]` does **not** raise an error: Python counts from the end, so it returns the bottom-right pixel. A bug that produces a negative index reads the wrong pixel silently.
+
+**6. Slices past the edge do not fail either.** On a 3 × 3 image, `image[0:10, 0:10]` simply returns the 3 × 3 image. An ROI that hangs off the edge comes back smaller than you asked for, without warning. Check `roi.shape`.
+
+**7. Forgetting that an ROI is a view.** `roi = image[0:2, 0:2]` shares pixels with `image`. Writing `roi[:] = 0` changes the original image too. Use `roi = image[0:2, 0:2].copy()` when you need an independent copy.
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Different books, different letters
+
+The image grid is always the same: origin at the top-left, rows going down, columns going right. The letters used for the two directions are not.
+
+- NumPy and OpenCV's Python API index `[row, column]`; OpenCV's points use (x, y) with x along the columns.
+- Gonzalez and Woods write a digital image as an M × N array f(x, y) with the origin at the top-left, and use x for the row direction and y for the column direction [1, Sec. 2.4]. That is the opposite letter choice to OpenCV's points.
+
+When you read a formula, first check which letter runs down the rows. Getting this wrong transposes the result.
+
+### How the grid sits in memory
+
+NumPy stores an image row by row (C order). For a grayscale `uint8` image of width W, pixel (r, c) is at offset
+
+```text
+offset = r × W + c
+```
+
+and for a 3-channel image, channel k of pixel (r, c) is at
+
+```text
+offset = (r × W + c) × 3 + k
+```
+
+You can see this in `image.strides`. For the 200 × 320 sample scene, `strides` is `(320, 1)`: moving one row skips 320 bytes, moving one column skips 1 byte. For a 4 × 5 colour image it is `(15, 3, 1)`. This row-by-row layout is why looping over rows in the outer loop is the natural order.
+
+### Neighbourhoods, formally
+
+The neighbours in section 25 have names [1, Sec. 2.5]:
+
+- **4-neighbours**, N₄(p): up, down, left, right.
+- **Diagonal neighbours**, N_D(p): the four corners.
+- **8-neighbours**, N₈(p) = N₄(p) ∪ N_D(p).
+
+Which set you use changes whether two pixels count as "connected", and so changes object counts. Chapter 3.6 covers this.
+
+### Megapixels and aspect ratio
+
+1 MP is 10⁶ pixels. 1920 × 1080 has an aspect ratio of 16:9 (1920 / 1080 = 1.78). 2448 × 2048 is about 1.2 : 1, closer to square, which suits many inspection tasks where the part is roughly square.
+
+### Integer pixels and real positions
+
+An index addresses a whole pixel. Libraries differ on whether a pixel's integer coordinate means its centre or its corner, and this matters when resizing, rotating or measuring to fractions of a pixel. Check the documentation of each function you use for sub-pixel work (16.4, 49.2).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "`img.shape` is `(480, 640)`. Which index reads the bottom-right pixel?",
+      options: ["`img[640, 480]`", "`img[480, 640]`", "`img[479, 639]`", "`img[639, 479]`"],
+      answer: 2,
+      explanation: "Rows first, and the last index is size − 1: row 479, column 639.",
+    },
+    {
+      question: "You want the pixel at x = 300, y = 200. What do you write in NumPy?",
+      options: ["`img[300, 200]`", "`img[200, 300]`", "`img(300, 200)`", "`img[200][300][0]`"],
+      answer: 1,
+      explanation: "NumPy indexing is [row, column] = [y, x], so img[200, 300].",
+    },
+    {
+      question: "A camera is 2448 × 2048. How many pixels is that?",
+      options: ["4,496", "2,048,000", "5,013,504", "50,135,040"],
+      answer: 2,
+      explanation: "2448 × 2048 = 5,013,504, about 5 MP.",
+    },
+    {
+      question: "`cv2.minMaxLoc(gray)` returns `max_loc = (3, 0)`. Which NumPy index holds that pixel?",
+      options: ["`gray[3, 0]`", "`gray[0, 3]`", "`gray[3][0]`", "It cannot be read back"],
+      answer: 1,
+      explanation: "OpenCV locations are (x, y). x = 3 is the column, y = 0 is the row, so gray[0, 3].",
+    },
+    {
+      question: "On a 3 × 3 NumPy image, what does `image[-1, -1]` do?",
+      options: ["Raises an IndexError", "Returns the top-left pixel", "Returns the bottom-right pixel", "Returns 0"],
+      answer: 2,
+      explanation: "Negative indices count from the end in Python and NumPy, so -1, -1 is the last row and last column. No error is raised.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+For this 3 × 4 image, write down (a) `image.shape`, (b) `image[2, 0]`, (c) `image[0, 3]`, (d) the result of `image[1:3, 2:4]`, and (e) the (x, y) point OpenCV would use for the pixel with value 250.
+
+```text
+ 10   20   30  250
+ 50   60   70   80
+ 90  100  110  120
+```
+
+<Solution>
+
+(a) `(3, 4)`: 3 rows, 4 columns.
+
+(b) Row 2, column 0 → **90**.
+
+(c) Row 0, column 3 → **250**.
+
+(d) Rows 1 and 2, columns 2 and 3:
+
+```text
+ 70   80
+110  120
+```
+
+(e) 250 is at row 0, column 3, so (x, y) = **(3, 0)**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Create a black 640 × 480 grayscale image. Make the box with top-left corner x = 50, y = 30, 200 pixels wide and 100 pixels high, white, using **slicing**. Then draw the same filled box on a second black image with `cv2.rectangle` (thickness `-1` fills it). Print how many pixels are white, and check the two images are identical.
+
+<Solution>
+
+```python
+import cv2
+import numpy as np
+
+a = np.zeros((480, 640), dtype=np.uint8)      # shape is (height, width)
+a[30:130, 50:250] = 255                       # rows y 30..129, columns x 50..249
+
+b = np.zeros((480, 640), dtype=np.uint8)
+cv2.rectangle(b, (50, 30), (249, 129), 255, -1)   # (x, y) corners, inclusive
+
+print("white pixels:", np.count_nonzero(a), "of", a.size)
+print("identical:", np.array_equal(a, b))
+```
+
+Output:
+
+```text
+white pixels: 20000 of 307200
+identical: True
+```
+
+200 × 100 = 20,000 white pixels. The slice end (130, 250) is exclusive; the rectangle's second corner (249, 129) is inclusive.
+
+</Solution>
+
+### Exercise 3 (coding)
+
+Load `sample-scene.png` in grayscale. Find the brightest pixel twice: with `np.argmax` + `np.unravel_index`, and with `cv2.minMaxLoc`. Print both results and show they point to the same pixel.
+
+<Solution>
+
+```python
+import cv2
+import numpy as np
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+if img is None:
+    raise FileNotFoundError("Could not read sample-scene.png. Check the path.")
+
+r, c = np.unravel_index(np.argmax(img), img.shape)
+_, max_val, _, (x, y) = cv2.minMaxLoc(img)
+
+print("numpy  [row, col]:", int(r), int(c))
+print("opencv (x, y):   ", x, y)
+print("same pixel:", (int(r), int(c)) == (y, x), img[r, c], max_val)
+```
+
+Output:
+
+```text
+numpy  [row, col]: 56 72
+opencv (x, y):    72 56
+same pixel: True 255 255.0
+```
+
+Same pixel, opposite order: NumPy reports (row 56, column 72); OpenCV reports (x 72, y 56).
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed. Pearson, 2018. Sec. 2.4 (representing digital images, coordinate convention, spatial resolution); Sec. 2.5 (neighbours of a pixel, adjacency).
+2. OpenCV 4.13.0 tutorials, *Basic Operations on Images* (pixel access, image properties, image ROI): [docs.opencv.org/4.13.0/d3/df2/tutorial_py_basic_ops.html](https://docs.opencv.org/4.13.0/d3/df2/tutorial_py_basic_ops.html).
+3. NumPy documentation, *Indexing on ndarrays* (zero-based and negative indices, slicing rules, views): [numpy.org/doc/stable/user/basics.indexing.html](https://numpy.org/doc/stable/user/basics.indexing.html).
+4. OpenCV 4.13.0 documentation, *Operations on arrays* (`minMaxLoc`): [docs.opencv.org/4.13.0/d2/de8/group__core__array.html](https://docs.opencv.org/4.13.0/d2/de8/group__core__array.html).
+5. OpenCV 4.13.0 documentation, *Drawing Functions* (`rectangle`): [docs.opencv.org/4.13.0/d6/d6e/group__imgproc__draw.html](https://docs.opencv.org/4.13.0/d6/d6e/group__imgproc__draw.html).

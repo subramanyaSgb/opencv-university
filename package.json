@@ -1,0 +1,22 @@
+{
+  "name": "opencv-university",
+  "private": true,
+  "version": "0.1.0",
+  "description": "OpenCV University: image processing and computer vision training platform",
+  "workspaces": [
+    "apps/web"
+  ],
+  "engines": {
+    "node": ">=22.12.0 <23"
+  },
+  "scripts": {
+    "content": "node scripts/build-content-index.mjs",
+    "dev": "npm run dev -w apps/web",
+    "build": "npm run build -w apps/web",
+    "start": "npm run start -w apps/web",
+    "lint:content": "node scripts/lint-content.mjs",
+    "test": "node --test --experimental-strip-types \"apps/web/lib/*.test.ts\" \"scripts/*.test.mjs\"",
+    "check": "npm run lint:content && npm test && npm run build",
+    "images": "python assets/images/generate_samples.py"
+  }
+}

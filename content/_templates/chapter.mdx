@@ -1,0 +1,100 @@
+export const meta = {
+  number: "n.m",
+  title: "Chapter title",
+  minutes: 30,
+  objectives: [
+    "First thing the learner will be able to do",
+    "Second thing the learner will be able to do",
+  ],
+};
+
+{/*
+  CHAPTER TEMPLATE. Copy to content/<part>/<NN-module>/<n.m-slug>.mdx and add the chapter to module.json.
+  Shape (checked by `npm run lint:content`):
+    # n.m Title, then <Definition>
+    ## 1. … ## N.   numbered lesson sections, simple first; use the visual components, not text art
+    ## Mini exercise (optional)
+    then the reference tail, headings exactly as below.
+  Visual components: see CLAUDE.md, "Visuals, not text art".
+*/}
+
+# n.m Chapter title
+
+<Definition term="Topic">plain-language meaning in one line.</Definition>
+
+## 1. First idea
+
+Analogy first, then a picture:
+
+<Flow steps={["Input", "Operation", "Output"]} />
+
+## 2. Second idea
+
+<PixelGrid values={[[0, 128, 255], [64, 128, 192], [255, 128, 0]]} operations={["invert"]} />
+
+## Mini exercise
+
+1. Question?
+
+<Solution>Answer.</Solution>
+
+## Code
+
+NumPy from scratch first:
+
+```python
+import numpy as np
+```
+
+Then the OpenCV call, with every parameter explained:
+
+```python
+import cv2
+```
+
+## OpenCV API notes
+
+Signature, parameters, dtype and channels, output, defaults, speed tips.
+
+## Where it fails
+
+Limits, and what to use instead.
+
+## ⚠️ Common mistakes
+
+- Mistake and how to avoid it.
+
+## 🔍 Go deeper
+
+<GoDeeper>
+Maths, derivations, variants, history.
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    { question: "Q1?", options: ["A", "B"], answer: 0, explanation: "Why." },
+    { question: "Q2?", options: ["A", "B"], answer: 1, explanation: "Why." },
+    { question: "Q3?", options: ["A", "B"], answer: 0, explanation: "Why." },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Task.
+
+<Solution>Answer.</Solution>
+
+### Exercise 2 (coding)
+
+Task.
+
+<Solution>Answer.</Solution>
+
+## References
+
+1. Reference one.
+2. Reference two.
