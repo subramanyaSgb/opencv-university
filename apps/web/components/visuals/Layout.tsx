@@ -5,7 +5,7 @@ export function Columns({ children, stack = false }: { children: ReactNode; stac
   return <div className={`cols${stack ? " cols-stack" : ""}`}>{children}</div>;
 }
 
-export type PanelTone = "plain" | "a" | "b" | "c" | "good" | "warn";
+export type PanelTone = "plain" | "a" | "b" | "c" | "d" | "good" | "warn";
 
 /** A titled card. Markdown inside works. */
 export function Panel({ title, badge, tone = "plain", children }: { title?: string; badge?: string; tone?: PanelTone; children: ReactNode }) {

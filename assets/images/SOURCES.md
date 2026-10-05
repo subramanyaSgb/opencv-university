@@ -19,3 +19,8 @@ Customer-site images only after anonymisation and written approval.
 | generated/sample-redgreen-gray.png | `cv2.cvtColor(rg, COLOR_BGR2GRAY)`: the disc disappears | Project-owned | 1.3 |
 | generated/sample-color-blurred.png | `cv2.GaussianBlur(color, (9, 9), 0)` (image processing: image out) | Project-owned | 1.4 |
 | generated/sample-color-detected.png | threshold + `findContours` + `boundingRect` boxes, count text (computer vision: information out) | Project-owned | 1.4 |
+| generated/sample-scene-saltpepper.png | sample-scene with 3% pepper and 3% salt pixels (seed 15) | Project-owned | 1.5 |
+| generated/sample-scene-saltpepper-box.png | `cv2.blur(noisy, (3, 3))` | Project-owned | 1.5 |
+| generated/sample-scene-saltpepper-median.png | `cv2.medianBlur(noisy, 3)` | Project-owned | 1.5 |
+| generated/sample-stripes.png | vertical sine stripes, period 16 px | Project-owned | 1.5 |
+| generated/sample-stripes-spectrum.png | log magnitude of the centred 2-D FFT of sample-stripes, peaks enlarged 7 × 7 for visibility | Project-owned | 1.5 |

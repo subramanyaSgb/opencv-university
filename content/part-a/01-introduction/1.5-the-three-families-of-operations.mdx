@@ -1,0 +1,1018 @@
+export const meta = {
+  number: "1.5",
+  title: "The three families of image operations",
+  minutes: 45,
+  objectives: [
+    "Sort image operations into point, neighbourhood and global / transform families",
+    "Apply a point operation and a 3 × 3 neighbourhood operation by hand",
+    "Explain why noise removal and edge detection need neighbouring pixels",
+    "Read a histogram as a whole-image (global) description",
+    "Recognise each family in OpenCV calls such as cvtColor, GaussianBlur and calcHist",
+    "Use the families as a first step when choosing a technique for a problem",
+  ],
+};
+
+{/*
+  Lesson content: owner's text (5 Oct 2026), presented with visual components.
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 1.5 The three families of image operations
+
+<Definition term="Image operation">a mathematical or computational step applied to an image's pixel values, producing a new image or new information.</Definition>
+
+This is a very important foundation, because almost everything you learn later in OpenCV can be placed into one of these broad categories.
+
+## 1. First, what is an image operation?
+
+We know an image is basically a collection of numbers:
+
+<Flow direction="right" steps={[{ label: "Image", tone: "data" }, { label: "Pixels", tone: "data" }, { label: "Numbers", tone: "result" }]} />
+
+For example, a tiny grayscale image:
+
+<PixelMatrix values={[[10, 20, 30], [40, 50, 60], [70, 80, 90]]} />
+
+An **image operation** means: *we perform some mathematical / computational operation on those pixel values.* For example:
+
+<Columns stack>
+<Panel title="Add brightness to one pixel" tone="a">
+
+<PixelMath value={50} ops={[{ label: "Add brightness", expr: "50 + 30", result: 80 }]} />
+
+</Panel>
+<Panel title="Blur the image" tone="b">
+
+<Flow direction="right" steps={[{ label: "Original image", tone: "data" }, { label: "Blur", tone: "process" }, { label: "New image", tone: "result" }]} />
+
+</Panel>
+<Panel title="Find edges" tone="c">
+
+<Flow direction="right" steps={[{ label: "Image", tone: "data" }, { label: "Find edges", tone: "process" }, { label: "Edge information", tone: "result" }]} />
+
+</Panel>
+</Columns>
+
+## 2. The three big families
+
+For our foundation, think of image operations as three major families:
+
+<Tree
+  root="Image operations"
+  branches={[
+    { title: "Point-wise", items: ["Look mainly at one pixel at a time"] },
+    { title: "Neighbourhood", items: ["Look at a pixel and the pixels around it"] },
+    { title: "Global / transform", items: ["Analyze or transform the image as a whole"] },
+  ]}
+/>
+
+<Columns>
+<Panel title="Family 1: point" tone="c">
+
+<Footprint mode="point" label="One pixel at a time" />
+
+</Panel>
+<Panel title="Family 2: neighbourhood" tone="a">
+
+<Footprint mode="neighborhood" label="A pixel and its neighbours" />
+
+</Panel>
+<Panel title="Family 3: global / transform" tone="d">
+
+<Footprint mode="global" label="The image as a whole" />
+
+</Panel>
+</Columns>
+
+This classification will become much clearer as we progress.
+
+## 3. Family 1: point-wise operations
+
+Let's start with the easiest. A point operation works on **each pixel individually**. For example: *add 20 to every pixel.*
+
+<MatrixTransform
+  before={[[10, 20, 30], [40, 50, 60], [70, 80, 90]]}
+  after={[[30, 40, 50], [60, 70, 80], [90, 100, 110]]}
+  rule="+ 20"
+  highlight={[[0, 0]]}
+/>
+
+Notice something important: **10 → 30**. The new value depends **only on 10**. It doesn't care what the neighbouring pixels are. That's why it is called a **point-wise operation**.
+
+## 4. Mathematical idea
+
+We can describe it very simply as:
+
+```text
+output pixel = function(input pixel)
+```
+
+<Columns>
+<Panel title="output = input + 20" tone="plain">
+
+<Equation terms={[{ value: "50", label: "input" }, { op: "+", value: "20" }, { op: "=", value: "70", label: "output", result: true }]} />
+
+</Panel>
+<Panel title="output = input × 2" tone="plain">
+
+<Equation terms={[{ value: "50", label: "input" }, { op: "×", value: "2" }, { op: "=", value: "100", label: "output", result: true }]} />
+
+</Panel>
+</Columns>
+
+## 5. Brightness adjustment is a point operation
+
+Suppose our image is the one below, and we want to make it brighter. We could do `bright = image + 30`:
+
+<MatrixTransform
+  before={[[50, 70, 90], [30, 60, 80], [20, 40, 100]]}
+  after={[[80, 100, 120], [60, 90, 110], [50, 70, 130]]}
+  rule="+ 30"
+/>
+
+Every pixel is treated individually.
+
+## 6. But there is a problem: 8-bit images
+
+Remember: an 8-bit grayscale value runs from **0 to 255**. What happens with **240 + 30 = 270**? 8-bit cannot represent 270. So the result has to be handled appropriately, often by **clipping / saturation**:
+
+<Equation terms={[{ value: "240" }, { op: "+", value: "30" }, { op: "=", value: "270", label: "too big" }, { op: "→", value: "255", label: "clipped", result: true }]} />
+
+**Try it.** Select the pixel 240, choose Brighten, and compare clipping with NumPy's wrap-around. Then try Threshold.
+
+<PixelGrid
+  values={[[50, 70, 90], [30, 240, 80], [20, 40, 100]]}
+  operations={["brighten", "threshold"]}
+  params={{ amount: 30, threshold: 100 }}
+  caption="Point operations: every output pixel is computed from the input pixel at the same place, and nothing else."
+/>
+
+This is something you'll learn in much more detail when we reach intensity transformations and NumPy / OpenCV data types.
+
+## 7. Thresholding can also be viewed as a point operation
+
+We define:
+
+```text
+if pixel > 100:  output = 255
+else:            output = 0
+```
+
+Then **80 → 0**, **150 → 255**, **200 → 255**, **50 → 0**. For an image:
+
+<MatrixTransform
+  before={[[50, 120, 80], [200, 30, 150], [90, 220, 70]]}
+  after={[[0, 255, 0], [255, 0, 255], [0, 255, 0]]}
+  rule="> 100 ? 255 : 0"
+/>
+
+This is the basic idea behind **binary thresholding**. We'll study it deeply in Module 13.
+
+## 8. Other examples of point operations
+
+Many operations fit this family:
+
+<Chips
+  items={[
+    "Brightness adjustment",
+    "Contrast adjustment",
+    "Intensity inversion",
+    "Thresholding",
+    "Gamma transformation",
+    "Log transformation",
+    "Pixel normalization",
+    "Lookup-table transformations",
+  ]}
+/>
+
+<Callout kind="key">
+
+**Each pixel is processed based primarily on its own value.**
+
+</Callout>
+
+## 9. Family 2: neighbourhood operations
+
+Now things get more interesting. Instead of looking at only one pixel, we look **around** it. The centre pixel is influenced by its neighbours.
+
+<Columns>
+<Panel title="Point: only this pixel" tone="c">
+
+<Footprint mode="point" />
+
+</Panel>
+<Panel title="Neighbourhood: this pixel and the 8 around it" tone="a">
+
+<Footprint mode="neighborhood" />
+
+</Panel>
+</Columns>
+
+This is a **neighbourhood operation**.
+
+## 10. Why do we need neighbouring pixels?
+
+Imagine a noisy image:
+
+<PixelMatrix size="lg" values={[[100, 100, 100], [100, 0, 100], [100, 100, 100]]} highlight={[[1, 1]]} />
+
+The centre pixel suddenly became **0**. It might be noise. If we only look at the centre, **0**, we don't know anything. But if we look at its neighbours, we can see: *almost everything around it is 100.* Therefore, perhaps the centre should also be close to 100.
+
+This is the basic intuition behind **filtering**. On a real image with scattered noise pixels:
+
+<ImageCompare
+  before={{ src: "/images/sample-scene-saltpepper.png", label: "Noisy (salt and pepper)" }}
+  after={[
+    { src: "/images/sample-scene-saltpepper-median.png", label: "3 × 3 median" },
+    { src: "/images/sample-scene-saltpepper-box.png", label: "3 × 3 mean (blur)" },
+  ]}
+  width={320}
+  height={200}
+  alt="A noisy test image and the same image cleaned by 3 by 3 median and mean filters"
+  caption="Both filters look at each pixel's 3 × 3 neighbourhood. The median removes isolated noise pixels almost completely; the mean only spreads them out."
+/>
+
+## 11. Blurring is a neighbourhood operation
+
+A simple averaging filter looks at the 3 × 3 window and calculates the average:
+
+<PixelMatrix values={[[10, 20, 30], [40, 50, 60], [70, 80, 90]]} />
+
+<Equation
+  terms={[
+    { value: "10+20+30+40+50+60+70+80+90", label: "sum of 9 pixels" },
+    { op: "=", value: "450" },
+    { op: "÷", value: "9" },
+    { op: "=", value: "50", label: "new centre", result: true },
+  ]}
+/>
+
+So the centre becomes **50**. The new centre depends on **many pixels**, not just itself.
+
+**Try it.** Tap any pixel to see its 3 × 3 window and how the output is computed. Switch between mean and median.
+
+<NeighborhoodLab
+  values={[
+    [100, 100, 100, 100, 100],
+    [100, 100, 100, 100, 100],
+    [100, 100, 0, 100, 100],
+    [100, 100, 100, 100, 100],
+    [100, 100, 100, 100, 100],
+  ]}
+/>
+
+## 12. This leads to kernels
+
+You'll hear this word constantly in OpenCV: **kernel**. A kernel is basically a small matrix used to perform an operation over an image. For example, this is an **averaging kernel**:
+
+<KernelGrid cells={[["1/9", "1/9", "1/9"], ["1/9", "1/9", "1/9"], ["1/9", "1/9", "1/9"]]} caption="Multiply each of the 9 pixels by 1/9 and add: that is the average." />
+
+It **moves across the image**. At each position, it calculates a new value:
+
+<Flow direction="right" steps={[{ label: "Place the 3 × 3 kernel", tone: "process" }, { label: "Combine the 9 pixels", tone: "process" }, { label: "Write one output pixel", tone: "result" }, { label: "Slide to the next pixel", tone: "plain" }]} highlightLast={false} />
+
+The lab in section 11 is exactly this: wherever you tap, the kernel sits there.
+
+## 13. Neighbourhood operations include
+
+This family becomes huge later in the course:
+
+<Chips
+  items={[
+    "Blur",
+    "Gaussian blur",
+    "Median filtering",
+    "Sharpening",
+    "Edge detection",
+    "Convolution",
+    "Morphological operations",
+    "Many restoration operations",
+  ]}
+/>
+
+<Columns>
+<Panel title="Blur" tone="a">
+
+<Flow steps={["Neighbours influence the pixel"]} highlightLast={false} />
+
+</Panel>
+<Panel title="Edge detection" tone="c">
+
+<Flow steps={["Compare nearby pixels", "Find sudden intensity changes"]} />
+
+</Panel>
+</Columns>
+
+## 14. Why does edge detection need neighbours?
+
+Imagine this:
+
+<IndexedGrid
+  values={[
+    [100, 100, 100, 100, 100],
+    [100, 100, 100, 100, 100],
+    [100, 100, 250, 250, 250],
+    [100, 100, 250, 250, 250],
+  ]}
+  highlight={[[1, 2], [1, 3], [1, 4], [2, 1], [3, 1], [2, 2], [2, 3], [2, 4], [3, 2]]}
+  rowLabels={false}
+  colLabels={false}
+  caption="The outlined pixels sit where 100 meets 250: a large local change."
+/>
+
+There is a large change around this region: **100 → 250**. An edge detector looks for these kinds of local changes. It therefore needs information from **neighbouring** pixels.
+
+## 15. Family 3: global / transform operations
+
+Now imagine we don't want to look at only one pixel, or a small neighbourhood. Instead, we want to analyze the **whole image**. For example: *"What is the overall brightness distribution of this image?"* We might calculate a **histogram**:
+
+<Flow direction="right" steps={[{ label: "Image", tone: "data" }, { label: "Look at ALL pixels", tone: "process" }, { label: "Histogram", tone: "result" }]} />
+
+That's a global-type analysis.
+
+## 16. Example: image histogram
+
+Suppose our image contains:
+
+<PixelMatrix values={[[0, 0, 10, 10], [20, 20, 20, 50], [50, 50, 100, 200]]} />
+
+We can **count** how many pixels have each intensity:
+
+<MiniHistogram
+  data={[
+    { value: 0, count: 2 },
+    { value: 10, count: 2 },
+    { value: 20, count: 3 },
+    { value: 50, count: 3 },
+    { value: 100, count: 1 },
+    { value: 200, count: 1 },
+  ]}
+  caption="12 pixels in total. cv2.calcHist gives exactly these counts."
+/>
+
+We're considering the image's **overall distribution**. That is fundamentally different from pixel → pixel, or neighbourhood → neighbourhood.
+
+## 17. Fourier transform
+
+Another major example is the **Fourier transform**. Don't worry about the mathematics yet. For now, understand the idea:
+
+<Columns>
+<Panel title="A normal image tells us" tone="a">
+
+**Where** are the brightness values?
+
+</Panel>
+<Panel title="A Fourier representation helps us analyze" tone="c">
+
+**What** spatial frequencies / pattern scales exist in the image?
+
+</Panel>
+</Columns>
+
+<Flow direction="right" steps={[{ label: "Image", tone: "data" }, { label: "Fourier transform", tone: "process" }, { label: "Frequency representation", tone: "result" }]} />
+
+<ImageCompare
+  before={{ src: "/images/sample-stripes.png", label: "Image: stripes" }}
+  after={{ src: "/images/sample-stripes-spectrum.png", label: "Fourier magnitude" }}
+  width={320}
+  height={200}
+  alt="Vertical stripes and their Fourier magnitude: three bright dots on a horizontal line"
+  caption="The whole stripe pattern becomes three dots. Their spacing encodes how fine the stripes are; nothing in the left image is 'at' those dots."
+/>
+
+We'll spend an entire section on this later (Part E).
+
+## 18. Other global / transform operations
+
+Examples include:
+
+<Chips
+  items={[
+    "Histogram analysis",
+    "Fourier transform",
+    "DCT",
+    "Wavelets",
+    "Global normalization",
+    "Frequency-domain filtering",
+    "Some image-wide statistical operations",
+  ]}
+/>
+
+These operations can involve the image as a whole.
+
+## 19. Now compare the three
+
+This is the important part.
+
+<Columns>
+<Panel badge="1" title="Point-wise" tone="c">
+
+<Footprint mode="point" />
+
+**Looks at:** one pixel
+
+**Example:** brightness
+
+</Panel>
+<Panel badge="2" title="Neighbourhood" tone="a">
+
+<Footprint mode="neighborhood" />
+
+**Looks at:** pixel + nearby pixels
+
+**Example:** blur
+
+</Panel>
+<Panel badge="3" title="Global / transform" tone="d">
+
+<Footprint mode="global" />
+
+**Looks at:** whole image / global representation
+
+**Example:** histogram, Fourier
+
+</Panel>
+</Columns>
+
+## 20. An analogy
+
+Imagine you're looking at a city.
+
+<Columns>
+<Panel badge="Point" title="One house" tone="c">
+
+<Footprint mode="point" />
+
+*"What colour is this house?"*
+
+</Panel>
+<Panel badge="Neighbourhood" title="One house and the houses around it" tone="a">
+
+<Footprint mode="neighborhood" />
+
+*"How dense is this neighbourhood?"*
+
+</Panel>
+<Panel badge="Global" title="The entire city" tone="d">
+
+<Footprint mode="global" />
+
+*"How many buildings are there?"*
+
+</Panel>
+</Columns>
+
+That's the basic mental model.
+
+## 21. How this appears in OpenCV
+
+You'll eventually write things like:
+
+<Columns stack>
+<Panel badge="Point-like" title="Colour conversion, intensity transformations" tone="c">
+
+```python
+import cv2
+
+image = cv2.imread("image.jpg")
+
+gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+```
+
+Each gray pixel comes from the B, G, R values of the same pixel only.
+
+</Panel>
+<Panel badge="Neighbourhood" title="Blur" tone="a">
+
+```python
+blurred = cv2.GaussianBlur(image, (5, 5), 0)
+```
+
+The `(5, 5)` indicates the neighbourhood / kernel size: **5 × 5**. The output pixel is influenced by a local neighbourhood.
+
+</Panel>
+<Panel badge="Global" title="Histogram" tone="d">
+
+```python
+histogram = cv2.calcHist(
+    [gray],
+    [0],
+    None,
+    [256],
+    [0, 256]
+)
+```
+
+This analyzes the intensity distribution across the whole image.
+
+</Panel>
+</Columns>
+
+## 22. One operation can be used as part of another task
+
+This is important professionally. Suppose you're doing object detection. Different operations in the pipeline belong to different families:
+
+<Flow
+  steps={[
+    { label: "Camera", tone: "world" },
+    { label: "Image", tone: "data" },
+    { label: "Gaussian blur", tag: "Neighbourhood", tone: "data" },
+    { label: "Threshold", tag: "Point-wise", tone: "result" },
+    { label: "Morphology", tag: "Neighbourhood", tone: "data" },
+    { label: "Contours", tag: "Higher-level analysis / computer vision", tone: "process" },
+    { label: "Object detection", tone: "process" },
+  ]}
+  highlightLast={false}
+/>
+
+So a real system is usually a **pipeline of many different operations**.
+
+## 23. Why this classification matters
+
+You might ask: *"Why do I even need to know these three families?"* Because when you face a new problem, you can think:
+
+<Takeaways>
+<Takeaway n={1} title="Image is too noisy">
+
+<Flow direction="right" steps={["Neighbourhood operation", "Filtering"]} />
+
+</Takeaway>
+<Takeaway n={2} title="Image is too dark">
+
+<Flow direction="right" steps={["Point-wise / intensity operation", "Brightness / contrast"]} />
+
+</Takeaway>
+<Takeaway n={3} title="I need the overall intensity distribution">
+
+<Flow direction="right" steps={["Global operation", "Histogram"]} />
+
+</Takeaway>
+<Takeaway n={4} title="I need to remove high-frequency noise">
+
+<Flow direction="right" steps={["Frequency-domain operation", "Fourier-based processing"]} />
+
+</Takeaway>
+</Takeaways>
+
+This becomes a **problem-solving framework**.
+
+## 24. A more professional view
+
+As you become advanced, you'll discover that the three-family classification is not always perfectly rigid. For example:
+
+- Some operations combine local and global information.
+- Morphological operations depend on neighbourhoods but can produce global structures.
+- Histogram equalization uses global statistics to transform individual pixels.
+- Fourier filtering transforms the entire image into another representation and modifies it there.
+- Modern deep-learning layers can perform operations that don't fit neatly into these beginner categories.
+
+<Callout kind="key">
+
+Don't treat the three families as strict mathematical laws. Treat them as a **mental framework for understanding image operations**.
+
+</Callout>
+
+## 25. The big picture
+
+You can now visualize image processing like this:
+
+<Flow steps={[{ label: "Image", tone: "data" }, { label: "Image operation", tone: "process" }]} highlightLast={false} />
+
+<Arrow />
+
+<Columns>
+<Panel title="Point" tone="c">
+
+<Chips items={["Brightness", "Contrast", "Threshold", "Gamma"]} />
+
+</Panel>
+<Panel title="Neighbourhood" tone="a">
+
+<Chips items={["Blur", "Edge", "Sharpen", "Median"]} />
+
+</Panel>
+<Panel title="Global / transform" tone="d">
+
+<Chips items={["Histogram", "Fourier", "DCT", "Wavelet"]} />
+
+</Panel>
+</Columns>
+
+<Arrow />
+
+<Flow steps={[{ label: "Useful information", tone: "result" }, { label: "Computer vision", tone: "process" }]} highlightLast={false} />
+
+## What you should remember
+
+<Columns stack>
+<Panel badge="Family 1" title="Point-wise: one pixel → one output pixel" tone="c">
+
+<Flow direction="right" steps={["Pixel", "Operation", "Pixel"]} />
+
+<Chips items={["Brightness", "Contrast", "Threshold", "Intensity transformations"]} />
+
+</Panel>
+<Panel badge="Family 2" title="Neighbourhood: many nearby pixels → one output pixel" tone="a">
+
+<Flow direction="right" steps={["Neighbours", "Operation", "Output pixel"]} />
+
+<Chips items={["Blur", "Gaussian filtering", "Median filtering", "Sharpening", "Edge detection", "Convolution"]} />
+
+</Panel>
+<Panel badge="Family 3" title="Global / transform: whole image → global representation or transformation" tone="d">
+
+<Flow direction="right" steps={["Whole image", "Operation", "Global / transform result"]} />
+
+<Chips items={["Histogram", "Fourier transform", "DCT", "Wavelets", "Frequency-domain processing"]} />
+
+</Panel>
+</Columns>
+
+### 🧠 One sentence to memorize
+
+<Callout kind="key">
+
+**Point operations look at individual pixels, neighbourhood operations look at nearby pixels, and global / transform operations consider the image as a whole or transform it into another representation.**
+
+</Callout>
+
+## Mini exercise
+
+Take this image:
+
+<PixelMatrix values={[[10, 20, 30], [40, 50, 60], [70, 80, 90]]} />
+
+Classify each operation:
+
+- **A.** Add 20 to every pixel.
+- **B.** Replace each pixel with the average of its 3 × 3 neighbours.
+- **C.** Count how many pixels have intensity between 50 and 100.
+- **D.** Apply Gaussian blur.
+- **E.** Calculate the Fourier transform.
+
+<Solution>
+
+- **A → Point-wise.** Each new value depends only on the old value at the same place (10 → 30).
+- **B → Neighbourhood.** Each new value depends on 9 pixels (the centre becomes 50).
+- **C → Global.** You must look at every pixel to count them: 5 pixels (50, 60, 70, 80, 90).
+- **D → Neighbourhood.** A weighted average over a small window.
+- **E → Global / transform.** Every output value depends on every input pixel.
+
+</Solution>
+
+### Next: 1.6 Where vision is used in industry
+
+We'll connect everything you've learned so far to **real industrial systems**: steel plants, inspection, measurement, tracking, robotics, OCR, thermal vision and quality control.
+
+## Code
+
+One image, one operation from each family, first by hand with NumPy, then with OpenCV.
+
+### 1. From scratch: the three families on a 3 × 3 image
+
+```python
+import numpy as np
+
+img = np.array([[10, 20, 30],
+                [40, 50, 60],
+                [70, 80, 90]], dtype=np.uint8)
+
+# Family 1, point: each output pixel uses one input pixel
+point = np.clip(img.astype(np.int16) + 20, 0, 255).astype(np.uint8)
+print(point)
+
+# Family 2, neighbourhood: the centre output uses all 9 pixels around it
+print("centre mean:", img[0:3, 0:3].mean())
+
+# Family 3, global: a histogram counts values over the whole image
+values, counts = np.unique(img, return_counts=True)
+print("histogram:", dict(zip(values.tolist(), counts.tolist())))
+print("pixels from 50 to 100:", np.count_nonzero((img >= 50) & (img <= 100)))
+```
+
+Output:
+
+```text
+[[ 30  40  50]
+ [ 60  70  80]
+ [ 90 100 110]]
+centre mean: 50.0
+histogram: {10: 1, 20: 1, 30: 1, 40: 1, 50: 1, 60: 1, 70: 1, 80: 1, 90: 1}
+pixels from 50 to 100: 5
+```
+
+### 2. From scratch: a 3 × 3 mean filter with a loop
+
+```python
+noisy = np.full((5, 5), 100, dtype=np.uint8)
+noisy[2, 2] = 0                                  # one noise pixel
+
+smooth = noisy.copy()
+for r in range(1, 4):                            # interior only, so the 3 × 3 window fits
+    for c in range(1, 4):
+        window = noisy[r - 1:r + 2, c - 1:c + 2].astype(np.int32)
+        smooth[r, c] = round(window.sum() / 9)
+
+print(smooth)
+```
+
+Output:
+
+```text
+[[100 100 100 100 100]
+ [100  89  89  89 100]
+ [100  89  89  89 100]
+ [100  89  89  89 100]
+ [100 100 100 100 100]]
+```
+
+- `noisy[r - 1:r + 2, c - 1:c + 2]` is the 3 × 3 window around (r, c).
+- Every pixel whose window contains the 0 drops to 800 / 9 ≈ 89. The noise is weakened and spread out, not removed.
+
+### 3. The OpenCV way
+
+```python
+import cv2
+
+print(cv2.blur(noisy, (3, 3)))
+print(cv2.medianBlur(noisy, 3))
+
+hist = cv2.calcHist([img], [0], None, [256], [0, 256])
+print(hist.shape, int(hist.sum()), int(hist[50, 0]))
+```
+
+Output:
+
+```text
+[[100 100 100 100 100]
+ [100  89  89  89 100]
+ [100  89  89  89 100]
+ [100  89  89  89 100]
+ [100 100 100 100 100]]
+[[100 100 100 100 100]
+ [100 100 100 100 100]
+ [100 100 100 100 100]
+ [100 100 100 100 100]
+ [100 100 100 100 100]]
+(256, 1) 9 1
+```
+
+- `cv2.blur(src, ksize)` is the mean filter. `(3, 3)` is the window size. It matches our loop exactly, and also handles the border pixels (see API notes).
+- `cv2.medianBlur(src, ksize)` takes the **median** of each window. One odd pixel out of nine never reaches the middle of the sorted list, so the noise pixel vanishes completely.
+- `cv2.calcHist(images, channels, mask, histSize, ranges)`: `[img]` is a list of images, `[0]` the channel, `None` means no mask, `[256]` bins, `[0, 256]` the value range. It returns a 256 × 1 `float32` array; `hist[50, 0]` is how many pixels equal 50.
+
+### 4. On a real image: one call from each family
+
+Download [sample-scene.png](/images/sample-scene.png) into the folder you run Python from.
+
+```python
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+if img is None:
+    raise FileNotFoundError("Could not read sample-scene.png. Check the path.")
+
+brighter = cv2.add(img, 40)                               # point
+blurred = cv2.GaussianBlur(img, (5, 5), 0)                # neighbourhood
+hist = cv2.calcHist([img], [0], None, [256], [0, 256])    # global
+
+patch = img[5:35, 228:238]                                # a small, nearly flat area
+print("point:   pixel [100, 160]", img[100, 160], "->", brighter[100, 160])
+print("neighbourhood: noise (std) in the patch",
+      round(float(patch.std()), 1), "->", round(float(blurred[5:35, 228:238].std()), 1))
+print("global:  bins", hist.shape[0], "| pixels", int(hist.sum()),
+      "| above 200:", int(hist[201:].sum()))
+```
+
+Output:
+
+```text
+point:   pixel [100, 160] 17 -> 57
+neighbourhood: noise (std) in the patch 6.1 -> 2.0
+global:  bins 256 | pixels 64000 | above 200: 7800
+```
+
+- The point operation changes one pixel from its own value: 17 + 40 = 57.
+- The neighbourhood operation lowers the pixel-to-pixel noise in a flat area from a standard deviation of about 6 to about 2.
+- The global operation summarizes all 64,000 pixels; `hist[201:]` adds up the bins for values 201 to 255.
+
+## OpenCV API notes
+
+Versions: OpenCV 4.13.0 (`opencv-python==4.13.0.92`), NumPy 2.5.3. Signatures are copied from the installed library's help text.
+
+| Function | Python signature | Family |
+|---|---|---|
+| `cv2.add`, `cv2.threshold`, `cv2.LUT` | `add(src1, src2[, …])`, `threshold(src, thresh, maxval, type[, dst])` | point |
+| `cv2.cvtColor` | `cvtColor(src, code[, dst[, dstCn[, hint]]]) -> dst` | point (per pixel, across channels) |
+| `cv2.blur` | `blur(src, ksize[, dst[, anchor[, borderType]]]) -> dst` | neighbourhood |
+| `cv2.medianBlur` | `medianBlur(src, ksize[, dst]) -> dst` | neighbourhood |
+| `cv2.GaussianBlur` | `GaussianBlur(src, ksize, sigmaX[, dst[, sigmaY[, borderType[, hint]]]]) -> dst` | neighbourhood |
+| `cv2.calcHist` | `calcHist(images, channels, mask, histSize, ranges[, hist[, accumulate]]) -> hist` | global |
+| `cv2.equalizeHist` | `equalizeHist(src[, dst]) -> dst` | global statistics, applied per pixel |
+| `cv2.dft` | `dft(src[, dst[, flags[, nonzeroRows]]]) -> dst` | global / transform |
+
+**Borders.** A 3 × 3 window at the edge reaches outside the image. OpenCV fills in the missing pixels: `cv2.blur` and `cv2.GaussianBlur` reflect the image without repeating the edge pixel by default (`BORDER_REFLECT_101`), while `cv2.medianBlur` repeats the edge pixel. The neighbourhood lab in section 11 uses the same rules, so its numbers match OpenCV's.
+
+**Kernel sizes.** `ksize` for `medianBlur` must be odd and greater than 1 (3, 5, 7 …). For `GaussianBlur` both numbers must be odd and positive, or `(0, 0)` to compute them from `sigmaX`.
+
+**`calcHist` arguments are lists.** `[img]`, `[0]`, `[256]` and `[0, 256]` are lists even for one image, because the same function builds histograms of several images and channels.
+
+**Speed.** Point operations visit each pixel once. A k × k neighbourhood filter does about k² work per pixel, so a 15 × 15 filter is far heavier than a 3 × 3 one; OpenCV speeds up box and Gaussian filters by filtering rows and columns separately (17.4). A Fourier transform of an N-pixel image costs on the order of N log N operations (30.2).
+
+## Where it fails
+
+- **Point operations cannot see context.** They cannot remove a noise pixel or find an edge, because they never look at the neighbours. *Instead:* a neighbourhood filter (Module 18) or edge detector (Module 22).
+- **Neighbourhood filters blur what you want to keep.** A mean or Gaussian filter softens edges along with the noise, which hurts measurement. *Instead:* edge-preserving filters such as median or bilateral (18.3, 18.4), and the smallest kernel that does the job.
+- **The mean filter is a poor cure for impulse noise.** Section 10's comparison shows it only spreads salt-and-pepper pixels into grey smudges. *Instead:* the median filter (18.3).
+- **Global statistics hide local problems.** A histogram says how many pixels are bright, not where they are. A small hot spot can vanish into the overall distribution. *Instead:* compute statistics inside an ROI (1.2), or locally (adaptive thresholding, 13.5; CLAHE, 12.3).
+- **Some operations fit no family neatly.** Resizing, rotating and warping move pixels rather than recompute their values. *Instead:* treat them as geometric transforms (Module 16).
+
+## ⚠️ Common mistakes
+
+**1. Using a point operation to fix noise.** Brightness and contrast changes make noise more visible, not less. Noise needs a neighbourhood filter.
+
+**2. Even kernel sizes.** `cv2.medianBlur(img, 4)` fails: the window must have a centre pixel, so the size must be odd.
+
+**3. Forgetting the border.** Near the edge, part of each window lies outside the image, and the result depends on the border rule. Measurements in the outer `k // 2` pixels deserve extra caution.
+
+**4. Passing calcHist bare values.** `cv2.calcHist(img, 0, None, 256, [0, 256])` fails; every argument except `mask` must be a list: `cv2.calcHist([img], [0], None, [256], [0, 256])`.
+
+**5. Using `[0, 255]` as the histogram range.** The upper bound is exclusive, so `[0, 255]` leaves out pixels equal to 255. Use `[0, 256]`.
+
+**6. Assuming bigger kernels are better.** A 15 × 15 blur removes more noise but also erases fine detail and costs far more time. Increase the size only until the noise is acceptable.
+
+**7. Treating the families as strict laws.** Histogram equalization is global *and* point-wise; morphology is local but can join whole objects. Use the families to choose a starting point, not to argue about labels.
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The textbook view
+
+Gonzalez and Woods write spatial operations as g(x, y) = T[f(x, y)], where T acts on a neighbourhood of (x, y). When the neighbourhood is a single pixel (1 × 1), T becomes an *intensity transformation* s = T(r): a point operation. Larger neighbourhoods give *spatial filtering* [1, Ch. 3]. Frequency-domain processing is treated separately: transform the image, operate on the transform, transform back [1, Ch. 4].
+
+Szeliski's image-processing chapter is organised along the same lines: point operators first, then linear filtering and other neighbourhood operators, then Fourier transforms, then pyramids and wavelets, then geometric transformations [2, Ch. 3].
+
+### Neighbourhood operations as a weighted sum
+
+A linear neighbourhood filter computes, for every pixel, a weighted sum of the window:
+
+```text
+g(x, y) = Σ  w(s, t) · f(x + s, y + t)
+         s,t
+```
+
+The weights w are the kernel. Strictly, this formula is *correlation*; *convolution* flips the kernel first. For symmetric kernels such as the 1/9 average the two are identical. OpenCV's `filter2D` documentation states that the function computes correlation, not convolution [3]. Chapter 17.2 works through both step by step.
+
+### Why the median beats the mean on impulse noise
+
+The mean adds every value with equal weight, so one extreme value (0 or 255) shifts the result. The median only depends on the *order* of the values: if fewer than half the window's pixels are noise, the middle value is a clean one. This is why one noise pixel in a 3 × 3 window disappears completely under the median but only shrinks under the mean.
+
+### Histogram equalization: global statistics, point-wise mapping
+
+OpenCV's `equalizeHist` computes the histogram of the whole image, turns its running total into a lookup table, and then maps every pixel through that table [4]. The table is global; applying it is a point operation. That is the "doesn't fit one box" case in section 24 (Chapter 12.2).
+
+### Reading the stripe spectrum
+
+The stripes in section 17 repeat every 16 pixels across a 320-pixel-wide image, so they complete 320 / 16 = 20 cycles. The two outer dots in the Fourier magnitude sit 20 positions left and right of the centre; the centre dot is the image's average brightness. Finer stripes would push the dots further out. That is what "frequency representation" means (Chapter 30).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "`output = input × 1.5` for every pixel belongs to which family?",
+      options: ["Point-wise", "Neighbourhood", "Global / transform", "None"],
+      answer: 0,
+      explanation: "Each output depends only on the input pixel at the same place.",
+    },
+    {
+      question: "A median filter belongs to which family?",
+      options: ["Point-wise", "Neighbourhood", "Global / transform", "Geometric"],
+      answer: 1,
+      explanation: "Each output is the middle value of a small window around the pixel.",
+    },
+    {
+      question: "Why can't a point operation remove one isolated noise pixel?",
+      options: ["It is too slow", "It never looks at the neighbouring pixels, so it cannot tell noise from detail", "It only works on colour images", "It changes the image size"],
+      answer: 1,
+      explanation: "Telling an odd pixel from its surroundings requires comparing it with those surroundings.",
+    },
+    {
+      question: "`cv2.blur` on a 5 × 5 image of 100s with one 0 in the centre gives 89 around the centre. Why 89?",
+      options: ["The kernel is 9 × 9", "(8 × 100 + 0) / 9 ≈ 89: the mean includes the 0", "OpenCV rounds down by 11", "It is a median"],
+      answer: 1,
+      explanation: "Each 3 × 3 window containing the 0 sums to 800; 800 / 9 = 88.9, rounded to 89.",
+    },
+    {
+      question: "Histogram equalization (`cv2.equalizeHist`) is best described as…",
+      options: ["a purely local filter", "global statistics turned into a per-pixel mapping", "a geometric transform", "a deep-learning layer"],
+      answer: 1,
+      explanation: "It builds a lookup table from the whole-image histogram, then applies it to each pixel.",
+    },
+    {
+      question: "Which range should you give `cv2.calcHist` to include every 8-bit value?",
+      options: ["`[0, 255]`", "`[1, 256]`", "`[0, 256]`", "`[0, 254]`"],
+      answer: 2,
+      explanation: "The upper bound is exclusive, so [0, 256] covers 0 to 255.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+For the centre pixel of this window, compute (a) the 3 × 3 mean and (b) the 3 × 3 median. Which result is closer to the surrounding values, and why?
+
+```text
+100  102   98
+101  255   99
+ 97  100  103
+```
+
+<Solution>
+
+(a) Sum = 100 + 102 + 98 + 101 + 255 + 99 + 97 + 100 + 103 = 1055. Mean = 1055 / 9 = 117.2 → **117**.
+
+(b) Sorted: 97, 98, 99, 100, **100**, 101, 102, 103, 255. Median = **100**.
+
+The median (100) matches the neighbours; the mean (117) is pulled up by the single outlier 255.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Load `sample-scene-saltpepper.png`. Count the pixels that are exactly 0 or exactly 255 before filtering, after `cv2.blur(img, (3, 3))`, and after `cv2.medianBlur(img, 3)`.
+
+<Solution>
+
+```python
+import cv2
+import numpy as np
+
+img = cv2.imread("sample-scene-saltpepper.png", cv2.IMREAD_GRAYSCALE)
+if img is None:
+    raise FileNotFoundError("Could not read sample-scene-saltpepper.png. Check the path.")
+
+def extremes(a):
+    return int(np.count_nonzero((a == 0) | (a == 255)))
+
+print("noisy :", extremes(img))
+print("mean  :", extremes(cv2.blur(img, (3, 3))))
+print("median:", extremes(cv2.medianBlur(img, 3)))
+```
+
+Output:
+
+```text
+noisy : 4203
+mean  : 0
+median: 5
+```
+
+Both filters almost eliminate pure black and white pixels. But the numbers hide the difference: the mean gets to 0 only by smearing each noise pixel into a grey smudge over 9 pixels, while the median removes the noise pixels and leaves the scene sharp (look at the section 10 comparison). By this count the mean even looks better. Choosing the right measure matters as much as choosing the filter.
+
+</Solution>
+
+### Exercise 3 (coding)
+
+Using only the histogram of `sample-scene.png` (not the image itself), find the fraction of pixels brighter than 200 and the darkest value that occurs.
+
+<Solution>
+
+```python
+import cv2
+import numpy as np
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+if img is None:
+    raise FileNotFoundError("Could not read sample-scene.png. Check the path.")
+
+hist = cv2.calcHist([img], [0], None, [256], [0, 256]).ravel()
+total = hist.sum()
+print("brighter than 200:", round(100 * hist[201:].sum() / total, 1), "%")
+print("darkest value present:", int(np.nonzero(hist)[0][0]))
+```
+
+Output:
+
+```text
+brighter than 200: 12.2 %
+darkest value present: 0
+```
+
+7800 of 64,000 pixels lie above 200. Both answers come from the 256 histogram counts alone: once you have the histogram, global questions no longer need the pixels.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed. Pearson, 2018. Ch. 3 (intensity transformations and spatial filtering), Ch. 4 (filtering in the frequency domain).
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. Springer, 2022. Ch. 3 (point operators, linear filtering, neighbourhood operators, Fourier transforms, pyramids and wavelets, geometric transformations). Free online edition: [szeliski.org/Book](https://szeliski.org/Book/).
+3. OpenCV 4.13.0 documentation, *Image Filtering* (`blur`, `medianBlur`, `GaussianBlur`, `filter2D` computes correlation): [docs.opencv.org/4.13.0/d4/d86/group__imgproc__filter.html](https://docs.opencv.org/4.13.0/d4/d86/group__imgproc__filter.html).
+4. OpenCV 4.13.0 documentation, *Histograms* (`calcHist`, `equalizeHist`): [docs.opencv.org/4.13.0/d6/dc7/group__imgproc__hist.html](https://docs.opencv.org/4.13.0/d6/dc7/group__imgproc__hist.html).
+5. OpenCV 4.13.0 tutorials, *Smoothing Images* (averaging, Gaussian, median and bilateral filtering): [docs.opencv.org/4.13.0/d4/d13/tutorial_py_filtering.html](https://docs.opencv.org/4.13.0/d4/d13/tutorial_py_filtering.html).
+6. OpenCV 4.13.0 tutorials, *Histograms - 1: Find, Plot, Analyze*: [docs.opencv.org/4.13.0/d1/db7/tutorial_py_histogram_begins.html](https://docs.opencv.org/4.13.0/d1/db7/tutorial_py_histogram_begins.html).

@@ -29,3 +29,7 @@ export { Nested } from "./Nested";
 export { SceneSketch } from "./SceneSketch";
 export { DotGrid } from "./DotGrid";
 export { Arrow } from "./Arrow";
+export { Footprint } from "./Footprint";
+export { MiniHistogram } from "./MiniHistogram";
+export { KernelGrid } from "./KernelGrid";
+export { NeighborhoodLab } from "./NeighborhoodLab";

@@ -74,6 +74,25 @@ for cnt in contours14:
 cv2.putText(detected, f"{len(contours14)} objects", (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 images["sample-color-detected.png"] = detected
 
+# Chapter 1.5: neighbourhood operations clean noise; a transform reveals pattern scale.
+sp = scene.copy()
+noise_rng = np.random.default_rng(seed=15)
+u = noise_rng.random(sp.shape)
+sp[u < 0.03] = 0                                                    # pepper
+sp[u > 0.97] = 255                                                  # salt
+images["sample-scene-saltpepper.png"] = sp
+images["sample-scene-saltpepper-box.png"] = cv2.blur(sp, (3, 3))    # mean of 3 x 3
+images["sample-scene-saltpepper-median.png"] = cv2.medianBlur(sp, 3)  # median of 3 x 3
+
+yy, xx = np.mgrid[0:H, 0:W]
+stripes_f = 128 + 100 * np.sin(2 * np.pi * xx / 16)                # vertical stripes, period 16 px
+images["sample-stripes.png"] = np.rint(stripes_f).astype(np.uint8)
+spec = np.fft.fftshift(np.fft.fft2(stripes_f))
+mag = np.log1p(np.abs(spec))
+mag = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+# The spectrum has three single-pixel peaks (centre + one each side); enlarge them so they are visible.
+images["sample-stripes-spectrum.png"] = cv2.dilate(mag, np.ones((7, 7), np.uint8))
+
 for name, img in images.items():
     ok = cv2.imwrite(str(OUT / name), img)
     assert ok, f"could not write {name}"
