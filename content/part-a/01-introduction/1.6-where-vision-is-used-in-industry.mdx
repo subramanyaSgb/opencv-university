@@ -1,0 +1,1097 @@
+export const meta = {
+  number: "1.6",
+  title: "Where vision is used in industry",
+  minutes: 45,
+  objectives: [
+    "Name the ten main kinds of industrial vision application and the question each answers",
+    "Explain why a camera measures pixels, and how a scale turns pixels into millimetres",
+    "Combine vision results with PLC data to make a pass / fail decision",
+    "Explain why lighting and optics matter as much as the algorithm",
+    "Tell a camera from a complete vision system",
+    "Sketch a full industrial pipeline from the real world to a machine action",
+  ],
+};
+
+{/*
+  Lesson content: owner's text (5 Oct 2026), presented with visual components.
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+  All sketches and the thermal frame are illustrations or simulations, not real plant data.
+*/}
+
+# 1.6 Where vision is used in industry
+
+<Definition term="Industrial computer vision">using cameras and software to automatically inspect, measure, identify, locate, count, or monitor things in the real world.</Definition>
+
+This is the last chapter of Module 1. So now let's connect everything we've learned:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Pixels", tone: "data" },
+    { label: "Image processing", tone: "process" },
+    { label: "Computer vision", tone: "process" },
+    { label: "Industrial application", tone: "result" },
+  ]}
+/>
+
+## 1. What is industrial vision?
+
+Imagine a steel plant. Humans are inspecting:
+
+<Chips items={["Hot steel", "Ladles", "Rod bundles", "Billets", "Slabs", "Machines"]} />
+
+A person might have to continuously watch cameras and make decisions. Instead, we can build:
+
+<Flow
+  steps={[
+    { label: "Camera", tone: "world" },
+    { label: "Image", tone: "data" },
+    { label: "Image processing", tone: "process" },
+    { label: "Computer vision", tone: "process" },
+    { label: "Result", tone: "result" },
+  ]}
+/>
+
+<Arrow />
+
+<Columns>
+<Panel title="Display" tone="a">
+
+Shown to an operator.
+
+</Panel>
+<Panel title="Action" tone="c">
+
+Sent to a machine, PLC or alarm.
+
+</Panel>
+</Columns>
+
+For example:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Camera sees rod bundle", tone: "world" },
+    { label: "Detect rod ends", tone: "process" },
+    { label: "Count = 52", tone: "data" },
+    { label: "Expected = 52", tone: "data" },
+    { label: "PASS", tone: "result" },
+  ]}
+/>
+
+That's industrial vision.
+
+## 2. Why do industries use cameras?
+
+Because cameras can **continuously observe** things. Imagine a production line moving very quickly:
+
+<Conveyor caption="Products pass under the camera one after another. The red one is defective." />
+
+A human might miss:
+
+<Chips items={["A defective product", "A missing component", "A wrong dimension", "A crack", "An incorrect label", "An object in the wrong position"]} />
+
+A vision system can **inspect every frame**:
+
+<Flow direction="right" steps={[{ label: "Camera", tone: "world" }, { label: "Frame 1 → inspect", tone: "process" }, { label: "Frame 2 → inspect", tone: "process" }, { label: "Frame 3 → inspect", tone: "process" }, { label: "Frame 4 → inspect", tone: "process" }, { label: "…", tone: "plain" }]} highlightLast={false} />
+
+## 3. The major industrial vision applications
+
+There are several major categories. Let's understand each one.
+
+<Takeaways>
+<Takeaway n={1} title="Inspection">Is it good or defective?</Takeaway>
+<Takeaway n={2} title="Measurement">How big is it?</Takeaway>
+<Takeaway n={3} title="Detection">Where is the object?</Takeaway>
+<Takeaway n={4} title="Counting">How many are there?</Takeaway>
+<Takeaway n={5} title="Identification">Which object is this?</Takeaway>
+<Takeaway n={6} title="Tracking">Where is it moving?</Takeaway>
+<Takeaway n={7} title="Positioning">Exactly where, so a robot can act?</Takeaway>
+<Takeaway n={8} title="OCR / code reading">What does the label say?</Takeaway>
+<Takeaway n={9} title="Safety monitoring">Is anyone at risk?</Takeaway>
+<Takeaway n={10} title="Process monitoring">Is the process running normally?</Takeaway>
+</Takeaways>
+
+## 4. Application 1: inspection
+
+This is one of the biggest applications. The system asks: *"Is this product good or defective?"*
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Product", tone: "world" },
+    { label: "Camera", tone: "world" },
+    { label: "Image", tone: "data" },
+    { label: "Vision inspection", tone: "process" },
+    { label: "GOOD / DEFECT", tone: "result" },
+  ]}
+/>
+
+**Example: surface defect.** Imagine a steel plate with a crack. The vision system detects the crack:
+
+<CrackSketch />
+
+<Glossary
+  items={[
+    { term: "Defect", desc: "Is there one?", example: "YES" },
+    { term: "Defect type", desc: "What kind?", example: "crack" },
+    { term: "Location", desc: "Where in the image?", example: "x, y" },
+    { term: "Length", desc: "How long (after calibration)?", example: "120 mm" },
+  ]}
+/>
+
+## 5. Application 2: measurement
+
+Instead of simply asking *"Is it defective?"* we can ask: *"How big is it?"*
+
+<DimSketch name="BILLET" length="1200 mm" width="150 mm" />
+
+A camera system can determine **length = 1200 mm** and **width = 150 mm**. But there's an important point:
+
+<Callout kind="key">
+
+A camera does not automatically know millimetres. **The image gives us pixels.**
+
+</Callout>
+
+We need **calibration or geometry** to convert pixels → physical units. If one pixel covers 1 mm, then:
+
+<Equation terms={[{ value: "1200", label: "pixels" }, { op: "×", value: "1 mm", label: "per pixel" }, { op: "=", value: "1200 mm", result: true }]} />
+
+But if the camera is closer, so that **10 pixels = 1 mm**, the same 1200 pixels mean something else:
+
+<Equation terms={[{ value: "1200", label: "pixels" }, { op: "÷", value: "10", label: "pixels per mm" }, { op: "=", value: "120 mm", result: true }]} />
+
+The pixel count alone says nothing about size until we know the scale.
+
+**Try it.** Change the field of view and the image width, and watch what one pixel is worth.
+
+<ScaleCalc />
+
+We'll study this much more deeply later under camera geometry and metrology (Modules 41 and 49).
+
+## 6. Application 3: object detection
+
+Now the question becomes: *"Where is the object?"* Suppose a camera sees a red object and a blue object. A vision system could output both objects **and their locations**:
+
+<DetectSketch />
+
+<Columns>
+<Panel title="Object 1: red object" tone="plain">
+
+x = 150, y = 100
+
+</Panel>
+<Panel title="Object 2: blue object" tone="plain">
+
+x = 500, y = 250
+
+</Panel>
+</Columns>
+
+Modern AI-based systems often represent this using **bounding boxes**: a rectangle around each object, with a class name such as **ROD**.
+
+## 7. Application 4: counting
+
+This is particularly relevant to steel plants. The system asks: *"How many objects are there?"*
+
+<DotGrid rows={1} cols={8} label="Detected objects = 8" />
+
+Industrial examples include:
+
+<Chips items={["Counting rods", "Counting bottles", "Counting components", "Counting packages", "Counting parts", "Counting products"]} />
+
+## 8. Rod counter example
+
+A rod counter is a perfect example. The camera sees the bundle end-on:
+
+<DotGrid rows={3} cols={8} label="Detected count = 24" />
+
+The **PLC** provides:
+
+<Glossary
+  items={[
+    { term: "Weight per metre", desc: "From the product recipe.", example: "2.0 kg/m" },
+    { term: "Rod length", desc: "Cut length of each rod.", example: "12 m" },
+    { term: "Total bundle weight", desc: "From the bundle scale.", example: "576 kg" },
+  ]}
+/>
+
+The expected number can then be calculated (example numbers):
+
+<Equation
+  terms={[
+    { value: "576 kg", label: "bundle weight" },
+    { op: "÷", value: "(2.0 kg/m × 12 m)", label: "weight of one rod" },
+    { op: "=", value: "24", label: "expected count", result: true },
+  ]}
+/>
+
+<Equation terms={[{ value: "24", label: "expected" }, { op: "=", value: "24", label: "detected" }, { op: "→", value: "PASS", label: "decision", result: true }]} />
+
+This is a combination of:
+
+<Equation terms={[{ value: "Image processing" }, { op: "+", value: "Computer vision" }, { op: "+", value: "PLC data" }, { op: "+", value: "Decision logic" }]} />
+
+That is a **complete industrial system**, not just an image-processing algorithm.
+
+## 9. Application 5: identification
+
+Sometimes we don't just want to detect an object. We want to know: *"Which object is this?"*
+
+<Flow direction="right" steps={[{ label: "Camera", tone: "world" }, { label: "Image", tone: "data" }, { label: "Recognition", tone: "process" }, { label: "\"Billet #12345\"", tone: "result" }]} />
+
+<Columns>
+<Panel title="One part…" tone="a">
+
+<Flow direction="right" steps={["Part", "Vision system", "Model A"]} />
+
+</Panel>
+<Panel title="…versus another" tone="c">
+
+<Flow direction="right" steps={["Part", "Vision system", "Model B"]} />
+
+</Panel>
+</Columns>
+
+This is commonly called **classification / recognition**, depending on the exact task.
+
+## 10. Application 6: tracking
+
+Detection answers *"Where is the object now?"* Tracking asks: *"Where is the object moving over time?"*
+
+<TrackSketch caption="The same object found in four frames. Linking the detections gives its path: it is moving right." />
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Video", tone: "data" },
+    { label: "Detect object", tone: "process" },
+    { label: "Frame-to-frame association", tone: "process" },
+    { label: "Track object", tone: "process" },
+    { label: "Position over time", tone: "result" },
+  ]}
+/>
+
+Industrial examples:
+
+<Chips items={["Tracking vehicles", "Tracking ladles", "Tracking billets", "Tracking products on conveyors", "Tracking robots", "Tracking material movement"]} />
+
+## 11. Application 7: positioning
+
+Vision can determine **where** something is, precisely enough for a machine to act on it:
+
+<Conveyor part caption="The system reports the part's position and angle on the conveyor." />
+
+A robot can then use this information:
+
+<Flow direction="right" steps={[{ label: "Camera", tone: "world" }, { label: "Find part", tone: "process" }, { label: "Calculate position", tone: "process" }, { label: "Robot", tone: "world" }, { label: "Pick part", tone: "result" }]} />
+
+This is called **vision-guided robotics** when vision provides guidance to a robot.
+
+## 12. Application 8: OCR and code reading
+
+Cameras can also **read** information printed on products. For example:
+
+<LabelPlate text="JSW-2026-BF-00125" />
+
+<Flow direction="right" steps={[{ label: "Image", tone: "data" }, { label: "OCR", tone: "process" }, { label: "\"JSW-2026-BF-00125\"", tone: "result" }]} />
+
+Other examples:
+
+<Chips items={["Barcode", "QR code", "Serial number", "Heat number", "Batch number", "Product ID"]} />
+
+This is extremely useful in manufacturing **traceability**.
+
+## 13. Application 9: safety monitoring
+
+Vision systems can also monitor safety conditions.
+
+<Columns>
+<Panel title="Restricted area" tone="warn">
+
+<Flow steps={[{ label: "Camera", tone: "world" }, { label: "Worker enters restricted area", tone: "data" }, { label: "Detection", tone: "process" }, { label: "Alarm", tone: "result" }]} />
+
+</Panel>
+<Panel title="PPE detection" tone="a">
+
+<Flow steps={[{ label: "Person", tone: "world" }, { label: "PPE detection", tone: "process" }]} highlightLast={false} />
+
+- Helmet? **YES**
+- Vest? **YES**
+- Safety shoes? …
+
+</Panel>
+</Columns>
+
+<Callout kind="key">
+
+The camera provides visual information; **the system converts that information into a decision or alert.**
+
+</Callout>
+
+## 14. Application 10: process monitoring
+
+This is especially important in heavy industries. Instead of inspecting the final product, we **monitor the process itself**:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Industrial process", tone: "world" },
+    { label: "Camera", tone: "world" },
+    { label: "Continuous monitoring", tone: "process" },
+    { label: "Detect abnormal condition", tone: "process" },
+    { label: "Alert / control action", tone: "result" },
+  ]}
+/>
+
+<Chips items={["Furnace monitoring", "Conveyor monitoring", "Ladle monitoring", "Machine monitoring", "Material flow monitoring", "Combustion monitoring", "Thermal monitoring"]} />
+
+## 15. Thermal vision
+
+Thermal imaging is central to monitoring in hot processes. A normal camera produces an **RGB image**; a thermal camera produces information related to **temperature**:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Hot object", tone: "world" },
+    { label: "Thermal camera", tone: "world" },
+    { label: "Temperature image", tone: "data" },
+    { label: "Vision processing", tone: "process" },
+    { label: "Temperature / hotspot / anomaly", tone: "result" },
+  ]}
+/>
+
+For example (a **simulated** frame, ambient 30 °C with a hot region):
+
+<ImageCompare
+  before={{ src: "/images/sample-thermal-gray.png", label: "Temperature as gray" }}
+  after={{ src: "/images/sample-thermal-inferno.png", label: "Colour palette + hotspot" }}
+  width={320}
+  height={200}
+  alt="A simulated thermal frame, shown in gray and with a colour palette and a marked hotspot"
+  caption="Same numbers, two displays. The colour palette only helps people see; the system works on the temperature values."
+/>
+
+The system could determine **maximum temperature** and **hotspot location**. This can be used for process monitoring and abnormal-condition detection. (Turning a thermal camera's raw values into reliable temperatures needs emissivity settings and calibration: Module 46.)
+
+## 16. Why industrial vision is different from normal photography
+
+This is a very important engineering concept.
+
+<Columns>
+<Panel title="Your phone camera is designed for" tone="a">
+
+**Taking visually pleasing photographs.**
+
+</Panel>
+<Panel title="An industrial vision system is designed for" tone="c">
+
+**Producing reliable measurements or decisions.**
+
+</Panel>
+</Columns>
+
+These are very different goals.
+
+## 17. Phone camera vs industrial camera
+
+<Columns>
+<Panel title="Phone camera" tone="a">
+
+<Flow direction="right" steps={["Human", "Nice picture"]} />
+
+The system may automatically adjust:
+
+<Chips items={["Exposure", "Colour", "Sharpening", "HDR", "Noise reduction"]} />
+
+</Panel>
+<Panel title="Industrial vision system" tone="c">
+
+<Flow direction="right" steps={["Machine", "Reliable measurement", "Decision"]} />
+
+We care about:
+
+<Chips items={["Repeatability", "Accuracy", "Timing", "Lighting", "Camera position", "Calibration", "Synchronization", "Communication", "Reliability", "Environmental conditions"]} />
+
+</Panel>
+</Columns>
+
+<Callout kind="mistake">
+
+**Camera moves 2 mm → measurement may change.** An automatic adjustment that improves a photo (auto-exposure, auto white balance, sharpening) changes the pixel values your algorithm depends on. Industrial cameras are usually set to fixed, manual values.
+
+</Callout>
+
+So industrial vision requires much more engineering than simply taking a picture.
+
+## 18. Industrial vision pipeline
+
+A typical system might look like:
+
+<Flow
+  steps={[
+    { label: "Real world", tone: "world" },
+    { label: "Lighting", tone: "world" },
+    { label: "Camera", tone: "world" },
+    { label: "Image frame", tone: "data" },
+    { label: "Image processing", tone: "process" },
+  ]}
+  highlightLast={false}
+/>
+
+<Arrow />
+
+<Columns>
+<Panel title="Classical CV" tone="a">
+</Panel>
+<Panel title="AI model" tone="b">
+</Panel>
+</Columns>
+
+<Arrow />
+
+<Flow steps={[{ label: "Result", tone: "result" }]} highlightLast={false} />
+
+<Arrow />
+
+<Columns>
+<Panel title="Count" tone="c">
+</Panel>
+<Panel title="Measure" tone="c">
+</Panel>
+<Panel title="Detect" tone="c">
+</Panel>
+</Columns>
+
+<Arrow />
+
+<Flow steps={[{ label: "Decision", tone: "result" }]} highlightLast={false} />
+
+<Arrow />
+
+<Columns>
+<Panel title="Dashboard → Operator" tone="a">
+</Panel>
+<Panel title="PLC → Machine" tone="d">
+</Panel>
+</Columns>
+
+This is the type of architecture you'll increasingly learn to design.
+
+## 19. Why lighting is so important
+
+Here's a secret of industrial vision:
+
+<Callout kind="key">
+
+A large part of a good vision system is **controlling the image before the algorithm even sees it.**
+
+</Callout>
+
+Suppose you're trying to detect a crack.
+
+<Columns>
+<Panel title="Bad lighting" tone="warn">
+
+<Flow steps={["Camera", "Poor contrast", "Difficult image", "Difficult detection"]} highlightLast={false} />
+
+</Panel>
+<Panel title="Good lighting" tone="good">
+
+<Flow steps={["Controlled light", "Clear contrast", "Better image", "Easier detection"]} />
+
+</Panel>
+</Columns>
+
+Here is the same crack under both conditions, with **exactly the same algorithm** (an automatic Otsu threshold) applied to each:
+
+<ImageCompare
+  before={{ src: "/images/sample-plate-poor.png", label: "Poor lighting" }}
+  after={{ src: "/images/sample-plate-poor-otsu.png", label: "Same algorithm" }}
+  width={320}
+  height={200}
+  alt="A faint crack on an unevenly lit plate, and the threshold result: noise everywhere"
+  caption="Poor lighting: low contrast and uneven brightness. The threshold result is mostly noise."
+/>
+
+<ImageCompare
+  before={{ src: "/images/sample-plate-good.png", label: "Controlled lighting" }}
+  after={{ src: "/images/sample-plate-good-otsu.png", label: "Same algorithm" }}
+  width={320}
+  height={200}
+  alt="A clear crack on an evenly lit plate, and the threshold result: the crack alone"
+  caption="Controlled lighting: high contrast, even background. The same threshold finds the crack and nothing else."
+/>
+
+So:
+
+<Equation terms={[{ value: "Good lighting" }, { op: "+", value: "Good camera" }, { op: "+", value: "Good optics" }, { op: "+", value: "Good processing" }, { op: "=", value: "Reliable vision system", result: true }]} />
+
+Not:
+
+<Equation terms={[{ value: "Bad image" }, { op: "+", value: "AI" }, { op: "≠", value: "Magic" }]} />
+
+AI cannot magically fix every bad acquisition problem.
+
+## 20. Example: steel industry
+
+Let's put many applications together. Imagine a steel rolling mill:
+
+<Tree
+  root="Steel mill"
+  branches={[
+    { title: "Billet camera", items: ["Billet system", "Measurement", "→ Length"] },
+    { title: "Rod camera", items: ["Rod system", "Counting", "→ Count"] },
+    { title: "Slab camera", items: ["Slab system", "Inspection", "→ Defect"] },
+  ]}
+/>
+
+<Arrow />
+
+<Flow direction="right" steps={[{ label: "Database", tone: "data" }, { label: "Dashboard", tone: "result" }]} />
+
+One industry can therefore use **many different vision systems simultaneously**.
+
+## 21. Vision doesn't always mean a visible-light camera
+
+This is another important point. "Vision" is a broad engineering term. Depending on the application, you may use:
+
+<Chips items={["Visible camera", "Thermal camera", "Infrared camera", "Line-scan camera", "3D camera", "Depth camera", "X-ray imaging", "Other specialized sensors"]} />
+
+The basic concept remains:
+
+<Flow direction="right" steps={[{ label: "Physical world", tone: "world" }, { label: "Sensor", tone: "world" }, { label: "Digital data", tone: "data" }, { label: "Processing", tone: "process" }, { label: "Information", tone: "result" }]} />
+
+## 22. Vision system vs camera
+
+Don't confuse these two.
+
+<Columns>
+<Panel title="A camera is only one component" tone="warn">
+
+<Flow steps={["Camera", "Image"]} highlightLast={false} />
+
+</Panel>
+<Panel title="A complete vision system may contain" tone="good">
+
+<Chips items={["Camera", "Lens", "Lighting", "Trigger", "Computer", "Image processing", "Computer vision", "AI", "PLC", "Database", "Dashboard", "Alarm"]} />
+
+</Panel>
+</Columns>
+
+This distinction is extremely important when you start designing industrial systems.
+
+## 23. Example: complete industrial inspection
+
+Imagine a production line:
+
+<Flow
+  steps={[
+    { label: "Product", tone: "world" },
+    { label: "Camera", tone: "world" },
+    { label: "Image", tone: "data" },
+    { label: "Preprocessing", tone: "process" },
+    { label: "Vision / AI", tone: "process" },
+    { label: "Defect found?", tone: "plain" },
+  ]}
+  highlightLast={false}
+/>
+
+<Columns>
+<Panel title="YES → FAIL" tone="warn">
+</Panel>
+<Panel title="NO → PASS" tone="good">
+</Panel>
+</Columns>
+
+<Arrow />
+
+<Flow steps={[{ label: "Result", tone: "result" }, { label: "PLC / Dashboard", tone: "plain" }]} highlightLast={false} />
+
+That's a real engineering workflow.
+
+## 24. The 6 major questions industrial vision answers
+
+You can remember industrial vision using these questions:
+
+<Takeaways>
+<Takeaway n={1} title="WHAT? — What object is this?">
+
+→ **Classification / recognition**
+
+</Takeaway>
+<Takeaway n={2} title="WHERE? — Where is the object?">
+
+→ **Detection / localization**
+
+</Takeaway>
+<Takeaway n={3} title="HOW MANY? — How many objects?">
+
+→ **Counting**
+
+</Takeaway>
+<Takeaway n={4} title="HOW BIG? — What are its dimensions?">
+
+→ **Measurement / metrology**
+
+</Takeaway>
+<Takeaway n={5} title="IS IT GOOD? — Is there a defect?">
+
+→ **Inspection / quality control**
+
+</Takeaway>
+<Takeaway n={6} title="WHERE IS IT GOING? — Where is the object moving?">
+
+→ **Tracking**
+
+</Takeaway>
+</Takeaways>
+
+These six questions cover a huge portion of practical industrial vision.
+
+**Try it.** Which question does each system answer?
+
+<TaskSorter
+  kinds={[
+    { key: "what", label: "What?" },
+    { key: "where", label: "Where?" },
+    { key: "many", label: "How many?" },
+    { key: "big", label: "How big?" },
+    { key: "good", label: "Is it good?" },
+    { key: "going", label: "Where is it going?" },
+  ]}
+  tasks={[
+    { task: "Check that every bundle has the expected number of rods", answer: "many", why: "The output is a count, compared with the expected count." },
+    { task: "Measure billet length before cutting to order", answer: "big", why: "A dimension in millimetres: measurement." },
+    { task: "Flag cracks and scale on hot slab surfaces", answer: "good", why: "A good / defect decision: inspection." },
+    { task: "Follow a ladle crane across the shop floor", answer: "going", why: "Position over time: tracking." },
+    { task: "Tell grade A billets from grade B by their marking", answer: "what", why: "Which kind of object it is: classification." },
+    { task: "Give a robot the position and angle of a part to pick", answer: "where", why: "Locating the object precisely: detection / localization." },
+  ]}
+/>
+
+## 25. One complete example
+
+Let's imagine a **billet inspection system**. The camera sees a billet:
+
+<DimSketch name="BILLET" length="1200 mm" width="150 mm" />
+
+The system performs:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "1. Capture image", tone: "world" },
+    { label: "2. Correct distortion", tone: "process" },
+    { label: "3. Remove noise", tone: "process" },
+    { label: "4. Detect billet", tone: "process" },
+    { label: "5. Find boundaries", tone: "process" },
+    { label: "6. Measure dimensions", tone: "process" },
+    { label: "7. Check quality", tone: "process" },
+    { label: "8. Store result", tone: "result" },
+  ]}
+/>
+
+Output:
+
+<Glossary
+  items={[
+    { term: "Billet ID", desc: "From OCR or the tracking system.", example: "12345" },
+    { term: "Length", desc: "Measured.", example: "1200 mm" },
+    { term: "Width", desc: "Measured.", example: "150 mm" },
+    { term: "Defect", desc: "Inspection result.", example: "NO" },
+    { term: "Status", desc: "Decision.", example: "PASS" },
+  ]}
+/>
+
+That is much more than "taking a picture."
+
+## 26. The most important engineering lesson
+
+A successful industrial vision system is **not** just *camera + AI*. It is:
+
+<Flow
+  steps={[
+    { label: "Optics", tone: "world" },
+    { label: "Lighting", tone: "world" },
+    { label: "Camera", tone: "world" },
+    { label: "Image data", tone: "data" },
+    { label: "Image processing", tone: "process" },
+    { label: "Computer vision / AI", tone: "process" },
+    { label: "Measurement / result", tone: "result" },
+    { label: "Control / decision", tone: "result" },
+  ]}
+/>
+
+<Callout kind="mistake">
+
+If **any** part is badly designed, the complete system can fail.
+
+</Callout>
+
+## 27. Module 1: everything you've learned
+
+You have now completed the entire **Module 1: Introduction to image processing**:
+
+<Flow
+  steps={[
+    { label: "1.1 What is image processing?", tone: "data" },
+    { label: "1.2 Pixels and the image grid", tone: "data" },
+    { label: "1.3 Grayscale and colour values", tone: "data" },
+    { label: "1.4 Image processing vs computer vision", tone: "process" },
+    { label: "1.5 The three families of image operations", tone: "process" },
+    { label: "1.6 Where vision is used in industry", tone: "result" },
+  ]}
+/>
+
+The progression is intentional:
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Image", tone: "data" },
+    { label: "Pixels", tone: "data" },
+    { label: "Pixel values", tone: "data" },
+    { label: "Image processing", tone: "process" },
+    { label: "Computer vision", tone: "process" },
+    { label: "Image operations", tone: "process" },
+    { label: "Industrial applications", tone: "result" },
+  ]}
+/>
+
+And this gives you the foundation for the next module.
+
+### 🧠 Final mental model
+
+If someone asks *"What is an industrial computer vision system?"* you should be able to answer:
+
+<Callout kind="key">
+
+It is a system that uses **cameras or other imaging sensors**, together with **image processing and computer vision algorithms**, to automatically **inspect, measure, detect, count, identify, track, or monitor** objects and processes in the real world.
+
+</Callout>
+
+And remember: **camera ≠ vision system.**
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Camera", tone: "world" },
+    { label: "Image", tone: "data" },
+    { label: "Processing", tone: "process" },
+    { label: "Vision / AI", tone: "process" },
+    { label: "Information", tone: "result" },
+    { label: "Decision", tone: "result" },
+    { label: "Industrial action", tone: "world" },
+  ]}
+/>
+
+Module 1 is now complete. The next module is **Module 2: How cameras form images**, starting with **2.1 Light and the pinhole camera**.
+
+## Code
+
+Three small pieces of a real industrial system: a measurement with a tolerance, a count checked against PLC data, and the effect of lighting on a fixed algorithm. Then a thermal alarm.
+
+### 1. From scratch: pixels to millimetres, then a decision
+
+```python
+import numpy as np
+
+fov_mm, image_px = 1920.0, 1920          # the camera sees 1920 mm across 1920 pixels
+mm_per_px = fov_mm / image_px
+edges_px = np.array([212, 1411])          # left and right billet edges found in the image (columns)
+length_mm = (edges_px[1] - edges_px[0]) * mm_per_px
+
+nominal, tolerance = 1200.0, 5.0          # order length and allowed error, in mm
+status = "PASS" if abs(length_mm - nominal) <= tolerance else "FAIL"
+print("mm per pixel:", mm_per_px)
+print("length:", length_mm, "mm ->", status)
+```
+
+Output:
+
+```text
+mm per pixel: 1.0
+length: 1199.0 mm -> PASS
+```
+
+- `mm_per_px` is the scale from section 5. In a real system it comes from calibration, not from a guess.
+- The decision needs a **tolerance**: real measurements are never exactly the nominal value.
+
+### 2. From scratch: a count checked against PLC data
+
+```python
+weight_per_m = 2.0       # kg per metre   (from the PLC; example numbers)
+rod_length_m = 12.0      # metres
+bundle_kg = 576.0        # bundle scale reading
+
+expected = round(bundle_kg / (weight_per_m * rod_length_m))
+detected = 24            # from the vision system
+
+print("expected:", expected, "detected:", detected)
+print("PASS" if detected == expected else "FAIL")
+```
+
+Output:
+
+```text
+expected: 24 detected: 24
+PASS
+```
+
+The vision part produces one number; the decision needs data from the rest of the plant.
+
+### 3. The OpenCV way: same algorithm, two lighting conditions
+
+Download [sample-plate-poor.png](/images/sample-plate-poor.png), [sample-plate-good.png](/images/sample-plate-good.png) and [sample-plate-crack-mask.png](/images/sample-plate-crack-mask.png) (the true crack position) into the folder you run Python from.
+
+```python
+import cv2
+import numpy as np
+
+truth = cv2.imread("sample-plate-crack-mask.png", cv2.IMREAD_GRAYSCALE)
+if truth is None:
+    raise FileNotFoundError("Could not read sample-plate-crack-mask.png. Check the path.")
+truth = truth > 0
+
+for name in ("sample-plate-poor.png", "sample-plate-good.png"):
+    img = cv2.imread(name, cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        raise FileNotFoundError(f"Could not read {name}. Check the path.")
+    t, seg = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    found = seg > 0
+    hit = np.count_nonzero(found & truth) / np.count_nonzero(truth)
+    wrong = np.count_nonzero(found & ~truth)
+    print(f"{name}: threshold {t:.0f}, crack found {100 * hit:.0f}%, wrong pixels {wrong}")
+```
+
+Output:
+
+```text
+sample-plate-poor.png: threshold 129, crack found 84%, wrong pixels 31401
+sample-plate-good.png: threshold 64, crack found 100%, wrong pixels 0
+```
+
+- `cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)` chooses the threshold automatically (Otsu's method, Chapter 13.3) and makes dark pixels white. The `0` is ignored when Otsu is used; the chosen value comes back as `t`.
+- Under poor lighting it finds most of the crack but also marks about 31,000 background pixels: unusable. Under controlled lighting it finds the whole crack and nothing else.
+- Nothing about the algorithm changed. Only the image did.
+
+### 4. A thermal alarm (simulated data)
+
+```python
+import cv2
+import numpy as np
+
+H, W = 200, 320
+yy, xx = np.mgrid[0:H, 0:W]
+temp = 30 + 920 * np.exp(-(((xx - 200) / 45.0) ** 2 + ((yy - 90) / 30.0) ** 2))   # simulated °C
+
+min_t, max_t, _, (x, y) = cv2.minMaxLoc(temp)
+print(f"max {max_t:.0f} °C at x={x}, y={y}")
+print("pixels above 800 °C:", np.count_nonzero(temp > 800))
+print("ALARM" if max_t > 900 else "normal")
+```
+
+Output:
+
+```text
+max 950 °C at x=200, y=90
+pixels above 800 °C: 753
+ALARM
+```
+
+- The array holds temperatures, not 0–255 brightness values, so it is `float64`. `cv2.minMaxLoc` works on it directly.
+- The location comes back as (x, y), as in Chapter 1.2.
+- A real system reads these values from a radiometric thermal camera, with emissivity set for the material (Module 46).
+
+## OpenCV API notes
+
+Versions: OpenCV 4.13.0 (`opencv-python==4.13.0.92`), NumPy 2.5.3. Signatures are copied from the installed library's help text.
+
+| Function | Python signature | Used here for |
+|---|---|---|
+| `cv2.threshold` with `THRESH_OTSU` | `threshold(src, thresh, maxval, type[, dst]) -> retval, dst` | automatic threshold; returns the value it chose |
+| `cv2.minMaxLoc` | `minMaxLoc(src[, mask]) -> minVal, maxVal, minLoc, maxLoc` | hottest pixel and its (x, y) |
+| `cv2.applyColorMap` | `applyColorMap(src, colormap[, dst]) -> dst` | false-colour display of a single-channel image |
+| `cv2.normalize` | `normalize(src, dst[, alpha[, beta[, norm_type[, dtype[, mask]]]]]) -> dst` | stretch values to 0–255 for display |
+
+**Inputs and types.**
+
+- Otsu's method in OpenCV works on 8-bit (and 16-bit) single-channel images only. The value you pass as `thresh` is ignored.
+- `minMaxLoc` accepts 8-bit, 16-bit and floating-point single-channel arrays, so it works directly on temperature or depth data.
+- `applyColorMap` needs an 8-bit input, so temperatures are normalized to 0–255 first. Do measurements on the original values, never on the coloured display image.
+
+**In production.** Industrial cameras connect over standard interfaces such as GigE Vision and USB3 Vision, configured through the GenICam standard, usually with a vendor SDK rather than `cv2.VideoCapture` (59.5, 59.6). Results go to PLCs over industrial protocols and to databases and dashboards (60.4, 60.5).
+
+## Where it fails
+
+- **Uncontrolled lighting.** Daylight, reflections from hot steel, smoke and steam change the image constantly. *Instead:* engineer the lighting and shielding first (59.3, 59.4), then choose robust algorithms.
+- **Calibration that drifts.** A camera knocked by a few millimetres, or warmed by the process, silently changes the pixel-to-mm scale. *Instead:* rigid mounts, reference targets in view, and regular re-calibration checks (41.6, 49.1).
+- **Harsh environments.** Heat, dust, vibration and water damage cameras and dirty the lens. *Instead:* protective housings, air purging and cooling, chosen together with the camera (59.1).
+- **Timing and motion.** A fast product blurs, or the image is taken at the wrong moment. *Instead:* short exposure, proper triggering, and line-scan cameras with encoders for continuous material (2.6, 59.5, 59.7).
+- **Rare events with no examples.** A defect type that has never been seen cannot be learned from data, and rules may not cover it either. *Instead:* anomaly detection (55.6), operator feedback, and a safe default decision.
+- **A wrong decision costs more than a missed image.** Stopping a mill line on a false alarm is expensive. *Instead:* measure false-alarm and miss rates on real plant data before go-live (58.4), and agree acceptable rates with the plant.
+
+## ⚠️ Common mistakes
+
+**1. Treating the camera as the system.** Budget and design time go to the camera, while lighting, mounting, triggering, PLC integration and the dashboard are left until site. Plan the whole chain (section 22).
+
+**2. Measuring in pixels and reporting millimetres.** Without calibration, a pixel count is not a length. Record the scale, how it was obtained, and when.
+
+**3. Leaving auto-exposure and auto white balance on.** The camera changes the image to look nice, and your thresholds stop working. Fix exposure, gain and white balance.
+
+**4. Measuring on the colour-mapped display image.** False colours are for people. Compute temperatures and statistics on the original data.
+
+**5. Testing only on good images.** A system tuned in the lab on clean samples fails in the plant. Collect images across shifts, seasons, product types and dirty-lens conditions.
+
+**6. No tolerance in the decision.** `length == 1200` is never true. Compare against a tolerance agreed with the customer.
+
+**7. Expecting AI to rescue a bad image.** Section 19's poor-lighting plate is hard for any method. Fix acquisition first.
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### What a vision system is made of
+
+Machine-vision engineering texts describe a vision system as a chain: illumination, optics, sensor and camera, interface, processing, and output to the controlling system. Each link limits the whole [1], [2]. The algorithms you learn in this course are one link.
+
+### How many pixels does a feature need?
+
+Sampling theory (Chapter 3.5) says a repeating pattern needs at least two samples per period to be represented at all. Practical inspection needs more: the smallest feature you must detect should cover several pixels, so that noise and blur do not hide it. Work out the scale before choosing a camera: field of view ÷ pixels = mm per pixel (section 5, Chapter 2.4), and compare it with the smallest defect and the required measurement tolerance [2].
+
+### Sub-pixel measurement
+
+Edges and centres can be located to a fraction of a pixel by fitting a model to the intensity profile, so measurement accuracy can be better than one pixel. This needs good contrast, low noise and a stable set-up: section 19 again (Chapters 22.5 and 49.2) [2].
+
+### Why lighting changes the algorithm's job
+
+The Otsu method used in the Code section picks the threshold that best separates two groups of gray levels [5]. With controlled lighting the crack and background form two well-separated groups, so any reasonable threshold works. With poor lighting the groups overlap and shift across the image, and no single global threshold can separate them. Better lighting turns a hard algorithm problem into an easy one.
+
+### Camera characterization
+
+How noisy is a camera, how sensitive, how linear? The EMVA 1288 standard defines how to measure and report these properties, so cameras from different makers can be compared fairly [6]. We use it in Module 2 (2.5) and Module 59.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A camera sees a billet as 1500 pixels long. What is its length in millimetres?",
+      options: ["1500 mm", "150 mm", "It cannot be known without the scale (mm per pixel)", "15 mm"],
+      answer: 2,
+      explanation: "Pixels become millimetres only through calibration or known geometry.",
+    },
+    {
+      question: "A system answers \"Where is this ladle moving?\" Which application is it?",
+      options: ["Inspection", "Tracking", "OCR", "Measurement"],
+      answer: 1,
+      explanation: "Position over time is tracking.",
+    },
+    {
+      question: "In the Code section, why did the same Otsu threshold fail on one plate and succeed on the other?",
+      options: ["The algorithm had a bug", "Lighting changed the image: low, uneven contrast vs high, even contrast", "One image was colour", "The images were different sizes"],
+      answer: 1,
+      explanation: "Only the acquisition changed. Controlled lighting separates crack and background clearly.",
+    },
+    {
+      question: "Which is a complete vision system rather than a camera?",
+      options: ["A 5 MP GigE camera", "A lens and a ring light", "Camera + lighting + PC software + PLC link + dashboard", "A thermal camera"],
+      answer: 2,
+      explanation: "A system includes acquisition, processing, decision and communication, not just the sensor.",
+    },
+    {
+      question: "Why should auto-exposure usually be off in an inspection camera?",
+      options: ["It uses more power", "It changes pixel values from image to image, so fixed thresholds and measurements drift", "It is not supported by OpenCV", "It makes images smaller"],
+      answer: 1,
+      explanation: "Industrial vision needs repeatable images; automatic adjustments break that.",
+    },
+    {
+      question: "A thermal system colours its frames with a palette. Where should the hotspot temperature be measured?",
+      options: ["On the coloured display image", "On the original temperature values", "On a grayscale screenshot", "It doesn't matter"],
+      answer: 1,
+      explanation: "The palette is only a display; the measurement must use the underlying values.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A camera views a 600 mm wide field with a 1200-pixel-wide image. (a) How many mm does one pixel cover? (b) A billet spans 900 pixels. How long is it? (c) If the edge positions can be wrong by ±1 pixel each, roughly how large can the length error be?
+
+<Solution>
+
+(a) 600 mm ÷ 1200 px = **0.5 mm per pixel**.
+
+(b) 900 px × 0.5 mm/px = **450 mm**.
+
+(c) Each edge can be off by ±0.5 mm, so the length can be off by up to about **±1 mm**. To measure more precisely you need more pixels across the field (or a smaller field), or sub-pixel edge methods.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the simulated thermal frame from the Code section, find the centre (mean x and mean y) of all pixels above 800 °C, and decide whether the hotspot lies inside a monitoring zone x 150–250, y 60–120.
+
+<Solution>
+
+```python
+import numpy as np
+
+H, W = 200, 320
+yy, xx = np.mgrid[0:H, 0:W]
+temp = 30 + 920 * np.exp(-(((xx - 200) / 45.0) ** 2 + ((yy - 90) / 30.0) ** 2))
+
+ys, xs = np.nonzero(temp > 800)
+cx, cy = xs.mean(), ys.mean()
+inside = 150 <= cx <= 250 and 60 <= cy <= 120
+print(f"hotspot centre x={cx:.1f}, y={cy:.1f}")
+print("inside zone" if inside else "outside zone")
+```
+
+Output:
+
+```text
+hotspot centre x=200.0, y=90.0
+inside zone
+```
+
+`np.nonzero` returns rows (y) first, then columns (x): the 1.2 rule again.
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+Design, as a list, a billet-ID reading station at a caster exit. Name every component of the **system** (not just the camera), and say which of the six questions (section 24) it answers.
+
+<Solution>
+
+A reasonable design:
+
+1. **Camera** with a suitable resolution for the character size, in a **cooled, purged housing** (heat and dust).
+2. **Lens** chosen for the working distance and field of view.
+3. **Lighting** that gives clear contrast on the marking, and shields against glare from hot steel.
+4. **Trigger** from a sensor or the PLC when a billet is in position.
+5. **Industrial PC** running preprocessing and **OCR**.
+6. **PLC link** to receive the expected ID and send the result.
+7. **Database** to store image, read ID and time for traceability.
+8. **Dashboard / alarm** for operators when a read fails or the ID does not match.
+
+It mainly answers **WHAT?** (which billet is this: identification by reading its ID). With a check against the expected ID it also gives an **IS IT GOOD?** decision (correct billet or not).
+
+</Solution>
+
+## References
+
+1. B. G. Batchelor (ed.), *Machine Vision Handbook*. Springer, 2012.
+2. C. Steger, M. Ulrich and C. Wiedemann, *Machine Vision Algorithms and Applications*, 2nd ed. Wiley-VCH, 2018.
+3. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. Springer, 2022. Ch. 1 (applications of computer vision). Free online edition: [szeliski.org/Book](https://szeliski.org/Book/).
+4. OpenCV 4.13.0 documentation, *ColorMaps in OpenCV* (`applyColorMap`): [docs.opencv.org/4.13.0/d3/d50/group__imgproc__colormap.html](https://docs.opencv.org/4.13.0/d3/d50/group__imgproc__colormap.html); *Image Thresholding* tutorial (Otsu's binarization): [docs.opencv.org/4.13.0/d7/d4d/tutorial_py_thresholding.html](https://docs.opencv.org/4.13.0/d7/d4d/tutorial_py_thresholding.html).
+5. N. Otsu, "A Threshold Selection Method from Gray-Level Histograms," *IEEE Transactions on Systems, Man, and Cybernetics*, vol. 9, no. 1, pp. 62–66, 1979.
+6. European Machine Vision Association, *EMVA Standard 1288: Standard for Characterization of Image Sensors and Cameras*.

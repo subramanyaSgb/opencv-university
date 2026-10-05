@@ -33,3 +33,5 @@ export { Footprint } from "./Footprint";
 export { MiniHistogram } from "./MiniHistogram";
 export { KernelGrid } from "./KernelGrid";
 export { NeighborhoodLab } from "./NeighborhoodLab";
+export { ScaleCalc } from "./ScaleCalc";
+export { DimSketch, Conveyor, CrackSketch, DetectSketch, TrackSketch, LabelPlate } from "./Sketches";

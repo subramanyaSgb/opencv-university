@@ -24,3 +24,8 @@ Customer-site images only after anonymisation and written approval.
 | generated/sample-scene-saltpepper-median.png | `cv2.medianBlur(noisy, 3)` | Project-owned | 1.5 |
 | generated/sample-stripes.png | vertical sine stripes, period 16 px | Project-owned | 1.5 |
 | generated/sample-stripes-spectrum.png | log magnitude of the centred 2-D FFT of sample-stripes, peaks enlarged 7 × 7 for visibility | Project-owned | 1.5 |
+| generated/sample-plate-crack-mask.png | ground-truth crack line (3 px) for the lighting demo | Project-owned | 1.6 |
+| generated/sample-plate-poor.png | synthetic plate, poor lighting: low contrast, uneven, noisy (seed 16) | Project-owned | 1.6 |
+| generated/sample-plate-good.png | synthetic plate, controlled lighting: even, high contrast | Project-owned | 1.6 |
+| generated/sample-plate-poor-otsu.png, sample-plate-good-otsu.png | Otsu threshold (inverted) of each plate | Project-owned | 1.6 |
+| generated/sample-thermal-gray.png, sample-thermal-inferno.png | simulated temperature field (30 to 950 °C), 8-bit and INFERNO colour map; not real camera data | Project-owned | 1.6 |

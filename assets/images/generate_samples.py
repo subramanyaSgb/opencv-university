@@ -93,6 +93,32 @@ mag = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 # The spectrum has three single-pixel peaks (centre + one each side); enlarge them so they are visible.
 images["sample-stripes-spectrum.png"] = cv2.dilate(mag, np.ones((7, 7), np.uint8))
 
+# Chapter 1.6: lighting decides how easy detection is; a simulated thermal image.
+crack_mask = np.zeros((H, W), np.uint8)
+crack_pts = np.array([[40, 120], [90, 104], [140, 112], [190, 92], [240, 98], [285, 80]], np.int32)
+cv2.polylines(crack_mask, [crack_pts], False, 255, 3)
+images["sample-plate-crack-mask.png"] = crack_mask
+plate_rng = np.random.default_rng(seed=16)
+# Poor lighting: low contrast (crack only 15 levels darker), strong uneven illumination, more noise.
+poor = 120 + 45 * (xx / W) - 25 * (yy / H) - 15 * (crack_mask > 0) + plate_rng.normal(0, 8, (H, W))
+images["sample-plate-poor.png"] = np.clip(poor, 0, 255).astype(np.uint8)
+# Controlled lighting: even and bright, crack 150 levels darker, less noise.
+good = 200 - 150 * (crack_mask > 0) + plate_rng.normal(0, 4, (H, W))
+images["sample-plate-good.png"] = np.clip(good, 0, 255).astype(np.uint8)
+for tag in ("poor", "good"):
+    _, seg = cv2.threshold(images[f"sample-plate-{tag}.png"], 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    images[f"sample-plate-{tag}-otsu.png"] = seg
+
+# Simulated thermal frame: ambient 30 °C with a hot region peaking near 950 °C (not real camera data).
+temp = 30 + 920 * np.exp(-(((xx - 200) / 45.0) ** 2 + ((yy - 90) / 30.0) ** 2))
+t8 = cv2.normalize(temp, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+thermal = cv2.applyColorMap(t8, cv2.COLORMAP_INFERNO)
+_, tmax, _, (mx, my) = cv2.minMaxLoc(temp)
+cv2.drawMarker(thermal, (mx, my), (255, 255, 255), cv2.MARKER_CROSS, 18, 2)
+cv2.putText(thermal, f"max {tmax:.0f} C", (mx + 12, my - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+images["sample-thermal-gray.png"] = t8
+images["sample-thermal-inferno.png"] = thermal
+
 for name, img in images.items():
     ok = cv2.imwrite(str(OUT / name), img)
     assert ok, f"could not write {name}"
