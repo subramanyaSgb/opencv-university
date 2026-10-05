@@ -90,11 +90,11 @@ function PinholeSvg({ f, X, Z, d, labels = true, object = true, rays = true }: S
 }
 
 /** Static pinhole diagram (no controls). */
-export function PinholeDiagram({ f = 8, X = 3, Z = 12, labels = true, object = true, caption }:
-  { f?: number; X?: number; Z?: number; labels?: boolean; object?: boolean; caption?: string }) {
+export function PinholeDiagram({ f = 8, X = 3, Z = 12, d, labels = true, object = true, caption }:
+  { f?: number; X?: number; Z?: number; d?: number; labels?: boolean; object?: boolean; caption?: string }) {
   return (
     <figure className="vis sk op">
-      <PinholeSvg f={f} X={X} Z={Z} labels={labels} object={object} />
+      <PinholeSvg f={f} X={X} Z={Z} d={d} labels={labels} object={object} />
       {caption && <figcaption>{caption}</figcaption>}
     </figure>
   );

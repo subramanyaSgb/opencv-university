@@ -1,0 +1,829 @@
+export const meta = {
+  number: "2.2",
+  title: "Lenses and focus",
+  minutes: 50,
+  objectives: [
+    "Explain why real cameras use a lens instead of a pinhole",
+    "Explain focus and the blur circle with the thin-lens picture",
+    "Tell focal length, working distance and focus apart",
+    "Predict how focal length, sensor size and working distance change the field of view",
+    "Explain why focus decides measurement quality, and measure sharpness with the variance of the Laplacian",
+    "List the inputs needed to select an industrial lens",
+  ],
+};
+
+{/*
+  Lesson content: owner's text (5 Oct 2026), presented with visual components.
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+  Defocus images are simulations (disk average), not real camera images. Thin-lens numbers are ideal.
+*/}
+
+# 2.2 Lenses and focus
+
+<Definition term="Lens">an optical element that collects light and redirects it, so that light from each point of the object comes together at one point on the sensor.</Definition>
+
+Now we move from the pinhole camera to the real camera. The big question is: **if a pinhole can form an image, why do real cameras use a lens?** The simple answer:
+
+<Callout kind="key">
+
+A lens lets us **collect much more light** while **still forming a sharp image**.
+
+</Callout>
+
+## 1. Why do we need a lens?
+
+Remember our pinhole camera:
+
+<Flow direction="right" steps={[{ label: "Object", tone: "world" }, { label: "Light rays", tone: "world" }, { label: "Tiny hole", tone: "process" }, { label: "Sensor", tone: "result" }]} />
+
+The tiny hole allows only a small amount of light to enter. That creates two problems.
+
+**Problem 1: very little light.** Imagine trying to drink water through a tiny needle hole: you get very little water. Same thing with light:
+
+<Flow direction="right" highlightLast={false} steps={["Tiny hole", "Very little light", "Dark image"]} />
+
+**Problem 2: the hole cannot be made arbitrarily large.** If we make the hole larger, light rays from different parts of the object start **mixing together**, and the image becomes **blurry**:
+
+<PinholeDiagram f={9} X={3} Z={9} d={2} caption="A big hole: the red cone from the top and the blue cone from the bottom each spread into a wide patch on the sensor, and the patches overlap." />
+
+So we have a problem:
+
+<Columns>
+<Panel title="Tiny hole" tone="warn">
+<Flow highlightLast={false} steps={["Sharp image", "BUT very little light"]} />
+</Panel>
+<Panel title="Large hole" tone="warn">
+<Flow highlightLast={false} steps={["Lots of light", "BUT blurry image"]} />
+</Panel>
+</Columns>
+
+We need something better. That's where the **lens** comes in.
+
+## 2. What does a lens do?
+
+A lens **controls the direction** of incoming light rays. Instead of simply blocking most of the light like a pinhole, the lens **redirects** the light so that rays from the same object point **come together** at the correct location on the sensor:
+
+<LensRays caption="Very simplified: the lens takes many incoming rays from one point and guides them toward a common point." />
+
+That gives us:
+
+<Equation terms={[{ value: "More light" }, { op: "+", value: "Controlled image formation" }, { op: "=", value: "Lens", result: true }]} />
+
+## 3. Think of the lens like a traffic controller
+
+This is a useful mental model. Imagine thousands of cars coming toward an intersection. **Without traffic control**, everything gets mixed. A lens acts more like a **traffic controller**: it directs the light to the correct locations.
+
+<ControllerSketch />
+
+## 4. The most important concept: focus
+
+Now we reach one of the most important concepts in cameras:
+
+<Callout kind="key">
+
+**Focus** means making light from an object at a particular distance form a **sharp image on the sensor**.
+
+</Callout>
+
+Suppose we have a camera looking at a bottle. If the lens is correctly positioned, the light converges exactly on the sensor: **sharp image**.
+
+<FocusDiagram objectM={2} focusM={2} caption="Correct lens–sensor relationship: the rays meet on the sensor." />
+
+But if the sensor / lens relationship is wrong, the light meets before (or behind) the sensor and arrives spread out: **blurry image**.
+
+<FocusDiagram objectM={2} focusM={0.8} caption="Wrong lens–sensor relationship: the rays have not met at the sensor, so the point arrives as a patch (red)." />
+
+## 5. What does "sharp" actually mean?
+
+Suppose we have a **tiny point** on an object, for example the tip of a screw. Ideally, the camera should turn that point into **another tiny point** on the sensor. That is sharp.
+
+But if the camera isn't focused correctly, the light **spreads over an area** instead of a tiny point. That creates **blur**:
+
+<ImageCompare
+  before={{ src: "/images/sample-focus-sharp.png", label: "In focus" }}
+  after={{ src: "/images/sample-focus-blur.png", label: "Out of focus" }}
+  width={320}
+  height={200}
+  alt="The test chart sharp, and the same chart with every point spread into a 9-pixel disk"
+  caption="Simulated: out of focus, every point becomes a 9-pixel disk. The thin bars merge and the letters soften."
+/>
+
+## 6. Focus distance
+
+Here's something extremely important: a lens **cannot generally make every possible distance perfectly sharp at the same time**.
+
+Suppose your camera is focused at **5 metres**. Objects around that distance will be very sharp. Now put another object at **1 metre**: it may be blurry, depending on the lens, aperture and depth of field.
+
+<DistanceFocus caption="Focus set for 5 m: the person at 5 m is sharp, the person at 1 m is not." />
+
+This is why focus matters in industrial vision.
+
+## 7. What is focal length?
+
+You will hear this term constantly in computer vision, for example a **12 mm, 25 mm, 50 mm or 100 mm lens**. These numbers refer to the lens's **focal length**: a fundamental property describing the lens's optical geometry.
+
+For a simple **thin-lens** model, light arriving from very far away (parallel rays) is brought to a point called the **focal point**, F. The **focal length** is the distance from the lens's optical centre to the focal point. It is usually written **f**.
+
+<FocalSketch />
+
+## 8. What does focal length change?
+
+One of the easiest ways to understand focal length:
+
+<Callout kind="key">
+
+Focal length strongly affects **how much of the scene the camera can see** and **how large objects appear** in the image.
+
+</Callout>
+
+<FovCone caption="A short focal length (12 mm) generally sees a wider area; a long one (50 mm) generally sees a narrower area." />
+
+<Columns>
+<Panel title="Short focal length" tone="a">
+<Flow steps={["12 mm", { label: "Wider view", tone: "result" }]} />
+</Panel>
+<Panel title="Long focal length" tone="b">
+<Flow steps={["50 mm", { label: "Narrower view", tone: "result" }]} />
+</Panel>
+</Columns>
+
+This becomes extremely important when selecting a lens for an industrial camera.
+
+## 9. Simple industrial example
+
+Imagine you want to inspect a **2000 mm wide steel slab**. Your camera is mounted several metres away, and you need the **entire slab** inside the image.
+
+- With a **very long focal length**, you may see **only part** of the slab.
+- With a **shorter focal length**, you can capture the **whole slab**.
+
+**Try it.** The camera is 4.5 m above the slab. Change the lens and see how much of the slab fits, and what one pixel is worth.
+
+<LensFov caption="Thin-lens estimate: field of view = sensor width × (WD − f) ÷ f. Sensor widths are nominal for each format. Chapter 2.4 covers this properly." />
+
+But there is a **trade-off**: the wider the view, the more millimetres each pixel has to cover.
+
+## 10. Why can't we always use a very wide lens?
+
+Because a wide lens can introduce problems:
+
+<Chips items={["Distortion", "Reduced pixel resolution on the object", "Objects near the edges can look different", "Difficult precision measurement"]} />
+
+So industrial vision is not simply *"use the widest lens possible"*. Instead, we select the lens based on:
+
+<Equation
+  terms={[
+    { value: "Camera sensor" },
+    { op: "+", value: "Working distance" },
+    { op: "+", value: "Required FOV" },
+    { op: "+", value: "Accuracy" },
+    { op: "+", value: "Object size" },
+    { op: "+", value: "Environment" },
+  ]}
+/>
+
+## 11. Working distance
+
+Another extremely important term:
+
+<Callout kind="key">
+
+**Working distance (WD)** = the distance between the camera / lens reference position and the object being inspected, according to the optical setup.
+
+</Callout>
+
+<Columns>
+<Panel title="Simple example">
+<WdSketch wd="2 m" object="Object" />
+</Panel>
+<Panel title="Industrial system">
+<WdSketch wd="4.5 m" object="Steel slab" wide />
+</Panel>
+</Columns>
+
+The working distance is one of the **key inputs** used when selecting the lens.
+
+## 12. Focal length vs working distance
+
+These two are often confused. **They are not the same thing.**
+
+<VsTable
+  left="Focal length"
+  right="Working distance"
+  rows={[
+    ["A property of the lens", "A property of the installation"],
+    ["e.g. 25 mm lens", "e.g. 3 metres to the object"],
+    ["Changes only if you change (or zoom) the lens", "Changes if you move the camera or the object"],
+  ]}
+/>
+
+So you could have a **25 mm lens + 3 m working distance**, or a **50 mm lens + 3 m working distance**: same working distance, different lens.
+
+## 13. Why does the image become blurry?
+
+Let's understand this physically. A point on the object sends light toward the lens. **For a particular object distance, the lens forms the sharp image at a particular image distance.** The rays meet at that image plane.
+
+<Columns stack>
+<Panel title="Sensor exactly at the image plane: sharp" tone="good">
+<FocusDiagram objectM={2} focusM={2} />
+</Panel>
+<Panel title="Sensor moved: the rays have not yet converged" tone="warn">
+<FocusDiagram objectM={2} focusM={0.8} />
+</Panel>
+</Columns>
+
+If the sensor is exactly there: **sharp**. Move the sensor away and the rays have not yet converged at the sensor, so the point becomes a **blur circle**.
+
+## 14. Blur circle
+
+This is a very important concept. Imagine the ideal image point is a dot •. But the sensor is not at the correct focus position, so instead we get a small disk ○. This is called a **circle of confusion** or **blur circle** in the simplified optical model.
+
+<Columns>
+<Panel title="Perfect focus" tone="good">
+<Flow steps={[{ label: "• point", tone: "result" }]} />
+</Panel>
+<Panel title="Wrong focus" tone="warn">
+<Flow highlightLast={false} steps={["○ blur circle"]} />
+</Panel>
+</Columns>
+
+The **larger** the blur circle, the **more blurry** the image appears.
+
+## 15. Why moving the object changes focus
+
+Suppose your camera is focused on an object at **2 m**. Now the object moves to **5 m**. The light geometry changes, so **the place where the lens forms the sharp image also changes**. That's why focusing is related to object distance.
+
+**Try it.** Focus is set for 2 m. Move the object and watch where the rays meet, and how big the blur circle is in pixels.
+
+<FocusLab caption="Ideal thin lens at f/2.8 with 3.45 µm pixels. The preview applies a blur of similar size; it is approximate." />
+
+With the 25 mm lens focused at 2 m, an object at 5 m forms its sharp image only about 0.19 mm closer to the lens, yet that small difference gives a blur circle of about **20 pixels**.
+
+## 16. Manual focus vs autofocus
+
+Some cameras / lenses allow **manual focus**: you physically adjust the lens.
+
+<Flow direction="right" steps={["Turn the lens ring ↻", { label: "Focus changes", tone: "result" }]} />
+
+Industrial cameras frequently use **carefully set manual focus**, because the camera and object positions are intended to remain fixed. Once properly focused:
+
+<Flow direction="right" steps={["Focus on the inspection area", "Lock focus", { label: "Keep it fixed", tone: "result" }]} />
+
+This is desirable in a stable industrial setup.
+
+## 17. Autofocus
+
+Consumer cameras often use **autofocus**: the camera automatically adjusts the lens until it finds what appears to be the sharpest focus.
+
+<Flow
+  steps={[
+    { label: "Try focus position 1", tone: "process" },
+    { label: "Measure sharpness", tone: "data" },
+    { label: "Try focus position 2", tone: "process" },
+    { label: "Measure sharpness", tone: "data" },
+    { label: "… repeat …", tone: "plain" },
+    { label: "Best focus", tone: "result" },
+  ]}
+/>
+
+This is useful for phones and photography. But industrial vision often prefers a **controlled, fixed optical setup** rather than constantly changing focus. Why? Because industrial inspection needs:
+
+<Equation terms={[{ value: "Repeatability" }, { op: "+", value: "Stable geometry" }, { op: "+", value: "Predictable measurement" }]} />
+
+## 18. Lens and industrial measurement
+
+Now connect this to steel-industry applications. Suppose you're measuring the diameter of a hot billet, nominally **150 mm**. The camera needs to produce a stable image.
+
+<Columns>
+<Panel title="Sharp image" tone="good">
+<Flow steps={["Sharp image", "Edge detected correctly", { label: "150 mm", tone: "result" }]} />
+</Panel>
+<Panel title="Blurry image" tone="warn">
+<Flow highlightLast={false} steps={["Blurry image", "Edge becomes uncertain", "Measurement error"]} />
+</Panel>
+</Columns>
+
+So focus isn't just about making the picture look nice.
+
+<Callout kind="key">
+
+In machine vision, **focus directly affects measurement quality and detection reliability**.
+
+</Callout>
+
+Code example 3 shows it in numbers: the same 150 mm billet measures 150, 144, 136 or 124 mm depending on the blur.
+
+## 19. Lens selection is a system problem
+
+This is a very important industrial lesson. You should not say: *"I have a 5 MP camera, so give me a lens."* Instead, we need information such as:
+
+1. Sensor size
+2. Object size
+3. Working distance
+4. Required field of view
+5. Required resolution
+6. Required measurement accuracy
+7. Lighting
+8. Distortion tolerance
+9. Object movement
+10. Environment
+
+Then select the appropriate lens.
+
+## 20. Sensor size also matters
+
+Suppose we have two cameras: **camera A** with a small sensor and **camera B** with a large sensor. Even with the **same lens focal length**, the sensor size affects how much of the **image circle** is captured, and therefore the resulting **field of view**.
+
+<SensorSizes />
+
+<Flow direction="right" steps={["Lens", "+ Sensor", "+ Working distance", { label: "Field of view", tone: "result" }]} />
+
+We'll study FOV and mm per pixel properly in **2.4**. Don't worry if this part isn't completely clear yet. (You can already see it in the lab in section 9: switch the sensor and the field of view changes.)
+
+## 21. A very important industrial example
+
+Imagine you're installing a camera **1500 mm above a conveyor**. You need to inspect objects from **100 mm × 100 mm** up to **500 mm × 300 mm**.
+
+<WdSketch wd="1500 mm" object="Conveyor" wide />
+
+You can't randomly choose a lens. You need to determine:
+
+<Flow
+  steps={[
+    { label: "How much area must be visible?", tag: "FOV", tone: "world" },
+    { label: "How far is the camera?", tag: "Working distance", tone: "world" },
+    { label: "How much detail is required?", tag: "Pixel resolution", tone: "data" },
+    { label: "Which lens provides this?", tag: "Lens selection", tone: "result" },
+  ]}
+/>
+
+This is the beginning of **machine vision optics**.
+
+## 22. Simple mental model
+
+Remember these four things:
+
+<Tree
+  root="LENS"
+  branches={[
+    { title: "Focus", items: ["Is the image sharp?"] },
+    { title: "Focal length", items: ["Viewing geometry / FOV"] },
+    { title: "Working distance", items: ["How far is the object?"] },
+    { title: "Aperture", items: ["How much light enters (2.3)"] },
+  ]}
+/>
+
+We'll discuss **aperture** in 2.3.
+
+## 23. Real camera pipeline
+
+Now connect everything we've learned. This is the basic foundation of almost every camera-based vision system:
+
+<CameraChain
+  steps={[
+    { icon: "world", label: "Real world", note: "light" },
+    { icon: "lens", label: "Lens", note: "focused light" },
+    { icon: "sensor", label: "Sensor" },
+    { icon: "electronics", label: "Electrical signal" },
+    { icon: "image", label: "Digital image" },
+    { icon: "code", label: "Image processing" },
+    { icon: "code", label: "Computer vision" },
+    { icon: "measure", label: "Measurement / decision" },
+  ]}
+/>
+
+## 24. Common beginner mistakes
+
+<Callout kind="mistake">
+
+**Mistake 1: "Focal length is the distance to the object."** No. Focal length ≠ working distance. For example, lens focal length = 25 mm; working distance = 2000 mm.
+
+</Callout>
+
+<Callout kind="mistake">
+
+**Mistake 2: "Longer focal length means physically moving the camera farther away."** Not necessarily. Focal length is a property of the lens. Working distance is the camera-to-object setup distance.
+
+</Callout>
+
+<Callout kind="mistake">
+
+**Mistake 3: "Focus means zoom."** No. **Zoom** changes the focal length (on a zoom lens). **Focus** makes the image sharp. They are different things.
+
+</Callout>
+
+<Callout kind="mistake">
+
+**Mistake 4: "A sharp-looking image is always good enough."** Not for industrial vision. An image can look acceptable to a human but still have insufficient sharpness for edge measurement, OCR, defect detection, dimensional measurement or small-object detection.
+
+</Callout>
+
+## 25. Tiny Python connection
+
+You don't normally control physical lens focus using OpenCV. But you can **see the effect of focus in the image**. For example:
+
+```python
+import cv2
+
+image = cv2.imread("image.jpg")
+gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+focus_score = laplacian.var()
+print("Focus score:", focus_score)
+```
+
+A commonly used simple sharpness indicator is the **variance of the Laplacian**. Rough idea:
+
+<Columns>
+<Panel title="Sharp image" tone="good">
+<Flow steps={["Strong edges", "Higher Laplacian variation", { label: "Higher focus score", tone: "result" }]} />
+</Panel>
+<Panel title="Blurry image" tone="warn">
+<Flow highlightLast={false} steps={["Weak edges", "Lower variation", "Lower focus score"]} />
+</Panel>
+</Columns>
+
+<Callout kind="note">
+
+This is only a simple focus / sharpness measure. It is **not a universal guarantee of optical quality**. The score also depends on scene content, noise and lighting, so compare scores only between images of the same scene.
+
+</Callout>
+
+## 26. The big picture
+
+We started with the **pinhole**, and then introduced the **lens**:
+
+<Columns>
+<Panel title="Pinhole" tone="warn">
+<Flow highlightLast={false} steps={["Tiny hole", "Sharp", "+ very little light"]} />
+</Panel>
+<Panel title="Lens" tone="good">
+<Flow steps={["Collects much more light", "+ controls light direction", { label: "Sharp image when correctly focused", tone: "result" }]} />
+</Panel>
+</Columns>
+
+And now we have:
+
+<Columns>
+<Panel title="Lens" tone="a">Controls light</Panel>
+<Panel title="Sensor" tone="b">Measures light</Panel>
+</Columns>
+
+<Flow steps={[{ label: "Lens + sensor = camera", tone: "process" }, { label: "Digital image", tone: "result" }]} />
+
+## What you should remember from 2.2
+
+<Takeaways>
+<Takeaway n={1} title="Lens">Controls and redirects light so an image can be formed efficiently.</Takeaway>
+<Takeaway n={2} title="Focus">Makes light from the object form a sharp image on the sensor.</Takeaway>
+<Takeaway n={3} title="Focal length">A fundamental lens property that strongly affects image geometry and field of view.</Takeaway>
+<Takeaway n={4} title="Working distance">The distance between the camera / lens setup and the object.</Takeaway>
+<Takeaway n={5} title="Blur">If the sensor isn't at the correct image plane for the object distance, a point becomes a blur circle instead of a sharp point.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+Try answering these without looking back.
+
+**Q1.** Why can't we simply make the pinhole very large?
+
+<Solution>
+
+Light rays from different parts of the object mix: each point spreads into a large patch and neighbouring patches overlap, so the image is blurry (section 1).
+
+</Solution>
+
+**Q2.** What is the main purpose of a lens?
+
+<Solution>
+
+To collect much more light than a pinhole **and** redirect it so that rays from each object point meet at one point on the sensor: more light and a sharp image.
+
+</Solution>
+
+**Q3.** What is the difference between focal length and working distance?
+
+<Solution>
+
+**Focal length** is a property of the lens (e.g. 25 mm). **Working distance** is a property of the installation: how far the object is from the camera / lens (e.g. 2000 mm).
+
+</Solution>
+
+**Q4.** If a camera is focused for an object at 2 m and the object moves significantly, what can happen to sharpness?
+
+<Solution>
+
+It can become blurry. The sharp image now forms at a different distance behind the lens, so the sensor receives a blur circle instead of a point (section 15: 2 m → 5 m gives about 20 pixels of blur with a 25 mm f/2.8 lens).
+
+</Solution>
+
+**Q5.** Which one controls image sharpness? A. Focus · B. Working distance · C. Pixel count · D. File format
+
+<Solution>
+
+**A. Focus.** (Working distance matters because focus must match it, but focus is the setting that makes the image sharp.)
+
+</Solution>
+
+**Q6.** Which one is a property of the lens? A. Working distance · B. Focal length · C. Object height · D. Conveyor speed
+
+<Solution>
+
+**B. Focal length.**
+
+</Solution>
+
+**Q7.** In an industrial measurement system, why can poor focus cause measurement errors?
+
+<Solution>
+
+Blur spreads each edge over several pixels, so the edge position depends on the threshold or edge detector and becomes uncertain. In Code example 3 a 150 mm billet measures as small as 124 mm when the blur is large and the threshold is not at mid-level.
+
+</Solution>
+
+### Next: 2.3 Aperture, depth of field and diffraction
+
+This is where we'll answer a very practical question: *why can one camera keep many objects sharp, while another camera has only a small region that is sharp?* We'll connect **aperture → light → depth of field → blur → diffraction**, and then see why these matter enormously in industrial vision.
+
+## Code
+
+Three experiments: the thin-lens numbers behind the blur circle, a simulated autofocus sweep with the variance-of-Laplacian score, and how blur turns into a measurement error.
+
+### 1. From scratch: where the sharp image forms, and how big the blur is
+
+```python
+import numpy as np
+
+f = 25.0                     # focal length, mm
+N = 2.8                      # f-number (aperture, Chapter 2.3)
+D = f / N                    # aperture diameter, mm
+pixel = 0.00345              # pixel pitch, mm (3.45 µm)
+
+def image_distance(f, s):
+    # thin lens: 1/f = 1/s + 1/s'  ->  s' = 1 / (1/f - 1/s)
+    return 1.0 / (1.0 / f - 1.0 / s)
+
+sensor = image_distance(f, 2000.0)          # focus set for an object at 2 m
+print(f"sensor sits {sensor:.3f} mm behind the lens")
+for s in [1000.0, 2000.0, 5000.0]:
+    sp = image_distance(f, s)
+    c = D * abs(sensor - sp) / sp           # blur circle diameter on the sensor, mm
+    print(f"object at {s / 1000:.0f} m: sharp image at {sp:.3f} mm, blur circle {c * 1000:5.1f} µm = {c / pixel:4.1f} px")
+```
+
+Output:
+
+```text
+sensor sits 25.316 mm behind the lens
+object at 1 m: sharp image at 25.641 mm, blur circle 113.0 µm = 32.8 px
+object at 2 m: sharp image at 25.316 mm, blur circle   0.0 µm =  0.0 px
+object at 5 m: sharp image at 25.126 mm, blur circle  67.8 µm = 19.7 px
+```
+
+- The **thin-lens equation** 1/f = 1/s + 1/s′ links object distance s and image distance s′. A distant object focuses almost exactly at f; a near one focuses farther back.
+- The light through an aperture of diameter D forms a cone that meets at s′. A sensor at the wrong place cuts that cone: by similar triangles the blur circle is c = D·|sensor − s′| / s′.
+- Differences of a fraction of a millimetre behind the lens become **tens of pixels** of blur. That is why industrial focus is set carefully and locked.
+
+### 2. A simulated autofocus sweep with the variance of the Laplacian
+
+```python
+import numpy as np
+import cv2
+
+chart = cv2.imread("sample-pinhole-scene.png", cv2.IMREAD_GRAYSCALE)
+
+def defocus(img, c):
+    # blur circle of diameter c pixels: average over a disk
+    if c <= 1:
+        return img.copy()
+    k = np.zeros((c, c), np.float32)
+    cv2.circle(k, (c // 2, c // 2), c // 2, 1.0, -1)
+    return cv2.filter2D(img, -1, k / k.sum())
+
+def focus_score(gray):
+    return cv2.Laplacian(gray, cv2.CV_64F).var()
+
+# autofocus sweep: lens positions give these blur circles (px); the sharpest is at position 3
+blur_at_position = [15, 9, 5, 1, 5, 9, 15]
+scores = []
+for pos, c in enumerate(blur_at_position):
+    s = focus_score(defocus(chart, c))
+    scores.append(s)
+    print(f"position {pos}: blur {c:2d} px, focus score {s:8.1f}")
+print("best position:", int(np.argmax(scores)))
+```
+
+Output:
+
+```text
+position 0: blur 15 px, focus score     10.3
+position 1: blur  9 px, focus score     48.9
+position 2: blur  5 px, focus score    292.8
+position 3: blur  1 px, focus score   4479.8
+position 4: blur  5 px, focus score    292.8
+position 5: blur  9 px, focus score     48.9
+position 6: blur 15 px, focus score     10.3
+best position: 3
+```
+
+- `cv2.Laplacian(gray, cv2.CV_64F)` responds strongly at edges and fine detail. Blur weakens edges, so the **variance** of the response falls quickly.
+- `cv2.CV_64F` keeps negative values. With an 8-bit output, negative responses would be clipped to 0 and the score would be wrong.
+- Taking the **position with the highest score** is the basic idea of contrast autofocus (section 17). In a fixed industrial setup you use the same score once, while turning the focus ring, and then lock it.
+
+### 3. Blur becomes measurement error
+
+```python
+import numpy as np
+import cv2
+
+# a bright billet 150 px wide on a dark background (1 px = 1 mm here)
+img = np.full((60, 300), 40, np.uint8)
+img[:, 75:225] = 220
+
+for c in [1, 9, 21, 41]:
+    if c == 1:
+        blurred = img
+    else:
+        k = np.zeros((c, c), np.float32)
+        cv2.circle(k, (c // 2, c // 2), c // 2, 1.0, -1)
+        blurred = cv2.filter2D(img, -1, k / k.sum())
+    row = blurred[30]
+    width_mid = np.count_nonzero(row > 130)   # threshold halfway between 40 and 220
+    width_hi = np.count_nonzero(row > 200)    # threshold set too high
+    print(f"blur {c:2d} px: width {width_mid} mm (mid threshold), {width_hi} mm (high threshold)")
+```
+
+Output:
+
+```text
+blur  1 px: width 150 mm (mid threshold), 150 mm (high threshold)
+blur  9 px: width 150 mm (mid threshold), 144 mm (high threshold)
+blur 21 px: width 150 mm (mid threshold), 136 mm (high threshold)
+blur 41 px: width 150 mm (mid threshold), 124 mm (high threshold)
+```
+
+- When the image is sharp, **any** threshold gives 150 mm: the edge is a clean step.
+- When it is blurred, the edge becomes a ramp, and the measured width **depends on where you cut the ramp**. A threshold that is not exactly mid-level (or uneven lighting, which shifts the levels) gives a wrong width.
+- In this ideal, noise-free case the mid-level threshold still gives 150 mm. Real images add noise and uneven light, so blur makes the result less certain either way.
+
+## OpenCV API notes
+
+**`cv2.Laplacian(src, ddepth, ksize=1, scale=1, delta=0, borderType=cv2.BORDER_DEFAULT) → dst`**
+
+- `ddepth`: output depth. Use `cv2.CV_64F` (or `CV_32F`) so negative responses survive; `-1` keeps 8-bit and clips them.
+- `ksize = 1` (default) uses the 3 × 3 kernel `[[0, 1, 0], [1, -4, 1], [0, 1, 0]]`. Larger odd sizes use Sobel-based second derivatives and respond to coarser detail.
+- Works per channel; convert to grayscale first for a single focus score.
+- `.var()` on the result gives the variance-of-Laplacian focus measure [5].
+
+**Focus score in practice.** Compute it on a fixed **region of interest** that always contains texture or edges (for example the part being inspected), not on the whole frame. Compare scores only across images of the same scene and lighting.
+
+**OpenCV and the lens.** OpenCV does not control a lens. Camera SDKs or motorized/liquid lenses do that; OpenCV measures the result.
+
+## Where it fails
+
+- **Thin-lens numbers are ideal.** Real lenses are thick, multi-element systems with aberrations. Use the manufacturer's data and test at the real working distance.
+- **Focus scores need texture.** A plain, smooth billet face gives a low score even when sharp. Noise raises the score even when blurry. Use a region with edges, and the same lighting.
+- **Motion blur is not defocus.** A moving object blurs along its direction of travel. The focus score drops, but refocusing does not help (Chapter 2.6).
+- **Depth.** One focus setting cannot make objects at very different distances all sharp. How much depth stays acceptably sharp is depth of field (Chapter 2.3).
+- **Field-of-view estimate.** `w·(WD − f)/f` assumes a thin lens and no distortion. Wide-angle lenses distort, and exact values come from calibration (Module 41).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Setting focus on a sample at the wrong height.** Focus on a part at the real working distance (conveyor height, billet top), then lock the ring.
+- **Reading a single focus score in isolation.** The number has no absolute meaning; compare it with other images of the same scene.
+- **Using `ddepth=-1` with `cv2.Laplacian` on 8-bit images.** Negative edge responses are clipped, and the focus score is wrong.
+- **Choosing the lens before the field of view.** Work out the FOV, working distance and accuracy first; the focal length follows (section 21).
+- **Ignoring sensor format.** The same 25 mm lens gives a different field of view on a 1/2-inch and a 1.1-inch sensor (section 20).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The thin-lens equation
+
+For an ideal thin lens, an object at distance s forms a sharp image at distance s′ behind the lens, with 1/f = 1/s + 1/s′ (Gaussian form, distances measured from the lens) [1]. As s grows very large, 1/s → 0 and s′ → f: that is the definition of the focal length. Magnification is m = s′/s, which for distant objects is about f/s: the same 1/Z behaviour as the pinhole model of 2.1.
+
+### Blur circle from similar triangles
+
+The aperture of diameter D sends a cone of light that converges at s′. A sensor at distance s_sensor cuts the cone in a disk of diameter c = D·|s_sensor − s′| / s′. Because D = f/N (N is the f-number), closing the aperture shrinks the blur: that is the start of depth of field, Chapter 2.3 [1][2].
+
+### Field of view from the sensor and the lens
+
+The sensor width w maps back onto the object through the magnification. With the thin lens, the object-side width is w/m = w·(s − f)/f, close to w·s/f when s ≫ f. Field of view therefore grows with working distance and sensor size and shrinks with focal length. Chapter 2.4 builds mm per pixel from this.
+
+### Focus measures
+
+The variance of the Laplacian was compared with other focus measures for microscope autofocus by Pech-Pacheco et al. [5]. Pertuz et al. compare dozens of focus operators (gradient-, Laplacian-, wavelet- and statistics-based) and how they behave with noise and contrast [6].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why do real cameras use a lens instead of a pinhole?",
+      options: ["Lenses are cheaper", "A lens collects much more light and still forms a sharp image", "A lens removes the need for a sensor", "A lens makes every distance sharp"],
+      answer: 1,
+      explanation: "A pinhole must stay tiny to be sharp, so it lets in little light. A lens gathers light through a large opening and redirects it to a point.",
+    },
+    {
+      question: "A camera has a 25 mm lens and is mounted 3 m from the part. What is the working distance?",
+      options: ["25 mm", "3 m", "75 m", "It depends on the sensor"],
+      answer: 1,
+      explanation: "Working distance is the camera-to-object distance. 25 mm is the focal length.",
+    },
+    {
+      question: "Focus is set for 2 m. The object moves to 5 m. What happens to a point on the object?",
+      options: ["Nothing", "It becomes a blur circle on the sensor", "It moves to another pixel but stays sharp", "The image gets brighter"],
+      answer: 1,
+      explanation: "The sharp image now forms at a different distance behind the lens, so the sensor sees a disk instead of a point.",
+    },
+    {
+      question: "Same sensor and working distance: you change from a 12 mm to a 50 mm lens. What happens?",
+      options: ["Wider view, fewer mm per pixel", "Narrower view, fewer mm per pixel (more detail on the object)", "Narrower view, more mm per pixel", "No change"],
+      answer: 1,
+      explanation: "Longer focal length narrows the field of view, so the same pixels cover a smaller area: finer detail, less of the scene.",
+    },
+    {
+      question: "Why use cv2.CV_64F as ddepth when computing the variance-of-Laplacian focus score?",
+      options: ["It is faster", "It keeps negative Laplacian values that 8-bit output would clip", "It converts to colour", "It is required for grayscale images"],
+      answer: 1,
+      explanation: "The Laplacian is negative on one side of every edge. 8-bit output clips those values to 0 and distorts the variance.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 16 mm lens is used with a sensor 8.8 mm wide. (a) Using the thin-lens estimate w·(WD − f)/f, what field of view do you get at a working distance of 1500 mm? (b) The conveyor in section 21 needs at least 500 mm. Is it enough? (c) With 2448 pixels across, how many mm does one pixel cover?
+
+<Solution>
+
+(a) 8.8 × (1500 − 16) / 16 = 8.8 × 92.75 = **816.2 mm**.
+
+(b) **Yes**: 816 mm covers the 500 mm part with margin for position variation.
+
+(c) 816.2 / 2448 ≈ **0.33 mm per pixel**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the thin-lens equation, find the **sensor position** for a 25 mm lens focused at 1.5 m, then the blur circle (in pixels, 3.45 µm pixels, f/2.8) for objects at 1.4 m and 1.6 m. Which side of the focus distance blurs more for the same 100 mm shift?
+
+<Solution>
+
+```python
+import numpy as np
+
+f, N, pixel = 25.0, 2.8, 0.00345
+D = f / N
+
+def image_distance(f, s):
+    return 1.0 / (1.0 / f - 1.0 / s)
+
+sensor = image_distance(f, 1500.0)
+for s in [1400.0, 1600.0]:
+    sp = image_distance(f, s)
+    c = D * abs(sensor - sp) / sp
+    print(f"object at {s:.0f} mm: blur {c / pixel:.1f} px")
+```
+
+Output:
+
+```text
+object at 1400 mm: blur 3.1 px
+object at 1600 mm: blur 2.7 px
+```
+
+The **nearer** side blurs more for the same 100 mm shift: the image distance changes faster for close objects. This is why depth of field extends further behind the focus distance than in front of it (Chapter 2.3).
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+Your colleague says: *"The camera is 2 m from the conveyor and the lens is 2 m, so it's in focus."* What two things are wrong with this sentence, and what would you check on site?
+
+<Solution>
+
+1. **Focal length is not working distance.** A lens is described by its focal length (for example 25 mm), not by the distance to the object.
+2. **Distance alone does not make an image sharp.** The focus ring must be set so that the sensor sits at the image distance for 2 m.
+
+On site: put a textured target at the real conveyor height, adjust the focus ring while watching a focus score (variance of the Laplacian on a fixed ROI), stop at the maximum, and lock the ring.
+
+</Solution>
+
+## References
+
+1. E. Hecht, *Optics*, 5th ed. Pearson, 2017. Ch. 5 (geometrical optics: thin lenses, the thin-lens equation).
+2. W. J. Smith, *Modern Optical Engineering*, 4th ed. McGraw-Hill, 2008.
+3. C. Steger, M. Ulrich and C. Wiedemann, *Machine Vision Algorithms and Applications*, 2nd ed. Wiley-VCH, 2018. Ch. 2 (image acquisition: lenses).
+4. OpenCV 4.13.0 documentation, *Image Filtering* (`Laplacian`): [docs.opencv.org/4.13.0/d4/d86/group__imgproc__filter.html](https://docs.opencv.org/4.13.0/d4/d86/group__imgproc__filter.html).
+5. J. L. Pech-Pacheco, G. Cristóbal, J. Chamorro-Martínez and J. Fernández-Valdivia, "Diatom autofocusing in brightfield microscopy: a comparative study," in *Proc. 15th International Conference on Pattern Recognition (ICPR)*, vol. 3, pp. 314–317, 2000.
+6. S. Pertuz, D. Puig and M. A. Garcia, "Analysis of focus measure operators for shape-from-focus," *Pattern Recognition*, vol. 46, no. 5, pp. 1415–1432, 2013.

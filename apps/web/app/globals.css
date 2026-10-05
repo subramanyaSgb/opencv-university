@@ -799,3 +799,22 @@ button.nl-cell { cursor: pointer; }
 .pinlab .sc-ctl { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 0.5rem 1.5rem; }
 .pinlab .ctl-wide { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.3rem 0.8rem; }
 @media (max-width: 560px) { .op .ax-label { font-size: 17px; } }
+
+/* ===================== Chapter 2.2 lens visuals ===================== */
+.op-dash { stroke-dasharray: 5 4; opacity: 0.7; }
+.op-blur { stroke: #e0473b; stroke-width: 9; stroke-linecap: round; opacity: 0.85; }
+.op-crash { fill: var(--bad); font: 700 22px var(--font); letter-spacing: 0.2em; }
+.op-circle { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 6 4; }
+.op-sensA { fill: var(--accent); fill-opacity: 0.25; stroke: var(--accent); stroke-width: 2; }
+.op-sensB { fill: none; stroke: var(--fg-soft); stroke-width: 2.5; }
+.lf-ok { stroke: var(--ok); stroke-width: 4; stroke-linecap: round; }
+.lf-bad { stroke: var(--bad); stroke-width: 4; stroke-linecap: round; }
+.focuslab .sc-ctl, .lensfov .sc-ctl { grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 0.6rem 1.5rem; }
+.fl-row { display: flex; flex-wrap: wrap; gap: 1rem 2rem; align-items: center; margin: 0.6rem 0 0.8rem; }
+.fl-spot { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.4rem; width: 9rem; height: 8.5rem; border: 1px solid var(--line); border-radius: var(--radius); background: #0b0d10; }
+.fl-dot { display: block; border-radius: 50%; background: radial-gradient(circle, #fff 0 55%, #d8dde3 100%); }
+.fl-spot .fl-cap { color: #c9d1d9; }
+.fl-prev { display: flex; flex-direction: column; gap: 0.3rem; overflow: hidden; }
+.fl-prev img { display: block; max-width: 100%; height: auto; border-radius: 6px; }
+.fl-cap { font-size: 0.78rem; color: var(--fg-faint); }
+@media (max-width: 560px) { .op .ax-label { font-size: 17px; } }

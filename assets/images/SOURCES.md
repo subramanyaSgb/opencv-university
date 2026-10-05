@@ -32,3 +32,4 @@ Customer-site images only after anonymisation and written approval.
 | generated/sample-pinhole-scene.png | synthetic test scene: bars 16/10/6/3 px wide, text "OPENCV", upward arrow | Project-owned | 2.1 |
 | generated/sample-pinhole-sensor.png | `cv2.flip(scene, -1)`: the inverted image a pinhole forms on the sensor | Project-owned | 2.1 |
 | generated/sample-pinhole-small.png, sample-pinhole-large.png | scene through a 5 px and 11 px pinhole: disk blur of the hole diameter, brightness × (d / 11)²; geometric optics only, no diffraction | Project-owned | 2.1 |
+| generated/sample-focus-sharp.png, sample-focus-blur.png | the 2.1 test scene in focus, and defocused: average over a 9 px disk (blur circle), same brightness | Project-owned | 2.2 |

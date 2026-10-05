@@ -37,3 +37,5 @@ export { ScaleCalc } from "./ScaleCalc";
 export { DimSketch, Conveyor, CrackSketch, DetectSketch, TrackSketch, LabelPlate } from "./Sketches";
 export { PinholeLab, PinholeDiagram } from "./PinholeLab";
 export { LightPath, OpenSensor, GateSketch, PerspectiveSketch, SensorGrid, CameraChain } from "./Optics";
+export { FocusLab, FocusDiagram, LensFov } from "./FocusLab";
+export { LensRays, ControllerSketch, FocalSketch, DistanceFocus, FovCone, WdSketch, SensorSizes } from "./Optics";

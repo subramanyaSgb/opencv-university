@@ -143,6 +143,10 @@ def pinhole_image(scene, d, d_ref=11):
 images["sample-pinhole-small.png"] = pinhole_image(chart, 5)
 images["sample-pinhole-large.png"] = pinhole_image(chart, 11)
 
+# Chapter 2.2: the same chart in focus and with a 9 px blur circle (defocus simulated as a disk average).
+images["sample-focus-sharp.png"] = chart.copy()
+images["sample-focus-blur.png"] = pinhole_image(chart, 9, d_ref=9)
+
 for name, img in images.items():
     ok = cv2.imwrite(str(OUT / name), img)
     assert ok, f"could not write {name}"
