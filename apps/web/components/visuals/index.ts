@@ -189,3 +189,4 @@ export { EpipolarLab } from "./EpipolarLab";
 export { DisparityLab } from "./DisparityLab";
 export { StructuredLightLab } from "./StructuredLightLab";
 export { LaserTriangulationLab } from "./LaserTriangulationLab";
+export { TimeOfFlightLab } from "./TimeOfFlightLab";

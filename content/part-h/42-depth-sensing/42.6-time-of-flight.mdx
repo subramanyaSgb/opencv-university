@@ -1,0 +1,279 @@
+export const meta = {
+  number: "42.6",
+  title: "Time of flight",
+  minutes: 22,
+  objectives: [
+    "Compute a real light round-trip time, and know why it demands extreme timing precision",
+    "Compute real phase-based distance, and reproduce its real ambiguity failure",
+    "Measure exactly how much timing precision a given depth precision requires",
+    "Know how ToF differs fundamentally from every other method in this module",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 42.6 (Part H, Module 42; closes the module). 42.1-42.5 all used
+  real triangulation (an angle between two known viewpoints or a known-angle light source).
+  Time of flight is fundamentally different: it measures real elapsed TIME, using the known,
+  constant speed of light, needing no second viewpoint or baseline at all.
+  Real, verified numbers (speed of light c=299792458 m/s, exact):
+  - Direct (pulsed) ToF round-trip times: d=0.5m -> 3.336ns, d=1.0m -> 6.671ns,
+    d=5.0m -> 33.356ns, d=10.0m -> 66.713ns.
+  - Real timing precision needed for a given depth precision (depth = c.t/2): 1mm depth
+    precision needs 6.67 picoseconds of timing precision; 10mm needs 66.71ps; 100mm needs
+    667.13ps.
+  - Phase-based (continuous-wave) ToF at a real 20 MHz modulation frequency: max unambiguous
+    range = c/(2.f_mod) = 7.495m. Real distances within range (1.0m, 3.0m, 6.0m) recovered
+    exactly via the real phase formula. At 7.5m (just past the 7.495m limit), phase wraps and
+    naively recovers 0.0052m (near zero) instead of 7.5m. At 9.0m, it wraps to 1.5052m -- a
+    real, wrong, CLOSER-looking distance, not an error message.
+  Lab: TimeOfFlightLab (apps/web/components/visuals/TimeOfFlightLab.tsx) -- both real formulas
+  live, with the real phase-wrap failure directly reproducible by dragging past the max range.
+*/}
+
+# 42.6 Time of flight
+
+<Definition term="Time of flight (ToF)">recovering real distance from how long light actually takes to travel to a surface and back, using the one real, exactly-known constant every other method in this module never needed: the speed of light.</Definition>
+
+42.1 through 42.5 all measured depth through triangulation — an angle between two known viewpoints, or a known-angle light source. Time of flight needs none of that: a single light source and a single detector, timing a real round trip, is enough on its own.
+
+## 1. An analogy
+
+Shouting across a canyon and timing the echo tells you the canyon's real width, using nothing but the known speed of sound and a stopwatch — no second listener on the far side needed. Time-of-flight depth sensing is exactly this, with light instead of sound, and real electronics standing in for the stopwatch.
+
+## 2. Direct ToF: a real, extremely short round trip
+
+<Flow
+  steps={[
+    { label: "A light pulse leaves the sensor", tone: "process" },
+    { label: "It travels to the surface and reflects back", tone: "world" },
+    { label: "A real, extremely short elapsed time, measured directly", tone: "data" },
+    { label: "distance = c . time / 2", tone: "result" },
+  ]}
+/>
+
+Light travels at a real, exactly-known `c = 299,792,458 m/s`. For a surface just 1 metre away, the real round-trip time is **6.671 nanoseconds** — for 10 metres, **66.713 nanoseconds**. These are genuinely, extraordinarily short real durations, which is exactly why direct ToF sensors need equally extraordinary real timing electronics.
+
+## 3. How much timing precision does real depth precision actually need?
+
+Rearranging `distance = c.t/2` shows exactly how much timing precision a given real depth precision demands:
+
+| Target depth precision | Required timing precision |
+| --- | --- |
+| 1 mm | 6.67 picoseconds |
+| 10 mm | 66.71 picoseconds |
+| 100 mm | 667.13 picoseconds |
+
+Millimetre-level depth precision needs **picosecond**-level timing precision — a real, extremely demanding requirement, explaining why many practical ToF depth cameras use a different real approach for everyday ranges instead of trying to time individual pulses directly.
+
+## 4. Phase-based ToF, and a real, measured failure mode
+
+<TimeOfFlightLab caption="Both real ToF formulas, live. Push the distance slider past the max unambiguous range and watch the phase-recovered distance wrap to a real, wrong, closer-looking value."/>
+
+Continuous-wave (phase-based) ToF modulates the light's brightness at a known frequency and measures the real phase shift of the returning signal instead of timing one pulse directly — a far less demanding real electronics problem. At a real `20 MHz` modulation frequency, the real maximum unambiguous range is `c / (2.f_mod) = 7.495 m`. Within that range, real distances recover exactly: `1.0 m → 1.0000 m`, `3.0 m → 3.0000 m`, `6.0 m → 6.0000 m`. Just past it, at `7.5 m`, the phase wraps and naively recovers **0.0052 m** — essentially zero. At `9.0 m`, it wraps to **1.5052 m**: a real, confidently wrong answer that looks exactly like a genuine nearby object, not an error or a warning.
+
+## 5. Industrial context: ToF's real niche
+
+A scene where triangulation's baseline or known-angle geometry (42.1–42.5) would be impractical — very long range, a single small sensor package, or a scene where no second viewpoint can physically fit — is where ToF earns its real place, at the real cost of either extreme timing precision (direct ToF) or a real, bounded unambiguous range that must be chosen to safely exceed the scene's actual maximum real distance (phase ToF, Section 4). A system that might see something beyond its chosen modulation frequency's real range needs either a lower frequency (a longer real range, at the cost of precision, since the same phase measurement precision now covers more real distance) or a second, different modulation frequency to resolve the real ambiguity directly.
+
+## What you should remember from 42.6
+
+<Takeaways>
+<Takeaway n={1} title="Time, not triangulation">ToF needs one light source and one detector -- no baseline or known angle required.</Takeaway>
+<Takeaway n={2} title="Real, extreme timing demands">1mm depth precision needs 6.67 picoseconds of real timing precision.</Takeaway>
+<Takeaway n={3} title="Phase ambiguity is a real, measured failure">Past the max range, phase ToF gives a confident, wrong, closer-looking answer -- reproduced directly.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A phase-based ToF sensor uses a 10 MHz modulation frequency. What is its real maximum unambiguous range?
+
+<Solution>
+
+max_range = c / (2 x f_mod) = 299792458 / (2 x 10,000,000) ≈ **14.99 m**.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: real direct-ToF timing and the required precision
+
+```python
+import numpy as np
+
+c = 299792458.0  # m/s, exact
+
+for d in [0.5, 1.0, 5.0, 10.0]:
+    t_ns = (2 * d / c) * 1e9
+    print(f"d={d}m: round-trip time = {t_ns:.3f} ns")
+
+for depth_precision_mm in [1, 10, 100]:
+    d = depth_precision_mm / 1000.0
+    t_ps = (2 * d / c) * 1e12
+    print(f"depth precision {depth_precision_mm}mm needs timing precision: {t_ps:.2f} ps")
+```
+
+Output:
+
+```text
+d=0.5m: round-trip time = 3.336 ns
+d=1.0m: round-trip time = 6.671 ns
+d=5.0m: round-trip time = 33.356 ns
+d=10.0m: round-trip time = 66.713 ns
+depth precision 1mm needs timing precision: 6.67 ps
+depth precision 10mm needs timing precision: 66.71 ps
+depth precision 100mm needs timing precision: 667.13 ps
+```
+
+### 2. OpenCV/NumPy: real phase-based distance, and the real ambiguity
+
+```python
+f_mod = 20e6  # 20 MHz
+max_range = c / (2 * f_mod)
+print(f"max unambiguous range: {max_range:.3f} m")
+
+for d in [1.0, 3.0, 6.0, 7.5, 9.0]:
+    phase = (4 * np.pi * f_mod * d / c) % (2 * np.pi)
+    d_recovered = phase * c / (4 * np.pi * f_mod)
+    print(f"d={d}m: recovered={d_recovered:.4f}m")
+```
+
+Output:
+
+```text
+max unambiguous range: 7.495 m
+d=1.0m: recovered=1.0000m
+d=3.0m: recovered=3.0000m
+d=6.0m: recovered=6.0000m
+d=7.5m: recovered=0.0052m
+d=9.0m: recovered=1.5052m
+```
+
+### 3. OpenCV: visualising a real depth map once ToF produces one
+
+```python
+import cv2
+
+depths_m = np.array([1.0, 3.0, 6.0, 7.5, 9.0])   # this chapter's own real recovered distances
+depth_img = np.clip(depths_m / depths_m.max() * 255, 0, 255).astype(np.uint8).reshape(1, -1)
+colour = cv2.applyColorMap(depth_img, cv2.COLORMAP_JET)
+print("depth image shape:", depth_img.shape, " colourised shape:", colour.shape)
+```
+
+Output:
+
+```text
+depth image shape: (1, 5)  colourised shape: (1, 5, 3)
+```
+
+Once any real depth value exists — from ToF, stereo (42.1–42.3), structured light (42.4), or laser triangulation (42.5) — `cv2` works with it identically; the sensing *method* this module covers is entirely separate from the downstream image processing.
+
+## OpenCV API notes
+
+- **No `cv2` function implements time-of-flight sensing** — the real physics (Code sections 1-2) is pure, exact arithmetic on a known constant (`c`) and a measured time or phase; a real ToF *camera* (hardware) produces a depth map directly, which `cv2` can then read and process like any other depth image, exactly as 42.1's own stereo output would be used downstream.
+- **`cv2.rgbd`** (contrib) and related modules work with depth images from any real source (stereo, structured light, or a real ToF camera) once they exist — the sensing *method* (this module's whole focus) is separate from what `cv2` does with the resulting depth map afterward.
+
+## Where it fails
+
+- **Direct ToF's real picosecond timing requirement** (Section 3) genuinely limits how cheaply and precisely it can be built — many consumer ToF products use the phase-based method specifically to avoid this real cost.
+- **Phase-based ToF's real ambiguity** (Section 4) is not a software bug to patch — it is a real, physical consequence of measuring a value (phase) that genuinely repeats every `2π`; a scene that can exceed the chosen modulation frequency's real range needs a real design change (lower frequency, or multiple frequencies), not a software fix alone.
+- **Strong ambient light or a highly reflective/absorbent surface** can overwhelm or starve a real ToF sensor's own emitted signal, the same real physical problem structured light (42.4) and laser triangulation (42.5) both face.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming a higher modulation frequency is always better for phase-based ToF** — Section 4's own real formula shows a higher frequency *reduces* the maximum unambiguous range; it trades range for precision, not a free improvement.
+- **Treating a confidently-returned ToF distance as automatically correct** — Section 4's own real demonstration shows a genuinely wrong, wrapped distance looks exactly like a normal, valid reading, with no built-in warning.
+- **Expecting direct ToF to reach millimetre precision cheaply** — Section 3's own real picosecond timing requirement is a genuine, expensive engineering problem, not a software tuning knob.
+- **Forgetting ToF needs no baseline at all**, then designing a ToF system with unnecessary triangulation-style geometric constraints left over from stereo or laser-triangulation thinking (42.1, 42.5).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Resolving phase ambiguity with multiple frequencies
+
+A real, common fix for phase-based ToF's ambiguity (Section 4) is measuring phase at two or more different modulation frequencies: each frequency wraps at a different real range, and combining the two real phase measurements can uniquely determine the true distance over a much longer real span than either frequency alone could manage unambiguously — a real, practical technique used in several commercial ToF depth cameras.
+
+### SPAD-based direct ToF
+
+Modern direct-ToF sensors increasingly use Single-Photon Avalanche Diodes (SPADs), real detectors sensitive enough to register individual photons with real sub-nanosecond timing resolution, directly addressing Section 3's own extreme precision requirement at the hardware level — a genuinely different real engineering approach from the phase-based method this chapter's Section 4 covers in depth.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does time-of-flight depth sensing need that triangulation-based methods (42.1-42.5) all require?",
+      options: ["A known baseline or angle between two viewpoints -- ToF needs neither", "Nothing different -- ToF is a form of triangulation too", "A second camera, just like stereo", "A laser at a specific angle, just like 42.5"],
+      answer: 0,
+      explanation: "Section 1-2: ToF measures real elapsed time directly, with no second viewpoint or known angle required.",
+    },
+    {
+      question: "In this chapter's own real calculation, how much timing precision does 1mm depth precision require for direct ToF?",
+      options: ["1 millisecond", "1 microsecond", "6.67 picoseconds", "6.67 nanoseconds"],
+      answer: 2,
+      explanation: "Section 3: a real, exact calculation from distance = c.t/2.",
+    },
+    {
+      question: "In this chapter's own real demonstration, what happened when a true distance (9.0m) exceeded the max unambiguous range (7.495m) of a 20 MHz phase-based ToF system?",
+      options: ["The sensor correctly reported 9.0m anyway", "It returned an error message", "It confidently returned a real, wrong, closer-looking distance (1.5052m) with no warning", "Phase-based ToF has no range limit at all"],
+      answer: 2,
+      explanation: "Section 4: a real, measured, physically genuine ambiguity failure, not a software bug.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A direct ToF sensor measures a round-trip time of 20 nanoseconds. What real distance does this correspond to?
+
+<Solution>
+
+distance = c x t / 2 = 299792458 x 20e-9 / 2 ≈ **3.0 m**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, compute the max unambiguous range for a 5 MHz modulation frequency, and compare it to this chapter's own 20 MHz result (7.495m).
+
+<Solution>
+
+```python
+f_mod_low = 5e6
+max_range_low = c / (2 * f_mod_low)
+print(f"max unambiguous range at 5 MHz: {max_range_low:.3f} m")
+```
+
+Output:
+
+```text
+max unambiguous range at 5 MHz: 29.979 m
+```
+
+A 4x lower frequency gives a 4x longer real range — confirming the chapter's own inverse relationship between modulation frequency and maximum unambiguous range directly.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A warehouse wants a ToF sensor to safely cover its full 15m aisle length without any real ambiguity. Based on Section 4 and Exercise 2, what real modulation frequency constraint should they check?
+
+<Solution>
+
+Following Section 4's own real formula (max_range = c / (2.f_mod)), they need a modulation frequency low enough that the max unambiguous range comfortably exceeds the real 15m aisle length — Exercise 2's own real result shows 5 MHz already gives nearly 30m of range, comfortably covering 15m with real margin, while this chapter's own 20 MHz example (7.495m range) would NOT be safe, since the real aisle length exceeds it and Section 4's own demonstration showed exactly what happens past that limit: a confident, wrong, closer-looking reading. They should explicitly check the chosen frequency against the real maximum distance the sensor could ever actually see, not just the typical or average expected distance.
+
+</Solution>
+
+## References
+
+1. R. Lange, P. Seitz, "Solid-state time-of-flight range camera," *IEEE Journal of Quantum Electronics*, 37(3), 390–397, 2001.
+2. D. Stoppa, F. Remondino (eds.), *TOF Range-Imaging Cameras*, Springer, 2013.
+3. CODATA 2018, exact value of the speed of light in vacuum: 299,792,458 m/s (defined exactly by the SI since 1983).
