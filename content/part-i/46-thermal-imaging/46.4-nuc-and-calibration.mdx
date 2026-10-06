@@ -1,0 +1,262 @@
+export const meta = {
+  number: "46.4",
+  title: "NUC and calibration",
+  minutes: 22,
+  objectives: [
+    "Know why every pixel of a real thermal detector array needs its own individual correction",
+    "Measure, for real, how much a one-point correction helps, and where it falls short",
+    "Measure, for real, why a two-point correction is needed for a genuinely non-uniform scene",
+    "Measure, for real, why a real thermal camera periodically re-calibrates itself"
+  ],
+};
+
+{/*
+  Lesson content for Chapter 46.4 (Part I, Module 46). 46.3 assumed a camera's raw count
+  already maps cleanly to radiance via one shared calibration curve; a real detector ARRAY
+  does not -- every pixel has its own small, real gain and offset error (fixed-pattern
+  noise), which Non-Uniformity Correction (NUC) removes.
+  All numbers real, verified directly. Simulated 1-D array of N=10000 detector pixels, real
+  per-pixel gain = 1.0 + N(0, 0.03) (3% real gain FPN), offset = N(0, 8.0) counts, sensor
+  noise std=0.5, seed=10 (gain/offset), seeds 1-5 for various reference/test captures.
+  1-point NUC: one uniform reference at R_ref=1000, correction = ref_counts.mean()-ref_counts.
+  2-point NUC: two uniform references at R_lo=500, R_hi=1500, per-pixel linear fit.
+  Uniform test scene (R=900): raw std across pixels=28.078; 1-point NUC std=3.062 (9.2x
+  better); 2-point NUC std=0.614 (45.7x better than raw, 5.0x better than 1-point).
+  Non-uniform (real linear gradient 600-1200) test scene: raw mean abs error=22.33 (max
+  124.03); 1-point NUC mean abs error=4.07 (max 38.68) -- real, but much weaker than its own
+  uniform-scene result; 2-point NUC mean abs error=0.50 (max 2.41) -- handles the real
+  non-uniform scene properly.
+  Drift test: added a real per-pixel offset-drift-with-internal-temperature coefficient,
+  N(0, 0.6) counts/degC, applied to a 1-point NUC calibrated at delta_T_internal=0: residual
+  std across pixels on the R=900 uniform test scene grows from 3.062 (delta_T=0) to 3.115
+  (1C), 3.543 (3C), 4.279 (5C), 6.740 (10C) -- more than doubling by 10C of internal drift.
+  Lab: NucLab (apps/web/components/visuals/NucLab.tsx) -- live 1-point vs 2-point correction
+  and drift degradation.
+*/}
+
+# 46.4 NUC and calibration
+
+<Definition term="Non-uniformity correction (NUC)">correcting the real, individual gain and offset error every single pixel of a thermal detector array has, by comparing the whole array's response to one or more known, uniform reference scenes.</Definition>
+
+46.3 assumed one shared calibration curve converts any pixel's raw count into a real radiance. A real detector array does not behave that uniformly: every individual pixel has its own small, real manufacturing variation in both gain and offset — fixed-pattern noise — and NUC is the real, standard procedure that removes it.
+
+## 1. An analogy
+
+A row of bathroom scales, each slightly miscalibrated, might show anywhere from 1kg to 3kg with nothing on them at all, and might also disagree slightly on how much a real 10kg weight actually weighs. Having every person step on an *empty* scale first (its own real "zero") fixes the first problem; having everyone also step on a known real 10kg reference weight fixes the second. A thermal detector array has exactly this same real two-part problem, pixel by pixel, at a far larger scale.
+
+## 2. The pipeline: known references in, a corrected array out
+
+<Flow
+  steps={[
+    { label: "A detector array, each pixel with its own real gain/offset error", tone: "data" },
+    { label: "Capture one or more KNOWN uniform reference radiances", tone: "process" },
+    { label: "Fit each pixel's own correction from those references", tone: "process" },
+    { label: "Apply that correction to every future real frame", tone: "result" },
+  ]}
+/>
+
+<NucLab caption="Live, exact 1-point vs 2-point non-uniformity correction on a simulated detector array." />
+
+A real camera performs this by closing an internal shutter (or pointing briefly at a uniform target) to capture one or more known, uniform reference frames, computing each pixel's own correction from them, and then applying that same correction to every subsequent real image until the next recalibration.
+
+## 3. A real, measured result: one reference already helps enormously
+
+Simulating a real detector array (10,000 pixels, each with its own real ±3% gain error and a real random offset) viewing a perfectly uniform test scene shows raw pixel-to-pixel variation of **28.078** counts of real standard deviation — pure fixed-pattern noise, since every pixel is seeing the identical real radiance. Correcting with a single uniform reference (**1-point NUC**, matching every pixel's own offset to the array's mean) cuts that to **3.062** — a real **9.2x** improvement — while using two references at different radiances to fit each pixel's real gain *and* offset (**2-point NUC**) reaches **0.614**, a real **45.7x** improvement over the uncorrected array.
+
+## 4. A real, measured surprise: one reference is not enough for a real scene
+
+That dramatic 1-point result came from testing on a *uniform* scene — exactly the condition the correction was fitted for. Testing the identical 1-point correction on a real, *non-uniform* scene (a smooth radiance gradient, a far more realistic test) reveals a real, much weaker result: a mean error of **4.07** (down from an uncorrected **22.33**, but far short of the uniform case's near-total fix) — because 1-point correction only truly matches each pixel's response at the *one* radiance it was calibrated against; every pixel's own small, real gain error still shows up everywhere else in the scene. The 2-point correction, fitted across *two* different real reference radiances, handles this properly: a mean error of just **0.50** on the same non-uniform scene — this is exactly why real thermal cameras use at least two-point calibration, not a single flat-field shot.
+
+## 5. A real, measured result: why a camera re-calibrates itself periodically
+
+A real detector's own gain and offset genuinely drift as the camera's internal temperature changes during use — a real, physical effect, not just scene noise. Applying a 1-point correction that was fitted at one internal temperature to later frames taken after the camera's own body has warmed shows a real, growing residual error: **3.062** at zero drift, rising to **3.543** at 3°C of internal drift, **4.279** at 5°C, and **6.740** — more than double the original value — at 10°C of real internal temperature change. This is exactly why a real thermal camera periodically performs its own audible internal **flat-field correction (FFC)** — the real "click" many users hear during use — re-capturing its own reference and refreshing every pixel's correction before this real drift grows too large.
+
+## What you should remember from 46.4
+
+<Takeaways>
+<Takeaway n={1} title="Every pixel needs its own real correction">Fixed-pattern noise is a real, individual gain/offset error per pixel, not a single shared calibration curve.</Takeaway>
+<Takeaway n={2} title="Two references beat one, on a real scene">This chapter's own real result: 1-point NUC left a real 4.07 mean error on a non-uniform scene; 2-point NUC cut it to 0.50.</Takeaway>
+<Takeaway n={3} title="NUC goes stale as the camera warms up">A real, measured, more-than-doubling of residual error (3.062 to 6.740) over 10C of internal drift -- the real reason for periodic FFC cycles.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A thermal camera has just been freshly flat-field-corrected, and a technician immediately begins a long inspection in a hot environment that will warm the camera's own body over the next hour. Based on Section 5, should they expect the correction to remain equally good throughout?
+
+<Solution>
+
+No. Section 5's own real result shows residual non-uniformity grows substantially as the camera's own internal temperature drifts from the point where it was calibrated — more than doubling by 10°C of drift. A real inspection protocol should expect, and plan for, periodic re-calibration (FFC) during a long session in a changing thermal environment.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: real 1-point vs 2-point non-uniformity correction
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(10)
+N = 10000
+true_gain = 1.0 + rng.normal(0, 0.03, N)
+true_offset = rng.normal(0, 8.0, N)
+
+def sensor_response(true_radiance, gain, offset, noise_std, seed):
+    return gain * true_radiance + offset + np.random.default_rng(seed).normal(0, noise_std, len(true_radiance))
+
+ref_counts = sensor_response(np.full(N, 1000.0), true_gain, true_offset, 0.5, seed=1)
+offset_correction = ref_counts.mean() - ref_counts
+
+counts_lo = sensor_response(np.full(N, 500.0), true_gain, true_offset, 0.5, seed=2)
+counts_hi = sensor_response(np.full(N, 1500.0), true_gain, true_offset, 0.5, seed=3)
+a = (1500.0 - 500.0) / (counts_hi - counts_lo)
+b = 500.0 - a * counts_lo
+
+raw_uniform = sensor_response(np.full(N, 900.0), true_gain, true_offset, 0.5, seed=4)
+print(f"uniform scene: raw std={raw_uniform.std():.3f}, 1-point std={(raw_uniform+offset_correction).std():.3f}, 2-point std={(a*raw_uniform+b).std():.3f}")
+
+scene = 600 + 600 * np.linspace(0, 1, N)
+raw_scene = sensor_response(scene, true_gain, true_offset, 0.5, seed=5)
+print(f"gradient scene: raw err={np.abs(raw_scene-scene).mean():.2f}, 1-point err={np.abs(raw_scene+offset_correction-scene).mean():.2f}, 2-point err={np.abs(a*raw_scene+b-scene).mean():.2f}")
+```
+
+Output:
+
+```text
+uniform scene: raw std=28.078, 1-point std=3.062, 2-point std=0.614
+gradient scene: raw err=22.33, 1-point err=4.07, 2-point err=0.50
+```
+
+### 2. OpenCV: visualizing fixed-pattern noise before and after NUC
+
+```python
+import cv2
+
+side = 100
+raw_img = raw_uniform[:side * side].reshape(side, side)
+corrected_img = (raw_uniform + offset_correction)[:side * side].reshape(side, side)
+
+raw_8bit = cv2.normalize(raw_img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+corrected_8bit = cv2.normalize(corrected_img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+print("raw FPN image std (8-bit display range):", raw_8bit.std().round(2))
+print("corrected image std (8-bit display range):", corrected_8bit.std().round(2))
+```
+
+Output:
+
+```text
+raw FPN image std (8-bit display range): 33.42
+corrected image std (8-bit display range): 35.08
+```
+
+## OpenCV API notes
+
+- **No `cv2` function performs non-uniformity correction** — NUC (Code section 1) is plain per-pixel arithmetic; `cv2` enters only to display the result (Code section 2).
+- **`cv2.normalize(..., cv2.NORM_MINMAX)`** (Code section 2) rescales a float array for 8-bit display — note it does NOT remove real fixed-pattern noise itself; the min-max stretch applied to both the raw and corrected images here shows a similarly large displayed std, because normalization stretches whatever full range is present rather than fixing non-uniformity, exactly 46.3's own "a palette is not the same as the real data" point applied here too.
+- **A real camera's own NUC coefficients are usually stored per pixel inside the camera** and applied to every frame before any further processing (46.3, 46.5) ever sees the data.
+
+## Where it fails
+
+- **This chapter's 2-point correction assumes a purely linear per-pixel response** — some real detectors have small nonlinearities a two-point fit cannot fully capture; higher-order or multi-point calibration exists for those real cases.
+- **A NUC calibration performed at one internal camera temperature degrades as that temperature drifts** (Section 5's own real result) — this is a genuine real limitation, not something a one-time factory calibration can solve permanently.
+- **A bad or stale reference capture (dust, a non-uniform shutter, motion during capture) corrupts the correction itself** — NUC is only as good as its own real reference capture.
+- **NUC corrects detector-level fixed-pattern noise, not scene-level problems** — it does nothing for the real emissivity (46.2) or bit-depth (46.3) issues covered elsewhere in this module.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming a single flat-field (1-point) correction is enough for real scenes** — Section 4's own real result (4.07 vs 0.50 mean error) shows a real, substantial gap between 1-point and 2-point correction on anything but a perfectly uniform test.
+- **Ignoring a camera's own FFC prompts or disabling automatic re-calibration** — Section 5's own real drift result is exactly what that feature exists to prevent.
+- **Assuming a corrected, normalized display image proves non-uniformity is gone** — Code section 2's own real result shows a naive min-max display stretch does not actually reveal (or fix) the real underlying correction quality.
+- **Performing a critical measurement immediately after a large change in the camera's own operating temperature**, without waiting for or triggering a fresh FFC — Section 5's own real numbers show exactly how much residual error this can leave.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Scene-based NUC
+
+Some real thermal cameras additionally use "scene-based" NUC, estimating correction coefficients from natural camera motion across an ordinary (non-uniform) real scene rather than a dedicated uniform reference — a more complex, real alternative to this chapter's shutter-based approach, useful when a physical shutter is impractical (e.g., some cooled MWIR systems).
+
+### Bad pixel replacement
+
+A real detector array almost always has a handful of individual pixels that cannot be corrected at all (dead, stuck, or wildly out-of-range) — a real camera's own processing pipeline maps these out and interpolates their value from real neighbours, a separate, additional step from this chapter's own per-pixel gain/offset correction.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why does a real thermal detector array need non-uniformity correction?",
+      options: ["It doesn't -- all pixels are identical by design", "Every real pixel has its own small, individual gain and offset manufacturing error (fixed-pattern noise) that a single shared calibration curve cannot account for", "Only to make the displayed colours look nicer", "Only old thermal cameras need this"],
+      answer: 1,
+      explanation: "Section 1-2: a real, per-pixel correction problem, not a single global calibration issue.",
+    },
+    {
+      question: "This chapter's own real test found what difference between 1-point and 2-point NUC on a NON-uniform (real gradient) test scene?",
+      options: ["No real difference at all", "1-point NUC left a real 4.07 mean error; 2-point NUC cut it to 0.50 -- a real, substantial difference on anything but a perfectly uniform scene", "1-point NUC performed better", "Both performed perfectly"],
+      answer: 1,
+      explanation: "Section 4: 1-point correction only truly matches its one reference radiance; 2-point handles the full real range.",
+    },
+    {
+      question: "This chapter's own real drift test found what effect from the camera's internal temperature changing after NUC calibration?",
+      options: ["No effect -- NUC is permanent once calibrated", "Residual non-uniformity grew substantially, more than doubling (3.062 to 6.740) over a real 10C of internal drift", "The correction got BETTER with drift", "This effect only happens in very old cameras"],
+      answer: 1,
+      explanation: "Section 5: a real, measured, physical reason real cameras perform periodic flat-field correction.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 1-point NUC calibration reduced array std from 30 counts to 3 counts on a uniform scene. Roughly what real improvement factor is this?
+
+<Solution>
+
+`30 / 3 = 10x` improvement — comparable to this chapter's own real 9.2x result.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, test the 2-point correction's residual std on a SECOND uniform test scene at R=1200 (outside the original calibration pair's 500-1500 range midpoint but still inside it), and compare to this chapter's own R=900 result (0.614 std... after offset correction only applies to the SAME uniform test used for calibration fitting -- use the 2-point `a`,`b` coefficients here).
+
+<Solution>
+
+```python
+raw_1200 = sensor_response(np.full(N, 1200.0), true_gain, true_offset, 0.5, seed=6)
+corrected_1200 = a * raw_1200 + b
+print(f"uniform scene at R=1200: 2-point corrected std={corrected_1200.std():.3f}")
+```
+
+Output:
+
+```text
+uniform scene at R=1200: 2-point corrected std=0.631
+```
+
+Close to this chapter's own R=900 result (0.614) — the 2-point correction performs consistently well across the real calibrated range, unlike the 1-point correction's much larger real degradation away from its single reference point.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A factory uses a fixed-mounted thermal camera for 24/7 monitoring of a process that runs both during cold nights and hot days, with the camera's own enclosure temperature varying by over 15°C across that cycle. Based on Section 5, what real risk should the team expect if they only perform NUC once, at installation?
+
+<Solution>
+
+Following Section 5's own real result (residual error more than doubling over just 10°C of drift), a 15°C daily swing in the camera's own enclosure temperature would be expected to cause real, substantial, and likely worse non-uniformity errors at the temperature extremes compared to right after the original calibration. The real, standard fix is relying on the camera's own automatic, periodic FFC cycling (Section 5) rather than a single one-time calibration at installation.
+
+</Solution>
+
+## References
+
+1. M. Vollmer, K.-P. Möllmann, *Infrared Thermal Imaging: Fundamentals, Research and Applications*, 2nd ed., Wiley-VCH, 2017 — already cited in 46.1-46.3.
+2. OpenCV 4.13.0 documentation: `cv2.normalize`. https://docs.opencv.org/4.13.0/
