@@ -1,0 +1,298 @@
+export const meta = {
+  number: "44.3",
+  title: "Multi-view stereo",
+  minutes: 24,
+  objectives: [
+    "Generalize 42.3's two-view disparity search into plane-sweep stereo across many calibrated views",
+    "Measure, for real, how much extra views reduce real sensor-noise error",
+    "Measure, for real, how extra views resolve a real repetitive-texture ambiguity that two views alone cannot",
+    "Know the one real failure extra views cannot fix: a genuinely textureless region",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 44.3 (Part H, Module 44; closes the module). Generalizes 42.3's
+  two-view disparity search to N calibrated views (the camera poses 43.1 would supply for a
+  real multi-image capture), using the classic "plane-sweep" method: for each candidate
+  depth, warp every view onto a reference view and measure how PHOTO-CONSISTENT (low
+  variance) the result is. The real multi-baseline idea (more, differently-spaced views
+  resolve ambiguity two views cannot) is Okutomi & Kanade's real, cited result.
+  All numbers real, verified via scripts/gen_mvs_data.py -> apps/web/public/data/mvs-data.json.
+  Setup: fronto-parallel 1-D test scene, f=800px, true depth Z=1000mm, cameras spaced 50mm
+  apart along a baseline, 200 reference pixels, 121 candidate depths (700-1300mm, step 5mm).
+  Scene 1 (ordinary, non-periodic texture, sensor noise std=5): mean depth error 129.70mm (2
+  views, 17.5% within 10mm) -> 25.90mm (5 views, 84.5%) -> 2.88mm (9 views, 99.0%) -- more
+  views average out real sensor noise.
+  Scene 2 (repetitive/periodic texture + the SAME sensor noise): mean error 57.65mm (2 views,
+  38.5% within 10mm) -> 8.85mm (5 views, 88.0%) -> 6.22mm (9 views, 97.5%) -- a real, DIFFERENT
+  source of error (aliasing/ambiguity, not just noise) that extra, differently-spaced
+  baselines also resolve. (Specific numbers depend on this texture's exact local detail --
+  a pure, noise-free periodic signal instead ties EVERY pixel identically rather than
+  producing this more realistic, locally-varying ambiguity.)
+  Scene 3 (genuinely textureless, same sensor noise): mean error 136.47mm (2 views) ->
+  137.53mm (5 views) -> 148.55mm (9 views) -- NO real improvement with more views (even
+  slightly worse at 9), because the real problem is a lack of any signal to match at all,
+  which no number of additional views can supply.
+  Real cv2.warpPerspective verification (Code section 2): a pure horizontal-translation
+  homography (disparity=f*baseline/Z=40px at baseline=50mm, Z=1000mm) warps a test image
+  identically to a manual pixel shift -- this IS how a real 2-D plane-sweep performs its warp
+  step.
+  Lab: MultiViewStereoLab (apps/web/components/visuals/MultiViewStereoLab.tsx).
+*/}
+
+# 44.3 Multi-view stereo
+
+<Definition term="Multi-view stereo (MVS)">recovering dense depth by combining MANY calibrated views of a scene, not just the two 42.1/42.3 used — each extra view adds another real, independent check against the same candidate depth.</Definition>
+
+42.3's dense disparity search matched exactly two images. A real multi-camera rig, or 43.1's own chained structure-from-motion poses, usually provides far more than two calibrated views of the same scene — and using all of them, not just a pair, is multi-view stereo's whole real point.
+
+## 1. An analogy
+
+Looking at a picket fence from directly in line with it, every picket lines up with every other one — it is genuinely impossible to tell, from that single vantage point, how far away the fence actually is. Stepping even slightly to one side breaks that illusion instantly; stepping to several different new positions breaks it even more thoroughly, because it becomes vanishingly unlikely that *every* new vantage point would happen to show the same false alignment. Multi-view stereo is exactly this: checking a candidate depth from several real, different positions at once, rather than trusting a single potentially-misleading pair.
+
+## 2. The pipeline: plane-sweep stereo
+
+<Flow
+  steps={[
+    { label: "N calibrated views of a static scene (43.1's own poses)", tone: "data" },
+    { label: "For each candidate depth: warp every view onto one reference view", tone: "process" },
+    { label: "Measure photo-consistency (variance) across all N warped views", tone: "process" },
+    { label: "Keep the depth with the lowest variance, per pixel", tone: "result" },
+  ]}
+/>
+
+<MultiViewStereoLab caption="Real plane-sweep stereo results (precomputed) on three synthetic scenes, as the number of calibrated views grows." />
+
+**Plane-sweep stereo** tests a whole range of candidate depths directly, one at a time: for a given candidate depth, every other view is warped (42.1/34.6's own homography machinery, specialized to a simple shift for a flat, fronto-parallel surface) onto the reference view's pixel grid, exactly as if that candidate depth were correct. If the candidate is right, every warped view should show the *same* real intensity at that pixel — low variance across all of them. If it's wrong, the views drift apart — high variance. Sweeping every candidate depth and keeping the one with the lowest variance, independently at every pixel, is the whole real method; this chapter's own test data shows exactly how much better that gets with more views.
+
+## 3. A real, measured result: more views average out real noise
+
+With ordinary (non-repetitive) texture and realistic sensor noise added to every view, two views alone recovered the true 1000mm depth to a mean error of **129.70mm** — only **17.5%** of pixels landed within 10mm of the truth. Adding more views (same noise level, same texture) genuinely helps, because the variance-based consistency check at each candidate depth now averages over more independent noisy measurements: **5** views cut the mean error to **25.90mm** (**84.5%** within 10mm), and **9** views reached **2.88mm** (**99.0%** within 10mm) — a real, roughly 45x improvement in mean error from four extra views beyond the original pair.
+
+## 4. A real, measured result: more views resolve a real ambiguity, not just noise
+
+A *repetitive* texture — the real hazard this chapter's analogy named directly — adds a second, genuinely different source of error on top of the same sensor noise: two views alone gave a mean error of **57.65mm** here (worse than the ordinary-texture case's 129.70mm might suggest it should be, in the opposite direction — a repetitive pattern can look *falsely* consistent at a wrong depth, not just noisily uncertain at the right one). Extra, differently-spaced views fix this the same real way they fixed Section 3's noise: **5** views brought the mean error to **8.85mm**, and **9** views reached **6.22mm** — because a false match that happens to align two closely-spaced views rarely also aligns a view spaced much farther away, exactly 42.5's baseline-sensitivity principle working in this method's favour instead of against it.
+
+## 5. The one real failure more views cannot fix
+
+Running the identical experiment on a genuinely **textureless** region (the same sensor noise, but with essentially no real texture signal at all) gives a real, different, and important result: mean error stays at **136.47mm** with 2 views, **137.53mm** with 5, and **148.55mm** with 9 — not better, and if anything very slightly *worse*. More views cannot manufacture information that was never there to begin with; with no real signal to match, the variance-minimization search is just as likely to settle on an accidentally-low-variance wrong depth as a right one, and more candidate views only add more chances for an accidental false minimum to appear.
+
+## 6. Industrial context: from many photos to one dense reconstruction
+
+A real photogrammetry pipeline — reconstructing a building facade, a manufactured part for reverse engineering, or a VFX film set — routinely captures dozens to hundreds of overlapping photos, recovers their relative poses with 43.1's structure from motion, and then runs exactly this chapter's plane-sweep (or a closely related patch-based variant) across every usable group of views to get one real, dense depth map per reference image — which 44.1's point-cloud cleanup then merges into a single combined model. Multi-view stereo is the real bridge between 43.1's sparse set of feature points and a genuinely dense reconstruction.
+
+## What you should remember from 44.3
+
+<Takeaways>
+<Takeaway n={1} title="Plane-sweep generalizes 42.3's two-view search">Warp every one of N views onto a reference at each candidate depth; keep the lowest-variance depth, per pixel.</Takeaway>
+<Takeaway n={2} title="More views fix two real, different problems">This chapter's own real results: noise error fell from 129.70mm to 2.88mm (2 to 9 views); a separate repetitive-texture ambiguity fell from 57.65mm to 6.22mm.</Takeaway>
+<Takeaway n={3} title="More views cannot fix a lack of signal">A genuinely textureless region stayed at ~136-149mm error regardless of view count -- the real, structural exception.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A team doubles their rig's camera count, hoping to fix a persistently noisy depth reconstruction in one specific region of their scene. Based on Section 3 vs Section 5, what is the one real question they should ask first?
+
+<Solution>
+
+Whether that specific region actually has real texture to match at all. If it is genuinely textureless, Section 5's own real result shows more cameras will not help (and may even make things very slightly worse) — the fix for *that* region is adding real texture (a projected pattern, as in structured light, 42.4) rather than more views. If the region does have ordinary texture and the problem is just noise, Section 3's own real result shows more views would genuinely help.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: plane-sweep stereo, and its real noise-averaging benefit
+
+```python
+import numpy as np
+
+F, Z_TRUE, W = 800.0, 1000.0, 3000
+rng = np.random.default_rng(42)
+texture = 128 + rng.normal(0, 40, W)  # ordinary, non-repetitive texture
+
+PMIN, PMAX = -600, 900
+PIX_RANGE = np.arange(PMIN, PMAX)
+REF_PIXELS = np.arange(50, 250)
+DEPTH_CANDIDATES = np.arange(700, 1301, 5)
+
+def lookup(arr, p):
+    idx = np.clip(p - PMIN, 0, len(arr) - 2)
+    i0 = np.floor(idx).astype(int)
+    return arr[i0] * (1 - (idx - i0)) + arr[i0 + 1] * (idx - i0)
+
+def sample_texture(pos):
+    pos_c = np.clip(pos, 0, W - 2)
+    i0 = np.floor(pos_c).astype(int)
+    return texture[i0] * (1 - (pos_c - i0)) + texture[i0 + 1] * (pos_c - i0)
+
+def render_camera(cam_x, noise_std, seed):
+    wx = cam_x + PIX_RANGE * Z_TRUE / F
+    return sample_texture(wx) + np.random.default_rng(seed).normal(0, noise_std, len(PIX_RANGE))
+
+def plane_sweep(n_cams, spacing, noise_std, seed_base):
+    cam_positions = np.arange(n_cams) * spacing
+    observed = [render_camera(cx, noise_std, seed_base + i) for i, cx in enumerate(cam_positions)]
+    variances = np.zeros((len(DEPTH_CANDIDATES), len(REF_PIXELS)))
+    for di, d in enumerate(DEPTH_CANDIDATES):
+        wx_ref = cam_positions[0] + REF_PIXELS * d / F
+        vals = [lookup(observed[ci], (wx_ref - cx) * F / d) for ci, cx in enumerate(cam_positions)]
+        variances[di] = np.array(vals).var(axis=0)
+    best = DEPTH_CANDIDATES[np.argmin(variances, axis=0)]
+    return np.abs(best - Z_TRUE)
+
+for n_cams in [2, 5, 9]:
+    err = plane_sweep(n_cams, spacing=50.0, noise_std=5.0, seed_base=100)
+    print(f"{n_cams} views: mean error={err.mean():.2f}mm, within 10mm={np.mean(err<=10)*100:.1f}%")
+```
+
+Output:
+
+```text
+2 views: mean error=129.70mm, within 10mm=17.5%
+5 views: mean error=25.90mm, within 10mm=84.5%
+9 views: mean error=2.88mm, within 10mm=99.0%
+```
+
+### 2. OpenCV: the real warp step
+
+```python
+import cv2
+
+baseline, Z = 50.0, 1000.0
+disparity_px = F * baseline / Z  # the pure horizontal shift a fronto-parallel plane produces
+H = np.array([[1, 0, disparity_px], [0, 1, 0], [0, 0, 1]], dtype=np.float64)
+
+img1 = np.random.default_rng(1).integers(0, 255, (50, 300), dtype=np.uint8)
+warped = cv2.warpPerspective(img1, H, (300, 50))
+manual_shift = np.allclose(warped[:, int(disparity_px):250].astype(float), img1[:, :250 - int(disparity_px)].astype(float), atol=1)
+print(f"disparity at true depth: {disparity_px:.1f}px")
+print("cv2.warpPerspective matches a manual pixel shift:", manual_shift)
+```
+
+Output:
+
+```text
+disparity at true depth: 40.0px
+cv2.warpPerspective matches a manual pixel shift: True
+```
+
+This is the real, standard way a 2-D plane-sweep implementation performs its "warp every view onto the reference at this candidate depth" step — `cv2.warpPerspective` with a homography built from the candidate plane, run once per view per candidate depth, exactly generalizing this chapter's 1-D pixel-shift model.
+
+## OpenCV API notes
+
+- **No single `cv2` function performs plane-sweep multi-view stereo** — it is a real, standard *algorithm* built from ordinary pieces: `cv2.warpPerspective` (or `cv2.remap`) for the warp step, plain NumPy for the per-pixel variance search across candidate depths.
+- **`cv2.warpPerspective(src, H, dsize)`** (Code section 2) takes a `3x3` homography `H`; for this chapter's fronto-parallel-plane case, `H` reduces to a pure horizontal translation by the real disparity (`f x baseline / Z`) that candidate depth implies — exactly 42.1/42.3's own disparity formula, reused here per candidate rather than solved for directly.
+- **A general (non-fronto-parallel) scene needs a different homography per candidate plane orientation**, not just per depth — this chapter simplified to a flat, camera-facing surface; a real implementation sweeps both depth and, where needed, surface orientation.
+
+## Where it fails
+
+- **A genuinely textureless region is not helped by more views** (Section 5's own real result) — the real fix there is adding texture (a projected pattern, 42.4), not more cameras.
+- **Occlusion**: a point visible in only some of the N views contributes no useful information from the views that cannot see it at all, and a naive variance computed across *all* N views (as this chapter's own simple implementation does) is biased by whichever views are occluded; a real system must detect and exclude occluded views per candidate, similar in spirit to 44.2's own shadow-aware fix.
+- **Cost grows with both view count and the number of candidate depths** — this chapter's 121-candidate, 9-view sweep is already real, measurable work; a real dense 2-D image at many more candidate depths and views is substantially more expensive than 42.3's simple two-view disparity search.
+- **This chapter's fronto-parallel-plane simplification does not generalize to curved or sharply-angled real surfaces** without sweeping surface orientation as well as depth (OpenCV API notes).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming more views always help** — Section 5's own real, measured counterexample (a textureless region getting *slightly worse*, not better, from 2 to 9 views) is the direct, honest exception.
+- **Treating noise-driven and ambiguity-driven errors as the same problem** — Section 3 and Section 4's own real, different starting errors (129.70mm vs 57.65mm at 2 views) show these are genuinely different failure modes, both real, both fixed by more views, but for different underlying reasons.
+- **Forgetting that occlusion needs explicit handling** (Where it fails) — a naive all-views-equal variance, as used throughout this chapter for clarity, silently degrades wherever some views cannot actually see a given point.
+- **Searching too coarse a depth range** — this chapter's 5mm candidate step is itself a real source of residual error (Section 3's 9-view "99.0% within 10mm," not 100%); a finer step trades real accuracy for real extra cost.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Multi-baseline stereo
+
+M. Okutomi, T. Kanade, "A Multiple-Baseline Stereo" (*IEEE Transactions on Pattern Analysis and Machine Intelligence*, 1993) is the real, foundational paper behind Section 4's own result: combining several *different* baselines (not just more of the same one) specifically defeats the kind of repetitive-texture false match that any single baseline alone is vulnerable to, because a false match's apparent depth genuinely depends on which baseline produced it, while the true match's depth does not.
+
+### Patch-based multi-view stereo (PMVS)
+
+Real, modern multi-view stereo (Furukawa, Ponce, "Accurate, Dense, and Robust Multiview Stereopatch, " IEEE TPAMI, 2010) grows a 3D reconstruction from sparse, reliable seed points (43.1's own structure-from-motion output) outward across small oriented patches, checking photo-consistency much like this chapter's variance test but adaptively, rather than sweeping every candidate depth everywhere uniformly — a real, more efficient version of this chapter's own brute-force sweep.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "How does plane-sweep multi-view stereo generalize 42.3's two-view disparity search?",
+      options: ["It doesn't -- they are unrelated methods", "It warps EVERY one of N calibrated views onto a reference view at each candidate depth and measures photo-consistency across all of them, instead of just two", "It only works with exactly 2 cameras", "It removes the need for camera calibration"],
+      answer: 1,
+      explanation: "Section 2: the real generalization, reusing 42.1/34.6's homography warp machinery per candidate depth.",
+    },
+    {
+      question: "This chapter's own real test found what effect from adding more views on an ORDINARY-texture scene with sensor noise?",
+      options: ["No effect at all", "Mean depth error fell from 129.70mm (2 views) to 2.88mm (9 views) -- more independent noisy measurements average out", "Error got worse", "Only works with repetitive texture"],
+      answer: 1,
+      explanation: "Section 3: a real, substantial noise-averaging benefit from extra views.",
+    },
+    {
+      question: "What real, DIFFERENT problem did Section 4's repetitive-texture test reveal, beyond ordinary noise?",
+      options: ["The exact same problem as Section 3", "A real ambiguity where a WRONG depth can look falsely consistent across too few, too-similar views -- fixed by adding differently-spaced views, not just more of the same", "Repetitive texture has no effect on stereo", "Only occurs with exactly 2 views"],
+      answer: 1,
+      explanation: "Section 4: a real, separate failure mode (aliasing/ambiguity) that multi-baseline views specifically defeat.",
+    },
+    {
+      question: "What did this chapter's own real textureless-region test show about adding more views?",
+      options: ["It fixed the problem completely", "Error stayed around 136-149mm regardless of view count, and was not improved by more views -- the real, structural exception to Sections 3-4's pattern", "It made the depth estimate perfectly accurate", "Textureless regions don't exist in real scenes"],
+      answer: 1,
+      explanation: "Section 5: a real, measured limit -- more views cannot create information that was never present.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A plane-sweep stereo setup has f=1000px. A candidate depth of 800mm and a camera baseline of 40mm are being tested. What horizontal pixel shift (disparity) does that candidate imply?
+
+<Solution>
+
+`disparity = f x baseline / Z = 1000 x 40 / 800 = 50px`.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, test `n_cams=3` (same spacing and noise) and compare its mean error to this chapter's own 2-view (129.70mm) and 5-view (25.90mm) results.
+
+<Solution>
+
+```python
+err3 = plane_sweep(3, spacing=50.0, noise_std=5.0, seed_base=100)
+print(f"3 views: mean error={err3.mean():.2f}mm, within 10mm={np.mean(err3<=10)*100:.1f}%")
+```
+
+Output:
+
+```text
+3 views: mean error=84.08mm, within 10mm=44.0%
+```
+
+Between this chapter's own 2-view (129.70mm) and 5-view (25.90mm) results, following the same real, improving trend as more views are added.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A facade-scanning team photographs a building with a repetitive brick pattern from only two closely-spaced tripod positions, 30cm apart, reasoning "two views is the mathematical minimum for stereo." Based on Section 4, what real risk should they expect, and what is the most direct fix?
+
+<Solution>
+
+Following Section 4's own real result, a repetitive texture (bricks are exactly this kind of pattern) can produce a real, false depth that looks consistent between two views, especially when those two views are close together and see a similar amount of the repeating pattern shifted by a similar amount. The most direct real fix, following this chapter's own measured result, is capturing from several additional, differently-spaced positions (not just more shots from nearby the same two spots) — Section 4's own data showed this cut the real mean error from 57.65mm (2 views) to 6.22mm (9 views) on exactly this kind of ambiguity.
+
+</Solution>
+
+## References
+
+1. M. Okutomi, T. Kanade, "A Multiple-Baseline Stereo," *IEEE Transactions on Pattern Analysis and Machine Intelligence*, 15(4), 1993.
+2. Y. Furukawa, J. Ponce, "Accurate, Dense, and Robust Multiview Stereopsis," *IEEE Transactions on Pattern Analysis and Machine Intelligence*, 32(8), 2010.
+3. R. Hartley, A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004 — already cited in 41.1-41.2, 41.5, 41.7, 42.1-42.2, 43.1-43.2.
+4. OpenCV 4.13.0 documentation: `cv2.warpPerspective`. https://docs.opencv.org/4.13.0/
