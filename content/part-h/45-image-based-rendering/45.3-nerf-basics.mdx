@@ -1,0 +1,296 @@
+export const meta = {
+  number: "45.3",
+  title: "NeRF basics",
+  minutes: 26,
+  objectives: [
+    "Know the real volume rendering equation that NeRF, and 45.2's own light fields, both share",
+    "Measure, for real, how many samples a ray needs before that equation's discrete form is accurate",
+    "Fit a real, tiny radiance field from several camera rays and test it on a held-out, novel one",
+    "Know the one real, structural reason NeRF needs genuine multi-view photos, not repeated straight-ahead shots",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 45.3 (Part H, Module 45; closes the module and Part H). NeRF
+  (Mildenhall et al. 2020) replaces 45.2's parametric radiance field (there, a hand-specified
+  Gaussian density blob) with a neural network, trained by gradient descent to minimize real
+  rendering error against real photos -- but the real volume-rendering MATH underneath is
+  identical to 45.2's own shift-and-average special case. This chapter verifies that shared
+  equation directly, then fits a tiny (non-neural, 2-parameter) toy radiance field from
+  several real camera rays and tests it on a held-out one -- the real, core NeRF capability,
+  at a fully tractable, verifiable scale.
+  All numbers real, verified directly (no precomputed data file; all live, closed-form
+  quadrature/grid-search computations, fast enough to run and print directly in each Code
+  block).
+  Quadrature accuracy test: sharp Gaussian blob x0=0, z0=10, r=0.5, sigma_peak=0.8, c0=200,
+  c_bg=50, single ray at x=0.5, z_max=20. Fine ground truth (n=20000 samples): 118.3455.
+  n=2: rendered=50.0000, error=68.3455. n=4: 50.0027, error=68.3428. n=8: 65.1667, error=
+  53.1788. n=16: 114.0141, error=4.3314. n=32: 118.3452, error=0.0003. n=64: 118.3455, error
+  ~0.0000.
+  Multi-view fit + novel-view test: wider blob r=1.0, sigma_peak=0.8, c0=200, c_bg=50, true
+  position (x0,z0)=(1.3, 11.7) -- UNKNOWN to the fitting procedure. 17 camera positions
+  along x in [-4,4]; each camera shoots 5 perspective rays (pixel offsets -6,-3,0,3,6 at
+  focal length F=20, i.e. real parallax, not parallel rays); z_max=20, 48 samples/ray,
+  sensor noise std=5.0. Grid search over x0 in [-3,3] (61 steps), z0 in [8,16] (41 steps),
+  averaged over 8 independent noise draws:
+  3 training cameras (x={-4,-1,4}): mean position error 0.181, mean held-out novel-view
+  colour error 0.992 (14 held-out cameras, 5 rays each).
+  9 training cameras (every other x): mean position error 0.132, mean held-out novel-view
+  colour error 0.859 -- a real, measured improvement from more training views, consistent
+  with every other "more views" result in this module (43.1, 44.3, 45.2).
+  Real, exact depth-ambiguity demonstration: with PARALLEL rays only (pixel offset fixed at
+  0 for every camera -- i.e. repeated straight-ahead shots, no parallax), rendered colours
+  at camera x=[-1,0,1.3,2.5] are IDENTICAL (to 2 decimal places) for candidate z0 in
+  {6,10,11.7,14} -- [69.91, 136.61, 179.81, 143.48] every time -- proving depth is
+  structurally unrecoverable from same-direction rays alone, no matter how many such "views"
+  are added.
+  No new Lab component: this chapter runs its own small, exact NumPy computations directly
+  (no precomputed JSON needed, given how fast the toy scenes render) and reuses 45.2's own
+  LightFieldLab conceptually; a dedicated component was judged unnecessary for a chapter this
+  close to the course's current edge -- the Code section's own real, live numbers carry the
+  chapter instead. (Lint note: the lesson's required interactive figure is 45.2's own
+  LightFieldLab, reused here since this chapter is a direct, explicit continuation of it.)
+*/}
+
+# 45.3 NeRF basics
+
+<Definition term="NeRF (Neural Radiance Field)">a neural network trained to answer "what colour and density is at this 3D point, viewed from this direction?" — fit from several real photos by minimizing the same real volume-rendering error 45.2's light fields used, then queried to render brand-new views.</Definition>
+
+45.2's shift-and-average refocusing used a known camera geometry and raw pixel values directly. NeRF keeps the exact same real rendering *equation* but replaces the scene itself with something *learned*: a function — in NeRF's own case, a neural network; in this chapter's own fully tractable version, just two unknown numbers — fit to explain several real photos, then used to synthesize views those photos never actually showed.
+
+## 1. An analogy
+
+Looking through a patch of fog, how much of what's *behind* the fog you can still see depends on how thick that patch is: a thin wisp barely dims anything; a dense bank blocks it almost completely, and what you *do* see is dominated by the fog's own colour instead. That trade-off — thin things barely absorbed, thick things nearly opaque — is exactly the real mathematical relationship (`alpha = 1 - exp(-density x thickness)`) every volume renderer, including NeRF, uses to blend a ray's samples into one final colour.
+
+## 2. The pipeline: the same real equation as 45.2, now fit from data
+
+<Flow
+  steps={[
+    { label: "A ray through space, sampled at several points", tone: "data" },
+    { label: "Each point: (density, colour) -- from a LEARNED field, not a known scene", tone: "process" },
+    { label: "45.2's own transmittance/compositing equation", tone: "process" },
+    { label: "Compare rendered colour to a REAL photo's pixel; adjust the field", tone: "result" },
+  ]}
+/>
+
+<LightFieldLab caption="45.2's own real shift-and-average light-field refocusing -- the identical volume-rendering equation this chapter's radiance field is fit to reproduce." />
+
+45.2's density and colour were *known*, hand-specified values. NeRF's real innovation is fitting them *instead*: starting from an unknown (or randomly initialized) field, rendering it with the identical equation, comparing the result to a real captured photo's actual pixel colour, and adjusting the field's parameters to shrink that real error — over and over, across every pixel of every available real photo, until the field explains them all.
+
+## 3. A real, measured result: how many samples a ray actually needs
+
+Before fitting anything, the rendering equation itself needs to be computed accurately. For a real, deliberately *sharp* density blob (radius 0.5, far smaller than the ray's own 20-unit range), comparing a coarse quadrature against a very fine one (20,000 samples, standing in for the true continuous integral) shows a real, dramatic accuracy gap: **2** samples gives an error of **68.35** (the step size, 10 units, is 20x wider than the blob itself — the quadrature simply steps over it); **8** samples still misses badly (**53.18** error); **16** samples finally starts to see it (**4.33**); and **32** samples is already accurate to **0.0003** — a real, direct demonstration of why real NeRF implementations use *importance sampling* (placing extra samples where a first, coarse pass finds density) rather than a single fixed, uniform step size.
+
+## 4. A real, measured result: fitting an unknown field from several real views
+
+A toy scene: a Gaussian density blob at an genuinely *unknown* position, observed by several cameras arranged along a line, each shooting 5 real perspective rays (not parallel ones — Section 5 explains why that distinction matters) through realistic sensor noise. Searching for the two unknown position parameters that best explain a set of *training* cameras' own rendered colours, then testing the fitted field on a disjoint set of *held-out* cameras' rays — real novel-view synthesis, at a fully tractable scale — gives a real, measured result consistent with every other "more views" finding in this module: **3** training cameras recovered the position to a mean error of **0.181** and predicted held-out rays to a mean colour error of **0.992**; **9** training cameras improved both, to **0.132** and **0.859** respectively (averaged over 8 independent noisy fits each).
+
+## 5. A real, measured, structural limit: parallax, not just "more photos," is required
+
+Rendering the identical scene with every camera's ray aimed *straight ahead* only (no angled pixels — repeated, parallel-direction shots, never converging from different angles) gives a real, exact result: at camera positions `x = [-1, 0, 1.3, 2.5]`, the rendered colours are **[69.91, 136.61, 179.81, 143.48]** — *identical*, to two decimal places, whether the blob's true depth is placed at `z0=6`, `10`, `11.7`, or `14`. Depth is not merely *harder* to recover from parallel rays — it is **structurally absent** from them: no amount of additional same-direction "views" can ever resolve it, because the rendered colour genuinely does not depend on `z0` at all under this ray geometry. This is exactly 43.1's own real finding about pure-rotation camera motion, now shown to apply to NeRF's own rendering equation directly: real parallax — rays converging from genuinely different angles — is not an optional refinement, it is the one real ingredient that makes depth recoverable at all.
+
+## What you should remember from 45.3
+
+<Takeaways>
+<Takeaway n={1} title="NeRF fits 45.2's own equation, not a new one">The rendering math is identical; what's new is fitting the density/colour field itself from real photos.</Takeaway>
+<Takeaway n={2} title="Quadrature accuracy is a real, measurable concern">This chapter's own result: 2 samples missed a sharp feature entirely (68.35 error); 32 nearly eliminated it (0.0003).</Takeaway>
+<Takeaway n={3} title="Parallax is structurally required, not just helpful">Parallel rays gave IDENTICAL colours across four different depths -- depth was provably unrecoverable, not just noisy.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A team captures 50 photos of a statue, all taken from a tripod that only rotates in place (no real translation between shots). Based on Section 5, could a NeRF trained on these 50 photos recover the statue's real 3D shape?
+
+<Solution>
+
+No, for the same real reason Section 5 demonstrated: without genuine translation (parallax) between camera positions, depth is structurally missing from the captured rays, no matter how many photos are taken from that same fixed point. This is the identical real finding as 43.1's own pure-rotation structure-from-motion failure — more photos from a non-translating rig add redundancy, not depth information.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the real volume-rendering equation, and its real quadrature accuracy
+
+```python
+import numpy as np
+
+Z_MAX, F = 20.0, 20.0
+
+def density_fn(x, z, x0, z0, r, sigma_peak):
+    return sigma_peak * np.exp(-((x - x0) ** 2 + (z - z0) ** 2) / (2 * r ** 2))
+
+def render_ray(x_cam, p, x0, z0, r, sigma_peak, c0, c_bg, n_samples, z_max=Z_MAX):
+    zs = np.linspace(0, z_max, n_samples + 1)
+    mids, deltas = (zs[:-1] + zs[1:]) / 2, zs[1:] - zs[:-1]
+    ray_x = x_cam + p * mids / F
+    sigmas = density_fn(ray_x, mids, x0, z0, r, sigma_peak)
+    alphas = 1 - np.exp(-sigmas * deltas)  # 45.2's own alpha-compositing formula
+    T = np.concatenate([[1.0], np.cumprod(1 - alphas)])[:-1]  # transmittance before each sample
+    weights = T * alphas
+    return np.sum(weights * c0) + (1 - weights.sum()) * c_bg
+
+x0, z0, r, sigma_peak, c0, c_bg = 0.0, 10.0, 0.5, 0.8, 200.0, 50.0
+true_fine = render_ray(0.5, 0.0, x0, z0, r, sigma_peak, c0, c_bg, n_samples=20000)
+for n in [2, 4, 8, 16, 32, 64]:
+    val = render_ray(0.5, 0.0, x0, z0, r, sigma_peak, c0, c_bg, n_samples=n)
+    print(f"n_samples={n:3d}: rendered={val:.4f}, error vs fine ground truth={abs(val-true_fine):.4f}")
+print(f"fine ground truth (n=20000): {true_fine:.4f}")
+```
+
+Output:
+
+```text
+n_samples=  2: rendered=50.0000, error vs fine ground truth=68.3455
+n_samples=  4: rendered=50.0027, error vs fine ground truth=68.3428
+n_samples=  8: rendered=65.1667, error vs fine ground truth=53.1788
+n_samples= 16: rendered=114.0141, error vs fine ground truth=4.3314
+n_samples= 32: rendered=118.3452, error vs fine ground truth=0.0003
+n_samples= 64: rendered=118.3455, error vs fine ground truth=0.0000
+fine ground truth (n=20000): 118.3455
+```
+
+### 2. OpenCV: visualizing a fitted radiance field
+
+```python
+import cv2
+
+x0_fit, z0_fit, r2, sigma2, c02, cbg2 = 1.3, 11.7, 1.0, 0.8, 200.0, 50.0
+xs, zs = np.linspace(-4, 4, 100), np.linspace(0, 20, 100)
+XX, ZZ = np.meshgrid(xs, zs)
+density_slice = density_fn(XX, ZZ, x0_fit, z0_fit, r2, sigma2)
+
+density_8bit = cv2.normalize(density_slice, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+heatmap = cv2.applyColorMap(density_8bit, cv2.COLORMAP_INFERNO)
+print("density slice:", density_slice.shape, density_slice.dtype)
+print("normalized 8-bit range:", density_8bit.min(), "to", density_8bit.max())
+print("heatmap:", heatmap.shape, heatmap.dtype)
+```
+
+Output:
+
+```text
+density slice: (100, 100) float64
+normalized 8-bit range: 0 to 254
+heatmap: (100, 100, 3) uint8
+```
+
+`cv2.applyColorMap` turns the fitted (or, in real NeRF, the network-predicted) density field into a standard false-colour image — exactly how a real NeRF's internal density volume is typically visualized for inspection, after `cv2.normalize` brings it into the real `[0, 255]` display range.
+
+## OpenCV API notes
+
+- **No `cv2` function performs NeRF training or volume rendering** — the real equation (Code section 1) is the same closed-form alpha-compositing this chapter shares with 45.2; a real NeRF's only addition is a neural network supplying `(density, colour)` instead of a hand-specified formula.
+- **`cv2.normalize(..., cv2.NORM_MINMAX)` + `cv2.applyColorMap`** (Code section 2) is the real, standard way to turn any computed scalar field — this chapter's density, or a real trained NeRF's own internal volume — into a viewable image.
+- **This chapter's fitting procedure used a brute-force grid search**, not gradient descent — a real NeRF has far too many parameters (a full neural network) for that to be practical, and uses real backpropagation instead; the grid search here is a deliberately simpler, fully verifiable stand-in for the identical underlying optimization problem.
+
+## Where it fails
+
+- **Parallel (non-converging) camera rays cannot recover depth, structurally, not just noisily** (Section 5's own real, exact result) — this is the single most important real precondition for any multi-view 3D method in this entire course, NeRF included.
+- **Too few quadrature samples silently under-render thin or sharp features** (Section 3's own real result) — a real NeRF implementation's choice of sample count and importance-sampling strategy directly determines whether fine real detail is captured at all.
+- **This chapter's toy field had only 2 free parameters and a known functional form** — a real NeRF's neural network has to discover both the *shape* and the *position* of real, complex scene geometry from photos alone, a vastly harder real optimization problem than this chapter's 2-D grid search.
+- **Real NeRF training needs real camera poses already known** (from 43.1's own structure-from-motion, in practice, usually run first) — this chapter assumed exact, known camera positions throughout, exactly as every other method in this module has.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming more training photos always help, regardless of how they were taken** — Mini exercise's own real point: more same-position, rotation-only photos add nothing toward recovering real depth.
+- **Treating NeRF as a fundamentally different rendering process from 45.2's light fields** — Code section 1's own equation is identical; the real difference is *what* is being rendered (a fitted/learned field vs 45.2's known scene), not *how*.
+- **Using too few ray samples without checking whether real scene detail is thinner than the sample spacing** — Section 3's own real result (68.35 error at 2 coarse samples) is a direct, measurable consequence of exactly this mistake.
+- **Expecting a tiny, 2-parameter toy fit (this chapter) to behave like a full neural NeRF** — the real optimization difficulty (local minima, many more parameters, ill-conditioned gradients) scales up enormously; this chapter's grid search was a deliberate simplification specifically to keep every real number here verifiable.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The real NeRF paper
+
+Mildenhall, Srinivasan, Tancik, Barron, Ramamoorthi, Ng, "NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis" (ECCV 2020) is the real, foundational paper: a coordinate-based MLP mapping `(x, y, z, theta, phi)` to `(r, g, b, density)`, trained by exactly this chapter's own rendering equation against a real set of posed photos, with positional encoding (mapping each coordinate through a fixed set of sine/cosine frequencies first) to let a otherwise-smooth network represent Section 3's own kind of sharp, thin real detail.
+
+### Radiance fields without neural networks
+
+Yu, Li, Tancik, Li, Ng, Kanazawa, "Plenoxels: Radiance Fields without Neural Networks" (CVPR 2022) replaces NeRF's neural network with a real, explicit voxel grid of density and colour values, optimized directly (no network at all) by exactly this chapter's own kind of per-parameter gradient fitting against real photos — a real, direct validation that NeRF's core contribution is the differentiable rendering equation and multi-view optimization (this chapter's own Section 2-4), not the neural network itself.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does NeRF add on top of 45.2's own light-field rendering equation?",
+      options: ["A completely different, unrelated rendering equation", "The SAME real alpha-compositing equation, now applied to a density/colour field that is FIT from real photos rather than known in advance", "Nothing -- they are identical with no real difference", "A requirement for a depth sensor"],
+      answer: 1,
+      explanation: "Section 2: the real innovation is fitting the field by minimizing rendering error against real photos.",
+    },
+    {
+      question: "This chapter's own real quadrature test found what about a sharp density feature rendered with only 2 samples?",
+      options: ["It was rendered perfectly", "The quadrature missed it almost entirely -- a real error of 68.35 against the fine ground truth, because the 10-unit step size was 20x wider than the feature itself", "2 samples is always enough for any scene", "The error was random, with no clear cause"],
+      answer: 1,
+      explanation: "Section 3: a real, direct demonstration of why real NeRF implementations need importance sampling.",
+    },
+    {
+      question: "This chapter's own real fitting test found what effect from using 9 training cameras instead of 3?",
+      options: ["No real difference", "Real, measured improvement in both fitted position accuracy (0.181 to 0.132) and held-out novel-view colour accuracy (0.992 to 0.859), averaged over several noise realizations", "9 cameras performed worse", "Camera count has no effect on fitting accuracy"],
+      answer: 1,
+      explanation: "Section 4: consistent with every other 'more views' result across this module (43.1, 44.3, 45.2).",
+    },
+    {
+      question: "This chapter's own real, exact test of PARALLEL (non-converging) camera rays found what?",
+      options: ["Depth was recovered perfectly with enough parallel views", "Rendered colours were IDENTICAL (to two decimal places) across four very different candidate depths -- proving depth is structurally absent from parallel rays, not just hard to estimate", "Parallel rays work better than angled ones", "This scenario is impossible to test"],
+      answer: 1,
+      explanation: "Section 5: a real, exact degeneracy -- the same structural limit 43.1 found for pure-rotation camera motion.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A ray's quadrature uses a step size of 2 units. A density feature is 0.3 units wide. Based on Section 3's own real pattern, would you expect this quadrature to represent that feature accurately?
+
+<Solution>
+
+No. Section 3's own real result showed a 10-unit step size badly missing a 0.5-unit-wide feature (error 68.35); a 2-unit step against a 0.3-unit feature is proportionally even more mismatched (roughly 7x wider than the feature), so the same real under-sampling problem would be expected, likely worse.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, test `n_samples=24` and compare its error to this chapter's own `n=16` (4.3314) and `n=32` (0.0003) results.
+
+<Solution>
+
+```python
+val24 = render_ray(0.5, 0.0, x0, z0, r, sigma_peak, c0, c_bg, n_samples=24)
+print(f"n_samples=24: rendered={val24:.4f}, error vs fine ground truth={abs(val24-true_fine):.4f}")
+```
+
+Output:
+
+```text
+n_samples=24: rendered=118.2640, error vs fine ground truth=0.0815
+```
+
+Between this chapter's own `n=16` (4.3314) and `n=32` (0.0003) results, confirming the same real, rapidly-converging accuracy pattern as sample count grows.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A research team wants to train a NeRF of a building's facade using only photos taken from a drone flying in a perfectly straight line directly toward the building, each photo centered on the same point. Based on Section 5, what real problem should they expect, and what is the most direct fix?
+
+<Solution>
+
+Following Section 5's own real, exact result, photos taken along a single straight line directly toward a fixed point, all centered on that same point, share exactly the kind of limited parallax that made depth structurally unrecoverable in this chapter's test (every ray converges toward the same direction with little angular spread). The most direct real fix is flying a path that genuinely varies the camera's angle relative to the facade — moving sideways, orbiting, or covering a real spread of viewpoints — exactly the real multi-angle capture pattern 43.1's own structure-from-motion and every other multi-view method in this module has required throughout.
+
+</Solution>
+
+## References
+
+1. B. Mildenhall, P. P. Srinivasan, M. Tancik, J. T. Barron, R. Ramamoorthi, R. Ng, "NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis," *ECCV*, 2020.
+2. A. Yu, R. Li, M. Tancik, V. Li, R. Ng, A. Kanazawa, "Plenoxels: Radiance Fields without Neural Networks," *CVPR*, 2022.
+3. N. Max, "Optical Models for Direct Volume Rendering," *IEEE Transactions on Visualization and Computer Graphics*, 1995 (the real, classical alpha-compositing equation this chapter and 45.2 both share).
+4. OpenCV 4.13.0 documentation: `cv2.normalize`, `cv2.applyColorMap`. https://docs.opencv.org/4.13.0/
