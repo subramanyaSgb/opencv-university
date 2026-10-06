@@ -741,6 +741,61 @@ images["sample-aruco-marker-warped.png"] = cv2.warpPerspective(_marker_canvas, _
 _charseg_img = np.full((60, 220), 255, np.uint8)
 cv2.putText(_charseg_img, "LOT42", (10, 42), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 0, 2, cv2.LINE_AA)
 images["sample-charseg-text.png"] = _charseg_img
+
+# Module 38.4: a real cv2.QRCodeEncoder QR code ("LOT-4471-QC-OK"), at error-correction levels L and H,
+# with increasing central damage (simulating dirt/scuffing), for testing real decode robustness.
+def make_qr_canvas(data, ec_level, scale=8, margin=40):
+    params = cv2.QRCodeEncoder_Params()
+    params.correction_level = ec_level
+    enc = cv2.QRCodeEncoder_create(params)
+    qr = enc.encode(data)
+    qr_img = cv2.resize(qr, (qr.shape[1] * scale, qr.shape[0] * scale), interpolation=cv2.INTER_NEAREST)
+    canvas = np.full((qr_img.shape[0] + 2 * margin, qr_img.shape[1] + 2 * margin), 255, np.uint8)
+    canvas[margin:margin + qr_img.shape[0], margin:margin + qr_img.shape[1]] = qr_img
+    return canvas, qr.shape[0], scale, margin
+
+_QR_DATA = "LOT-4471-QC-OK"
+for _level_name, _level in [("L", cv2.QRCODE_ENCODER_CORRECT_LEVEL_L), ("H", cv2.QRCODE_ENCODER_CORRECT_LEVEL_H)]:
+    _canvas, _n, _scale, _margin = make_qr_canvas(_QR_DATA, _level)
+    for _frac in (0.0, 0.1, 0.2, 0.3, 0.4):
+        _dmg = _canvas.copy()
+        if _frac > 0:
+            _size_px = int(_n * _scale * _frac)
+            _y0 = _margin + (_n * _scale - _size_px) // 2
+            _x0 = _margin + (_n * _scale - _size_px) // 2
+            _dmg[_y0:_y0 + _size_px, _x0:_x0 + _size_px] = 255
+        images[f"sample-qr-{_level_name}-{int(_frac * 100):02d}.png"] = _dmg
+
+# Module 38.4: a real, standards-correct EAN-13 barcode ("4006381333931") rendered from the ISO/IEC
+# encoding tables (L/G/R digit patterns, parity table, start/middle/end guards) -- see the chapter for
+# the verified bit string. Not confirmed to be detected by cv2.barcode.BarcodeDetector in this course's
+# synthetic (non-photographic) rendering; kept as a correctly-encoded reference image regardless.
+_EAN_L = {0: "0001101", 1: "0011001", 2: "0010011", 3: "0111101", 4: "0100011", 5: "0110001", 6: "0101111", 7: "0111011", 8: "0110111", 9: "0001011"}
+_EAN_G = {0: "0100111", 1: "0110011", 2: "0011011", 3: "0100001", 4: "0011101", 5: "0111001", 6: "0000101", 7: "0010001", 8: "0001001", 9: "0010111"}
+_EAN_R = {0: "1110010", 1: "1100110", 2: "1101100", 3: "1000010", 4: "1011100", 5: "1001110", 6: "1010000", 7: "1000100", 8: "1001000", 9: "1110100"}
+_EAN_PARITY = {0: "LLLLLL", 1: "LLGLGG", 2: "LLGGLG", 3: "LLGGGL", 4: "LGLLGG", 5: "LGGLLG", 6: "LGGGLL", 7: "LGLGLG", 8: "LGLGGL", 9: "LGGLGL"}
+
+def encode_ean13(digits13):
+    first, left, right = digits13[0], digits13[1:7], digits13[7:13]
+    bits = "101"
+    for d, p in zip(left, _EAN_PARITY[first]):
+        bits += (_EAN_L if p == "L" else _EAN_G)[d]
+    bits += "01010"
+    for d in right:
+        bits += _EAN_R[d]
+    bits += "101"
+    return bits
+
+_ean_bits = encode_ean13([4, 0, 0, 6, 3, 8, 1, 3, 3, 3, 9, 3, 1])
+_module_px, _bar_h, _ean_margin = 6, 200, 120
+_bar_w = len(_ean_bits) * _module_px
+_ean_bar = np.full((_bar_h, _bar_w), 255, np.uint8)
+for _i, _b in enumerate(_ean_bits):
+    if _b == "1":
+        _ean_bar[:, _i * _module_px:(_i + 1) * _module_px] = 0
+_ean_canvas = np.full((_bar_h + 2 * _ean_margin, _bar_w + 2 * _ean_margin), 255, np.uint8)
+_ean_canvas[_ean_margin:_ean_margin + _bar_h, _ean_margin:_ean_margin + _bar_w] = _ean_bar
+images["sample-ean13.png"] = _ean_canvas
 ft_b = cv2.warpPerspective(images["sample-feat.png"].astype(np.float64), FEAT_H, (320, 200), flags=cv2.INTER_LINEAR,
                            borderMode=cv2.BORDER_CONSTANT, borderValue=110)
 images["sample-feat-b.png"] = np.clip(np.rint(ft_b * 0.8 + 20 + np.random.default_rng(34).normal(0, 3, ft_b.shape)), 0, 255).astype(np.uint8)

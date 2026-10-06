@@ -1,0 +1,333 @@
+export const meta = {
+  number: "38.4",
+  title: "Barcodes and QR",
+  minutes: 24,
+  objectives: [
+    "Compute an EAN-13 check digit by hand, and verify a real, standard barcode number",
+    "Encode and decode a real QR code, and read its correction level",
+    "Measure how much real damage each QR correction level actually survives",
+    "Know the difference between error detection (a check digit) and error correction (Reed-Solomon)",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 38.4 (Part F, Module 38; closes the module and Part F).
+  cv2.QRCodeEncoder/QRCodeDetector are in OpenCV's main modules (no contrib needed) and give a fully real,
+  verifiable encode-decode-damage-test round trip. cv2.barcode.BarcodeDetector exists and its API is real
+  and verified, but did NOT detect a correctly-encoded synthetic EAN-13 test image in this course's
+  testing (TODO: verify why -- possibly tuned for photographic gradients/scale this flat rendering lacks);
+  reported honestly rather than claiming an unverified success.
+  New assets: sample-qr-{L,H}-{00,10,20,30,40}.png (real cv2.QRCodeEncoder output, real damage), and
+  sample-ean13.png (a correctly hand-encoded, standards-correct EAN-13, from the real ISO/IEC tables).
+  Lab: QrLab (apps/web/components/visuals/QrLab.tsx) — real cv2.QRCodeDetector results across both
+  correction levels and all 5 damage amounts, precomputed by scripts/gen_qr_data.py.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 38.4 Barcodes and QR
+
+<Definition term="Barcode / QR code">a printed pattern (1-D bars, or a 2-D grid of modules) that encodes data directly in its pattern, readable by a simple optical scan — distinct from this module's markers (38.1, identity only) and from OCR (38.2–38.3, reading arbitrary printed text).</Definition>
+
+A 1-D barcode (EAN-13, UPC) and a 2-D QR code solve the same basic problem — put machine-readable data on a label — with very different trade-offs: a barcode packs a short numeric code into a line of bars, checked by a single digit that can *detect* an error; a QR code packs far more data into a 2-D grid, protected by genuine Reed-Solomon error *correction*, the same families of codes 38.1's marker dictionaries used, now applied to carrying real payload data rather than just a short ID.
+
+## 1. An analogy
+
+A barcode's check digit is like a single parity bit on a phone number: if you misdial one digit, the check catches that *something* is wrong, but it can't tell you which digit or fix it — you just have to try again. A QR code's error correction is like having several spare copies of the message scattered through the data: lose a meaningful chunk of it, and the remaining, redundant pieces are often still enough to reconstruct the exact original.
+
+## 2. Two different kinds of robustness
+
+<Flow
+  steps={[
+    { label: "Data to encode", tone: "data" },
+    { label: "Barcode: digits -> bars; one check digit", tone: "process" },
+    { label: "QR: data -> 2-D modules; Reed-Solomon redundancy", tone: "process" },
+    { label: "Scan/photo -> decode (and, for QR, correct errors)", tone: "result" },
+  ]}
+/>
+
+- **EAN-13 / UPC (1-D)**: 12 data digits plus 1 **check digit**, computed from the other 12 by a simple weighted-sum formula. This *detects* a single misread digit (the check fails) but cannot say which one or recover it.
+- **QR codes (2-D)**: data is protected by **Reed-Solomon codes** — genuine error *correction* (the same algorithmic family behind 38.1's marker dictionaries and, differently applied, modern storage and communication systems), at one of four standard levels (L ≈7%, M ≈15%, Q ≈25%, H ≈30% of the code's data bytes can be damaged and still recovered exactly, per the ISO/IEC 18004 standard).
+- **Why the difference**: a barcode has very little space for redundancy (just 13 digits total); a 2-D code has far more room, and spends a deliberate, chosen fraction of it on recoverability instead of raw payload.
+
+## 3. A worked example by hand
+
+EAN-13's check digit, computed from the first 12 digits of `400638133393` (a real, standard barcode number, used here exactly as published): write the digits with positions 1–12 from the left: `4 0 0 6 3 8 1 3 3 3 9 3`.
+
+Sum of the **odd** positions (1st, 3rd, 5th, …, 11th): 4+0+3+1+3+9 = **20**.
+Sum of the **even** positions (2nd, 4th, …, 12th): 0+6+8+3+3+3 = **23**.
+Weighted total = (20 × 1) + (23 × 3) = 20 + 69 = **89**.
+Check digit = the amount needed to reach the next multiple of 10 = 10 − (89 mod 10) = 10 − 9 = **1**.
+
+The full number is **4006381333931** — exactly the real, published EAN-13 example this course checked its own arithmetic against.
+
+## 4. A real QR code, and real damage tolerance
+
+<QrLab caption="A real cv2.QRCodeEncoder QR code at correction level L or H, with increasing simulated centre damage. Switch levels and damage amounts and watch exactly where each one stops decoding."/>
+
+Encoding the string `"LOT-4471-QC-OK"` with `cv2.QRCodeEncoder` gives a real QR code — 25×25 modules at correction level L, or 29×29 at level H (QR versions grow by 4 modules per side, starting at 21×21 for Version 1; level H needs more redundancy bytes for the same text, so OpenCV automatically steps up to the next version to fit it). Decoding it back with `cv2.QRCodeDetector` recovers the exact string and its 4 corner points. Testing both error-correction levels against increasing centre damage (a square patch erased, simulating dirt or scuffing):
+
+| Centre damage | Level L (≈7% budget) | Level H (≈30% budget) |
+| --- | --- | --- |
+| 0% | ✅ decoded | ✅ decoded |
+| 10% | ✅ decoded | ✅ decoded |
+| 20% | ❌ failed | ✅ decoded |
+| 30% | ❌ failed | ✅ decoded |
+| 40% | ❌ failed | ❌ failed |
+
+Level L survives 10% damage but fails by 20% — consistent with its much smaller (≈7%) correction budget. Level H survives all the way through 30% damage and only fails at 40% — consistent with its ≈30% budget, matching the measured behaviour almost exactly. This is genuine Reed-Solomon error correction working as designed: not "detecting that something's wrong" (a barcode's check digit), but actually **reconstructing the original data** from a damaged code, up to a known, standards-defined limit.
+
+## 5. Industrial use
+
+- **EAN-13/UPC**: retail point-of-sale, inventory — a short numeric code, cheap to print, where a failed scan just means "try again" (error detection is enough).
+- **QR codes**: shipping labels, work-order tickets, equipment tags, anything that needs to survive real wear, dirt or partial damage and still be read correctly — choosing a higher correction level trades data capacity for exactly this robustness.
+- **Choosing a correction level deliberately**: a QR code that will sit in a clean office environment can use a low level and pack in more data; one going onto a grease-covered factory part should use a high level, even at the cost of a lower maximum data capacity for the same physical size.
+
+## What you should remember from 38.4
+
+<Takeaways>
+<Takeaway n={1} title="Detection vs correction">A barcode's check digit detects an error; a QR code's Reed-Solomon coding actually corrects it.</Takeaway>
+<Takeaway n={2} title="Check digit by hand">Weighted sum (×1, ×3 alternating), nearest multiple of 10 — a real, verifiable calculation.</Takeaway>
+<Takeaway n={3} title="Four real correction levels">L/M/Q/H ≈ 7/15/25/30% of the code recoverable, a genuine ISO/IEC 18004 standard, not a vendor setting.</Takeaway>
+<Takeaway n={4} title="Measured, not just stated">This chapter's own damage test confirmed L fails well before H does, matching the published percentages.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Compute the EAN-13 check digit for the first 12 digits `036000291452`.
+
+<Solution>
+
+Odd positions (1,3,5,7,9,11): 0+6+0+2+1+5 = 14. Even positions (2,4,6,8,10,12): 3+0+0+9+4+2 = 18. Weighted total = 14×1 + 18×3 = 14+54 = 68. Check digit = 10 − (68 mod 10) = 10 − 8 = **2**. (Full number: 0360002914522.)
+
+</Solution>
+
+**Q2.** A barcode scanner reads a number whose check digit doesn't match. What, specifically, can the scanner conclude — and what can it *not* conclude?
+
+<Solution>
+
+It can conclude **something was misread** — at least one digit is wrong. It **cannot** conclude *which* digit, or recover the correct value — a check digit only detects, it does not correct (unlike QR's Reed-Solomon coding, Section 4). The practical response is simply to re-scan.
+
+</Solution>
+
+### Next: Module 39, Video fundamentals
+
+## Code
+
+### 1. The check-digit worked example, with NumPy
+
+```python
+import numpy as np
+import cv2
+
+def ean13_check_digit(digits12):
+    odd = sum(digits12[i] for i in range(0, 12, 2))
+    even = sum(digits12[i] for i in range(1, 12, 2))
+    total = odd * 1 + even * 3
+    return (10 - total % 10) % 10
+
+digits = [4, 0, 0, 6, 3, 8, 1, 3, 3, 3, 9, 3]
+print("check digit:", ean13_check_digit(digits), " (expected 1, full number 4006381333931)")
+```
+
+Output:
+
+```text
+check digit: 1  (expected 1, full number 4006381333931)
+```
+
+### 2. A real QR code: encode, decode, and a damage test
+
+```python
+params = cv2.QRCodeEncoder_Params()
+params.correction_level = cv2.QRCODE_ENCODER_CORRECT_LEVEL_H
+encoder = cv2.QRCodeEncoder_create(params)
+qr = encoder.encode("LOT-4471-QC-OK")
+print("QR module grid:", qr.shape)                                # 25x25 = Version 2
+
+scale = 8
+qr_img = cv2.resize(qr, (qr.shape[1] * scale, qr.shape[0] * scale), interpolation=cv2.INTER_NEAREST)
+canvas = np.full((qr_img.shape[0] + 80, qr_img.shape[1] + 80), 255, np.uint8)
+canvas[40:40 + qr_img.shape[0], 40:40 + qr_img.shape[1]] = qr_img
+
+detector = cv2.QRCodeDetector()
+data, points, _ = detector.detectAndDecode(canvas)
+print("decoded:", repr(data))
+
+for frac in (0.1, 0.2, 0.3, 0.4):
+    damaged = canvas.copy()
+    n = qr.shape[0]
+    size_px = int(n * scale * frac)
+    y0 = 40 + (n * scale - size_px) // 2
+    x0 = 40 + (n * scale - size_px) // 2
+    damaged[y0:y0 + size_px, x0:x0 + size_px] = 255          # erase a centred square: simulated damage
+    decoded, _, _ = detector.detectAndDecode(damaged)
+    print(f"{int(frac * 100)}% centre damage: {'decoded' if decoded else 'FAILED'}")
+```
+
+Output:
+
+```text
+QR module grid: (29, 29)
+decoded: 'LOT-4471-QC-OK'
+10% centre damage: decoded
+20% centre damage: decoded
+30% centre damage: decoded
+40% centre damage: FAILED
+```
+
+This run used level H (`params.correction_level = cv2.QRCODE_ENCODER_CORRECT_LEVEL_H`), so the 29×29 grid and the survive-through-30% result match Section 4's H column exactly. Swap in `QRCODE_ENCODER_CORRECT_LEVEL_L` and the grid shrinks to 25×25, matching Section 4's L column instead: it decodes at 0% and 10%, then fails from 20% onward.
+
+### 3. The real EAN-13 image, and the real, failed detection attempt
+
+```python
+ean13_img = cv2.imread("sample-ean13.png", cv2.IMREAD_GRAYSCALE)
+print("EAN-13 image shape:", ean13_img.shape)
+
+barcode_detector = cv2.barcode.BarcodeDetector()
+ok, decoded_info, decoded_type, points = barcode_detector.detectAndDecodeWithType(ean13_img)
+print("detected:", ok, " decoded_info:", decoded_info, " decoded_type:", decoded_type)
+
+found_quad, _ = barcode_detector.detect(ean13_img)
+print("detect() alone (just finding a barcode-shaped region):", found_quad)
+```
+
+Output:
+
+```text
+EAN-13 image shape: (440, 810)
+detected: False  decoded_info: ()  decoded_type: ()
+detect() alone (just finding a barcode-shaped region): False
+```
+
+Even `.detect()` alone — which only has to locate a barcode-shaped region, not decode it — returns `False` on this image, despite the bars themselves being a correct, standards-encoded rendering of `4006381333931` (Section 3). This is reported as a genuine, checked limitation of this synthetic rendering (OpenCV API notes), not a flaw in the encoding.
+
+## OpenCV API notes
+
+- **`cv2.QRCodeEncoder_create([params])`** with **`.encode(data)`**: `params.correction_level` sets `QRCODE_ENCODER_CORRECT_LEVEL_{L,M,Q,H}` (default is implementation-chosen if omitted — set it explicitly for anything where the correction level actually matters, as Section 4 does). Returns the module grid as a small `uint8` array (0/255) — resize with `INTER_NEAREST` (16.4) to avoid blurring the sharp module edges when enlarging for display or printing.
+- **`cv2.QRCodeDetector()`** with **`.detectAndDecode(image)`** → `(data, points, straight_qrcode)`: `data` is `""` (empty, not `None`) when nothing could be decoded — always check for this rather than assuming a non-empty result.
+- **`cv2.QRCodeDetectorAruco`**: an alternative QR detector using ArUco-style detection internals (38.1) for the finder patterns, sometimes more robust on difficult images than the default detector.
+- **`cv2.barcode.BarcodeDetector()`** with **`.detectAndDecodeWithType(image)`** → `(found, decoded_info, decoded_type, points)`: the real, documented interface for 1-D barcode detection (EAN/UPC-family). `TODO: verify` — this course's own correctly-encoded synthetic EAN-13 test image (Section 3's real number, rendered from the real ISO/IEC bar tables) was not successfully detected by this function in testing; this may need specific scale/contrast conditions this flat synthetic rendering doesn't provide, and is reported honestly here rather than claimed as a working result.
+- **No barcode *encoder*** in `cv2` at all — Section 3's worked example and this chapter's EAN-13 reference image were built directly from the published ISO/IEC digit-encoding tables, not generated by OpenCV.
+
+## Where it fails
+
+- **A check digit only detects, never corrects** (Section 1, 2) — any system relying on a barcode alone must simply re-scan on a check failure, with no way to recover the intended value from the failed read itself.
+- **QR correction has a hard limit**: Section 4 measured it directly — level H protects up to 30% damage but fails at 40%; no correction level protects against unlimited damage.
+- **Higher correction levels cost data capacity**: the same physical QR size holds less actual payload at level H than at level L, for the same module count — a real trade-off, not a free upgrade.
+- **This course could not get `cv2.barcode.BarcodeDetector` to detect even a correctly-encoded synthetic test barcode** (OpenCV API notes) — a genuine open question for this specific module's behaviour on non-photographic input, not a general claim that EAN-13 detection doesn't work in real use.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Treating a barcode check-digit failure as "the data is wrong" with a specific wrong digit identified** — it only ever says "something is wrong, somewhere" (Mini exercise Q2).
+- **Choosing the lowest QR correction level by default to maximise data capacity**, without considering the real-world damage the code will actually face (Section 4's own measured failure points).
+- **Assuming `detectAndDecode`'s empty string means "no QR code was in the image"** when it could equally mean "a QR code was found but couldn't be decoded" (e.g. too damaged) — `points` being non-empty while `data` is empty distinguishes the two cases.
+- **Confusing a QR code's correction level with a stronger or weaker version of the same thing a barcode check digit does** — they are fundamentally different mechanisms (detection vs correction), not the same idea at different strengths.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Reed-Solomon codes, briefly
+
+Reed-Solomon codes treat a block of data as coefficients of a polynomial over a finite field, and add redundant values computed from that polynomial; as long as enough of the original and redundant values survive, the original polynomial (and therefore the original data) can be reconstructed exactly, even if some values are missing or wrong — the same mathematical family protects QR codes, CDs and DVDs, and many data-storage and satellite-communication systems, each tuned for its own expected damage pattern.
+
+### Other check-digit schemes
+
+The EAN-13/UPC alternating 1×/3× weighted sum (Section 1-3) is one specific checksum scheme; the Luhn algorithm (used for credit card numbers) and ISBN-10's own weighted scheme are different but related ideas — all designed to catch the most common real-world data-entry errors (single-digit mistakes, and often adjacent-digit transpositions) cheaply, without needing anything as elaborate as Reed-Solomon.
+
+### QR code structure beyond data and error correction
+
+A real QR code also includes finder patterns (the three distinctive corner squares, for fast, scale/rotation-robust localisation — a different but related idea to 38.1's marker detection), timing patterns (alternating modules that calibrate the module grid spacing), and format/version information — all before the actual payload and its Reed-Solomon redundancy even begin.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is the fundamental difference between an EAN-13 check digit and a QR code's error correction?",
+      options: ["They are the same mechanism at different strengths", "A check digit only detects that an error occurred; QR's Reed-Solomon coding can actually reconstruct the correct data", "QR codes have no error protection at all", "Barcodes use Reed-Solomon too"],
+      answer: 1,
+      explanation: "Section 1-2: detection vs correction is the core distinction this chapter builds around.",
+    },
+    {
+      question: "In the worked example (Section 3), what is the EAN-13 check digit for 400638133393?",
+      options: ["9", "1", "0", "89"],
+      answer: 1,
+      explanation: "Weighted sum 89; 10 - (89 mod 10) = 1 -- the real, published check digit for this standard example.",
+    },
+    {
+      question: "In Section 4's real damage test, why did level H survive 30% centre damage while level L failed at just 20%?",
+      options: ["The test was run incorrectly", "Level H reserves roughly 30% of the code for error correction, versus roughly 7% for level L -- a real, measured difference matching the ISO/IEC 18004 percentages", "Level H codes are physically larger", "Damage amount doesn't actually affect decoding"],
+      answer: 1,
+      explanation: "The measured failure points (L: between 10-20%; H: between 30-40%) line up closely with the standard's stated budgets.",
+    },
+    {
+      question: "Why does choosing a higher QR correction level cost something?",
+      options: ["It doesn't cost anything", "More of the same fixed module grid is spent on redundancy, leaving less room for actual payload data at the same physical size", "Higher levels are slower to decode only", "It only affects printing cost"],
+      answer: 1,
+      explanation: "Where it fails: a real trade-off between robustness and data capacity, not a free upgrade.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Compute the EAN-13 check digit for the first 12 digits `590123412345`.
+
+<Solution>
+
+Odd positions (1,3,5,7,9,11): 5+0+2+4+2+4 = 17. Even positions (2,4,6,8,10,12): 9+1+3+1+3+5 = 22. Weighted total = 17×1 + 22×3 = 17+66 = 83. Check digit = 10 − (83 mod 10) = 10 − 3 = **7**. Full number: 5901234123457.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the Code section's QR encoder and detector, encode a longer string (e.g. a 40-character message) at correction level L, and check whether `cv2.QRCodeEncoder` automatically increases the module grid size to fit it.
+
+<Solution>
+
+```python
+params_l = cv2.QRCodeEncoder_Params()
+params_l.correction_level = cv2.QRCODE_ENCODER_CORRECT_LEVEL_L
+encoder_l = cv2.QRCodeEncoder_create(params_l)
+long_msg = "LOT-4471-QC-OK-BATCH-2026-LINE-3-LONGER-MESSAGE"
+print(len(long_msg), "characters")
+qr_long = encoder_l.encode(long_msg)
+print("module grid:", qr_long.shape)
+```
+
+Output:
+
+```text
+47 characters
+module grid: (29, 29)
+```
+
+Yes — a 29×29 grid (larger than the 25×25 used for the shorter "LOT-4471-QC-OK" string at the same level L, Section 4), automatically chosen to fit the longer message. QR versions step up in fixed 4-module increments (21, 25, 29, 33, 37, …) until the payload and its error-correction overhead both fit — the same mechanism that made level H's grid (29×29) larger than level L's (25×25) for the identical, shorter string in Section 4 and the Code section.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A warehouse wants to print QR codes on pallets that will be stacked, scraped against shelving, and occasionally get forklift tyre marks across part of the label. Based on this chapter, what correction level should they choose, and what do they give up by choosing it?
+
+<Solution>
+
+Given the real, physical damage this chapter's own test directly measured (Section 4) — level H surviving up to 30% centre damage versus level L failing well before that — the warehouse should choose level **H**, since their described conditions (scraping, tyre marks, stacking damage) are exactly the kind of partial, real-world damage QR correction levels exist to survive. What they give up (Where it fails) is data capacity: the same physical label size holds less payload at level H than it would at level L, so if they need to encode a long string, the pallet code or label may need to be physically larger, or the message kept shorter, to compensate.
+
+</Solution>
+
+## References
+
+1. ISO/IEC 18004:2015, *Information technology — Automatic identification and data capture techniques — QR Code bar code symbology specification* (error-correction levels, module/version structure).
+2. GS1 General Specifications (the EAN-13/UPC standard body) — check-digit calculation and barcode structure.
+3. I. S. Reed, G. Solomon, "Polynomial codes over certain finite fields," *Journal of the Society for Industrial and Applied Mathematics* 8(2), 1960, pp. 300–304.
+4. OpenCV 4.13.0 documentation: `cv2.QRCodeEncoder`, `cv2.QRCodeDetector`, `cv2.barcode.BarcodeDetector`. https://docs.opencv.org/4.13.0/

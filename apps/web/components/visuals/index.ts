@@ -162,3 +162,4 @@ export { FaceRecLab } from "./FaceRecLab";
 export { ArucoLab } from "./ArucoLab";
 export { CharSegLab } from "./CharSegLab";
 export { OcrEngineLab } from "./OcrEngineLab";
+export { QrLab } from "./QrLab";
