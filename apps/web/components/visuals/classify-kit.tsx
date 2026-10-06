@@ -3,6 +3,7 @@
 /** Shared pieces for the 2-D feature-space labs of Module 36: an SVG scatter plot with axes, coloured
  *  classes, an optional decision-region background and a clickable test point. Styles: `.ck-*` in globals.css. */
 import { type ReactNode } from "react";
+import { useGrays } from "./lab-kit";
 
 export type Pt = { x: number; y: number; label: string };
 export const CLASS_COLOURS = ["#3aa0ff", "#e0393e", "#2fae5c", "#caa42a", "#9b59d9"];
@@ -69,6 +70,44 @@ export function ScatterPlot({
       </div>
     </div>
   );
+}
+
+// Shared 3-class dataset for Module 36's labs: 8x8-tile (mean, std) features of the three 35.1 texture
+// images (81 tiles each). Reused from 36.1 on so later chapters compare against the same feature space.
+export const TEXTURE_SOURCES: [string, string][] = [
+  ["woven", "/images/sample-texture-woven.png"],
+  ["smooth", "/images/sample-texture-smooth.png"],
+  ["blotchy", "/images/sample-texture-blotchy.png"],
+];
+export const TILE = 8;
+
+export function tileFeatures(d: ArrayLike<number>, w: number, h: number, label: string): Pt[] {
+  const pts: Pt[] = [];
+  for (let ty = 0; ty < Math.floor(h / TILE); ty++) {
+    for (let tx = 0; tx < Math.floor(w / TILE); tx++) {
+      const vals: number[] = [];
+      for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) vals.push(d[(ty * TILE + y) * w + (tx * TILE + x)]);
+      const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const variance = vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length;
+      pts.push({ x: mean, y: Math.sqrt(variance), label });
+    }
+  }
+  return pts;
+}
+
+/** Loads the three texture images and returns their combined tile-feature points, or null while loading. */
+export function useTextureTiles(): Pt[] | null {
+  const imgs = useGrays(TEXTURE_SOURCES.map(([, src]) => src));
+  if (!imgs) return null;
+  return TEXTURE_SOURCES.flatMap(([label], i) => tileFeatures(imgs[i].d, imgs[i].w, imgs[i].h, label));
+}
+
+export function centroidsOf(points: Pt[]): { label: string; x: number; y: number }[] {
+  const labels = [...new Set(points.map((p) => p.label))];
+  return labels.map((label) => {
+    const pts = points.filter((p) => p.label === label);
+    return { label, x: pts.reduce((a, p) => a + p.x, 0) / pts.length, y: pts.reduce((a, p) => a + p.y, 0) / pts.length };
+  });
 }
 
 /** A coarse decision-region background: evaluates `classify(x,y)` on a grid and fills each cell with its class colour at low opacity. */

@@ -1,0 +1,338 @@
+export const meta = {
+  number: "36.2",
+  title: "Bayes",
+  minutes: 22,
+  objectives: [
+    "Compute a class-conditional Gaussian likelihood and turn it into a posterior probability by hand",
+    "Explain what 'naive' means in naive Bayes, and why each class gets its own spread, not just a centroid",
+    "Build a Gaussian naive Bayes classifier and compare its decision regions with nearest-centroid's",
+    "Use cv2.ml.NormalBayesClassifier and read its predictions",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 36.2 (Part F, Module 36).
+  Lab: GaussNbLab (apps/web/components/visuals/GaussNbLab.tsx) — Gaussian naive Bayes decision regions on
+  the same 36.1 texture tile feature space, click to see posterior probabilities.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 36.2 Bayes
+
+<Definition term="Bayes classifier">a classifier that picks the class with the highest posterior probability given the observed features, computed from each class's likelihood (how probable these features are, if this were the true class) and its prior probability (how common the class is), combined by Bayes' theorem (5.8).</Definition>
+
+36.1's nearest-centroid classifier treated every class as an equally-sized blob and asked "whose centre is closest?" A Bayes classifier asks a sharper question: "given everything I know about how each class's features are actually spread out, which class most plausibly produced this exact point?" A class with a wide spread can rightfully claim territory far from its own centroid; a class with a narrow spread cannot.
+
+## 1. An analogy
+
+Two factories ship the same part. Factory A's parts' weight is very consistent (always close to 10 g); Factory B's is much more variable (often anywhere from 6 g to 22 g). A part arrives weighing 12 g. By "which average is closer," it looks like Factory A (10 g vs Factory B's wider range). But if Factory A *never* produces anything as heavy as 12 g, while 12 g is a perfectly ordinary weight for Factory B, the sensible guess flips to Factory B — because Factory B's actual spread, not just its average, makes 12 g plausible. That is exactly what a Bayes classifier computes, formally.
+
+## 2. From Bayes' theorem to a classifier
+
+<Flow
+  steps={[
+    { label: "A class's training examples", tone: "data" },
+    { label: "Fit each feature's mean and std per class (assume a Gaussian)", tone: "process" },
+    { label: "New point: likelihood under each class's Gaussian x its prior", tone: "process" },
+    { label: "Normalise -> posterior probability per class; pick the highest", tone: "result" },
+  ]}
+/>
+
+Bayes' theorem (5.8): P(class | x) = P(x | class) · P(class) / P(x). Since P(x) is the same for every class being compared, it only rescales the numbers — the classifier just needs the class with the largest P(x | class) · P(class).
+
+- **Likelihood**, P(x | class): how probable this feature value is, *if* this were the true class. Modelled here as a Gaussian, fitted from that class's own training examples (its mean and standard deviation — the same statistics 36.1 used, but now describing a *distribution*, not just a point).
+- **Prior**, P(class): how common the class is overall, before seeing any features — if 99% of parts are good and 1% defective, that imbalance belongs in the prior.
+- **"Naive"**: when there is more than one feature, naive Bayes multiplies each feature's likelihood together, which is only exactly correct if the features are statistically independent given the class. It is rarely exactly true, but it is simple, fast, and often works well regardless.
+
+## 3. A worked example by hand
+
+Two classes, each a single Gaussian feature, equal priors (0.5 each): Class A, mean 10, std 2. Class B, mean 14, std 4. Observed x = 12.
+
+Gaussian likelihood, P(x) = 1/(σ√(2π)) · exp(−(x−μ)²/(2σ²)):
+
+- P(12 | A) = 1/(2·2.5066) · exp(−(12−10)²/(2·4)) = 0.1995 · 0.6065 = **0.121**
+- P(12 | B) = 1/(4·2.5066) · exp(−(12−14)²/(2·16)) = 0.0998 · 0.8825 = **0.088**
+
+Posterior (normalising so the two add to 1): P(A | 12) = 0.121 / (0.121+0.088) = **0.579**. P(B | 12) = **0.421**.
+
+A is still more probable (x = 12 is closer to A's mean), but B is far from negligible — B's wider spread keeps it plausible. Now suppose Class A parts are four times as common (**prior** 0.8 vs 0.2, instead of equal): posterior becomes P(A | 12) = **0.846**, P(B | 12) = **0.154** — the same measurement, a different conclusion, because the *prior* changed, not the data.
+
+## 4. Where Bayes and nearest-centroid disagree
+
+<GaussNbLab caption="The same three-texture feature space as 36.1, now with Gaussian naive Bayes decision regions. Click near the boundary between Woven and Blotchy — Blotchy's wide spread lets it claim territory much further from its own centroid than Woven's tight spread allows."/>
+
+Fitting a Gaussian to each feature of each class (81 tiles each, from 35.1's woven/smooth/blotchy textures):
+
+| Class | Mean (mean, std) | Std. dev. of (mean, std) |
+| --- | --- | --- |
+| Woven | (145.49, 33.54) | (4.18, 2.71) |
+| Smooth | (139.93, 4.50) | (12.47, 0.55) |
+| Blotchy | (136.56, 27.56) | (35.12, 21.61) |
+
+Woven's spread is tiny; Blotchy's is enormous. Take the point (155, 40):
+
+- **By nearest centroid** (36.1): distance to Woven = 11.5, to Blotchy = 22.2 → **Woven** wins.
+- **By Bayes posterior**: P(Woven) = 28.6%, P(Blotchy) = 71.4%, P(Smooth) ≈ 0% → **Blotchy** wins, decisively.
+
+The two classifiers disagree. Nearest-centroid only sees that (155, 40) is closer to Woven's average. Bayes sees that (155, 40) is about 2.3 standard deviations from Woven's *tight* distribution (quite improbable for Woven) but well within one standard deviation of Blotchy's *wide* one (very plausible for Blotchy) — and Blotchy wins because the data genuinely looks more like a typical Blotchy tile than a typical Woven one, once each class's actual spread is accounted for.
+
+## 5. Industrial use
+
+- **Any classification task with class-imbalanced priors** (rare defects, common good parts): Bayes is the principled way to fold that imbalance in, rather than ignoring it.
+- **Quality grading with naturally variable classes**: when one grade is naturally more variable than another (as "Blotchy" is here), Bayes handles this correctly; nearest-centroid does not.
+- **A standard baseline classifier**: fast to train (just means and variances), fast to run, and a reasonable first thing to try before more complex methods (36.4–36.6).
+
+## What you should remember from 36.2
+
+<Takeaways>
+<Takeaway n={1} title="Posterior, not distance">Bayes picks the class that makes the observed features most probable overall, not just the nearest average.</Takeaway>
+<Takeaway n={2} title="Likelihood + prior">Both the class-conditional distribution and how common the class is feed into the decision.</Takeaway>
+<Takeaway n={3} title="Spread matters">A wide-spread class can rightfully claim territory far from its own centroid; nearest-centroid cannot express this.</Takeaway>
+<Takeaway n={4} title="Naive = independent features assumed">Multiplying per-feature likelihoods is an approximation, usually a good-enough one.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Class A: mean 0, std 1. Class B: mean 0, std 10 (same mean, very different spread). At x = 15, which class is more probable, roughly, and why — without computing exact numbers?
+
+<Solution>
+
+**Class B.** x = 15 is 15 standard deviations from A's mean under A's tight spread — essentially impossible. Under B's wide spread, 15 is only 1.5 standard deviations away — ordinary. Even though both classes share the same mean, the one with the larger spread explains a far point much better.
+
+</Solution>
+
+**Q2.** If a defect is extremely rare (prior 0.001) but a false alarm on a good part is reasonably likely (say the measured feature overlaps the defect's typical range occasionally), what does the prior do to the posterior probability of "defect" for a borderline measurement?
+
+<Solution>
+
+It pulls the posterior **down**, often a lot — this is exactly 5.8's base-rate lesson applied here: with a prior this small, even a measurement that looks somewhat defect-like usually still comes out more likely to be a rare coincidence from the (vastly more numerous) good parts than a genuine rare defect, unless the likelihood ratio in favour of "defect" is very large.
+
+</Solution>
+
+### Next: 36.3 kNN
+
+## Code
+
+### 1. The worked example, and fitting class Gaussians with NumPy
+
+```python
+import numpy as np
+import cv2
+
+def gauss_pdf(x, mu, sd):
+    return 1.0 / (sd * np.sqrt(2 * np.pi)) * np.exp(-0.5 * ((x - mu) / sd) ** 2)
+
+pA, pB = gauss_pdf(12, 10, 2), gauss_pdf(12, 14, 4)
+print(f"P(12|A)={pA:.3f}  P(12|B)={pB:.3f}")
+for name, priors in [("equal priors", (0.5, 0.5)), ("priors 0.8/0.2", (0.8, 0.2))]:
+    num_a, num_b = pA * priors[0], pB * priors[1]
+    total = num_a + num_b
+    print(f"{name}: P(A|12)={num_a / total:.3f}  P(B|12)={num_b / total:.3f}")
+
+TILE = 8
+def tile_features(img):
+    h, w = img.shape
+    feats = []
+    for ty in range(h // TILE):
+        for tx in range(w // TILE):
+            patch = img[ty * TILE:(ty + 1) * TILE, tx * TILE:(tx + 1) * TILE].astype(np.float64)
+            feats.append((patch.mean(), patch.std()))
+    return np.array(feats)
+
+names = ["woven", "smooth", "blotchy"]
+classes = {n: tile_features(cv2.imread(f"sample-texture-{n}.png", cv2.IMREAD_GRAYSCALE)) for n in names}
+stats = {n: (f.mean(axis=0), f.std(axis=0)) for n, f in classes.items()}
+for n, (mu, sd) in stats.items():
+    print(f"{n}: mean=({mu[0]:.2f}, {mu[1]:.2f})  std=({sd[0]:.2f}, {sd[1]:.2f})")
+```
+
+Output:
+
+```text
+P(12|A)=0.121  P(12|B)=0.088
+equal priors: P(A|12)=0.579  P(B|12)=0.421
+priors 0.8/0.2: P(A|12)=0.846  P(B|12)=0.154
+woven: mean=(145.49, 33.54)  std=(4.18, 2.71)
+smooth: mean=(139.93, 4.50)  std=(12.47, 0.55)
+blotchy: mean=(136.56, 27.56)  std=(35.12, 21.61)
+```
+
+### 2. Gaussian naive Bayes vs nearest-centroid, where they disagree
+
+```python
+def posterior(point, stats, prior=None):
+    names = list(stats)
+    prior = prior or {n: 1 / len(names) for n in names}
+    likes = {n: np.prod(gauss_pdf(np.array(point), mu, sd)) * prior[n] for n, (mu, sd) in stats.items()}
+    total = sum(likes.values())
+    return {n: likes[n] / total for n in names}
+
+point = (155.0, 40.0)
+post = posterior(point, stats)
+for n, p in sorted(post.items(), key=lambda kv: -kv[1]):
+    print(f"P({n} | point) = {p:.3f}")
+
+centroids = {n: mu for n, (mu, sd) in stats.items()}
+for n, mu in centroids.items():
+    print(f"distance to {n} centroid: {np.hypot(point[0] - mu[0], point[1] - mu[1]):.1f}")
+```
+
+Output:
+
+```text
+P(blotchy | point) = 0.714
+P(woven | point) = 0.286
+P(smooth | point) = 0.000
+distance to woven centroid: 11.5
+distance to smooth centroid: 38.6
+distance to blotchy centroid: 22.2
+```
+
+Nearest-centroid would pick Woven (distance 11.5, the smallest); Bayes picks Blotchy (71.4% posterior) — the disagreement from Section 4.
+
+### 3. cv2.ml.NormalBayesClassifier
+
+```python
+X = np.vstack([classes[n] for n in names]).astype(np.float32)
+y = np.array(sum(([i] * len(classes[n]) for i, n in enumerate(names)), []), dtype=np.int32)
+model = cv2.ml.NormalBayesClassifier_create()
+model.train(X, cv2.ml.ROW_SAMPLE, y)
+
+test_points = np.array([[142.77, 4.93], [155.0, 40.0]], dtype=np.float32)
+_, predictions = model.predict(test_points)
+print("predictions:", [names[int(p)] for p in predictions.ravel()])
+```
+
+Output:
+
+```text
+predictions: ['smooth', 'blotchy']
+```
+
+Matches the from-scratch Gaussian naive Bayes exactly: the defect-patch tile (142.77, 4.93, 36.1) → smooth; (155, 40) → blotchy.
+
+## OpenCV API notes
+
+- **`cv2.ml.NormalBayesClassifier_create()`**: `.train(samples, cv2.ml.ROW_SAMPLE, responses)` (`samples` `float32`, one row per example; `responses` `int32` class labels), `.predict(samples)` returns `(retval, predictions)`.
+- **`.predictProb(samples)`** returns `(retval, predictions, outputProbs)`: `outputProbs` are relative likelihood-times-prior scores, **not necessarily normalised to sum to 1** across classes — use them to compare classes relatively (or normalise yourself, as the from-scratch `posterior` function above does), not as calibrated probabilities out of the box.
+- **Assumes each class is Gaussian, and (as implemented in OpenCV) treats features as independent given the class** — the same naive assumption built from scratch above; it is a genuine implementation of Gaussian naive Bayes, not a different, more general Bayesian model.
+- **Other `cv2.ml` classifiers** (kNN, SVM, decision trees, boosting) do not share this specific probabilistic structure; they are covered, with their own assumptions, in 36.3–36.6.
+
+## Where it fails
+
+- **The Gaussian assumption can be wrong**: if a class's real feature distribution is skewed, multi-modal (two separate sub-clusters), or bounded in a way a Gaussian can't represent, the likelihood estimate is systematically off.
+- **The independence ("naive") assumption can be wrong**: correlated features get double-counted in the product, which can bias the posterior, though in practice this often matters less than expected.
+- **Needs enough examples per class to estimate a reliable mean and std** — a class with very few training examples gives an unreliable (often too narrow) estimated spread, which can make it over-confident.
+- **A near-zero likelihood under every class** (a genuinely novel point, unlike anything seen in training) still forces the posteriors to sum to 1 and pick a "most probable" class — Bayes as described here has no built-in way to say "none of the above" (that is a separate problem, anomaly/novelty detection, touched on again in 55.6).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Treating `predictProb`'s `outputProbs` as calibrated probabilities** without checking they sum to 1 — they often don't (OpenCV API notes above).
+- **Ignoring priors when classes are genuinely imbalanced** — using equal priors by habit when one class is actually far more common silently throws away real information (Mini exercise Q2).
+- **Fitting a Gaussian to a tiny number of examples** and trusting the resulting std — a handful of points can give a wildly over- or under-estimated spread.
+- **Assuming "naive" means "bad"**: despite the name and the usually-false independence assumption, naive Bayes is a strong, fast, genuinely useful baseline in practice — don't dismiss it on the name alone.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why nearest-centroid is a special case
+
+If every class is assumed to be Gaussian with the *same* spread (same std in every direction, same for every class) and equal priors, the Bayes decision rule reduces exactly to nearest-centroid: the likelihood term becomes a function of distance to the mean alone, and with identical spreads the class with the smallest distance always wins. Section 4's disagreement happens precisely because the classes here do *not* have equal spread — nearest-centroid implicitly (and here, wrongly) assumes they do.
+
+### Log-likelihoods, for numerical stability
+
+In practice, likelihoods (products of many small Gaussian densities, for high-dimensional features) can underflow to zero in floating point. Real implementations compute **log-likelihoods** (sums of logs instead of products) and compare those, which is mathematically equivalent (the log is monotonic) but numerically stable — `cv2.ml.NormalBayesClassifier` handles this internally.
+
+### Beyond naive: full covariance and other generative models
+
+Dropping the independence assumption gives **Gaussian discriminant analysis** with a full covariance matrix per class (capturing correlations between features, at the cost of needing more data to estimate it reliably), or a **shared** covariance across classes (giving a linear, rather than curved, decision boundary — closer to nearest-centroid again, but correctly accounting for correlated features). These sit between naive Bayes and fully general classifiers like SVM (36.4) on the simplicity/flexibility trade-off.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does a Bayes classifier compute, that nearest-centroid does not?",
+      options: ["The exact same thing, just slower", "A full probability distribution (likelihood) per class, not just its average, combined with how common each class is (prior)", "The image's colour histogram", "A single global threshold"],
+      answer: 1,
+      explanation: "Section 2: likelihood (shape of the distribution) and prior (base rate), not just the centroid.",
+    },
+    {
+      question: "In Section 3, why did a higher prior for Class A (0.8 vs 0.2) increase P(A|12) even though the measurement x=12 did not change?",
+      options: ["It was a calculation error", "The posterior depends on both the likelihood of the data AND the prior probability of each class", "Priors only affect Class B", "x=12 is impossible under Class A"],
+      answer: 1,
+      explanation: "Bayes' theorem combines likelihood and prior; changing the prior changes the posterior even with the same data.",
+    },
+    {
+      question: "In Section 4, why did Bayes classify (155, 40) as 'blotchy' while nearest-centroid picked 'woven'?",
+      options: ["A bug in one of the methods", "Woven's narrow spread makes (155,40) very improbable for Woven, while Blotchy's wide spread makes it quite plausible for Blotchy, even though Woven's centroid is numerically closer", "Blotchy always wins ties", "The features were not normalised"],
+      answer: 1,
+      explanation: "Bayes accounts for each class's actual spread; nearest-centroid only looks at distance to the average.",
+    },
+    {
+      question: "What does 'naive' mean in naive Bayes?",
+      options: ["The classifier is inaccurate by design", "Features are assumed statistically independent given the class, so their likelihoods can simply be multiplied", "It only works on small datasets", "It ignores the prior"],
+      answer: 1,
+      explanation: "Section 2: multiplying per-feature likelihoods is only exactly valid under independence -- the 'naive' assumption.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Class A: mean 5, std 1, prior 0.5. Class B: mean 5, std 1, prior 0.5 — identical in every way. What is P(A | x) for any x?
+
+<Solution>
+
+Since the classes have identical likelihoods and identical priors, their posteriors must be equal: **P(A|x) = P(B|x) = 0.5**, for every x. When two classes are statistically indistinguishable, no classifier — Bayes or otherwise — can do better than guessing between them.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using `posterior` and `stats` from the Code section, compute the posterior for the defect-patch tile (142.77, 4.93, from 36.1) under all three classes, and confirm it matches the nearest-centroid answer from 36.1 (unlike the Section 4 example, where they disagreed).
+
+<Solution>
+
+```python
+post_defect = posterior((142.77, 4.93), stats)
+for n, p in sorted(post_defect.items(), key=lambda kv: -kv[1]):
+    print(f"P({n} | defect tile) = {p:.4f}")
+```
+
+Output:
+
+```text
+P(smooth | defect tile) = 0.9929
+P(blotchy | defect tile) = 0.0071
+P(woven | defect tile) = 0.0000
+```
+
+Yes — both Bayes (99.3% for "smooth") and nearest-centroid (36.1, distance 2.87 vs 23–29 for the others) agree strongly here. The two methods don't always disagree; Section 4 specifically picked a point near the boundary between a tight and a wide class to make the difference visible.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A teammate says: "Bayes is always better than nearest-centroid, so we should never use nearest-centroid." Is that a fair conclusion from this chapter?
+
+<Solution>
+
+Not quite. Bayes needs a *correct enough* model of each class's distribution (here, Gaussian, with reliably estimated means and stds) to gain its advantage; with very little training data per class, those estimates can be unreliable, and a simpler method like nearest-centroid can sometimes be more robust precisely because it assumes less. The fair conclusion is narrower: **when classes genuinely differ in spread, and there is enough data to estimate that spread reliably, Bayes can make better decisions than nearest-centroid** (Section 4) — not that Bayes is categorically superior in every situation.
+
+</Solution>
+
+## References
+
+1. R. O. Duda, P. E. Hart, D. G. Stork, *Pattern Classification*, 2nd ed., Wiley, 2001, Chapter 2 (Bayesian decision theory).
+2. C. M. Bishop, *Pattern Recognition and Machine Learning*, Springer, 2006, Section 4.2 (probabilistic generative models).
+3. OpenCV 4.13.0 documentation: `cv2.ml.NormalBayesClassifier`. https://docs.opencv.org/4.13.0/
