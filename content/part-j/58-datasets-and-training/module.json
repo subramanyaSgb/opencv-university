@@ -1,0 +1,32 @@
+{
+  "number": 58,
+  "title": "Datasets and training",
+  "summary": "The data side of deep learning: labelling, splits, augmentation, metrics (confusion matrix, IoU, Dice), and data drift and active learning.",
+  "chapters": [
+    {
+      "number": "58.1",
+      "slug": "58.1-labelling",
+      "title": "Labelling"
+    },
+    {
+      "number": "58.2",
+      "slug": "58.2-splits",
+      "title": "Splits"
+    },
+    {
+      "number": "58.3",
+      "slug": "58.3-augmentation",
+      "title": "Augmentation"
+    },
+    {
+      "number": "58.4",
+      "slug": "58.4-metrics-confusion-matrix-iou-and-dice",
+      "title": "Metrics, confusion matrix, IoU and Dice"
+    },
+    {
+      "number": "58.5",
+      "slug": "58.5-data-drift-and-active-learning",
+      "title": "Data drift and active learning"
+    }
+  ]
+}

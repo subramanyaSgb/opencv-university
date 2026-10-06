@@ -1,0 +1,37 @@
+{
+  "number": 55,
+  "title": "Segmentation and beyond",
+  "summary": "Pixel-level and instance-level deep learning: U-Net, instance segmentation, SAM, pose estimation, face recognition with deep learning, and anomaly detection.",
+  "chapters": [
+    {
+      "number": "55.1",
+      "slug": "55.1-u-net",
+      "title": "U-Net"
+    },
+    {
+      "number": "55.2",
+      "slug": "55.2-instance-segmentation",
+      "title": "Instance segmentation"
+    },
+    {
+      "number": "55.3",
+      "slug": "55.3-sam",
+      "title": "SAM"
+    },
+    {
+      "number": "55.4",
+      "slug": "55.4-pose",
+      "title": "Pose"
+    },
+    {
+      "number": "55.5",
+      "slug": "55.5-face-recognition-with-deep-learning",
+      "title": "Face recognition with deep learning"
+    },
+    {
+      "number": "55.6",
+      "slug": "55.6-anomaly-detection",
+      "title": "Anomaly detection"
+    }
+  ]
+}

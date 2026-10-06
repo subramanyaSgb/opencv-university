@@ -1,0 +1,27 @@
+{
+  "number": 66,
+  "title": "Reference library",
+  "summary": "Quick lookup for the whole course: glossary, OpenCV function index, cheat sheets, and a problem-to-technique index.",
+  "chapters": [
+    {
+      "number": "66.1",
+      "slug": "66.1-glossary",
+      "title": "Glossary"
+    },
+    {
+      "number": "66.2",
+      "slug": "66.2-opencv-function-index",
+      "title": "OpenCV function index"
+    },
+    {
+      "number": "66.3",
+      "slug": "66.3-cheat-sheets",
+      "title": "Cheat sheets"
+    },
+    {
+      "number": "66.4",
+      "slug": "66.4-problem-to-technique-index",
+      "title": "Problem-to-technique index"
+    }
+  ]
+}

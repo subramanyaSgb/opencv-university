@@ -1,0 +1,37 @@
+{
+  "number": 61,
+  "title": "Deployment and performance",
+  "summary": "Running models fast in production: ONNX, TensorRT and FP16, batching, multi-camera scaling, DeepStream, and profiling.",
+  "chapters": [
+    {
+      "number": "61.1",
+      "slug": "61.1-onnx",
+      "title": "ONNX"
+    },
+    {
+      "number": "61.2",
+      "slug": "61.2-tensorrt-and-fp16",
+      "title": "TensorRT and FP16"
+    },
+    {
+      "number": "61.3",
+      "slug": "61.3-batching",
+      "title": "Batching"
+    },
+    {
+      "number": "61.4",
+      "slug": "61.4-multi-camera-scaling",
+      "title": "Multi-camera scaling"
+    },
+    {
+      "number": "61.5",
+      "slug": "61.5-deepstream",
+      "title": "DeepStream"
+    },
+    {
+      "number": "61.6",
+      "slug": "61.6-profiling",
+      "title": "Profiling"
+    }
+  ]
+}

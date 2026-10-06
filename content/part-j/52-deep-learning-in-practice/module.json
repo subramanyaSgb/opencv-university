@@ -1,0 +1,37 @@
+{
+  "number": 52,
+  "title": "Deep learning in practice",
+  "summary": "From theory to a trained model: PyTorch basics, loss functions and optimizers, training loops and curves, the Ultralytics YOLO workflow, exporting models, and explainability with Grad-CAM.",
+  "chapters": [
+    {
+      "number": "52.1",
+      "slug": "52.1-pytorch-basics",
+      "title": "PyTorch basics"
+    },
+    {
+      "number": "52.2",
+      "slug": "52.2-loss-functions-and-optimizers",
+      "title": "Loss functions and optimizers"
+    },
+    {
+      "number": "52.3",
+      "slug": "52.3-training-loops-and-curves",
+      "title": "Training loops and curves"
+    },
+    {
+      "number": "52.4",
+      "slug": "52.4-the-ultralytics-yolo-workflow",
+      "title": "The Ultralytics YOLO workflow"
+    },
+    {
+      "number": "52.5",
+      "slug": "52.5-exporting-models",
+      "title": "Exporting models"
+    },
+    {
+      "number": "52.6",
+      "slug": "52.6-explainability-with-grad-cam",
+      "title": "Explainability with Grad-CAM"
+    }
+  ]
+}

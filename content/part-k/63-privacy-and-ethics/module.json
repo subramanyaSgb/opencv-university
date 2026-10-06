@@ -1,0 +1,22 @@
+{
+  "number": 63,
+  "title": "Privacy and ethics",
+  "summary": "Responsibilities that come with cameras watching people: monitoring people, data protection, and responsible deployment.",
+  "chapters": [
+    {
+      "number": "63.1",
+      "slug": "63.1-monitoring-people",
+      "title": "Monitoring people"
+    },
+    {
+      "number": "63.2",
+      "slug": "63.2-data-protection",
+      "title": "Data protection"
+    },
+    {
+      "number": "63.3",
+      "slug": "63.3-responsible-deployment",
+      "title": "Responsible deployment"
+    }
+  ]
+}

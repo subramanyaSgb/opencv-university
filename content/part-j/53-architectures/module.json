@@ -1,0 +1,27 @@
+{
+  "number": 53,
+  "title": "Architectures",
+  "summary": "How CNN design evolved: LeNet to ResNet, EfficientNet, Vision Transformers, and transfer learning.",
+  "chapters": [
+    {
+      "number": "53.1",
+      "slug": "53.1-lenet-to-resnet",
+      "title": "LeNet to ResNet"
+    },
+    {
+      "number": "53.2",
+      "slug": "53.2-efficientnet",
+      "title": "EfficientNet"
+    },
+    {
+      "number": "53.3",
+      "slug": "53.3-vision-transformers",
+      "title": "Vision Transformers"
+    },
+    {
+      "number": "53.4",
+      "slug": "53.4-transfer-learning",
+      "title": "Transfer learning"
+    }
+  ]
+}

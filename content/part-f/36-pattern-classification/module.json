@@ -1,0 +1,47 @@
+{
+  "number": 36,
+  "title": "Pattern classification",
+  "summary": "Turning descriptors into decisions: features and classes, Bayes decision theory, k-nearest neighbours, support vector machines, decision trees and random forests, boosting, PCA for dimensionality reduction, and clustering.",
+  "chapters": [
+    {
+      "number": "36.1",
+      "slug": "36.1-features-and-classes",
+      "title": "Features and classes"
+    },
+    {
+      "number": "36.2",
+      "slug": "36.2-bayes",
+      "title": "Bayes"
+    },
+    {
+      "number": "36.3",
+      "slug": "36.3-knn",
+      "title": "kNN"
+    },
+    {
+      "number": "36.4",
+      "slug": "36.4-svm",
+      "title": "SVM"
+    },
+    {
+      "number": "36.5",
+      "slug": "36.5-decision-trees-and-random-forests",
+      "title": "Decision trees and random forests"
+    },
+    {
+      "number": "36.6",
+      "slug": "36.6-boosting-and-adaboost",
+      "title": "Boosting and AdaBoost"
+    },
+    {
+      "number": "36.7",
+      "slug": "36.7-pca",
+      "title": "PCA"
+    },
+    {
+      "number": "36.8",
+      "slug": "36.8-clustering",
+      "title": "Clustering"
+    }
+  ]
+}

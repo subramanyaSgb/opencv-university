@@ -1,0 +1,37 @@
+{
+  "number": 42,
+  "title": "Depth sensing",
+  "summary": "Recovering distance: stereo, epipolar geometry, disparity, structured light, laser triangulation, and time of flight.",
+  "chapters": [
+    {
+      "number": "42.1",
+      "slug": "42.1-stereo",
+      "title": "Stereo"
+    },
+    {
+      "number": "42.2",
+      "slug": "42.2-epipolar-geometry",
+      "title": "Epipolar geometry"
+    },
+    {
+      "number": "42.3",
+      "slug": "42.3-disparity",
+      "title": "Disparity"
+    },
+    {
+      "number": "42.4",
+      "slug": "42.4-structured-light",
+      "title": "Structured light"
+    },
+    {
+      "number": "42.5",
+      "slug": "42.5-laser-triangulation",
+      "title": "Laser triangulation"
+    },
+    {
+      "number": "42.6",
+      "slug": "42.6-time-of-flight",
+      "title": "Time of flight"
+    }
+  ]
+}

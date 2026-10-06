@@ -1,0 +1,37 @@
+{
+  "number": 65,
+  "title": "Capstone projects",
+  "summary": "End-to-end projects combining earlier modules: object counting, thermal monitoring, ID recognition, PPE detection, defect detection, and dimension measurement.",
+  "chapters": [
+    {
+      "number": "65.1",
+      "slug": "65.1-object-counting",
+      "title": "Object counting"
+    },
+    {
+      "number": "65.2",
+      "slug": "65.2-thermal-monitoring",
+      "title": "Thermal monitoring"
+    },
+    {
+      "number": "65.3",
+      "slug": "65.3-id-recognition",
+      "title": "ID recognition"
+    },
+    {
+      "number": "65.4",
+      "slug": "65.4-ppe-detection",
+      "title": "PPE detection"
+    },
+    {
+      "number": "65.5",
+      "slug": "65.5-defect-detection",
+      "title": "Defect detection"
+    },
+    {
+      "number": "65.6",
+      "slug": "65.6-dimension-measurement",
+      "title": "Dimension measurement"
+    }
+  ]
+}

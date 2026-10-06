@@ -1,0 +1,37 @@
+{
+  "number": 37,
+  "title": "Classical detection and faces",
+  "summary": "Finding objects before deep learning: sliding windows, Haar cascades, HOG + SVM, non-max suppression, and face detection and recognition with classical features.",
+  "chapters": [
+    {
+      "number": "37.1",
+      "slug": "37.1-sliding-windows",
+      "title": "Sliding windows"
+    },
+    {
+      "number": "37.2",
+      "slug": "37.2-haar-cascades",
+      "title": "Haar cascades"
+    },
+    {
+      "number": "37.3",
+      "slug": "37.3-hog-plus-svm",
+      "title": "HOG + SVM"
+    },
+    {
+      "number": "37.4",
+      "slug": "37.4-non-max-suppression",
+      "title": "Non-max suppression"
+    },
+    {
+      "number": "37.5",
+      "slug": "37.5-face-detection",
+      "title": "Face detection"
+    },
+    {
+      "number": "37.6",
+      "slug": "37.6-face-recognition",
+      "title": "Face recognition"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "number": 54,
+  "title": "Object detection",
+  "summary": "Finding and localising objects with deep learning: boxes and IoU, anchors and grids, how YOLO works, NMS and confidence, mAP, and training and tuning a detector.",
+  "chapters": [
+    {
+      "number": "54.1",
+      "slug": "54.1-boxes-and-iou",
+      "title": "Boxes and IoU"
+    },
+    {
+      "number": "54.2",
+      "slug": "54.2-anchors-and-grids",
+      "title": "Anchors and grids"
+    },
+    {
+      "number": "54.3",
+      "slug": "54.3-how-yolo-works",
+      "title": "How YOLO works"
+    },
+    {
+      "number": "54.4",
+      "slug": "54.4-nms-and-confidence",
+      "title": "NMS and confidence"
+    },
+    {
+      "number": "54.5",
+      "slug": "54.5-map",
+      "title": "mAP"
+    },
+    {
+      "number": "54.6",
+      "slug": "54.6-training-and-tuning",
+      "title": "Training and tuning"
+    }
+  ]
+}

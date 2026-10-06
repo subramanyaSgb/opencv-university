@@ -1,0 +1,27 @@
+{
+  "number": 48,
+  "title": "Computational photography",
+  "summary": "Computing a better image than one exposure can give: HDR, inpainting, dehazing, and low-light enhancement.",
+  "chapters": [
+    {
+      "number": "48.1",
+      "slug": "48.1-hdr",
+      "title": "HDR"
+    },
+    {
+      "number": "48.2",
+      "slug": "48.2-inpainting",
+      "title": "Inpainting"
+    },
+    {
+      "number": "48.3",
+      "slug": "48.3-dehazing",
+      "title": "Dehazing"
+    },
+    {
+      "number": "48.4",
+      "slug": "48.4-low-light-enhancement",
+      "title": "Low-light enhancement"
+    }
+  ]
+}

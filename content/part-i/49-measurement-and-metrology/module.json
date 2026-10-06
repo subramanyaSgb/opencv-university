@@ -1,0 +1,27 @@
+{
+  "number": 49,
+  "title": "Measurement and metrology",
+  "summary": "Making vision measurements trustworthy: calibration for measurement, sub-pixel accuracy, error analysis, and repeatability (gauge R&R).",
+  "chapters": [
+    {
+      "number": "49.1",
+      "slug": "49.1-calibration-for-measurement",
+      "title": "Calibration for measurement"
+    },
+    {
+      "number": "49.2",
+      "slug": "49.2-sub-pixel-accuracy",
+      "title": "Sub-pixel accuracy"
+    },
+    {
+      "number": "49.3",
+      "slug": "49.3-error-analysis",
+      "title": "Error analysis"
+    },
+    {
+      "number": "49.4",
+      "slug": "49.4-repeatability-gauge-r-and-r",
+      "title": "Repeatability (gauge R&R)"
+    }
+  ]
+}

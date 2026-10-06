@@ -1,0 +1,22 @@
+{
+  "number": 57,
+  "title": "Deep tracking",
+  "summary": "Multi-object tracking with learned features: SORT, DeepSORT, and ByteTrack.",
+  "chapters": [
+    {
+      "number": "57.1",
+      "slug": "57.1-sort",
+      "title": "SORT"
+    },
+    {
+      "number": "57.2",
+      "slug": "57.2-deepsort",
+      "title": "DeepSORT"
+    },
+    {
+      "number": "57.3",
+      "slug": "57.3-bytetrack",
+      "title": "ByteTrack"
+    }
+  ]
+}

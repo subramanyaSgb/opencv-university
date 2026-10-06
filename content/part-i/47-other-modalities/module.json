@@ -1,0 +1,27 @@
+{
+  "number": 47,
+  "title": "Other modalities",
+  "summary": "Beyond visible light: NIR and SWIR, polarization imaging, multispectral imaging, and X-ray/medical imaging.",
+  "chapters": [
+    {
+      "number": "47.1",
+      "slug": "47.1-nir-and-swir",
+      "title": "NIR and SWIR"
+    },
+    {
+      "number": "47.2",
+      "slug": "47.2-polarization",
+      "title": "Polarization"
+    },
+    {
+      "number": "47.3",
+      "slug": "47.3-multispectral",
+      "title": "Multispectral"
+    },
+    {
+      "number": "47.4",
+      "slug": "47.4-x-ray-and-medical",
+      "title": "X-ray and medical"
+    }
+  ]
+}

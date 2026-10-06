@@ -35,7 +35,43 @@
       "id": "part-f",
       "letter": "F",
       "title": "Features and recognition",
-      "modules": ["33-interest-points", "34-descriptors-and-matching"]
+      "modules": ["33-interest-points", "34-descriptors-and-matching", "35-texture-global-descriptors-and-retrieval", "36-pattern-classification", "37-classical-detection-and-faces", "38-markers-ocr-and-codes"]
+    },
+    {
+      "id": "part-g",
+      "letter": "G",
+      "title": "Video",
+      "modules": ["39-video-fundamentals", "40-motion-and-tracking"]
+    },
+    {
+      "id": "part-h",
+      "letter": "H",
+      "title": "Camera geometry and 3D",
+      "modules": ["41-camera-model-and-calibration", "42-depth-sensing", "43-sfm-and-slam", "44-3d-reconstruction", "45-image-based-rendering"]
+    },
+    {
+      "id": "part-i",
+      "letter": "I",
+      "title": "Specialised imaging",
+      "modules": ["46-thermal-imaging", "47-other-modalities", "48-computational-photography", "49-measurement-and-metrology", "50-image-quality"]
+    },
+    {
+      "id": "part-j",
+      "letter": "J",
+      "title": "Deep learning for vision",
+      "modules": ["51-neural-network-and-cnn-basics", "52-deep-learning-in-practice", "53-architectures", "54-object-detection", "55-segmentation-and-beyond", "56-foundation-and-generative-models", "57-deep-tracking", "58-datasets-and-training"]
+    },
+    {
+      "id": "part-k",
+      "letter": "K",
+      "title": "Engineering practice",
+      "modules": ["59-hardware-and-lighting", "60-production-pipelines", "61-deployment-and-performance", "62-model-compression-and-edge", "63-privacy-and-ethics", "64-troubleshooting-and-decision-guide"]
+    },
+    {
+      "id": "part-l",
+      "letter": "L",
+      "title": "Practice and reference",
+      "modules": ["65-capstone-projects", "66-reference-library"]
     }
   ]
 }

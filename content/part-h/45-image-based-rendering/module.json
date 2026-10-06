@@ -1,0 +1,22 @@
+{
+  "number": 45,
+  "title": "Image-based rendering",
+  "summary": "Synthesising new views from captured images: panoramas, light fields, and the basics of NeRF.",
+  "chapters": [
+    {
+      "number": "45.1",
+      "slug": "45.1-panoramas",
+      "title": "Panoramas"
+    },
+    {
+      "number": "45.2",
+      "slug": "45.2-light-fields",
+      "title": "Light fields"
+    },
+    {
+      "number": "45.3",
+      "slug": "45.3-nerf-basics",
+      "title": "NeRF basics"
+    }
+  ]
+}

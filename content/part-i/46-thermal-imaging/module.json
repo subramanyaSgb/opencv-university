@@ -1,0 +1,37 @@
+{
+  "number": 46,
+  "title": "Thermal imaging",
+  "summary": "Seeing heat: infrared basics, emissivity, radiometric data, non-uniformity correction and calibration, temperature measurement in ROIs, and colour palettes.",
+  "chapters": [
+    {
+      "number": "46.1",
+      "slug": "46.1-infrared-basics",
+      "title": "Infrared basics"
+    },
+    {
+      "number": "46.2",
+      "slug": "46.2-emissivity",
+      "title": "Emissivity"
+    },
+    {
+      "number": "46.3",
+      "slug": "46.3-radiometric-data",
+      "title": "Radiometric data"
+    },
+    {
+      "number": "46.4",
+      "slug": "46.4-nuc-and-calibration",
+      "title": "NUC and calibration"
+    },
+    {
+      "number": "46.5",
+      "slug": "46.5-temperature-measurement-in-rois",
+      "title": "Temperature measurement in ROIs"
+    },
+    {
+      "number": "46.6",
+      "slug": "46.6-palettes",
+      "title": "Palettes"
+    }
+  ]
+}

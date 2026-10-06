@@ -1,0 +1,27 @@
+{
+  "number": 56,
+  "title": "Foundation and generative models",
+  "summary": "Large pretrained vision models: CLIP, DINO, GANs and diffusion models, and synthetic data generation.",
+  "chapters": [
+    {
+      "number": "56.1",
+      "slug": "56.1-clip",
+      "title": "CLIP"
+    },
+    {
+      "number": "56.2",
+      "slug": "56.2-dino",
+      "title": "DINO"
+    },
+    {
+      "number": "56.3",
+      "slug": "56.3-gans-and-diffusion",
+      "title": "GANs and diffusion"
+    },
+    {
+      "number": "56.4",
+      "slug": "56.4-synthetic-data",
+      "title": "Synthetic data"
+    }
+  ]
+}

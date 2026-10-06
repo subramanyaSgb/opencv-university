@@ -1,0 +1,27 @@
+{
+  "number": 50,
+  "title": "Image quality",
+  "summary": "Measuring image quality itself: PSNR and SSIM, SNR, sharpness and focus metrics, and MTF.",
+  "chapters": [
+    {
+      "number": "50.1",
+      "slug": "50.1-psnr-and-ssim",
+      "title": "PSNR and SSIM"
+    },
+    {
+      "number": "50.2",
+      "slug": "50.2-snr",
+      "title": "SNR"
+    },
+    {
+      "number": "50.3",
+      "slug": "50.3-sharpness-and-focus-metrics",
+      "title": "Sharpness and focus metrics"
+    },
+    {
+      "number": "50.4",
+      "slug": "50.4-mtf",
+      "title": "MTF"
+    }
+  ]
+}

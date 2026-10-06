@@ -1,0 +1,22 @@
+{
+  "number": 43,
+  "title": "SfM and SLAM",
+  "summary": "Building geometry from a moving camera: structure from motion, visual odometry, and the basics of SLAM.",
+  "chapters": [
+    {
+      "number": "43.1",
+      "slug": "43.1-structure-from-motion",
+      "title": "Structure from motion"
+    },
+    {
+      "number": "43.2",
+      "slug": "43.2-visual-odometry",
+      "title": "Visual odometry"
+    },
+    {
+      "number": "43.3",
+      "slug": "43.3-slam-basics",
+      "title": "SLAM basics"
+    }
+  ]
+}

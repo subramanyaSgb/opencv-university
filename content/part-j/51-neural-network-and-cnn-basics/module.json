@@ -1,0 +1,32 @@
+{
+  "number": 51,
+  "title": "Neural network and CNN basics",
+  "summary": "The building blocks of deep learning: neurons and layers, training and loss, convolution layers as learned kernels, pooling, and overfitting.",
+  "chapters": [
+    {
+      "number": "51.1",
+      "slug": "51.1-neurons-and-layers",
+      "title": "Neurons and layers"
+    },
+    {
+      "number": "51.2",
+      "slug": "51.2-training-and-loss",
+      "title": "Training and loss"
+    },
+    {
+      "number": "51.3",
+      "slug": "51.3-convolution-layers-as-learned-kernels",
+      "title": "Convolution layers as learned kernels"
+    },
+    {
+      "number": "51.4",
+      "slug": "51.4-pooling",
+      "title": "Pooling"
+    },
+    {
+      "number": "51.5",
+      "slug": "51.5-overfitting",
+      "title": "Overfitting"
+    }
+  ]
+}

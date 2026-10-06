@@ -1,0 +1,47 @@
+{
+  "number": 41,
+  "title": "Camera model and calibration",
+  "summary": "Turning a camera into a measuring instrument: the pinhole model, intrinsics and extrinsics, lens distortion, chessboard calibration, pose with PnP, pixel-to-mm conversion, bird's-eye views, and hand-eye/multi-camera calibration.",
+  "chapters": [
+    {
+      "number": "41.1",
+      "slug": "41.1-pinhole-model",
+      "title": "Pinhole model"
+    },
+    {
+      "number": "41.2",
+      "slug": "41.2-intrinsics-and-extrinsics",
+      "title": "Intrinsics and extrinsics"
+    },
+    {
+      "number": "41.3",
+      "slug": "41.3-lens-distortion",
+      "title": "Lens distortion"
+    },
+    {
+      "number": "41.4",
+      "slug": "41.4-chessboard-calibration",
+      "title": "Chessboard calibration"
+    },
+    {
+      "number": "41.5",
+      "slug": "41.5-pose-with-pnp",
+      "title": "Pose with PnP"
+    },
+    {
+      "number": "41.6",
+      "slug": "41.6-pixel-to-mm",
+      "title": "Pixel to mm"
+    },
+    {
+      "number": "41.7",
+      "slug": "41.7-birds-eye-view",
+      "title": "Bird's-eye view (ground-plane homography)"
+    },
+    {
+      "number": "41.8",
+      "slug": "41.8-hand-eye-and-multi-camera-calibration",
+      "title": "Hand-eye and multi-camera calibration"
+    }
+  ]
+}

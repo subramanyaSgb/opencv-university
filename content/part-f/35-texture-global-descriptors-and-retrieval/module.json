@@ -1,0 +1,37 @@
+{
+  "number": 35,
+  "title": "Texture, global descriptors and retrieval",
+  "summary": "Describing a whole patch or image instead of a single point: local binary patterns, grey-level co-occurrence texture features, the HOG descriptor, Haar-like features, perceptual hashing, and bag-of-visual-words retrieval.",
+  "chapters": [
+    {
+      "number": "35.1",
+      "slug": "35.1-lbp",
+      "title": "LBP"
+    },
+    {
+      "number": "35.2",
+      "slug": "35.2-glcm",
+      "title": "GLCM"
+    },
+    {
+      "number": "35.3",
+      "slug": "35.3-hog",
+      "title": "HOG"
+    },
+    {
+      "number": "35.4",
+      "slug": "35.4-haar-features",
+      "title": "Haar features"
+    },
+    {
+      "number": "35.5",
+      "slug": "35.5-perceptual-hashing",
+      "title": "Perceptual hashing"
+    },
+    {
+      "number": "35.6",
+      "slug": "35.6-bag-of-visual-words-and-image-retrieval",
+      "title": "Bag of visual words and image retrieval"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "number": 60,
+  "title": "Production pipelines",
+  "summary": "Turning a script into a service: architecture, FastAPI services, Docker, databases, PLC and alarm integration, and logging and testing.",
+  "chapters": [
+    {
+      "number": "60.1",
+      "slug": "60.1-architecture",
+      "title": "Architecture"
+    },
+    {
+      "number": "60.2",
+      "slug": "60.2-fastapi-services",
+      "title": "FastAPI services"
+    },
+    {
+      "number": "60.3",
+      "slug": "60.3-docker",
+      "title": "Docker"
+    },
+    {
+      "number": "60.4",
+      "slug": "60.4-databases",
+      "title": "Databases"
+    },
+    {
+      "number": "60.5",
+      "slug": "60.5-plc-and-alarm-integration",
+      "title": "PLC and alarm integration"
+    },
+    {
+      "number": "60.6",
+      "slug": "60.6-logging-and-testing",
+      "title": "Logging and testing"
+    }
+  ]
+}

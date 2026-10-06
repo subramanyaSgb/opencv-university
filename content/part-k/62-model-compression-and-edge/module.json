@@ -1,0 +1,27 @@
+{
+  "number": 62,
+  "title": "Model compression and edge",
+  "summary": "Fitting models onto small hardware: quantization, pruning, distillation, and Jetson/cv2.dnn deployment.",
+  "chapters": [
+    {
+      "number": "62.1",
+      "slug": "62.1-quantization",
+      "title": "Quantization"
+    },
+    {
+      "number": "62.2",
+      "slug": "62.2-pruning",
+      "title": "Pruning"
+    },
+    {
+      "number": "62.3",
+      "slug": "62.3-distillation",
+      "title": "Distillation"
+    },
+    {
+      "number": "62.4",
+      "slug": "62.4-jetson-and-cv2-dnn",
+      "title": "Jetson and cv2.dnn"
+    }
+  ]
+}

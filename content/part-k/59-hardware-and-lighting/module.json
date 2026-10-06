@@ -1,0 +1,42 @@
+{
+  "number": 59,
+  "title": "Hardware and lighting",
+  "summary": "Choosing and setting up the physical system: choosing a camera, lens calculations, lighting techniques, filters, interfaces and triggering, industrial camera SDKs, and line-scan cameras and encoders.",
+  "chapters": [
+    {
+      "number": "59.1",
+      "slug": "59.1-choosing-a-camera",
+      "title": "Choosing a camera"
+    },
+    {
+      "number": "59.2",
+      "slug": "59.2-lens-calculations",
+      "title": "Lens calculations"
+    },
+    {
+      "number": "59.3",
+      "slug": "59.3-lighting-techniques",
+      "title": "Lighting techniques"
+    },
+    {
+      "number": "59.4",
+      "slug": "59.4-filters",
+      "title": "Filters"
+    },
+    {
+      "number": "59.5",
+      "slug": "59.5-interfaces-and-triggering",
+      "title": "Interfaces and triggering"
+    },
+    {
+      "number": "59.6",
+      "slug": "59.6-industrial-camera-sdks",
+      "title": "Industrial camera SDKs (GenICam, GigE Vision, pypylon, Harvester)"
+    },
+    {
+      "number": "59.7",
+      "slug": "59.7-line-scan-cameras-and-encoders",
+      "title": "Line-scan cameras and encoders"
+    }
+  ]
+}

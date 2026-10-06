@@ -1,0 +1,22 @@
+{
+  "number": 64,
+  "title": "Troubleshooting and decision guide",
+  "summary": "Practical decision-making: which technique to use, why a detection fails, and a debugging checklist.",
+  "chapters": [
+    {
+      "number": "64.1",
+      "slug": "64.1-which-technique-should-i-use",
+      "title": "Which technique should I use?"
+    },
+    {
+      "number": "64.2",
+      "slug": "64.2-my-detection-fails-why",
+      "title": "My detection fails, why?"
+    },
+    {
+      "number": "64.3",
+      "slug": "64.3-debugging-checklist",
+      "title": "Debugging checklist"
+    }
+  ]
+}

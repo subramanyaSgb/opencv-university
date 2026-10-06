@@ -1,0 +1,42 @@
+{
+  "number": 39,
+  "title": "Video fundamentals",
+  "summary": "Video as a stream, not a stack of images: frames and fps, codecs and RTSP, FFmpeg and GStreamer, hardware decoding, latency and buffering, multi-camera sync, and stabilization.",
+  "chapters": [
+    {
+      "number": "39.1",
+      "slug": "39.1-frames-and-fps",
+      "title": "Frames and FPS"
+    },
+    {
+      "number": "39.2",
+      "slug": "39.2-codecs-and-rtsp",
+      "title": "Codecs and RTSP"
+    },
+    {
+      "number": "39.3",
+      "slug": "39.3-ffmpeg-and-gstreamer",
+      "title": "FFmpeg and GStreamer"
+    },
+    {
+      "number": "39.4",
+      "slug": "39.4-hardware-decoding",
+      "title": "Hardware decoding"
+    },
+    {
+      "number": "39.5",
+      "slug": "39.5-latency-and-buffering",
+      "title": "Latency and buffering"
+    },
+    {
+      "number": "39.6",
+      "slug": "39.6-multi-camera-sync",
+      "title": "Multi-camera sync"
+    },
+    {
+      "number": "39.7",
+      "slug": "39.7-stabilization",
+      "title": "Stabilization"
+    }
+  ]
+}

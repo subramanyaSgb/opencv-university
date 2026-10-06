@@ -1,0 +1,42 @@
+{
+  "number": 40,
+  "title": "Motion and tracking",
+  "summary": "Following things across frames: frame differencing, background subtraction, optical flow, MeanShift and CamShift, the Kalman filter, particle filters, and counting with line crossing.",
+  "chapters": [
+    {
+      "number": "40.1",
+      "slug": "40.1-frame-differencing",
+      "title": "Frame differencing"
+    },
+    {
+      "number": "40.2",
+      "slug": "40.2-background-subtraction",
+      "title": "Background subtraction"
+    },
+    {
+      "number": "40.3",
+      "slug": "40.3-optical-flow",
+      "title": "Optical flow"
+    },
+    {
+      "number": "40.4",
+      "slug": "40.4-meanshift-and-camshift",
+      "title": "MeanShift and CamShift"
+    },
+    {
+      "number": "40.5",
+      "slug": "40.5-kalman-filter",
+      "title": "Kalman filter"
+    },
+    {
+      "number": "40.6",
+      "slug": "40.6-particle-filter",
+      "title": "Particle filter"
+    },
+    {
+      "number": "40.7",
+      "slug": "40.7-counting-and-line-crossing",
+      "title": "Counting and line crossing"
+    }
+  ]
+}

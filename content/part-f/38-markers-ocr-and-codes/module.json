@@ -1,0 +1,27 @@
+{
+  "number": 38,
+  "title": "Markers, OCR and codes",
+  "summary": "Reading structured marks: ArUco and AprilTag fiducial markers, character segmentation, OCR engines, and barcodes and QR codes.",
+  "chapters": [
+    {
+      "number": "38.1",
+      "slug": "38.1-aruco-and-apriltag",
+      "title": "ArUco and AprilTag"
+    },
+    {
+      "number": "38.2",
+      "slug": "38.2-character-segmentation",
+      "title": "Character segmentation"
+    },
+    {
+      "number": "38.3",
+      "slug": "38.3-ocr-engines",
+      "title": "OCR engines"
+    },
+    {
+      "number": "38.4",
+      "slug": "38.4-barcodes-and-qr",
+      "title": "Barcodes and QR"
+    }
+  ]
+}
