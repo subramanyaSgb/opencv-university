@@ -1,0 +1,299 @@
+export const meta = {
+  number: "35.3",
+  title: "HOG",
+  minutes: 24,
+  objectives: [
+    "Compute the gradient magnitude and orientation at a pixel with the simple centred-difference kernel",
+    "Build an 8x8 cell's unnormalised orientation histogram by hand",
+    "Explain how cells, blocks and normalisation combine into the full HOG descriptor",
+    "Use cv2.HOGDescriptor to compute a real descriptor and know its default (people-detection) configuration",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 35.3 (Part F, Module 35).
+  Lab: HogLab (apps/web/components/visuals/HogLab.tsx) — sample-hog-l.png (64x64 crop of sample-feat.png's
+  L-shape), classic "rose of lines" cell visualisation, click a cell for its 9-bin histogram.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 35.3 HOG
+
+<Definition term="Histogram of Oriented Gradients (HOG)">a descriptor for a region built from the local distribution of edge directions: divide the region into small cells, histogram each cell's gradient orientations weighted by gradient strength, group cells into overlapping blocks and normalise, then concatenate every block's histogram into one long vector.</Definition>
+
+LBP (35.1) and GLCM (35.2) describe *texture* — fine repeating pattern. HOG describes **shape**, through the directions of its edges, and is almost blind to texture or exact brightness. It was built for detecting objects with a recognisable outline — originally pedestrians — and is still a strong, fast, well-understood baseline.
+
+## 1. An analogy
+
+Imagine tracing the outline of a shape with your finger and, every short distance, noting only the *direction* your finger pointed — not the colour of the paper, not how hard you pressed. A chair and a lamp have very different collections of "mostly-vertical" and "mostly-horizontal" direction counts even if they're printed in the same ink. HOG is that collection of direction counts, made systematic.
+
+## 2. From pixel to descriptor
+
+<Flow
+  steps={[
+    { label: "Grey image region", tone: "data" },
+    { label: "Gradient at every pixel: magnitude + direction", tone: "process" },
+    { label: "8x8 cells: histogram of directions, weighted by magnitude", tone: "process" },
+    { label: "16x16 blocks (overlapping cells): normalise", tone: "process" },
+    { label: "Concatenate all block histograms = HOG descriptor", tone: "result" },
+  ]}
+/>
+
+- **Gradient**: at each pixel, `gx` = right neighbour − left neighbour, `gy` = below neighbour − above neighbour (the same simple kernel as 22.2, no smoothing — Dalal and Triggs [1] tested smoothed and more complex kernels and found this simple one worked best for this purpose). Magnitude = √(gx² + gy²); orientation = atan2(gy, gx).
+- **Unsigned orientation**: angles are folded into 0°–180° (a 10° edge and a 190° edge are treated the same — HOG, as originally defined, does not care which side is "light" and which is "dark").
+- **Cell histogram**: each 8×8 cell gets a histogram over a fixed number of orientation bins (9 bins of 20° is the common default), each pixel's gradient magnitude added into the bin for its orientation.
+- **Block normalisation**: cells are grouped into overlapping blocks (commonly 2×2 cells = 16×16 pixels, stepping by 8 pixels so blocks overlap by half), and each block's concatenated histogram is normalised (e.g. by its L2 norm) — this is what makes HOG robust to overall brightness and contrast changes, because normalising divides out a common scale factor.
+
+## 3. A worked example by hand
+
+A tiny 3×3 patch, computing the gradient at the centre pixel:
+
+```text
+10  10  10
+10  50  90
+10  90  90
+```
+
+`gx` = right − left = 90 − 10 = **80**. `gy` = below − above = 90 − 10 = **80**.
+Magnitude = √(80² + 80²) = √12800 = **113.1**.
+Orientation = atan2(80, 80) = **45°** — this pixel's gradient points at exactly 45°, and with 9 bins of 20° it falls in the 40°–60° bin.
+
+## 4. A real cell's histogram
+
+<HogLab caption="The L-shape, cell by cell. Each short blue line is one orientation bin, drawn through the cell's centre at that bin's angle, with length proportional to how much of the cell's gradient energy is in that bin — the classic HOG visualisation. Click a cell for its exact 9-bin histogram."/>
+
+The top-left 8×8 cell of the 64×64 crop above, histogrammed into 9 bins of 20° (0°–20°, 20°–40°, …), gradient magnitude summed into each bin:
+
+| Bin | 0–20° | 20–40° | 40–60° | 60–80° | 80–100° | 100–120° | 120–140° | 140–160° | 160–180° |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Σ\|∇\| | 73.7 | 51.6 | 42.1 | 20.0 | 28.1 | 68.5 | 44.8 | 22.6 | 21.9 |
+
+Nothing here is normalised yet (Section 2) — on its own this cell's total (373.1) depends on local contrast, which block normalisation removes once cells are grouped. No single bin dominates completely because the background has a slight brightness gradient too (Section 2's rule treats *any* local brightness change as a small gradient).
+
+## 5. The full descriptor
+
+Running OpenCV's `cv2.HOGDescriptor` on the whole 64×64 crop with 8×8 cells, 16×16 blocks (50% overlap) and 9 bins gives 7×7 = 49 block positions × 4 cells × 9 bins = **1764 numbers** — one long vector describing the shape of everything inside the crop, whatever its brightness or contrast. This is what a classifier (Module 36, or `cv2.HOGDescriptor.detectMultiScale` in 37.3) is actually trained on: not the image, this vector.
+
+## 6. Industrial use
+
+- **Pedestrian and person detection**: HOG + a linear SVM (Dalal and Triggs [1]; OpenCV ships a pretrained detector, `cv2.HOGDescriptor_getDefaultPeopleDetector()`, used in 37.3) was the standard approach for years before deep learning.
+- **General shape-based object detection** on fixed-size windows, when training data is limited and a fast, interpretable, CPU-only detector is wanted.
+- **Any sliding-window classifier** (37.1–37.3) that needs a shape descriptor more structured than raw pixels but without a deep model.
+
+## What you should remember from 35.3
+
+<Takeaways>
+<Takeaway n={1} title="Gradients, not brightness">HOG describes edge directions, nearly independent of actual grey level.</Takeaway>
+<Takeaway n={2} title="Cells then blocks">Histogram orientations per 8×8 cell; normalise per overlapping 16×16 block.</Takeaway>
+<Takeaway n={3} title="Normalisation = robustness">Dividing out each block's own scale is what makes HOG tolerant of lighting changes.</Takeaway>
+<Takeaway n={4} title="One long vector">The concatenation of every block's normalised histogram is the descriptor a classifier trains on.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** At a pixel, `gx` = 0, `gy` = 40. What is the magnitude and the (unsigned) orientation?
+
+<Solution>
+
+Magnitude = √(0² + 40²) = **40**. Orientation = atan2(40, 0) = 90°, already inside 0°–180°, so **90°** — a purely vertical gradient, as expected when `gx` = 0.
+
+</Solution>
+
+**Q2.** Two 8×8 cells have the exact same *shape* of histogram (same relative proportions in each bin) but one cell's image was twice as bright-contrast as the other, so its raw histogram values are all doubled. After block normalisation, are their contributions to the final descriptor the same or different?
+
+<Solution>
+
+The **same**. Normalising a block's histogram (e.g. dividing by its L2 norm) removes an overall scale factor, so two histograms that are scalar multiples of each other normalise to the same vector. This is exactly the robustness block normalisation is for (Section 2).
+
+</Solution>
+
+### Next: 35.4 Haar features
+
+## Code
+
+### 1. One cell's histogram, from scratch with NumPy
+
+```python
+import numpy as np
+import cv2
+
+# By-hand check (Section 3)
+patch = np.array([[10, 10, 10], [10, 50, 90], [10, 90, 90]], dtype=np.float64)
+gx, gy = patch[1, 2] - patch[1, 0], patch[2, 1] - patch[0, 1]
+mag = np.hypot(gx, gy)
+ang = np.degrees(np.arctan2(gy, gx)) % 180
+print(f"gx={gx:.0f} gy={gy:.0f} magnitude={mag:.2f} angle={ang:.1f} deg")
+
+crop = cv2.imread("sample-hog-l.png", cv2.IMREAD_GRAYSCALE).astype(np.float64)
+
+def gradients(img):
+    gx = cv2.filter2D(img, cv2.CV_64F, np.array([[-1, 0, 1]]), borderType=cv2.BORDER_REPLICATE)
+    gy = cv2.filter2D(img, cv2.CV_64F, np.array([[-1], [0], [1]]), borderType=cv2.BORDER_REPLICATE)
+    mag = np.hypot(gx, gy)
+    ang = np.degrees(np.arctan2(gy, gx)) % 180                 # unsigned, 0-180
+    return mag, ang
+
+def cell_histogram(mag, ang, cx, cy, cell=8, nbins=9):
+    bin_w = 180 / nbins
+    m = mag[cy * cell:(cy + 1) * cell, cx * cell:(cx + 1) * cell]
+    a = ang[cy * cell:(cy + 1) * cell, cx * cell:(cx + 1) * cell]
+    hist = np.zeros(nbins)
+    b = np.minimum((a // bin_w).astype(int), nbins - 1)
+    for k in range(nbins):
+        hist[k] = m[b == k].sum()
+    return hist
+
+mag, ang = gradients(crop)
+hist00 = cell_histogram(mag, ang, 0, 0)
+print("cell (0,0) histogram:", np.round(hist00, 1))
+```
+
+Output:
+
+```text
+gx=80 gy=80 magnitude=113.14 angle=45.0 deg
+cell (0,0) histogram: [73.7 51.6 42.1 20.  28.1 68.5 44.8 22.6 21.9]
+```
+
+### 2. The full descriptor with cv2.HOGDescriptor
+
+```python
+hog = cv2.HOGDescriptor(_winSize=(64, 64), _blockSize=(16, 16), _blockStride=(8, 8), _cellSize=(8, 8), _nbins=9)
+desc = hog.compute(crop.astype(np.uint8))
+n_blocks = ((64 - 16) // 8 + 1) ** 2
+print("descriptor length:", desc.shape[0], " expected:", n_blocks * 4 * 9, " (", n_blocks, "blocks x 4 cells x 9 bins)")
+print("first block, first cell (normalised):", np.round(desc[:9], 4))
+```
+
+Output:
+
+```text
+descriptor length: 1764  expected: 1764  ( 49 blocks x 4 cells x 9 bins)
+first block, first cell (normalised): [0.2047 0.0496 0.087  0.1049 0.1549 0.0455 0.0456 0.0237 0.0739]
+```
+
+The normalised values are not simply `hist00` divided by its own sum: `cv2.HOGDescriptor`'s actual block processing also applies **bilinear voting** between neighbouring bins and cells (so one pixel's gradient contributes partly to two adjacent bins/cells instead of only one, reducing boundary artefacts) and Gaussian spatial weighting within the block, on top of the L2-Hys block normalisation — refinements from Dalal and Triggs' original paper that the simplified from-scratch version above skips for clarity.
+
+## OpenCV API notes
+
+- **`cv2.HOGDescriptor([_winSize, _blockSize, _blockStride, _cellSize, _nbins, ...])`**: defaults `winSize=(64,128)`, `blockSize=(16,16)`, `blockStride=(8,8)`, `cellSize=(8,8)`, `nbins=9` — the exact configuration from Dalal and Triggs' pedestrian detector [1].
+- **`hog.compute(img[, winStride[, padding[, locations]]])`**: `img` must be `uint8`, sized to (a multiple of `blockStride` beyond) `winSize`; returns a 1-D `float32` array, length = (number of block positions) × (cells per block) × `nbins`.
+- **`cv2.HOGDescriptor_getDefaultPeopleDetector()`**: returns a `float32` array of length 3781 (3780 descriptor weights + 1 bias) — a pretrained **linear SVM** for the default 64×128 window, for use with `setSVMDetector` and `detectMultiScale` (37.3).
+- **`hog.detectMultiScale(img, ...)`**: slides the window across the image at multiple scales, runs the linear SVM on each window's descriptor, and returns bounding boxes — the full detector pipeline, covered in 37.1–37.3.
+- **Speed**: `compute` is a handful of convolutions plus histogram binning; fast enough for real-time use on a CPU, which was a major reason for HOG's popularity before GPUs made CNN inference affordable everywhere.
+
+## Where it fails
+
+- **Rotation**: HOG as defined has no built-in rotation invariance — a HOG-trained pedestrian detector expects upright pedestrians.
+- **Fixed aspect ratio / scale**: the descriptor length depends on the window size; detecting at other scales means resizing the image (or window) and recomputing, which `detectMultiScale` does for you.
+- **Needs a reasonably clean, high-contrast outline**: HOG describes *edges*; on a very low-contrast or heavily textured background, the edge signal that makes HOG useful can be swamped (compare: this is exactly where LBP/GLCM, built for texture, might do better).
+- **Superseded for most detection tasks today** by CNN-based detectors (Part J), which learn their own features end-to-end rather than using a hand-built gradient histogram — but HOG remains fast, interpretable and useful when training data or compute is limited.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Forgetting block normalisation and expecting brightness invariance**: raw cell histograms (Section 4) are not brightness/contrast invariant; only the normalised block output is.
+- **Using signed orientation (0–360°) when the application expects unsigned (0–180°)**, or vice versa — `cv2.HOGDescriptor` defaults to unsigned; mixing conventions between a from-scratch implementation and OpenCV's gives descriptors that are not comparable.
+- **Passing an image not sized correctly for `winSize`**: `hog.compute` expects the image to fit the configured window (and stride); a mismatched size raises an error or silently crops.
+- **Comparing raw (non-normalised) cell histograms between cells of different local contrast** and expecting them to reflect only shape — exactly the problem block normalisation exists to fix.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The original paper and its choices
+
+Dalal and Triggs [1] tried many combinations of gradient computation, cell/block size, normalisation scheme and classifier, and published the specific combination (simple centred gradient, 9 unsigned bins, 16×16 blocks of four 8×8 cells with 50% overlap, L2-Hys normalisation, linear SVM) that worked best for pedestrian detection on their dataset — this became the de facto standard "HOG" configuration used ever since, including OpenCV's defaults.
+
+### Bilinear voting
+
+Rather than placing a pixel's whole gradient magnitude into one orientation bin and one cell, Dalal and Triggs' full implementation spreads it between the two nearest bins (weighted by how close the angle is to each bin centre) and the nearest cells (weighted by distance within the block), reducing sharp jumps in the descriptor as a gradient's angle or position crosses a bin or cell boundary. This is what makes OpenCV's output in Section 5 not a simple rescaling of the hard-binned histogram in Section 4.
+
+### L2-Hys normalisation
+
+Dalal and Triggs' best-performing normalisation, L2-Hys, is L2 normalisation (divide by the vector's Euclidean norm) followed by clipping any value above 0.2 and renormalising — limiting the influence of any single very strong edge on the whole block's descriptor.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does HOG primarily describe?",
+      options: ["Colour", "Fine repeating texture", "The local distribution of edge directions (shape)", "Absolute brightness"],
+      answer: 2,
+      explanation: "Unlike LBP/GLCM (texture), HOG is built from gradient orientations, which describe shape.",
+    },
+    {
+      question: "In the worked example (Section 3), gx = 80 and gy = 80. What is the orientation?",
+      options: ["0 deg", "45 deg", "90 deg", "180 deg"],
+      answer: 1,
+      explanation: "atan2(80, 80) = 45 deg -- equal horizontal and vertical gradient.",
+    },
+    {
+      question: "Why does HOG group cells into overlapping blocks and normalise each block?",
+      options: ["To make the descriptor shorter", "To make the descriptor robust to overall brightness/contrast changes", "To rotate the image", "To remove noise from the image directly"],
+      answer: 1,
+      explanation: "Section 2 and Mini exercise Q2: normalising divides out a common scale factor shared by a block's cells.",
+    },
+    {
+      question: "cv2.HOGDescriptor_getDefaultPeopleDetector() returns a vector of length 3781. What is it?",
+      options: ["A HOG descriptor of a sample pedestrian", "A pretrained linear SVM (3780 weights + 1 bias) for the default 64x128 window", "A list of 3781 training images", "A set of Haar cascade stages"],
+      answer: 1,
+      explanation: "It's used with setSVMDetector() + detectMultiScale(), covered in 37.3.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+At a pixel, `gx` = −50, `gy` = 0. What bin (of 9 bins, 20° wide, unsigned 0–180°) does this gradient fall into?
+
+<Solution>
+
+Orientation = atan2(0, −50) = 180°, folded into the unsigned range 0°–180° gives **0°** (180° mod 180 = 0°). That falls in the first bin, 0°–20°.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using `gradients` and `cell_histogram` from the Code section, compute the histogram of the cell at `(cx, cy) = (3, 3)` (the centre of the 64×64 crop, near the inside corner of the L-shape) and report which bin has the largest value.
+
+<Solution>
+
+```python
+hist33 = cell_histogram(mag, ang, 3, 3)
+print(np.round(hist33, 1), " largest bin:", int(np.argmax(hist33)), "=", int(np.argmax(hist33)) * 20, "-", int(np.argmax(hist33)) * 20 + 20, "deg")
+```
+
+Output:
+
+```text
+[346.1  56.9 103.6 122.1 250.3  59.2  32.1  32.6  18.7]  largest bin: 0 = 0 - 20 deg
+```
+
+Bin 0 (0°–20°, near-horizontal gradient direction) dominates, with bin 4 (80°–100°, near-vertical gradient direction) a strong second. This cell sits right at the L-shape's inner corner: a **vertical** edge (the left arm's right-hand side) produces a gradient pointing *horizontally* (near 0°), and a **horizontal** edge (the top arm's bottom side) produces a gradient pointing *vertically* (near 90°) — both edges pass through this one cell, so both their (perpendicular) gradient directions show up strongly.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague wants to use HOG to detect whether a printed label is upside down. Will HOG, by itself, tell them that?
+
+<Solution>
+
+Not reliably with the *unsigned* orientation used here: a vertical edge and the same edge rotated 180° (upside down) fold to the *same* bin, because 0°–180° treats an edge and its reverse identically. A HOG trained this way cannot distinguish "upright" from "upside down" through orientation alone — the colleague would need either a *signed* orientation variant (0°–360°, keeping light-to-dark direction) or an orientation-insensitive descriptor plus a separate explicit check (e.g. matching against a known-upright template, 32.1–32.2, or an asymmetric feature on the label itself).
+
+</Solution>
+
+## References
+
+1. N. Dalal, B. Triggs, "Histograms of oriented gradients for human detection," *Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR)*, 2005, pp. 886–893.
+2. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Section 7.1.3 (HOG and related descriptors).
+3. OpenCV 4.13.0 documentation: `cv2.HOGDescriptor`, `cv2.HOGDescriptor_getDefaultPeopleDetector`. https://docs.opencv.org/4.13.0/

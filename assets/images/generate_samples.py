@@ -629,6 +629,7 @@ FEAT_H = np.array([[0.9 * np.cos(np.radians(15)), -0.9 * np.sin(np.radians(15)),
                    [0.9 * np.sin(np.radians(15)), 0.9 * np.cos(np.radians(15)), -25],
                    [0.0002, 0.0001, 1.0]])
 images["sample-feat.png"] = feat_scene()
+images["sample-hog-l.png"] = images["sample-feat.png"][17:81, 112:176]   # 64x64 crop around the L-shape, for HOG (35.3)
 ft_b = cv2.warpPerspective(images["sample-feat.png"].astype(np.float64), FEAT_H, (320, 200), flags=cv2.INTER_LINEAR,
                            borderMode=cv2.BORDER_CONSTANT, borderValue=110)
 images["sample-feat-b.png"] = np.clip(np.rint(ft_b * 0.8 + 20 + np.random.default_rng(34).normal(0, 3, ft_b.shape)), 0, 255).astype(np.uint8)
