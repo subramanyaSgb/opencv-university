@@ -1,0 +1,322 @@
+export const meta = {
+  number: "35.6",
+  title: "Bag of visual words and image retrieval",
+  minutes: 24,
+  objectives: [
+    "Assign a local descriptor to its nearest visual word and build a bag-of-visual-words histogram by hand",
+    "Explain why a fixed-length histogram lets images with different numbers of keypoints be compared directly",
+    "Rank a small database of images against a query by histogram similarity",
+    "Use cv2.BOWKMeansTrainer and cv2.BOWImgDescriptorExtractor to build a real vocabulary and histograms",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 35.6 (Part F, Module 35; closes the module).
+  Lab: BowLab (apps/web/components/visuals/BowLab.tsx) — precomputed by scripts/gen_bow_data.py into
+  apps/web/public/data/bow-data.json (SIFT + BOWKMeansTrainer(32) + BOWImgDescriptorExtractor on 5 existing
+  sample images; two existing transformed views as queries). All numbers verified on
+  opencv-python-headless 4.13.0.92.
+*/}
+
+# 35.6 Bag of visual words and image retrieval
+
+<Definition term="Bag of visual words (BoVW)">a fixed-length histogram that describes a whole image by counting how many of its local descriptors (33.1–34.6) fall near each of a fixed set of reference descriptors ("visual words"), learned once from a collection of images by clustering. Two images with different numbers and positions of keypoints can still be compared directly, because both end up as histograms of the same fixed length.</Definition>
+
+Modules 33–34 found individual points and matched them one-to-one between two specific images. Bag of visual words goes a different direction: throw away *where* each descriptor is, keep only *which kind* of descriptor it is, and count. The result is one short vector per image — exactly the ingredient a search engine or classifier (Module 36) needs.
+
+## 1. An analogy
+
+Describing a bookshelf by walking along it and, for every book, noting only its colour: so many red spines, so many blue, so many green — not which shelf, not the order. Two bookshelves with a similar mix of colours feel similar even if no two books are in the same position. BoVW does this with "colours of local image patches" instead of book colours, and the "colours" themselves are learned, not predefined.
+
+## 2. Building a vocabulary and a histogram
+
+<Flow
+  steps={[
+    { label: "Many images' local descriptors (33-34)", tone: "data" },
+    { label: "Cluster them into K groups (k-means, 27.2) = the vocabulary", tone: "process" },
+    { label: "One image's descriptors -> nearest-word assignment", tone: "process" },
+    { label: "Count assignments per word = BoVW histogram", tone: "result" },
+  ]}
+/>
+
+- **Vocabulary**: run k-means (27.2 covers the algorithm in full; here the "pixels" being clustered are descriptor vectors, not colours) on a large pool of descriptors gathered from many images. Each of the K cluster centres is a **visual word** — not a real word, just a representative descriptor.
+- **Assignment**: for one image, take each of its own descriptors and find the nearest visual word (smallest distance to a cluster centre).
+- **Histogram**: count how many descriptors landed on each word. Normalising this count (so it sums to 1) makes the histogram comparable between images with very different numbers of keypoints.
+
+## 3. A worked example by hand
+
+Three visual words (toy 2-D "descriptors" here, for arithmetic you can check by hand; real ones are 128-D SIFT vectors): word 0 = (0, 0), word 1 = (10, 0), word 2 = (5, 10).
+
+An image's five descriptors, and the nearest word for each:
+
+| Descriptor | Distance to word 0 | Distance to word 1 | Distance to word 2 | Nearest |
+| --- | --- | --- | --- | --- |
+| (1, 1) | 1.41 | 9.06 | 9.85 | word 0 |
+| (9, 1) | 9.06 | 1.41 | 9.85 | word 1 |
+| (4, 9) | 9.85 | 10.82 | 1.41 | word 2 |
+| (2, 2) | 2.83 | 8.25 | 8.54 | word 0 |
+| (11, −1) | 11.05 | 1.41 | 12.53 | word 1 |
+
+Counting assignments: word 0 → 2, word 1 → 2, word 2 → 1. **BoVW histogram = [2, 2, 1]**, or normalised, **[0.4, 0.4, 0.2]**.
+
+## 4. Retrieval: ranking a small database against a query
+
+<BowLab caption="A 5-image database and a query (a transformed view of one database image, from Module 34). Switch the query: both correctly rank their true match first, by cosine similarity between BoVW histograms, with a clear margin."/>
+
+A vocabulary of 32 visual words, learned from SIFT descriptors of 5 database images (`sample-poster.png`, `sample-feat.png`, `sample-scene.png`, `sample-color.png`, `sample-board.png`), then every image's BoVW histogram compared with a query's by cosine similarity:
+
+| Query | Rank 1 | Rank 2 | Rank 3 | Rank 4 | Rank 5 |
+| --- | --- | --- | --- | --- | --- |
+| poster, transformed | **poster, 0.867** | colour scene, 0.512 | scene, 0.472 | feature scene, 0.363 | board, 0.162 |
+| feature scene, transformed | **feature scene, 0.924** | poster, 0.468 | scene, 0.303 | colour scene, 0.167 | board, 0.062 |
+
+Both queries are geometrically transformed views of a database image (34.5's homography), yet both correctly rank their true match first, by a wide margin (0.867 and 0.924, versus the next-best 0.512 and 0.468). This is the payoff: BoVW retrieval survived a transformation that would make a pixel-by-pixel image comparison fail completely, because it never looked at pixel positions — only at which visual words were present, and how often.
+
+## 5. Industrial and real-world use
+
+- **Image and video retrieval**: Sivic and Zisserman's "Video Google" [1] searched video frames for matching objects this way, inspiring the name.
+- **Scene and object category recognition**: a BoVW histogram is a fixed-length feature vector, so Module 36's classifiers (SVM, kNN, and others) can be trained on it directly.
+- **Duplicate/near-duplicate detection at a coarser, more viewpoint-tolerant level than perceptual hashing (35.5)** — useful when images of the *same object* are expected to differ in angle or scale, not just brightness.
+- **Loop closure in visual SLAM** (43.3): recognising "I have been at this place before" from a BoVW-style comparison of the current view against previously visited ones.
+
+## What you should remember from 35.6
+
+<Takeaways>
+<Takeaway n={1} title="Vocabulary">K-means on many images' descriptors gives K visual words — learned, not predefined.</Takeaway>
+<Takeaway n={2} title="Histogram">Assign each descriptor to its nearest word, count; the result is a fixed-length vector regardless of keypoint count.</Takeaway>
+<Takeaway n={3} title="Retrieval">Rank a database by histogram similarity (cosine, or histogram intersection as in 12.5) to the query's histogram.</Takeaway>
+<Takeaway n={4} title="Why it survives transforms">Throwing away position (keeping only word counts) is exactly what tolerates viewpoint and scale changes.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Two visual words: word A = (0, 0), word B = (6, 0). A descriptor at (4, 1): which word is it nearest to?
+
+<Solution>
+
+Distance to A = √(16+1) = 4.12. Distance to B = √(4+1) = 2.24. Nearer to **word B**.
+
+</Solution>
+
+**Q2.** Image 1's BoVW histogram (3 words) is [6, 2, 2] (10 descriptors total); Image 2's is [3, 1, 1] (5 descriptors total). Before comparing them, what should you do, and why?
+
+<Solution>
+
+**Normalise** each histogram by its own total (divide by 10 and by 5 respectively), giving [0.6, 0.2, 0.2] for both — they describe the *same mix* of visual words, just from different numbers of keypoints. Comparing the raw counts directly would make Image 1 look different from Image 2 purely because it had more keypoints, not because its content actually differed.
+
+</Solution>
+
+### Next: Module 36, Pattern classification
+
+## Code
+
+### 1. The worked example, and a real vocabulary with cv2.BOWKMeansTrainer
+
+```python
+import numpy as np
+import cv2
+
+words = np.array([[0, 0], [10, 0], [5, 10]], dtype=np.float64)
+descriptors = np.array([[1, 1], [9, 1], [4, 9], [2, 2], [11, -1]], dtype=np.float64)
+nearest = [int(np.argmin(np.linalg.norm(words - d, axis=1))) for d in descriptors]
+hist = np.bincount(nearest, minlength=len(words))
+print("nearest word per descriptor:", nearest, " histogram:", hist.tolist())
+
+sift = cv2.SIFT_create()
+names = ["sample-poster.png", "sample-feat.png", "sample-scene.png", "sample-color.png", "sample-board.png"]
+imgs = {n: cv2.imread(n, cv2.IMREAD_GRAYSCALE) for n in names}
+descs = {n: sift.detectAndCompute(im, None)[1] for n, im in imgs.items()}
+
+trainer = cv2.BOWKMeansTrainer(32)                   # K = 32 visual words
+for d in descs.values():
+    trainer.add(d)
+vocab = trainer.cluster()                             # (32, 128): one SIFT-sized descriptor per word
+print("vocabulary shape:", vocab.shape)
+```
+
+Output:
+
+```text
+nearest word per descriptor: [0, 1, 2, 0, 1]  histogram: [2, 2, 1]
+vocabulary shape: (32, 128)
+```
+
+### 2. Histograms and retrieval with cv2.BOWImgDescriptorExtractor
+
+```python
+bow = cv2.BOWImgDescriptorExtractor(sift, cv2.BFMatcher(cv2.NORM_L2))
+bow.setVocabulary(vocab)
+
+def bow_hist(img):
+    kp = sift.detect(img, None)
+    return bow.compute(img, kp).flatten()
+
+hist_db = {n: bow_hist(im) for n, im in imgs.items()}
+query = cv2.imread("sample-poster-b.png", cv2.IMREAD_GRAYSCALE)      # a transformed view, 34.5/34.6
+hist_q = bow_hist(query)
+
+def cosine(a, b):
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-9))
+
+ranking = sorted(((n, cosine(hist_q, h)) for n, h in hist_db.items()), key=lambda x: -x[1])
+for name, sim in ranking:
+    print(f"{name}: {sim:.4f}")
+```
+
+Output:
+
+```text
+sample-poster.png: 0.8668
+sample-color.png: 0.5123
+sample-scene.png: 0.4717
+sample-feat.png: 0.3630
+sample-board.png: 0.1616
+```
+
+`sample-poster.png` — the true match — ranks first, clearly separated from the rest.
+
+## OpenCV API notes
+
+- **`cv2.BOWKMeansTrainer(clusterCount[, termcrit[, attempts[, flags]]])`**: wraps `cv2.kmeans` (27.2) for clustering descriptors. `.add(descriptors)` accumulates a training set (call once per image, or pool everything first); `.cluster()` runs k-means and returns the vocabulary, shape `(clusterCount, descriptorDim)`, `float32`.
+- **`cv2.BOWImgDescriptorExtractor(dextractor, dmatcher)`**: needs a descriptor extractor (e.g. `cv2.SIFT_create()`) and a matcher (e.g. `cv2.BFMatcher(cv2.NORM_L2)`) to assign descriptors to the nearest vocabulary word. `.setVocabulary(vocab)` sets the words; `.compute(img, keypoints)` returns the normalised histogram as a `(1, K)` `float32` array.
+- **Only works with the matcher's distance**: `cv2.NORM_L2` (float descriptors, e.g. SIFT) needs a matcher built for float descriptors; binary descriptors (ORB, BRIEF, AKAZE, 34.2–34.3) need `cv2.NORM_HAMMING` and k-means is not the natural clustering choice for them (see Where it fails).
+- **Speed**: `.cluster()` (the k-means step) is the expensive one-time cost of building a vocabulary; `.compute()` on a new image is fast (33.1–34.6's extraction, then one nearest-word search per descriptor).
+
+## Where it fails
+
+- **Binary descriptors (ORB, AKAZE) don't cluster well with ordinary k-means**, which assumes a Euclidean (continuous) feature space; clustering binary descriptors properly needs Hamming-distance-aware methods (e.g. k-medoids, or hierarchical clustering on Hamming distance) — this is why the classic BoVW pipeline, and this chapter's example, use SIFT.
+- **No spatial information at all**: two images with the same visual words in a completely different arrangement get similar (even identical) histograms — for tasks where layout matters, spatial verification (geometric consistency with RANSAC, 26.3) is usually added after an initial BoVW-based shortlist.
+- **Vocabulary size (K) is a real trade-off**: too small merges genuinely different local patterns into one word (losing discriminative power); too large makes the histogram sparse and sensitive to noise, and the vocabulary expensive to build.
+- **A vocabulary learned from one kind of image collection may not transfer well to a very different one** — it reflects whatever local patterns were common in the images used to build it.
+- Superseded for many retrieval/recognition tasks today by learned embeddings (a CNN feature vector, Part J), which remove most of BoVW's hand-designed steps and tend to perform better when training data is available.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Comparing un-normalised histograms** (Mini exercise Q2) — always normalise before comparing images with different keypoint counts.
+- **Building the vocabulary from only one image, or far too few images**, and then expecting it to generalise — a vocabulary needs a representative pool of descriptors to be useful.
+- **Mixing descriptor types** (training the vocabulary on SIFT descriptors, then assigning ORB descriptors to it) — the vocabulary only means something in the feature space it was built from.
+- **Treating BoVW as giving an exact match confidence**: a high cosine similarity (Section 4) means "very similar visual-word content," which is strong retrieval evidence, not photometric or geometric proof of a correct match (a few false positives are expected; that's what a later verification step, e.g. RANSAC-based matching, 34.5, is for).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Video Google and TF-IDF weighting
+
+Sivic and Zisserman [1] borrowed a key idea from text retrieval: weight each visual word's contribution by **TF-IDF** (term frequency, inverse document frequency) — a word that appears in almost every image in the collection (e.g. one corresponding to a very common texture pattern) is down-weighted, because it carries little information about which specific image matches; a rarer, more distinctive word is up-weighted. This chapter's plain counts are the simpler version; TF-IDF weighting usually improves retrieval quality further.
+
+### Spatial pyramids and VLAD
+
+A **spatial pyramid** (Lazebnik, Schmid, Ponce) keeps a little position information by building separate BoVW histograms for coarse spatial regions of the image, then concatenating them — a middle ground between no spatial information (this chapter) and full keypoint positions. **VLAD** (Vector of Locally Aggregated Descriptors) replaces each word's count with the *sum of the residuals* (descriptor minus its assigned word's centre) in that word's bin — a richer, higher-dimensional summary than a simple histogram, generally more accurate for retrieval.
+
+### From hand-built vocabularies to learned embeddings
+
+Modern image retrieval increasingly replaces the whole cluster-and-histogram pipeline with a single learned embedding (a CNN trained so that similar images map to nearby vectors, Part J) — conceptually the same goal as BoVW (a fixed-length, comparable summary of an image) reached by a very different, learned route.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does a visual word represent?",
+      options: ["A literal English word found in the image", "A cluster centre in descriptor space, learned by k-means over many images' descriptors", "A single pixel", "A bounding box"],
+      answer: 1,
+      explanation: "Section 2: the vocabulary is K cluster centres from running k-means (27.2) on a pool of descriptors.",
+    },
+    {
+      question: "Why must a BoVW histogram be normalised before comparing two images?",
+      options: ["It is not necessary", "Images with different numbers of keypoints would otherwise look different purely from keypoint count, not content", "Normalising changes the vocabulary", "It only matters for binary descriptors"],
+      answer: 1,
+      explanation: "Mini exercise Q2: normalising (dividing by the total) makes the comparison about the mix of words, not the count.",
+    },
+    {
+      question: "In Section 4, both queries were geometrically transformed (rotated/scaled/perspective) views of a database image. Why did BoVW retrieval still work?",
+      options: ["It got lucky", "BoVW discards keypoint position, comparing only which visual words are present and how often -- information that survives the transform", "The transform was too small to matter", "cv2.BOWImgDescriptorExtractor automatically undoes transforms"],
+      answer: 1,
+      explanation: "A pixel-by-pixel comparison would fail under the same transform; BoVW never looked at position.",
+    },
+    {
+      question: "Why does the classic BoVW pipeline typically use SIFT rather than ORB descriptors?",
+      options: ["ORB is slower", "Ordinary k-means assumes a Euclidean feature space, which fits SIFT's float descriptors but not ORB's binary ones", "ORB cannot detect keypoints", "SIFT produces fewer keypoints"],
+      answer: 1,
+      explanation: "Where it fails: clustering binary descriptors properly needs Hamming-distance-aware methods, not ordinary k-means.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Two visual words: word A = (0, 0), word B = (4, 4). Three descriptors: (1, 0), (3, 5), (2, 2). Build the (unnormalised) BoVW histogram.
+
+<Solution>
+
+(1, 0): distance to A = 1, to B = √(9+16) = 5 → word A.
+(3, 5): distance to A = √(9+25) = 5.83, to B = √(1+1) = 1.41 → word B.
+(2, 2): distance to A = √(4+4) = 2.83, to B = √(4+4) = 2.83 → **tie** — conventionally assigned to the lower-indexed word, A (or either, consistently, in a real implementation `np.argmin` picks the first).
+Histogram = **[2, 1]** (word A: (1,0) and (2,2); word B: (3,5)).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the Code section's functions, rebuild the vocabulary with `K = 8` instead of 32, recompute the histograms and the ranking for the `sample-poster-b.png` query. Does `sample-poster.png` still rank first?
+
+<Solution>
+
+```python
+trainer8 = cv2.BOWKMeansTrainer(8)
+for d in descs.values():
+    trainer8.add(d)
+vocab8 = trainer8.cluster()
+bow8 = cv2.BOWImgDescriptorExtractor(sift, cv2.BFMatcher(cv2.NORM_L2))
+bow8.setVocabulary(vocab8)
+
+def bow_hist8(img):
+    kp = sift.detect(img, None)
+    return bow8.compute(img, kp).flatten()
+
+hist_db8 = {n: bow_hist8(im) for n, im in imgs.items()}
+hist_q8 = bow_hist8(query)
+ranking8 = sorted(((n, cosine(hist_q8, h)) for n, h in hist_db8.items()), key=lambda x: -x[1])
+for name, sim in ranking8:
+    print(f"{name}: {sim:.4f}")
+```
+
+Output:
+
+```text
+sample-poster.png: 0.9809
+sample-feat.png: 0.8922
+sample-scene.png: 0.7663
+sample-color.png: 0.7426
+sample-board.png: 0.5388
+```
+
+Yes, `sample-poster.png` still ranks first. But every similarity shifted upward, and the *spread* between the best and worst match shrank: 0.539–0.981 (a spread of 0.44) with 8 words, versus 0.162–0.867 (a spread of 0.70) with 32 words. With only 8 words, every image's descriptors are spread across far fewer bins, so histograms look more alike regardless of content — the ranking survived here, but a vocabulary this small gives noticeably less separation between a true match and the rest, illustrating the vocabulary-size trade-off from "Where it fails."
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague wants to retrieve, from a database of 10 000 part photos, every photo containing the *same individual part* as a query photo, taken from a different angle. Is plain BoVW (as built in this chapter) the right tool, or does it need something added?
+
+<Solution>
+
+Plain BoVW is a reasonable **first-stage shortlist**: it is fast, handles viewpoint/scale changes well (Section 4), and narrows 10 000 images down to a short list of likely candidates. But a high BoVW similarity only means "similar mix of local patterns," not "verified to be the same object" — two different parts with similar surface texture could score highly. In practice this is combined with a **second, verification stage**: for the top candidates from BoVW, run actual feature matching with the ratio test and RANSAC (34.4–34.5) to confirm a geometrically consistent match, which plain histogram comparison cannot provide on its own.
+
+</Solution>
+
+## References
+
+1. J. Sivic, A. Zisserman, "Video Google: a text retrieval approach to object matching in videos," *Proceedings of the IEEE International Conference on Computer Vision (ICCV)*, 2003, pp. 1470–1477.
+2. G. Csurka, C. Dance, L. Fan, J. Willamowski, C. Bray, "Visual categorization with bags of keypoints," *ECCV Workshop on Statistical Learning in Computer Vision*, 2004.
+3. S. Lazebnik, C. Schmid, J. Ponce, "Beyond bags of features: spatial pyramid matching for recognizing natural scene categories," *CVPR*, 2006, pp. 2169–2178.
+4. OpenCV 4.13.0 documentation: `cv2.BOWKMeansTrainer`, `cv2.BOWImgDescriptorExtractor`, `cv2.kmeans`. https://docs.opencv.org/4.13.0/
