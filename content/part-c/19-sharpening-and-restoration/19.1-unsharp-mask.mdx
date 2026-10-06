@@ -1,0 +1,315 @@
+export const meta = {
+  number: "19.1",
+  title: "Unsharp mask",
+  minutes: 20,
+  objectives: [
+    "Sharpen an image by adding back the difference between the image and a blurred copy",
+    "Compute an unsharp mask by hand on a 1-D edge and with cv2.addWeighted",
+    "Explain overshoot (halos), noise amplification and how radius, amount and threshold control them",
+    "Know why sharpening makes edges look sharper without restoring lost detail",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 19.1 (first chapter of Module 19).
+  New lab: RestoreLab (lib/restore-ops.ts; unsharp/Laplacian match OpenCV within 1, FFT blur/Wiener/RL match NumPy).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 19.1 Unsharp mask
+
+<Definition term="Unsharp mask">a sharpening method: blur the image, subtract the blur from the original to get the fine detail (the "mask"), and add an amplified copy of that detail back. Edges get steeper and look sharper.</Definition>
+
+Module 18 removed noise by smoothing, and smoothing blurs. Lenses, focus errors, motion and anti-aliasing filters blur as well. This module goes the other way: first making edges look crisp again (19.1, 19.2), then modelling the blur (19.3) and undoing it when it is known (19.4, 19.5). The name comes from darkroom photography: a slightly blurred ("unsharp") negative was sandwiched with the original to boost edge contrast.
+
+## 1. An analogy
+
+Turning up the treble on a stereo. The blur is the bass, the slow changes. What is left after subtracting it is the treble, the fast changes: edges and fine texture. Turning the treble up makes the sound crisper, and also makes the hiss louder.
+
+## 2. Blur, subtract, add back
+
+<Flow
+  steps={[
+    { label: "Image I", tone: "data" },
+    { label: "Blur: B = Gaussian(I, σ)", tone: "process" },
+    { label: "Detail (mask): D = I − B", tone: "process" },
+    { label: "Sharpened: S = I + amount · D", tone: "result" },
+  ]}
+/>
+
+A worked example on a 1-D edge, with the small blur 1-2-1 / 4 and amount 1:
+
+| Position | 1 | 2 | 3 | 4 | 5 | 6 |
+| --- | --- | --- | --- | --- | --- | --- |
+| I (edge) | 50 | 50 | 50 | 150 | 150 | 150 |
+| B (blur) | 50 | 50 | 75 | 125 | 150 | 150 |
+| D = I − B | 0 | 0 | −25 | +25 | 0 | 0 |
+| S = I + D | 50 | 50 | **25** | **175** | 150 | 150 |
+
+In flat areas D is 0 and nothing changes. At the edge the dark side gets darker and the bright side brighter: the step grows from 100 to 150 grey levels across the same two pixels. The values 25 and 175 lie outside the original range: this **overshoot** is what makes the edge look sharper, and, when too strong, it is visible as a light and a dark halo along every edge.
+
+Since S = I + a·(I − B) = (1 + a)·I − a·B, the whole operation is one weighted sum: `cv2.addWeighted(I, 1 + a, B, −a, 0)`.
+
+## 3. Radius, amount, threshold
+
+The three controls of every unsharp mask, in image editors as well:
+
+- **Radius** (σ of the blur): which details count as "fine". Small σ boosts only the finest edges; large σ boosts broader transitions and makes wider halos.
+- **Amount**: how much detail is added back.
+- **Threshold**: detail smaller than this (in grey levels) is left alone, so that the noise in flat areas is not amplified.
+
+The test image blurred with σ = 1.5 (edge 10–90 % width 4 px), then sharpened; values along row 60 across the edge of the bright square (230 → 105):
+
+| Image | PSNR | Edge width | Darkest / brightest near the edge |
+| --- | --- | --- | --- |
+| Blurred σ = 1.5 | 21.7 dB | 4 px | 105 / 230 |
+| σ = 1, amount 1 | 22.2 dB | | 105 / 231 |
+| σ = 2, amount 1.5 | 22.7 dB | 2 px | 89 / 247 |
+| σ = 2, amount 3 | 22.8 dB | 2 px | 68 / 255 (clipped) |
+| σ = 4, amount 1.5 | 21.9 dB | | 66 / 255 (clipped) |
+
+The edge width halves, but PSNR hardly moves. Sharpening does not bring back what the blur destroyed: the thin lines and bars that became grey stay grey. It increases the slope of what is left, which the eye reads as sharpness.
+
+<RestoreLab mode="sharpen" initial="unsharp" caption="The input is the test image blurred with σ = 1.5. Change σ and amount and watch the profile across the square's edge: the result (solid) gets steeper than the input (dashed), with overshoot on both sides. Push the amount up until the halos clip at 0 and 255. Then add noise to the input and raise the threshold until the flat circle stops getting grainier."/>
+
+## 4. Noise
+
+D contains the noise as well as the edges, and the noise is amplified with it. With noise σ = 4.9 in a flat area of the blurred image, σ = 2 and amount 1.5:
+
+| Threshold | Noise in the flat area | PSNR |
+| --- | --- | --- |
+| 0 | 12.0 | 21.1 dB |
+| 5 | 10.9 | 21.2 dB |
+| 10 | 7.5 | 21.5 dB |
+| 15 | 5.0 | 21.6 dB |
+
+Without a threshold, the grain is 2.5 times stronger. A threshold of about three times the noise σ leaves flat areas untouched and still sharpens strong edges. Denoising first (18) and sharpening afterwards is the other standard answer.
+
+## 5. Industrial example
+
+Camera ISPs (2.8) apply an unsharp mask to almost every image they output, and many inspection images arrive already sharpened, halos included. For measurement this matters: a halo next to an edge can create a false second edge or shift a threshold crossing, so camera sharpening is usually switched off for gauging, and sharpening, if any, is applied in software with known parameters. Where sharpening does help is in images for people (operator screens, archived defect pictures) and before OCR of slightly soft text.
+
+## What you should remember from 19.1
+
+<Takeaways>
+<Takeaway n={1} title="Formula">S = I + amount · (I − Gaussian(I, σ)) = addWeighted(I, 1 + a, B, −a, 0).</Takeaway>
+<Takeaway n={2} title="Effect">Steeper edges with overshoot; lost detail does not come back.</Takeaway>
+<Takeaway n={3} title="Controls">σ = which details, amount = how much, threshold = protect flat areas from noise.</Takeaway>
+<Takeaway n={4} title="Measurement">Halos shift edges; switch camera sharpening off for gauging.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** In the worked example, what is S with amount 2?
+
+<Solution>
+
+S = I + 2D: 50, 50, **0**, **200**, 150, 150. The step is now 200 grey levels; the dark side reaches 0.
+
+</Solution>
+
+**Q2.** Why does an unsharp mask leave flat areas unchanged (without noise)?
+
+<Solution>
+
+In a flat area the blur equals the image, so D = I − B = 0 and nothing is added.
+
+</Solution>
+
+### Next: 19.2 Laplacian sharpening
+
+The same idea with a second-derivative kernel: one convolution instead of a blur and a subtraction.
+
+## Code
+
+Two examples: the 1-D worked example and the unsharp mask with OpenCV, then the threshold against noise.
+
+### 1. Unsharp mask
+
+```python
+import numpy as np
+import cv2
+
+I = np.array([50, 50, 50, 150, 150, 150], float)
+B = np.convolve(np.pad(I, 1, mode="edge"), [0.25, 0.5, 0.25], mode="valid")
+print("blur:", B.tolist(), "| sharpened:", (I + (I - B)).tolist())
+
+img = cv2.imread("sample-clean.png", cv2.IMREAD_GRAYSCALE)
+soft = cv2.GaussianBlur(img, (0, 0), 1.5)                       # the image to sharpen
+
+def unsharp(x, sigma, amount, threshold=0):
+    xf = x.astype(np.float32)
+    detail = xf - cv2.GaussianBlur(xf, (0, 0), sigma)
+    out = np.where(np.abs(detail) >= threshold, xf + amount * detail, xf)
+    return np.clip(np.rint(out), 0, 255).astype(np.uint8)
+
+sharp = unsharp(soft, 2, 1.5)
+print("row 60, soft :", soft[60, 105:117].tolist())
+print("row 60, sharp:", sharp[60, 105:117].tolist())
+quick = cv2.addWeighted(soft, 2.5, cv2.GaussianBlur(soft, (0, 0), 2), -1.5, 0)
+print("addWeighted version differs by at most:", int(np.abs(quick.astype(int) - sharp).max()))
+```
+
+Output:
+
+```text
+blur: [50.0, 50.0, 75.0, 125.0, 150.0, 150.0] | sharpened: [50.0, 50.0, 25.0, 175.0, 150.0, 150.0]
+row 60, soft : [230, 230, 229, 225, 211, 184, 151, 125, 111, 107, 107, 107]
+row 60, sharp: [232, 236, 242, 247, 233, 193, 141, 103, 89, 93, 101, 104]
+addWeighted version differs by at most: 1
+```
+
+- Compute in float32 and clip once at the end; in uint8, the negative detail values would wrap or saturate before they are added.
+- The addWeighted version blurs the uint8 image, so it differs by rounding only.
+
+### 2. Threshold against noise
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(0)
+noisy = np.clip(np.rint(soft + rng.normal(0, 5, soft.shape)), 0, 255).astype(np.uint8)
+flat = lambda x: x[50:80, 155:185].astype(float).std()             # inside the dark circle
+print(f"noise before: {flat(noisy):.2f}")
+for t in (0, 5, 10, 15):
+    print(f"threshold {t:2d}: noise {flat(unsharp(noisy, 2, 1.5, t)):.2f}")
+```
+
+Output:
+
+```text
+noise before: 4.89
+threshold  0: noise 12.04
+threshold  5: noise 10.90
+threshold 10: noise 7.53
+threshold 15: noise 5.03
+```
+
+## OpenCV API notes
+
+OpenCV has no single unsharp-mask function; build it from:
+
+- **`cv2.GaussianBlur(src, (0, 0), sigma)`** for the blurred copy.
+- **`cv2.addWeighted(src1, alpha, src2, beta, gamma)`**: alpha = 1 + amount, beta = −amount; saturates to the output type.
+- **Threshold**: a mask from `np.abs(I − B) >= t` (or `cv2.absdiff` + `cv2.threshold`), then `np.where` or `cv2.copyTo`.
+
+**Colour images**: sharpen only the luminance (Y of YCrCb or L of Lab, 11) to avoid colour fringes, then convert back.
+
+**Contrib**: `cv2.detailEnhance` (photo module, in the main package) is an edge-aware detail boost for photographs, not a classic unsharp mask.
+
+## Where it fails
+
+- **Lost detail**: anything the blur averaged away stays lost; for a known blur, deconvolve instead (19.4, 19.5).
+- **Noise**: amplified with the detail; use a threshold or denoise first.
+- **Halos**: strong amounts or large radii create visible halos and false edges for measurement.
+- **Clipping**: overshoot beyond 0 or 255 is clipped, flattening the halo tops into bands.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Computing I − B in uint8**: negative values are lost (wrap or saturate to 0).
+- **Sharpening before denoising**: the noise is boosted first and is harder to remove afterwards.
+- **Sharpening images that will be measured**: halos move threshold crossings and edge positions.
+- **Sharpening each colour channel separately**: colour fringes at edges.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Frequency view
+
+The Gaussian blur keeps low frequencies, so I − B is a high-pass filter and S = I + a(I − B) has a frequency response 1 + a(1 − G(f)), where G is the Gaussian's response (18.2 Go deeper). Low frequencies pass unchanged, high frequencies are multiplied by up to 1 + a. Frequencies the blur reduced to almost zero cannot be lifted back above the noise this way; that is the job of deconvolution.
+
+### Relation to the Laplacian
+
+For a small σ, I − Gaussian(I, σ) is approximately −(σ²/2)·∇²I, so the unsharp mask is close to Laplacian sharpening (19.2). The difference of Gaussians (20.4) is the same idea with two blurs.
+
+### Adaptive sharpening
+
+Image editors and ISPs often sharpen adaptively: more on edges, less in flat areas and on already strong edges (to limit halos), sometimes with an overshoot limit that clips the halo to the local minimum and maximum.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The unsharp mask adds back…",
+      options: ["The blurred image", "The difference between the image and its blur", "A Gaussian noise pattern", "The histogram"],
+      answer: 1,
+      explanation: "S = I + amount · (I − B).",
+    },
+    {
+      question: "Which addWeighted call gives amount = 2?",
+      options: ["addWeighted(I, 2, B, −2, 0)", "addWeighted(I, 3, B, −2, 0)", "addWeighted(I, 1, B, 2, 0)", "addWeighted(I, 0.5, B, 0.5, 0)"],
+      answer: 1,
+      explanation: "(1 + a)·I − a·B with a = 2.",
+    },
+    {
+      question: "What does the threshold protect?",
+      options: ["Strong edges", "Flat areas from noise amplification", "Bright pixels from clipping", "The image border"],
+      answer: 1,
+      explanation: "Small differences, mostly noise, are left unchanged.",
+    },
+    {
+      question: "After an unsharp mask on a blurred bar pattern that became flat grey…",
+      options: ["The bars come back", "Nothing comes back", "The bars appear inverted", "The image gets darker"],
+      answer: 1,
+      explanation: "There is no detail left to amplify; sharpening is not restoration.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Signal 100, 100, 100, 200, 200, 200; blur 1-2-1 / 4 with replicated ends; amount 0.5. Compute S. What are the darkest and brightest values?
+
+<Solution>
+
+B = 100, 100, 125, 175, 200, 200; D = 0, 0, −25, 25, 0, 0; S = 100, 100, **87.5**, **212.5**, 200, 200. Overshoot of 12.5 on each side.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Sharpen the colour scene `sample-scene.png` only on the L channel of Lab (σ = 2, amount 1), and check that the a and b channels are unchanged.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+bgr = cv2.imread("sample-scene.png")
+lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
+L, a, b = cv2.split(lab)
+L2 = unsharp(L, 2, 1.0)
+out = cv2.cvtColor(cv2.merge([L2, a, b]), cv2.COLOR_LAB2BGR)
+lab2 = cv2.cvtColor(out, cv2.COLOR_BGR2LAB)
+print("L changed in", int((L2 != L).sum()), "pixels")
+print("a, b max change after the round trip:", int(np.abs(lab2[..., 1].astype(int) - a).max()), int(np.abs(lab2[..., 2].astype(int) - b).max()))
+```
+
+Output:
+
+```text
+L changed in 59535 pixels
+a, b max change after the round trip: 2 1
+```
+
+a and b are not touched by the sharpening; the changes of 1 or 2 come only from rounding in the conversion back to 8-bit BGR and to Lab again. Almost every pixel of L changes a little, because the scene has gradients and noise everywhere; the large changes are at edges.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 3 (sharpening spatial filters, unsharp masking).
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022: Section 3.2 (linear filtering).
+3. OpenCV 4.13.0 documentation: `GaussianBlur`, `addWeighted`, `detailEnhance`. https://docs.opencv.org/4.13.0/

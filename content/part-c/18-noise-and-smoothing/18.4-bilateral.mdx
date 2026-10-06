@@ -1,0 +1,331 @@
+export const meta = {
+  number: "18.4",
+  title: "Bilateral",
+  minutes: 25,
+  objectives: [
+    "Explain the two weights of the bilateral filter: distance and difference in value",
+    "Compute one bilateral output by hand and with cv2.bilateralFilter",
+    "Choose d, sigmaColor and sigmaSpace from the noise level",
+    "Recognise its limits: low-contrast detail, cartoon look, speed",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 18.4 (Module 18).
+  Lab: DenoiseLab (Gaussian vs bilateral).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 18.4 Bilateral
+
+<Definition term="Bilateral filter">a weighted average like the Gaussian, with a second weight: a neighbour counts less the more its value differs from the centre pixel. Neighbours across an edge differ a lot, get almost no weight, and are left out, so the filter smooths within regions and stops at edges.</Definition>
+
+The Gaussian filter (18.2) averages every neighbour by distance only, so it mixes the two sides of an edge. The median (18.3) keeps edges but erases thin structures. The bilateral filter, introduced by Tomasi and Manduchi in 1998 [1], keeps edges and thin lines as long as they are clearly brighter or darker than the noise.
+
+## 1. An analogy
+
+Asking neighbours for advice, but only those who think like you. People far away count less (the distance weight); people whose opinion is very different are ignored (the value weight). Inside a like-minded group the opinions average out; across the border between two groups nothing gets mixed.
+
+## 2. Two weights
+
+<Flow
+  steps={[
+    { label: "Centre pixel p and a neighbour q", tone: "data" },
+    { label: "Space weight: exp(−distance² / 2σs²)", tone: "process" },
+    { label: "Range (colour) weight: exp(−(I(q) − I(p))² / 2σc²)", tone: "process" },
+    { label: "Output: Σ w·I(q) / Σ w with w = space × range", tone: "result" },
+  ]}
+/>
+
+A worked example: a pixel next to an edge (left side about 100, right column about 200), σs = 1, σc = 20, centre value 101.
+
+<PixelMatrix values={[[100, 102, 200], [98, 101, 203], [99, 100, 198]]} highlight={[[1, 1]]} />
+
+| Weight | Left column | Middle column | Right column (edge side) |
+| --- | --- | --- | --- |
+| Space (centre row) | 0.607 | 1.000 | 0.607 |
+| Range (centre row) | 0.989 | 1.000 | 0.000 |
+| Final, normalised (centre row) | 0.169 | 0.282 | 0.000 |
+
+The three bright pixels differ from the centre by about 100 = 5σc, so their range weight is e^(−12.5) ≈ 0.000004: they are ignored. The output is **100.2**, an average of the six dark pixels only. A Gaussian with the same σs gives **127.8**: it pulls the dark pixel a quarter of the way towards the bright side, which is what a blurred edge is. OpenCV gives 100 (rounded to uint8).
+
+## 3. Choosing the parameters
+
+| Parameter | Meaning | Rule of thumb |
+| --- | --- | --- |
+| `sigmaColor` (σc) | differences much larger than σc are treated as edges | about 2 × the noise σ |
+| `sigmaSpace` (σs) | spatial reach, as in a Gaussian | 2 to 5 pixels |
+| `d` | window diameter; −1 computes it from σs | 5 to 9 for real time |
+
+Gaussian noise σ = 20 on the test image (PSNR 22.2 dB, noise in the dark circle 19.2):
+
+| Filter | PSNR | Noise left in the circle | Edge width (10–90 %) |
+| --- | --- | --- | --- |
+| Gaussian σ = 2 | 21.0 dB | 2.3 | 6 px |
+| Bilateral d = 9, σs = 3, σc = 20 | 27.2 dB | 10.1 | 0 px |
+| **Bilateral d = 9, σs = 3, σc = 40** | **32.1 dB** | 4.6 | 0 px |
+| Bilateral d = 9, σs = 3, σc = 80 | 26.5 dB | 2.7 | 2 px |
+| Bilateral d = 9, σs = 3, σc = 150 | 22.3 dB | 2.5 | 4 px |
+
+With σc = 20 (equal to the noise), many noisy neighbours already count as "different" and the noise is only halved. With σc = 40 the noise drops to a quarter and the 125-level edge of the square stays perfectly sharp. As σc grows the range weight approaches 1 everywhere and the filter becomes a Gaussian again: at σc = 150 the edge is 4 pixels wide.
+
+<DenoiseLab initialFilter="bilateral" filters={["none", "gauss", "bilateral"]} caption="Gaussian noise σ = 20. Bilateral filter: change σ colour from 5 to 120 and watch the noise in flat areas and the edges of the square, circle and lines. Around 40 (twice the noise) both look good; far above, it turns into a Gaussian blur; far below, it hardly smooths. Then switch to salt-and-pepper noise: impulses differ from everything around them, so the bilateral keeps them."/>
+
+## 4. Where the edge test breaks
+
+The bilateral filter decides "edge or noise" from a single difference in value. That works when the edge contrast is several times the noise σ. A faint 3-pixel line with contrast 25 on a flat background with noise σ = 10:
+
+| Filter | Line contrast left | Noise left |
+| --- | --- | --- |
+| Noisy | 25.2 | 10.2 |
+| Bilateral σc = 10 | 22.9 | 5.8 |
+| Bilateral σc = 20 | 18.7 | 2.8 |
+| Gaussian σ = 1 | 19.0 | 2.9 |
+| Bilateral σc = 40 | 14.9 | 1.7 |
+
+At σc = 20 the bilateral filter is no better than a plain Gaussian: the line's contrast is only 2.5 σ, so line pixels and noisy background pixels look the same to the range weight. Low-contrast detail (fine texture, faint scratches) is smoothed like noise. Applied repeatedly or with large σc, the filter also flattens smooth shading into flat patches with sharp steps: the "cartoon" look used on purpose in photo effects.
+
+## 5. Industrial example
+
+Bilateral filtering is used before measurement on parts with strong edges: a gauge that finds the edge of a machined part or a stamped hole needs low noise along the edge and no shift of its position, and a Gaussian would widen the edge while a median would round its corners. It is also common on depth maps from stereo and time-of-flight cameras (42), where object boundaries must stay sharp. For faint defects close to the noise level it does not help, and its cost (tens of operations per pixel per window position) is a concern on high-resolution line-scan images.
+
+## What you should remember from 18.4
+
+<Takeaways>
+<Takeaway n={1} title="Two weights">Distance (σs) times difference in value (σc).</Takeaway>
+<Takeaway n={2} title="σc">About twice the noise σ: below it smooths little, far above it is a Gaussian.</Takeaway>
+<Takeaway n={3} title="Strength">Strong edges and thin high-contrast lines stay sharp.</Takeaway>
+<Takeaway n={4} title="Limits">Low-contrast detail is smoothed like noise; impulses are kept; slower than a Gaussian.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Noise σ = 8. A starting value for sigmaColor?
+
+<Solution>
+
+About **16** (twice the noise), then adjust while looking at flat areas and edges.
+
+</Solution>
+
+**Q2.** Why does the bilateral filter not remove salt-and-pepper noise?
+
+<Solution>
+
+An impulse (0 or 255) differs from all its neighbours by much more than σc, so all neighbours get range weight near 0 and the output is the impulse itself.
+
+</Solution>
+
+### Next: 18.5 Non-local means
+
+Instead of comparing single pixel values, compare whole patches, and average similar patches from anywhere in a search window.
+
+## Code
+
+Two examples: the worked example from scratch, then the effect of sigmaColor.
+
+### 1. One bilateral output from scratch
+
+```python
+import numpy as np
+import cv2
+
+p = np.array([[100, 102, 200], [98, 101, 203], [99, 100, 198]], float)
+ys, xs = np.mgrid[-1:2, -1:2]
+w_space = np.exp(-(xs ** 2 + ys ** 2) / (2 * 1.0 ** 2))          # sigmaSpace = 1
+w_range = np.exp(-(p - p[1, 1]) ** 2 / (2 * 20.0 ** 2))         # sigmaColor = 20
+w = w_space * w_range
+print("bilateral:", round(float((w * p).sum() / w.sum()), 2), "| gaussian:", round(float((w_space * p).sum() / w_space.sum()), 2))
+print(f"total weight of the edge column: {(w / w.sum())[:, 2].sum():.1e}")
+print("cv2.bilateralFilter:", int(cv2.bilateralFilter(p.astype(np.uint8), 3, 20, 1)[1, 1]))
+```
+
+Output:
+
+```text
+bilateral: 100.18 | gaussian: 127.76
+total weight of the edge column: 1.7e-06
+cv2.bilateralFilter: 100
+```
+
+- The three bright pixels together get under two millionths of the total weight.
+
+### 2. The effect of sigmaColor
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-clean.png", cv2.IMREAD_GRAYSCALE)
+clean = img.astype(float)
+rng = np.random.default_rng(0)
+noisy = np.clip(np.rint(clean + rng.normal(0, 20, clean.shape)), 0, 255).astype(np.uint8)
+
+def report(name, x):
+    psnr = 10 * np.log10(255 ** 2 / np.mean((x.astype(float) - clean) ** 2))
+    noise = (x.astype(float) - clean)[50:80, 155:185].std()          # inside the dark circle
+    print(f"{name:16s} PSNR {psnr:5.2f} dB | noise left {noise:5.2f}")
+
+report("noisy", noisy)
+report("gaussian s=2", cv2.GaussianBlur(noisy, (0, 0), 2))
+for sc in (20, 40, 80, 150):
+    report(f"bilateral c={sc}", cv2.bilateralFilter(noisy, 9, sc, 3))
+```
+
+Output:
+
+```text
+noisy            PSNR 22.24 dB | noise left 19.16
+gaussian s=2     PSNR 20.98 dB | noise left  2.31
+bilateral c=20   PSNR 27.22 dB | noise left 10.14
+bilateral c=40   PSNR 32.09 dB | noise left  4.62
+bilateral c=80   PSNR 26.49 dB | noise left  2.72
+bilateral c=150  PSNR 22.30 dB | noise left  2.45
+```
+
+- The Gaussian removes the most noise in flat areas but has the lowest PSNR: it blurs every edge, line and letter.
+
+## OpenCV API notes
+
+**`cv2.bilateralFilter(src, d, sigmaColor, sigmaSpace, borderType=cv2.BORDER_DEFAULT)`**:
+- `src`: 8-bit or 32-bit float, 1 or 3 channels. Not in place.
+- `d`: window diameter; if ≤ 0, computed from sigmaSpace (radius = round(1.5·σs), so σs = 3 gives d = 9).
+- `sigmaColor`: in grey levels (for float images, in the image's units). For colour images the difference is the sum of absolute differences over the three channels, so similar colours are averaged together.
+- `sigmaSpace`: in pixels.
+- The documentation's rule of thumb: sigmas below 10 have little effect, above 150 a very strong, "cartoonish" effect.
+
+**Speed**: cost grows with d² (not separable). The documentation recommends d ≤ 5 for real-time use and d = 9 for offline heavy filtering.
+
+**Related**: `cv2.ximgproc.jointBilateralFilter` (contrib) takes the range weight from a second guide image; `cv2.edgePreservingFilter` and `cv2.stylization` (photo module) give similar effects for photographs.
+
+## Where it fails
+
+- **Low-contrast detail**: edges with contrast below 2 to 3 times the noise are smoothed like noise.
+- **Impulse noise**: kept, because impulses differ from everything; run a median first.
+- **Strong noise**: when noise σ approaches the edge contrast, no σc separates them.
+- **Shading**: repeated or strong filtering turns gradients into flat patches (cartoon look, staircasing).
+- **Speed**: slow for large d; use the guided filter or downsampling for large windows.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **sigmaColor far from the noise level**: 5 does nothing, 200 is just a Gaussian.
+- **Large d "for more smoothing"**: the cost grows with d² and the result changes little beyond about 3σs.
+- **Expecting it to remove salt and pepper**.
+- **Running it in place** (src and dst the same array); OpenCV does not allow it.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Origin and relatives
+
+Tomasi and Manduchi (1998) named the filter [1]; similar ideas appear earlier as the SUSAN filter and the sigma filter. Paris, Kornprobst, Tumblin and Durand surveyed its theory and fast versions [2]: the bilateral grid treats the image as a 3-D volume (x, y, value), where the filter becomes a Gaussian blur that can be computed at low resolution.
+
+### Guided filter
+
+He, Sun and Tang's guided filter (2010) fits a local linear model between a guide image and the output in each window [3]. It preserves edges like the bilateral filter, costs O(1) per pixel whatever the window size (via box filters and integral images, 17.5), and does not create gradient reversal artefacts. It is in OpenCV contrib as `cv2.ximgproc.guidedFilter`.
+
+### Anisotropic diffusion
+
+Perona and Malik (1990) smooth by a diffusion whose speed falls where the gradient is large; iterating it behaves like a repeated bilateral filter. In contrib: `cv2.ximgproc.anisotropicDiffusion`.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does the range (colour) weight depend on?",
+      options: ["Distance to the centre", "Difference in value from the centre pixel", "The image gradient", "The window size"],
+      answer: 1,
+      explanation: "exp(−(I(q) − I(p))² / 2σc²).",
+    },
+    {
+      question: "With noise σ = 20, a good first sigmaColor is about…",
+      options: ["2", "40", "200", "1000"],
+      answer: 1,
+      explanation: "About twice the noise σ.",
+    },
+    {
+      question: "What happens when sigmaColor becomes very large?",
+      options: ["No smoothing", "It becomes a Gaussian blur", "It becomes a median", "It sharpens"],
+      answer: 1,
+      explanation: "All range weights approach 1; only the space weight remains.",
+    },
+    {
+      question: "A faint line of contrast 25 in noise σ = 10 after a bilateral filter with σc = 20…",
+      options: ["Stays sharp, noise removed", "Is smoothed about as much as by a Gaussian", "Becomes brighter", "Is removed completely"],
+      answer: 1,
+      explanation: "The range weight cannot tell the line from noise at that contrast.",
+    },
+    {
+      question: "cv2.bilateralFilter with d = −1 and sigmaSpace = 3 uses a window of…",
+      options: ["3", "7", "9", "−1"],
+      answer: 2,
+      explanation: "radius = round(1.5 × 3) = 4, so d = 9.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+σc = 20. Range weight for a neighbour that differs from the centre by 10, by 40 and by 100?
+
+<Solution>
+
+exp(−10²/800) = exp(−0.125) = **0.88**; exp(−1600/800) = exp(−2) = **0.14**; exp(−10000/800) = exp(−12.5) ≈ **0.000004**. Differences of half σc barely matter; twice σc counts a seventh; five times σc is ignored.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Reproduce the faint-line experiment: a 100 × 100 image of 128 with a 3-pixel line at 153, noise σ = 10, then the bilateral filter with σc = 10, 20 and 40 and a Gaussian with σ = 1. Print the line contrast and the noise left.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(2)
+im = np.full((100, 100), 128.0)
+im[:, 49:52] = 153
+nz = np.clip(np.rint(im + rng.normal(0, 10, im.shape)), 0, 255).astype(np.uint8)
+line = lambda x: round(float(x[:, 49:52].astype(float).mean() - x[:, 30:40].astype(float).mean()), 1)
+left = lambda x: round(float(x[:, 10:40].astype(float).std()), 2)
+print("noisy        ", line(nz), left(nz))
+for sc in (10, 20, 40):
+    b = cv2.bilateralFilter(nz, 9, sc, 3)
+    print(f"bilateral {sc:3d}", line(b), left(b))
+g = cv2.GaussianBlur(nz, (0, 0), 1)
+print("gaussian 1   ", line(g), left(g))
+```
+
+Output:
+
+```text
+noisy         25.2 10.2
+bilateral  10 22.9 5.78
+bilateral  20 18.7 2.77
+bilateral  40 14.9 1.67
+gaussian 1    19.0 2.89
+```
+
+The bilateral filter with σc = 20 and the Gaussian with σ = 1 land on almost the same trade-off: at this contrast the edge-preserving weight has nothing to work with.
+
+</Solution>
+
+## References
+
+1. C. Tomasi, R. Manduchi, "Bilateral filtering for gray and color images", *Proc. ICCV*, 839–846, 1998.
+2. S. Paris, P. Kornprobst, J. Tumblin, F. Durand, "Bilateral filtering: theory and applications", *Foundations and Trends in Computer Graphics and Vision* 4(1), 1–73, 2009.
+3. K. He, J. Sun, X. Tang, "Guided image filtering", *Proc. ECCV*, 1–14, 2010.
+4. P. Perona, J. Malik, "Scale-space and edge detection using anisotropic diffusion", *IEEE Trans. PAMI* 12(7), 629–639, 1990.
+5. OpenCV 4.13.0 documentation: `bilateralFilter`, `ximgproc::guidedFilter`. https://docs.opencv.org/4.13.0/

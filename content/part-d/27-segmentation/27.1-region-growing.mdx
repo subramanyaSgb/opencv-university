@@ -1,0 +1,342 @@
+export const meta = {
+  number: "27.1",
+  title: "Region growing",
+  minutes: 25,
+  objectives: [
+    "Grow a region from a seed pixel with a similarity rule",
+    "Compare fixed-range, floating-range and running-mean growing on shaded objects",
+    "Use cv2.floodFill with loDiff, upDiff, flags and a mask",
+    "Recognise leaking and choose the tolerance",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 27.1 (Module 27).
+  New lab: SegmentLab (lib/seg-ops.ts; floodFill, pyrMeanShiftFiltering at level 0 and watershed equal OpenCV).
+  New sample: sample-seg.png + sample-seg-ids.png (colour scene with an object map).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 27.1 Region growing
+
+<Definition term="Region growing">segmentation that starts from a seed pixel and repeatedly adds neighbouring pixels that are similar enough, until no more neighbours qualify. The result is one connected region around the seed.</Definition>
+
+Thresholding (Module 13) looks at each pixel alone. Segmentation asks a bigger question: which pixels belong **together**? Module 27 answers it six ways. Region growing is the simplest: point at an object, and the region spreads out from there like paint, stopping at the object's border. It is the "magic wand" of image editors and the engine of `cv2.floodFill`.
+
+## 1. An analogy
+
+Pouring water on a tiled floor with low walls between the tiles. The water spreads from where you pour it to every neighbouring tile it can reach without climbing a wall higher than a certain height. A low tolerance stops at small walls; a high tolerance flows over them. If there is a gap in a wall, the water leaks into the next room.
+
+## 2. The algorithm and its rules
+
+<Flow
+  steps={[
+    { label: "Image + seed pixel", tone: "data" },
+    { label: "Put the seed in a queue", tone: "process" },
+    { label: "Take a pixel; test each 4- or 8-neighbour against the rule", tone: "process" },
+    { label: "Similar → add to the region and the queue", tone: "process" },
+    { label: "Queue empty → the region is complete", tone: "result" },
+  ]}
+/>
+
+What "similar" means is the whole method. Three common rules:
+
+- **Fixed range**: a neighbour is accepted if its colour is within the tolerance of the **seed** colour. Robust against leaks, but fails on shaded objects whose colour drifts away from the seed.
+- **Floating range**: a neighbour is accepted if it is within the tolerance of the **already accepted pixel next to it**. Follows smooth shading, but can leak through any gradual transition.
+- **Running mean**: a neighbour is accepted if it is within a distance of the **current region mean**. A compromise: the reference adapts slowly as the region grows.
+
+`cv2.floodFill` implements the first two, per channel: each of B, G, R must lie within [reference − loDiff, reference + upDiff].
+
+## 3. A worked example by hand
+
+A 3 × 6 grey image: a soft ramp on top of a bright band. Seed at the top-left pixel (value 10), tolerance 3 (loDiff = upDiff = 3), 4-connected:
+
+<PixelMatrix size="sm" values={[[10, 12, 15, 18, 21, 24], [11, 13, 16, 19, 22, 25], [50, 52, 51, 53, 50, 52]]} highlight={[[0, 0]]} />
+
+- **Fixed range** accepts values 7 to 13: the four pixels 10, 12, 11, 13. The next pixel, 15, is 5 away from the seed: stop. **4 pixels**.
+- **Floating range**: 12 is within 3 of 10, 15 within 3 of 12, 18 within 3 of 15, and so on along the ramp. The whole top two rows join; the bottom row (50 and more) is far from its upper neighbours. **12 pixels**.
+
+The ramp is shading on one object (floating range is right) or a soft border between two objects (floating range leaks): the pixel values alone cannot tell which.
+
+## 4. On a real scene
+
+The new test scene has five objects on a woven cloth, with light falling off to the right. Seeding each object and comparing the grown region with the true object (IoU, 1 = perfect):
+
+| Seed on | Fixed ±10 | Fixed ±30 | Floating ±10 | Floating ±20 |
+| --- | --- | --- | --- | --- |
+| shaded orange | 0.16 | 0.44 | **0.94** | 0.99 |
+| red disc | 0.90 | **0.98** | 0.94 | 0.55 (leaks into crimson) |
+| crimson disc | 0.92 | **0.98** | 0.98 | 0.45 (leaks into red) |
+| striped green box | 0.08 | 0.62 | 0.08 | 0.85 |
+| background cloth | 0.24 | 0.51 | **0.99** | 1.00 |
+
+- The **orange** is shaded: its colour changes by much more than 30 from its centre to its rim. Only the floating range follows it.
+- The **red and crimson discs** touch, and their colours are about 40 apart. Floating ±10 keeps them separate; ±20 crosses the border in small steps and fills both.
+- The **striped box** has stripes about 35 apart in green: each tolerance below that fills one stripe only.
+- The **cloth** is lit unevenly: the fixed range covers only the part near the seed.
+
+There is no single best rule or tolerance: each object needs its own. That is why region growing is mostly used interactively (a user clicks and adjusts) or with seeds and tolerances that come from knowledge of the scene.
+
+<SegmentLab mode="grow" caption="Click anywhere to place the seed; the grown region is tinted yellow. Try the shaded orange with fixed and floating range, the red disc with floating ±10 and ±20 (watch it leak into the crimson disc), and the striped green box. The running-mean rule uses a Euclidean colour distance to the region's mean."/>
+
+## 5. Industrial use
+
+- **Interactive tools**: the magic wand in labelling software, filling a defect area to measure it.
+- **Seeded inspection**: a known position (the centre of a part, a fiducial) is the seed; the grown region's area and shape are checked.
+- **Medical imaging**: growing organs or lesions from a clicked seed in CT and MRI slices.
+- **Filling holes and backgrounds**: flood-filling the background from a corner, then inverting, fills holes inside objects (Exercise 2).
+
+## What you should remember from 27.1
+
+<Takeaways>
+<Takeaway n={1} title="Seed + rule">Grow from a seed while neighbours are similar enough.</Takeaway>
+<Takeaway n={2} title="Fixed vs floating">Fixed: stable, fails on shading. Floating: follows shading, leaks through soft borders.</Takeaway>
+<Takeaway n={3} title="Tolerance">Per object; too high leaks, too low fragments.</Takeaway>
+<Takeaway n={4} title="floodFill">OpenCV's region growing; FIXED_RANGE flag, MASK_ONLY, 4/8 connectivity.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A seed has value 100, tolerance ±5, fixed range. Which of 94, 96, 105, 106 are accepted (if connected)?
+
+<Solution>
+
+The range is 95 to 105: **96 and 105**.
+
+</Solution>
+
+**Q2.** Floating-range growing on a shaded sphere stops halfway. What do you change?
+
+<Solution>
+
+Increase the tolerance a little (the shading step between neighbours is too large), or smooth the image first so neighbour differences from noise get smaller.
+
+</Solution>
+
+### Next: 27.2 K-means
+
+Grouping pixels by colour without seeds: clustering.
+
+## Code
+
+Three examples: the worked example, the scene, and running-mean growing from scratch.
+
+### 1. Fixed and floating range
+
+```python
+import numpy as np
+import cv2
+
+img = np.array([[10, 12, 15, 18, 21, 24],
+                [11, 13, 16, 19, 22, 25],
+                [50, 52, 51, 53, 50, 52]], np.uint8)
+for name, extra in [("fixed", cv2.FLOODFILL_FIXED_RANGE), ("floating", 0)]:
+    mask = np.zeros((img.shape[0] + 2, img.shape[1] + 2), np.uint8)    # mask is 2 px larger than the image
+    flags = 4 | extra | cv2.FLOODFILL_MASK_ONLY | (1 << 8)               # 4-connected, write 1 into the mask
+    area, _, _, rect = cv2.floodFill(img, mask, (0, 0), 0, 3, 3, flags)  # seed (x, y) = (0, 0), loDiff = upDiff = 3
+    print(name, "area", area, "rect", rect)
+    print(mask[1:-1, 1:-1])
+```
+
+Output:
+
+```text
+fixed area 4 rect (0, 0, 2, 2)
+[[1 1 0 0 0 0]
+ [1 1 0 0 0 0]
+ [0 0 0 0 0 0]]
+floating area 12 rect (0, 0, 6, 2)
+[[1 1 1 1 1 1]
+ [1 1 1 1 1 1]
+ [0 0 0 0 0 0]]
+```
+
+- With `FLOODFILL_MASK_ONLY` the image is not changed; the region is written into the mask with the value in bits 8–15 of `flags`.
+- `floodFill` returns the area, the image, the mask and the bounding rectangle of the region.
+
+### 2. The scene
+
+```python
+scene = cv2.imread("sample-seg.png")
+ids = cv2.imread("sample-seg-ids.png", cv2.IMREAD_GRAYSCALE)        # 0 background, 1 to 5 objects
+h, w = ids.shape
+
+def grow(seed, tol, fixed):
+    mask = np.zeros((h + 2, w + 2), np.uint8)
+    flags = 4 | cv2.FLOODFILL_MASK_ONLY | (255 << 8) | (cv2.FLOODFILL_FIXED_RANGE if fixed else 0)
+    cv2.floodFill(scene, mask, seed, 0, (tol,) * 3, (tol,) * 3, flags)
+    return mask[1:-1, 1:-1] > 0
+
+def iou(a, b):
+    return round(float((a & b).sum() / (a | b).sum()), 2)
+
+for name, seed, k in [("orange", (55, 55), 1), ("red", (120, 50), 2), ("green", (60, 125), 4), ("cloth", (225, 15), 0)]:
+    truth = ids == k
+    print(name, "fixed 10:", iou(grow(seed, 10, True), truth), "| floating 10:", iou(grow(seed, 10, False), truth),
+          "| floating 20:", iou(grow(seed, 20, False), truth))
+```
+
+Output:
+
+```text
+orange fixed 10: 0.16 | floating 10: 0.94 | floating 20: 0.99
+red fixed 10: 0.9 | floating 10: 0.94 | floating 20: 0.55
+green fixed 10: 0.08 | floating 10: 0.08 | floating 20: 0.85
+cloth fixed 10: 0.24 | floating 10: 0.99 | floating 20: 1.0
+```
+
+### 3. Running-mean growing from scratch
+
+```python
+from collections import deque
+
+def grow_mean(img, seed, T):
+    f = img.astype(float)
+    x, y = seed
+    region = np.zeros(img.shape[:2], bool)
+    region[y, x] = True
+    total, n = f[y, x].copy(), 1
+    queue = deque([(x, y)])
+    while queue:
+        cx, cy = queue.popleft()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = cx + dx, cy + dy
+            if 0 <= nx < img.shape[1] and 0 <= ny < img.shape[0] and not region[ny, nx]:
+                if np.linalg.norm(f[ny, nx] - total / n) <= T:          # distance to the current mean
+                    region[ny, nx] = True
+                    total += f[ny, nx]
+                    n += 1
+                    queue.append((nx, ny))
+    return region
+
+for T in (20, 30, 45):
+    print("T", T, "| red:", iou(grow_mean(scene, (120, 50), T), ids == 2), "| label:", iou(grow_mean(scene, (205, 112), T), ids == 5))
+```
+
+Output:
+
+```text
+T 20 | red: 0.94 | label: 0.57
+T 30 | red: 0.97 | label: 0.82
+T 45 | red: 0.56 | label: 0.86
+```
+
+- The label never reaches 1: its dark text is a different colour and is cut out of the region (holes).
+
+## OpenCV API notes
+
+- **`cv2.floodFill(image, mask, seedPoint, newVal, loDiff, upDiff, flags)`** → (area, image, mask, rect). `seedPoint` is (x, y). `loDiff`/`upDiff`: scalars or per-channel tuples.
+- **`mask`**: uint8, (h + 2) × (w + 2); non-zero mask pixels block the fill (use them as walls). Pass `None` to skip it.
+- **`flags`**: connectivity (4 or 8) in the low bits, the mask fill value in bits 8–15, `FLOODFILL_FIXED_RANGE` (compare with the seed) and `FLOODFILL_MASK_ONLY` (do not change the image).
+- **Types**: 8-bit or 32-bit float images, 1 or 3 channels.
+- **Speed**: linear in the region size; a scan-line algorithm, very fast.
+
+## Where it fails
+
+- **Soft or broken borders**: leaks into neighbours (floating range) through any gradual path.
+- **Shading and texture**: fragments (fixed range) or needs a tolerance that leaks.
+- **Many objects**: needs one seed per object; for automatic segmentation use clustering (27.2) or watershed (27.4).
+- **Noise**: single noisy pixels break the chain; smooth first (Module 18).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Mask the same size as the image**: it must be 2 pixels larger in each direction.
+- **Seed as (row, column)**: `seedPoint` is (x, y).
+- **Forgetting `FLOODFILL_MASK_ONLY`**: the input image is overwritten with `newVal`.
+- **Mask value 0 in the flags**: then the region is not visible in the mask (use `(255 << 8)` or `(1 << 8)`).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Seeded region growing and split-and-merge
+
+Adams and Bischof [1] grow several seeded regions at once, always adding the unassigned pixel that is closest to its neighbouring region's mean (a priority queue), which removes the dependence on processing order. Split-and-merge (Horowitz and Pavlidis 1976 [2]) starts from the whole image, splits blocks that are not uniform (a quadtree), then merges adjacent similar blocks. Watershed (27.4) can be seen as seeded growing ordered by gradient height.
+
+### Order dependence
+
+Running-mean growing depends on the order in which pixels are visited, because the mean changes as pixels are added. Fixed- and floating-range growing do not: the result is the set of pixels connected to the seed through accepted steps, whatever the order.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Floating-range growing compares a neighbour with…",
+      options: ["The seed", "The already accepted pixel next to it", "The image mean", "A threshold"],
+      answer: 1,
+      explanation: "That is why it follows shading and can leak.",
+    },
+    {
+      question: "Why does fixed range fail on the shaded orange?",
+      options: ["Noise", "The colour drifts far from the seed colour", "The orange is too small", "Wrong connectivity"],
+      answer: 1,
+      explanation: "IoU 0.16 at ±10; the rim differs from the centre by more than the tolerance.",
+    },
+    {
+      question: "What size must the floodFill mask be for a 240 × 160 image?",
+      options: ["240 × 160", "242 × 162", "238 × 158", "Any"],
+      answer: 1,
+      explanation: "Two pixels larger in each direction.",
+    },
+    {
+      question: "The red disc's region suddenly includes the crimson disc at ±20. This is…",
+      options: ["Over-segmentation", "Leaking through a gradual border", "A bug", "Noise"],
+      answer: 1,
+      explanation: "Small steps across the border each pass the tolerance.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Pixels along a line: 40, 44, 47, 51, 54, 90. Seed 40, tolerance ±4. How many pixels does fixed range fill, and how many floating range?
+
+<Solution>
+
+Fixed (36–44): 40, 44 → **2**. Floating: 44 (Δ4), 47 (Δ3), 51 (Δ4), 54 (Δ3), then 90 (Δ36) stops → **5**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Fill the holes of a binary mask: grow the label from the seed (205, 112) with floating range ±10 (the dark text stays out as holes), flood-fill the background of that mask from the corner, invert, and combine. How many hole pixels are filled, and what is the IoU with the true label before and after?
+
+<Solution>
+
+```python
+label = grow((205, 112), 10, False).astype(np.uint8) * 255          # the label region, text = holes
+filled = label.copy()
+mask = np.zeros((h + 2, w + 2), np.uint8)
+cv2.floodFill(filled, mask, (0, 0), 255)                             # fill the outside from a corner
+holes = cv2.bitwise_not(filled)                                      # what the outside fill could not reach
+result = label | holes
+print("label pixels:", int((label > 0).sum()), "| holes filled:", int((holes > 0).sum()), "| after:", int((result > 0).sum()))
+print("IoU before:", iou(label > 0, ids == 5), "| after:", iou(result > 0, ids == 5))
+```
+
+Output:
+
+```text
+label pixels: 2295 | holes filled: 645 | after: 2940
+IoU before: 0.74 | after: 0.95
+```
+
+Filling the 645 text pixels raises the IoU from 0.74 to 0.95. The rest is missing where floating ±10 stopped growing (the label's colour drifts with the light): hole filling cannot fix gaps that touch the outside.
+
+</Solution>
+
+## References
+
+1. R. Adams, L. Bischof, "Seeded region growing", *IEEE Trans. Pattern Analysis and Machine Intelligence* 16(6), 641–647, 1994.
+2. S. L. Horowitz, T. Pavlidis, "Picture segmentation by a tree traversal algorithm", *Journal of the ACM* 23(2), 368–388, 1976.
+3. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Section 10.4 (region growing, splitting and merging).
+4. OpenCV 4.13.0 documentation: `floodFill`, `FloodFillFlags`. https://docs.opencv.org/4.13.0/

@@ -1,0 +1,322 @@
+export const meta = {
+  number: "13.5",
+  title: "Adaptive thresholds (mean, Gaussian, Niblack, Sauvola)",
+  minutes: 30,
+  objectives: [
+    "Explain local thresholds: one T per pixel from its neighbourhood",
+    "Use cv2.adaptiveThreshold (mean and Gaussian) and choose blockSize and C",
+    "Implement Niblack and Sauvola with box filters and know their difference",
+    "Recognise what local thresholds cannot fix",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 13.5 (Module 13 plan).
+  Reuses ThreshLab (adaptive mean equals cv2.adaptiveThreshold exactly; Gaussian within a few pixels).
+  Contrib block: cv2.ximgproc.niBlackThreshold (checked with opencv-contrib-python-headless 4.13.0.92).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 13.5 Adaptive thresholds (mean, Gaussian, Niblack, Sauvola)
+
+<Definition term="Adaptive (local) threshold">a threshold that is computed separately for every pixel from the grey values in a window around it, so that it follows changes in lighting across the image.</Definition>
+
+Every global method (13.2–13.4) failed on the unevenly lit label: ink in the bright corner is lighter than paper in the dark corner. A person reading the label has no trouble, because we judge each letter against **its own surroundings**. Adaptive thresholds do the same: "darker than the neighbourhood" instead of "darker than 120".
+
+## 1. An analogy
+
+A teacher grading on a curve per class rather than for the whole school: a score is "good" if it is well above the class average, whatever the average of the school is. A hard class and an easy class each get their own pass mark.
+
+## 2. Local mean minus a constant
+
+<Flow
+  steps={[
+    { label: "Window of blockSize × blockSize around each pixel", tone: "data" },
+    { label: "Local mean (box) or Gaussian-weighted mean", tone: "process" },
+    { label: "T(x, y) = local mean − C", tone: "process" },
+    { label: "Object if src(x, y) ≤ T(x, y) (dark objects)", tone: "result" },
+  ]}
+/>
+
+This is `cv2.adaptiveThreshold`. Two parameters matter:
+
+- **blockSize** (odd): the window must be **larger than the objects** (larger than a stroke of a letter, or a defect) so that the mean is dominated by background. Too small, and the inside of thick objects is compared with itself and becomes background.
+- **C**: how much darker than the local mean a pixel must be. It suppresses noise on plain background: with C = 0, half of the paper pixels would be "darker than their mean".
+
+Real numbers for the label (F1 against the true text):
+
+| blockSize | C = 5 | C = 10 | C = 20 |
+| --- | --- | --- | --- |
+| 5 | 0.701 | 0.935 | 0.879 |
+| 11 | 0.739 | 0.956 | 0.973 |
+| 25 | 0.821 | 0.954 | **0.979** |
+| 51 | 0.849 | 0.923 | 0.956 |
+
+(Box mean. The best global threshold of 13.2–13.4 reached 0.83.)
+
+<ThreshLab methods={["otsu", "mean", "gauss", "niblack", "sauvola"]} initial="mean" caption="Adaptive methods on the unevenly lit label. Try blockSize 5 (letters break up) and 75 (the window sees the light gradient again), and C = 0 (paper noise everywhere). Then compare Niblack and Sauvola on the plain paper areas." />
+
+## 3. Niblack and Sauvola: using the local spread
+
+Mean − C uses a fixed offset. Two classic methods from document analysis scale it with the **local standard deviation** s:
+
+| Method | Threshold | Typical k | Behaviour |
+| --- | --- | --- | --- |
+| Niblack (1986) | T = m + k · s | −0.2 (dark text) | good on text; on plain background s is just noise, so noise pixels pass |
+| Sauvola (2000) | T = m · (1 + k · (s / R − 1)), R = 128 | 0.2 to 0.5 | on plain background (small s) T drops well below m: noise is rejected |
+
+On the label (blockSize 25): Niblack k = −0.2 gives F1 0.672; Sauvola k = 0.34 gives **0.987**, the best of all methods in this module. Sauvola is the usual choice for documents and printed codes.
+
+Why Sauvola rejects background noise: with s ≈ 4 (paper noise), T ≈ m · (1 − 0.34 · 0.97) ≈ 0.67 m, a third darker than the paper; inside a letter's neighbourhood s is large (ink and paper mixed) and T rises towards m.
+
+## 4. Industrial example
+
+A pharmaceutical line reads lot numbers printed on curved blister foil. The foil reflects the ring light unevenly, so the background varies from 60 to 230 across one image. A global threshold never worked on every package; Sauvola with a 31 × 31 window (about one character height) and k = 0.3 gives clean characters for the OCR, and the window size is fixed by the print size, which never changes. A big window would see the reflection gradient again; a small one would hollow out the thick digits.
+
+## What you should remember from 13.5
+
+<Takeaways>
+<Takeaway n={1} title="Idea">One T per pixel from its neighbourhood: local mean − C, or Niblack/Sauvola.</Takeaway>
+<Takeaway n={2} title="blockSize">Larger than the objects, smaller than the lighting changes.</Takeaway>
+<Takeaway n={3} title="C or k">Rejects background noise; C = 0 marks half the background.</Takeaway>
+<Takeaway n={4} title="Sauvola">Best for print and documents: the local spread adapts the offset.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Paper around a pixel has mean 180; with C = 10, what is the pixel's threshold, and is a pixel of 172 text?
+
+<Solution>
+
+T = 180 − 10 = **170**; 172 > 170, so it is **not** text (dark objects need v ≤ T).
+
+</Solution>
+
+**Q2.** Letters are 4 pixels thick. Why does blockSize = 3 fail?
+
+<Solution>
+
+A 3 × 3 window inside a letter contains only ink: its mean is the ink value, and the ink is not darker than "itself minus C". The **inside of the stroke becomes background**; only the edges remain.
+
+</Solution>
+
+### Next: 13.6 Hysteresis and multi-level thresholds
+
+Two thresholds instead of one: grow objects from confident seeds, or split into more than two classes.
+
+## Code
+
+Three examples: adaptive mean from scratch vs OpenCV, Niblack and Sauvola with box filters, and the contrib implementation.
+
+### 1. Adaptive mean from scratch
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-print-uneven.png", cv2.IMREAD_GRAYSCALE)
+gt = cv2.imread("sample-print-uneven-gt.png", cv2.IMREAD_GRAYSCALE) > 0
+f1 = lambda m: 2 * (m & gt).sum() / (m.sum() + gt.sum())
+
+block, C = 25, 20
+mean = cv2.boxFilter(img, -1, (block, block), borderType=cv2.BORDER_REPLICATE)   # 8-bit local mean (rounded)
+mine = img.astype(int) - mean <= -C                                              # dark object: v - mean <= -C
+ref = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, block, C) > 0
+print("identical to adaptiveThreshold:", np.array_equal(mine, ref), f"| F1 {f1(ref):.3f}")
+gauss = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block, C) > 0
+otsu = img <= cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[0]
+print(f"Gaussian F1 {f1(gauss):.3f} | global Otsu F1 {f1(otsu):.3f}")
+```
+
+Output:
+
+```text
+identical to adaptiveThreshold: True | F1 0.979
+Gaussian F1 0.976 | global Otsu F1 0.414
+```
+
+- OpenCV computes the local mean as an **8-bit** image (rounded) with replicated borders, then compares `src − mean` with `−C`. Reproducing those two details gives an identical result.
+- The Gaussian variant weights the centre of the window more; results are usually similar.
+
+### 2. Niblack and Sauvola with box filters
+
+```python
+import numpy as np
+import cv2
+
+def local_mean_std(im, block):
+    f = im.astype(np.float64)
+    m = cv2.boxFilter(f, -1, (block, block), borderType=cv2.BORDER_REPLICATE)
+    m2 = cv2.boxFilter(f * f, -1, (block, block), borderType=cv2.BORDER_REPLICATE)
+    return m, np.sqrt(np.maximum(m2 - m * m, 0))                       # std from E[x²] − E[x]²
+
+m, s = local_mean_std(img, 25)
+for k in (-0.2, -0.5):
+    print(f"Niblack k={k}: F1 {f1(img <= m + k * s):.3f}")
+for k in (0.1, 0.2, 0.34, 0.5):
+    print(f"Sauvola k={k}: F1 {f1(img <= m * (1 + k * (s / 128 - 1))):.3f}")
+flat = (~gt) & (s < 6)                                                  # plain paper: little local variation
+print(f"plain paper pixels marked: Niblack {(img <= m - 0.2 * s)[flat].mean():.1%}, Sauvola {(img <= m * (1 + 0.34 * (s / 128 - 1)))[flat].mean():.1%}")
+```
+
+Output:
+
+```text
+Niblack k=-0.2: F1 0.672
+Niblack k=-0.5: F1 0.776
+Sauvola k=0.1: F1 0.959
+Sauvola k=0.2: F1 0.979
+Sauvola k=0.34: F1 0.987
+Sauvola k=0.5: F1 0.967
+plain paper pixels marked: Niblack 43.5%, Sauvola 0.0%
+```
+
+- Niblack's weakness in one number: on plain paper, where the "spread" is only noise, it marks over 40 % of the pixels as text.
+- Box filters on x and x² give mean and standard deviation for every window at once; the cost does not depend on blockSize.
+
+### 3. The contrib implementation
+
+```python
+# Needs opencv-contrib (cv2.ximgproc)
+import numpy as np
+import cv2
+
+for name, k in [("BINARIZATION_NIBLACK", -0.2), ("BINARIZATION_SAUVOLA", 0.34), ("BINARIZATION_WOLF", 0.5), ("BINARIZATION_NICK", -0.1)]:
+    out = cv2.ximgproc.niBlackThreshold(img, 255, cv2.THRESH_BINARY_INV, 25, k,
+                                        binarizationMethod=getattr(cv2.ximgproc, name), r=128)
+    print(f"{name:22s} k={k:5}: F1 {f1(out > 0):.3f}")
+```
+
+Output:
+
+```text
+BINARIZATION_NIBLACK   k= -0.2: F1 0.647
+BINARIZATION_SAUVOLA   k= 0.34: F1 0.987
+BINARIZATION_WOLF      k=  0.5: F1 0.977
+BINARIZATION_NICK      k= -0.1: F1 0.971
+```
+
+- Wolf and NICK are later refinements of Niblack for documents. The small difference to example 2 for Niblack (0.647 vs 0.672) comes from a different border handling.
+
+## OpenCV API notes
+
+**`cv2.adaptiveThreshold(src, maxValue, adaptiveMethod, thresholdType, blockSize, C)`**: `src` 8-bit single-channel; `adaptiveMethod` `ADAPTIVE_THRESH_MEAN_C` or `ADAPTIVE_THRESH_GAUSSIAN_C`; `thresholdType` `THRESH_BINARY` or `THRESH_BINARY_INV`; `blockSize` odd ≥ 3; `C` subtracted from the local mean (can be negative). Borders replicated.
+
+**Contrib**: `cv2.ximgproc.niBlackThreshold(src, maxValue, type, blockSize, k, binarizationMethod=..., r=128)` with `BINARIZATION_NIBLACK`, `_SAUVOLA`, `_WOLF`, `_NICK`; T = mean + k · std for Niblack.
+
+**Speed**: box filters use running sums: the cost is independent of blockSize. The Gaussian variant costs more for large blocks.
+
+**scikit-image**: `threshold_local`, `threshold_niblack`, `threshold_sauvola`.
+
+## Where it fails
+
+- **Objects larger than the window**: their interior becomes background.
+- **Lighting that changes faster than the window**: sharp shadows and reflections are followed only partly.
+- **Low contrast + noise**: the faint crack of the badly lit plate stays poor (best F1 about 0.17 with adaptive Gaussian); a local threshold cannot create contrast. Smooth, use edges or fix the lighting.
+- **Empty regions**: on plain background, mean − C and Niblack still produce noise pixels; Sauvola or a minimum-contrast check helps.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **An even blockSize** (assertion error) or a block smaller than the objects.
+- **C = 0** (half the background becomes object).
+- **Wrong sign of C or k** for the polarity: for dark objects with `THRESH_BINARY_INV`, a positive C makes the test stricter.
+- **Using a local threshold for measurement** of grey levels: the mask depends on the surroundings, not just on the object.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Sauvola's formula
+
+Sauvola and Pietikäinen (2000) proposed T = m · (1 + k · (s / R − 1)) for document images, with R the dynamic range of the standard deviation (128 for 8-bit) [3]. Where the window has high contrast (s close to R), T ≈ m; on flat background (s ≪ R), T ≈ m · (1 − k), well below the mean, so noise cannot reach it. Niblack's original formula [2] was designed for text regions, which is why it struggles on large empty areas.
+
+### Integral images
+
+Shafait, Keysers and Breuel (2008) showed that the local mean and variance needed by Niblack and Sauvola can be computed with integral images (a running 2D sum, `cv2.integral`) in constant time per pixel, making Sauvola as fast as a global threshold [4]. The same idea underlies `boxFilter`.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "In cv2.adaptiveThreshold with ADAPTIVE_THRESH_MEAN_C, the threshold for each pixel is…",
+      options: ["The global mean", "The mean of its blockSize × blockSize neighbourhood minus C", "Otsu's T", "The median of the image"],
+      answer: 1,
+      explanation: "One threshold per pixel from its neighbourhood.",
+    },
+    {
+      question: "How should blockSize relate to the objects?",
+      options: ["Smaller than the objects", "Larger than the objects, smaller than lighting changes", "Always 3", "Equal to the image size"],
+      answer: 1,
+      explanation: "The window's mean should be dominated by background around the object.",
+    },
+    {
+      question: "Why does Sauvola produce fewer noise pixels on plain background than Niblack?",
+      options: ["It uses a bigger window", "On low local spread its threshold drops well below the local mean", "It blurs the image", "It ignores the mean"],
+      answer: 1,
+      explanation: "T ≈ m(1 − k) when s ≪ R.",
+    },
+    {
+      question: "Which problem can an adaptive threshold NOT fix?",
+      options: ["A light gradient", "Shading across a document", "A defect with almost no contrast in heavy noise", "Different paper brightness"],
+      answer: 2,
+      explanation: "It adapts to the background, but cannot create contrast that is not there.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 3 × 3 neighbourhood has values 200, 200, 200, 200, 150, 200, 200, 200, 200. With the mean − C rule and C = 10, is the centre an object (dark)? With C = 50?
+
+<Solution>
+
+Mean = (8 · 200 + 150) / 9 = **194.4** (8-bit: 194). C = 10: T = 184, 150 ≤ 184 → **object**. C = 50: T = 144, 150 > 144 → **background**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Find the blockSize (from 11, 15, 21, 25, 31, 41, 51) and k (from 0.2, 0.3, 0.34, 0.4) that give the best Sauvola F1 on the label, and print it.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+best = (0, None, None)
+for block in (11, 15, 21, 25, 31, 41, 51):
+    m, s = local_mean_std(img, block)
+    for k in (0.2, 0.3, 0.34, 0.4):
+        score = f1(img <= m * (1 + k * (s / 128 - 1)))
+        if score > best[0]:
+            best = (score, block, k)
+print(f"best F1 {best[0]:.3f} with blockSize {best[1]}, k {best[2]}")
+```
+
+Output:
+
+```text
+best F1 0.991 with blockSize 51, k 0.4
+```
+
+The best pair lies at the edge of the grid (largest block, largest k), so the grid should be extended before trusting it. A grid search on labelled images is the honest way to set local-threshold parameters; then check that neighbouring values give nearly the same score (here 0.987 to 0.991 over a wide range), so the choice is not fragile.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 10.3 (variable thresholding).
+2. W. Niblack, *An Introduction to Digital Image Processing*, Prentice Hall, 1986.
+3. J. Sauvola, M. Pietikäinen, "Adaptive document image binarization", *Pattern Recognition* 33(2), 225–236, 2000.
+4. F. Shafait, D. Keysers, T. M. Breuel, "Efficient implementation of local adaptive thresholding techniques using integral images", *Proc. SPIE Document Recognition and Retrieval XV*, 6815, 2008.
+5. OpenCV 4.13.0 documentation: `adaptiveThreshold`, `ximgproc::niBlackThreshold`. https://docs.opencv.org/4.13.0/

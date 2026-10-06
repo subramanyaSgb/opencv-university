@@ -1,0 +1,473 @@
+export const meta = {
+  number: "2.10",
+  title: "Area-scan vs line-scan cameras",
+  minutes: 40,
+  objectives: [
+    "Explain how area-scan and line-scan cameras form images",
+    "Compute resolution across and along the motion for a line-scan camera",
+    "Choose a line rate (or encoder triggering) for square pixels",
+    "Estimate frames, frame rate and data rates for both camera types",
+    "Choose the right camera type for a given industrial task",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 2.10 (Module 2 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 2.10 Area-scan vs line-scan cameras
+
+<Definition term="Line-scan camera">a camera with one row of pixels that builds an image line by line while the object moves past.</Definition>
+
+Every camera so far had a **rectangle** of pixels and took **frames**: an **area-scan** camera. There is a second family, built for objects that move continuously: the **line-scan** camera. It works like a **document scanner** or **photocopier**, except the paper moves instead of the scanner.
+
+<Columns>
+<Panel title="Area-scan" tone="a">
+<Flow steps={["2D sensor (e.g. 2448 × 2048)", "One exposure", { label: "One frame", tone: "result" }]} />
+</Panel>
+<Panel title="Line-scan" tone="b">
+<Flow steps={["1D sensor (e.g. 4096 × 1)", "One line per exposure, object moves", { label: "Image of any length", tone: "result" }]} />
+</Panel>
+</Columns>
+
+## 1. Area-scan: what we know so far
+
+An **area-scan** camera exposes a 2D grid of pixels and delivers **frames**. Each frame is a snapshot of a rectangular field of view (2.4). It is the natural choice for **discrete parts**: a billet end, a label, a person, a bundle of rods.
+
+## 2. Line-scan: one line at a time
+
+A **line-scan** camera has a sensor with **one row** of pixels (sometimes a few rows). It sees a **thin line** across the object. As the object moves under it, the camera takes line after line, and the computer stacks them into an image.
+
+<LineScanSketch />
+
+The motion of the object provides the **second dimension** of the image.
+
+## 3. Why use a line-scan camera?
+
+<Chips items={["Continuous objects: strip, sheet, paper, film, textiles", "Very long objects: rails, slabs, pipes", "Very high resolution across: 4k, 8k, 16k pixels", "No stitching of overlapping frames", "Even lighting along one line"]} />
+
+Area-scan cameras can do these jobs too, but they must take many overlapping frames and **stitch** them, and lighting a whole rectangle evenly is harder than lighting a line.
+
+## 4. Resolution across the motion
+
+Across the line, it works like 2.4:
+
+```text
+across (mm/px) = field-of-view width ÷ number of pixels
+```
+
+A **1500 mm** wide strip seen by a **4096-pixel** line: 1500 / 4096 = **0.366 mm/px**.
+
+## 5. Resolution along the motion
+
+Along the motion, the pixel size is **how far the object moves between two lines**:
+
+```text
+along (mm/line) = speed ÷ line rate
+```
+
+At **5 m/s** and **10 000 lines per second** (10 kHz), each line is 5000 / 10 000 = **0.5 mm** apart.
+
+## 6. Square pixels
+
+For an undistorted image, both should match: **along = across**. Solve for the line rate:
+
+<Equation
+  terms={[
+    { value: "5000 mm/s", label: "speed" },
+    { op: "÷", value: "0.366 mm", label: "across" },
+    { op: "=", value: "13.65 kHz", label: "line rate", result: true },
+  ]}
+/>
+
+That is a new line every **73 µs**.
+
+## 7. Wrong line rate: stretched or squashed
+
+If the line rate is too **low** for the speed, the object moves more than a pixel between lines: the image is **squashed** along the motion and detail is lost. If it is too **high**, the image is **stretched**.
+
+**Try it.** The camera sees 320 mm across with 320 pixels (1 mm/px).
+
+<LineScanLab caption="The scanned image of the test chart. Grey area at the bottom: the object has already passed. Turn on encoder triggering to keep the pixels square at any speed." />
+
+## 8. Encoders: follow the real speed
+
+Conveyors speed up and slow down. A fixed line rate then gives a stretched image when slow and a squashed one when fast. The fix: an **encoder** (a rotary sensor on a roller) sends a pulse every fixed distance, and the camera takes **one line per pulse**. The along-track resolution is then fixed in millimetres, whatever the speed.
+
+<Flow direction="right" steps={["Roller turns", "Encoder pulse every 0.366 mm", "Camera takes one line", { label: "Square pixels at any speed", tone: "result" }]} />
+
+## 9. Exposure in line-scan cameras
+
+Each line must be exposed **within one line period**: at 13.65 kHz, at most **73 µs**. That is very little time to collect light (2.5, 2.6), so line-scan systems need **very bright, focused line lights**, often LED bars concentrating light onto the thin line the camera sees.
+
+## 10. TDI: more light from more rows
+
+A **TDI** (time delay integration) sensor has many rows, say 64 or 128. As the object moves, the charge is shifted from row to row **in step with the motion**, so each point of the object is exposed many times and the signals add up. More signal, same speed. It needs an accurate encoder: if the shifting and the motion are out of step, the image blurs.
+
+## 11. Data rates
+
+Line-scan cameras produce a lot of data:
+
+<Equation terms={[{ value: "4096 px", label: "per line" }, { op: "×", value: "13 650", label: "lines/s" }, { op: "=", value: "56 MB/s", label: "8-bit", result: true }, { op: "≈", value: "201 GB", label: "per hour", result: true }]} />
+
+High-end line-scan cameras with 16k pixels and line rates in the hundreds of kHz need fast interfaces (for example CoaXPress or Camera Link) and processing that keeps up in real time.
+
+## 12. Area-scan for long objects
+
+You can inspect a long slab with an area-scan camera by taking **overlapping frames**. With a 500 mm view along the motion and 20 % overlap, each frame advances 400 mm: a 12 m slab needs **30 frames**, and at 1.5 m/s the camera must run at **3.75 fps** (Code example 3). Then software stitches or analyses frame by frame.
+
+## 13. Lighting differences
+
+<VsTable
+  left="Area-scan"
+  right="Line-scan"
+  rows={[
+    ["Must light a whole rectangle evenly", "Must light only a thin line, very brightly"],
+    ["Ring lights, dome lights, back lights, bar lights", "Line lights, focused LED bars"],
+    ["Uneven light shows as darker corners", "Uneven light shows as darker columns (correct with a flat field, 2.8)"],
+  ]}
+/>
+
+## 14. Setup and alignment
+
+A line-scan camera's line must be **exactly** across the motion and **in focus along its whole length**. Small tilts make diagonal stripes; vibration of the conveyor makes wavy images. Area-scan cameras are more forgiving to set up.
+
+## 15. Summary table
+
+| | Area-scan | Line-scan |
+| --- | --- | --- |
+| Sensor | 2D, e.g. 2448 × 2048 | 1D (or a few rows), e.g. 4096 × 1 |
+| Needs motion | No | Yes, steady and known (encoder) |
+| Best for | Discrete parts, scenes, people | Continuous or very long objects, webs |
+| Resolution across | Up to ~5–8k px | Up to 16k px and more |
+| Lighting | Area lighting | Intense line lighting |
+| Setup | Simpler | Alignment and synchronization critical |
+| Output | Frames | Endless stream of lines, cut into images |
+
+## 16. Industrial examples
+
+<Columns>
+<Panel title="Line-scan" tone="b">
+Hot or cold **strip surface inspection** in rolling mills, **rail** and **pipe** inspection, paper and film webs, wide plate defect detection.
+</Panel>
+<Panel title="Area-scan" tone="a">
+**Billet and slab ID** reading, **rod counting** at the bundle end, ladle and burden monitoring, safety monitoring, robot guidance, measurement of discrete parts.
+</Panel>
+</Columns>
+
+## 17. How to choose
+
+<Flow
+  steps={[
+    { label: "Is the object continuous or very long?", tone: "world" },
+    { label: "Yes → is its motion steady and measurable (encoder)?", tone: "process" },
+    { label: "Yes → line-scan (high resolution across, no stitching)", tone: "result" },
+    { label: "No, or discrete parts → area-scan", tone: "result" },
+  ]}
+/>
+
+## 18. Module 2 complete
+
+You now know how a camera forms an image: light and the pinhole model, lenses and focus, aperture and depth of field, field of view and mm per pixel, the sensor and its noise, exposure and motion blur, colour filters, the ISP, shutters and flicker, and the two camera families.
+
+<CameraChain
+  direction="right"
+  steps={[
+    { icon: "light", label: "Light" },
+    { icon: "lens", label: "Lens" },
+    { icon: "sensor", label: "Sensor" },
+    { icon: "isp", label: "ISP" },
+    { icon: "image", label: "Image" },
+    { icon: "numbers", label: "Pixels you can trust" },
+  ]}
+/>
+
+## What you should remember from 2.10
+
+<Takeaways>
+<Takeaway n={1} title="Area-scan">2D sensor, frames: discrete parts and scenes.</Takeaway>
+<Takeaway n={2} title="Line-scan">1D sensor; the object's motion builds the second dimension.</Takeaway>
+<Takeaway n={3} title="Two resolutions">Across = FOV ÷ pixels; along = speed ÷ line rate.</Takeaway>
+<Takeaway n={4} title="Square pixels">Line rate = speed ÷ across resolution; use an encoder when speed varies.</Takeaway>
+<Takeaway n={5} title="Costs">Short line periods need intense line lights; data rates are high.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 2048-pixel line-scan camera sees 800 mm across. What is the resolution across?
+
+<Solution>
+
+800 / 2048 ≈ **0.39 mm/px**.
+
+</Solution>
+
+**Q2.** The conveyor moves at 2 m/s. Which line rate gives square pixels?
+
+<Solution>
+
+2000 / 0.39 ≈ **5.1 kHz** (5120 lines/s with the exact 0.390625 mm).
+
+</Solution>
+
+**Q3.** The line rate is set to 2.5 kHz by mistake. What does the image look like?
+
+<Solution>
+
+Each line is 2000 / 2500 = 0.8 mm apart, about 2× the across resolution: the image is **squashed** to half its length along the motion, and detail along the motion is lost.
+
+</Solution>
+
+**Q4.** Why use an encoder instead of a fixed line rate?
+
+<Solution>
+
+Conveyor speed varies. With encoder triggering, the camera takes one line per fixed distance travelled, so the along-track resolution stays constant.
+
+</Solution>
+
+**Q5.** Area-scan or line-scan for reading a painted ID on the end of each billet? For finding scratches on a 1.8 m wide moving strip?
+
+<Solution>
+
+Billet end ID: **area-scan** (a discrete part). Strip scratches: **line-scan** (continuous, wide, high resolution across).
+
+</Solution>
+
+### Next: Module 3 — Digital images
+
+We now have pixels we can trust. Module 3 looks at those pixels as data: **sampling and resolution**, **quantization and bit depth**, **channels**, **coordinates**, **aliasing** and **neighbours**.
+
+## Code
+
+Three calculations: line rate and data rate for square pixels, a simulated line-scan capture with the wrong line rate (and its correction), and covering a long slab with area-scan frames.
+
+### 1. From scratch: line rate and data rate
+
+```python
+import numpy as np
+
+strip_width = 1500.0      # mm across the line
+pixels = 4096             # line-scan sensor length
+speed = 5.0               # m/s along the line
+
+cross = strip_width / pixels                    # mm per pixel across
+line_rate = speed * 1000 / cross                # lines per second for square pixels
+data = pixels * line_rate                       # bytes per second at 8 bits per pixel
+print(f"across: {cross:.3f} mm/px")
+print(f"line rate for square pixels: {line_rate / 1000:.2f} kHz (line period {1e6 / line_rate:.1f} us)")
+print(f"data rate: {data / 1e6:.0f} MB/s, {data * 3600 / 1e9:.0f} GB per hour")
+```
+
+Output:
+
+```text
+across: 0.366 mm/px
+line rate for square pixels: 13.65 kHz (line period 73.2 us)
+data rate: 56 MB/s, 201 GB per hour
+```
+
+- The line period is also the **longest possible exposure**: 73 µs here.
+- At 201 GB per hour, systems usually analyse the stream on the fly and store only defects.
+
+### 2. Simulated line-scan capture, wrong line rate, and the fix
+
+```python
+import numpy as np
+import cv2
+
+# a long object passing under a line-scan camera: the "true" object, 1 px = 1 mm both ways
+obj = cv2.imread("sample-pinhole-scene.png", cv2.IMREAD_GRAYSCALE)   # rows = along the motion
+true_rows = obj.shape[0]
+
+def scan(speed_mm_s, line_rate_hz):
+    # the camera grabs one row every 1/line_rate s; the object moves speed/line_rate mm per line
+    step = speed_mm_s / line_rate_hz                     # mm (= true rows) travelled per line
+    positions = np.arange(0, true_rows, step)
+    return obj[np.minimum(positions.astype(int), true_rows - 1)]
+
+for speed in [1000, 2000, 500]:                          # mm/s; line rate fixed at 1 kHz
+    img = scan(speed, 1000)
+    print(f"speed {speed:4d} mm/s: image {img.shape[1]} x {img.shape[0]} px (true 320 x {true_rows})")
+
+stretched = scan(500, 1000)
+fixed = cv2.resize(stretched, (obj.shape[1], true_rows), interpolation=cv2.INTER_AREA)
+print("after resize:", fixed.shape, " mean abs difference:", round(float(np.abs(fixed.astype(int) - obj).mean()), 2))
+```
+
+Output:
+
+```text
+speed 1000 mm/s: image 320 x 200 px (true 320 x 200)
+speed 2000 mm/s: image 320 x 100 px (true 320 x 200)
+speed  500 mm/s: image 320 x 400 px (true 320 x 200)
+after resize: (200, 320)  mean abs difference: 0.0
+```
+
+- At 1 kHz, only 1 m/s gives square pixels. Twice the speed halves the image length (squashed); half the speed doubles it (stretched).
+- A **stretched** image can be resized back without loss (here exactly, because each line was repeated twice). A **squashed** one has lost rows: resizing cannot bring the detail back.
+- `cv2.resize(img, (width, height))` takes the size as **(width, height)**, not (rows, columns). `INTER_AREA` is the usual choice for shrinking.
+
+### 3. Covering a long slab with area-scan frames
+
+```python
+import numpy as np
+
+slab_len = 12_000      # mm
+fov_along = 500        # mm seen along the motion per area-scan frame
+overlap = 0.2          # 20 % overlap between frames for stitching
+speed = 1.5            # m/s
+
+advance = fov_along * (1 - overlap)
+frames = int(np.ceil((slab_len - fov_along) / advance)) + 1
+fps = speed * 1000 / advance
+print(f"each new frame advances {advance:.0f} mm")
+print(f"frames per slab: {frames}, frame rate needed: {fps:.2f} fps")
+```
+
+Output:
+
+```text
+each new frame advances 400 mm
+frames per slab: 30, frame rate needed: 3.75 fps
+```
+
+- The first frame covers 500 mm; each further frame adds 400 mm. (12 000 − 500) / 400 rounded up, plus 1, is 30.
+- A low frame rate is easy for an area-scan camera; the harder parts are the even lighting over 500 mm and the stitching.
+
+## OpenCV API notes
+
+**`cv2.resize(src, dsize[, fx, fy, interpolation])`**: `dsize = (width, height)`. Interpolation: `INTER_AREA` for shrinking, `INTER_LINEAR` or `INTER_CUBIC` for enlarging, `INTER_NEAREST` to keep exact values.
+
+**Building line-scan images**: line-scan SDKs deliver blocks of lines (for example 1024 lines per buffer). Stack them with `np.vstack` or write them into a preallocated array; process overlapping blocks so defects on block boundaries are not missed.
+
+**Stitching area-scan frames**: for calibrated, known motion, place frames by their encoder position. OpenCV's `cv2.Stitcher` is designed for panoramas from hand-held cameras and is usually not the right tool for conveyor images.
+
+## Where it fails
+
+- **Unsteady motion** (slip, vibration, speed changes without an encoder) distorts line-scan images; sideways wander shows as wavy edges.
+- **Stopping objects**: a line-scan camera sees nothing new while the object stands still.
+- **Very bright line lighting** heats nearby parts and needs good cooling; in hot plants the camera also needs protection.
+- **Discrete parts with gaps** waste line-scan data and need extra logic to find each part in the stream.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Running a line-scan camera at a fixed line rate on a variable-speed line.**
+- **Forgetting that exposure ≤ line period.** High line rates need much more light.
+- **Ignoring data rates and storage** when choosing pixels and line rate.
+- **Using area-scan with too little overlap**, so defects on frame borders are missed or cut in half.
+- **Mixing up (width, height) in `cv2.resize`.**
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### TDI sensors
+
+Time delay integration shifts accumulated charge along N rows synchronously with the image motion, giving about N times the signal and √N better shot-noise SNR than a single row at the same line rate. The shift must match the motion; a mismatch smears the image [1].
+
+### Contact image sensors
+
+Contact image sensors (CIS) combine a full-width line of sensors and a lens array with no conventional lens, placed millimetres from the object; they are used for flat, close objects such as banknotes and print inspection [2].
+
+### Line-scan geometry
+
+Line-scan cameras have a perspective geometry across the line and an orthographic, motion-defined geometry along it. Calibrating them needs a model of the motion as well as the lens [1][3].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What provides the second dimension of a line-scan image?",
+      options: ["A second sensor", "The motion of the object", "The lens", "Software interpolation"],
+      answer: 1,
+      explanation: "Each exposure captures one line; the object's motion places successive lines next to each other.",
+    },
+    {
+      question: "Across resolution 0.5 mm/px, speed 3 m/s. Line rate for square pixels?",
+      options: ["1.5 kHz", "6 kHz", "600 Hz", "15 kHz"],
+      answer: 1,
+      explanation: "3000 mm/s ÷ 0.5 mm = 6000 lines/s.",
+    },
+    {
+      question: "The line rate is too low for the speed. The image is…",
+      options: ["Stretched", "Squashed, with lost detail along the motion", "Blurred across", "Unchanged"],
+      answer: 1,
+      explanation: "The object moves more than one pixel between lines, so rows are skipped.",
+    },
+    {
+      question: "Why do line-scan systems usually need very bright lighting?",
+      options: ["Line-scan sensors are less sensitive", "Each line's exposure must fit in a very short line period", "They use colour filters", "To avoid flicker"],
+      answer: 1,
+      explanation: "At tens of kHz the exposure is tens of microseconds.",
+    },
+    {
+      question: "Which task suits an area-scan camera best?",
+      options: ["Scratches on a 2 m wide moving strip", "Reading the ID painted on a billet end", "Inspecting 1 km of rail", "Paper web defects"],
+      answer: 1,
+      explanation: "A discrete part seen in one view: area-scan.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 8192-pixel line-scan camera inspects a 2000 mm wide plate moving at 1.2 m/s. (a) Across resolution? (b) Line rate for square pixels? (c) Longest exposure? (d) Data rate at 8 bits?
+
+<Solution>
+
+(a) 2000 / 8192 ≈ **0.244 mm/px**. (b) 1200 / 0.244 ≈ **4.9 kHz** (4915 lines/s). (c) 1 / 4915 s ≈ **203 µs**. (d) 8192 × 4915 ≈ **40 MB/s**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+An encoder gives 2000 pulses per revolution on a roller of 150 mm diameter. Compute the distance per pulse, and how many pulses to skip between lines (divider) to get as close as possible to 0.366 mm per line.
+
+<Solution>
+
+```python
+import numpy as np
+
+per_pulse = np.pi * 150.0 / 2000          # roller circumference / pulses
+target = 0.366
+divider = max(1, round(target / per_pulse))
+print(f"{per_pulse:.4f} mm per pulse; divider {divider} -> {divider * per_pulse:.4f} mm per line")
+```
+
+Output:
+
+```text
+0.2356 mm per pulse; divider 2 -> 0.4712 mm per line
+```
+
+A divider of 2 gives 0.471 mm per line: pixels 1.29× longer along the motion than across. For a closer match use an encoder with a different resolution, a camera with a fractional encoder divider/multiplier, or resize the image afterwards.
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+A 20 m rail moves at 0.8 m/s past an area-scan camera that sees 600 mm along the rail. With 15 % overlap, how many frames per rail and what frame rate?
+
+<Solution>
+
+Advance per frame 600 × 0.85 = 510 mm. Frames: (20 000 − 600) / 510 = 38.04 → 39, plus 1 = **40 frames**. Frame rate 800 / 510 ≈ **1.57 fps**.
+
+</Solution>
+
+## References
+
+1. C. Steger, M. Ulrich and C. Wiedemann, *Machine Vision Algorithms and Applications*, 2nd ed. Wiley-VCH, 2018. Ch. 2 (cameras: area-scan and line-scan, TDI) and Ch. 3 (line-scan camera calibration).
+2. B. G. Batchelor (ed.), *Machine Vision Handbook*. Springer, 2012.
+3. R. Gupta and R. I. Hartley, "Linear pushbroom cameras," *IEEE Transactions on Pattern Analysis and Machine Intelligence*, vol. 19, no. 9, pp. 963–975, 1997.
+4. OpenCV 4.13.0 documentation, *Geometric Image Transformations* (`resize`): [docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html](https://docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html).

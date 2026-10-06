@@ -1,0 +1,497 @@
+export const meta = {
+  number: "4.6",
+  title: "Metadata and watermarking",
+  minutes: 35,
+  objectives: [
+    "Read and write EXIF metadata with OpenCV and handle the orientation tag",
+    "Decide what to record with every inspection image, and where",
+    "Explain visible, fragile and robust watermarks, and their limits",
+    "Prove that an image has not been changed, with a hash",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 4.6 (Module 4 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+  imreadWithMetadata / imwriteWithMetadata format support (JPEG, PNG, WebP, AVIF yes; TIFF no) checked on 4.13.0.
+*/}
+
+# 4.6 Metadata and watermarking
+
+<Definition term="Metadata and watermarks">metadata is information stored **next to** the pixels (camera, time, orientation); a watermark is information hidden **in** the pixels themselves.</Definition>
+
+A pixel array alone does not say when, where or how it was taken. For inspection that context is often as important as the image: which part, which camera, which settings, which result. This chapter covers where that information lives, how it gets lost, and how to mark or protect the images themselves.
+
+## 1. An analogy
+
+A parcel. **Metadata** is the label on the box: sender, date, contents. It is easy to read, easy to change and easy to lose if someone repacks the parcel. A **watermark** is a pattern woven into the cloth inside: hard to see, travels with the cloth, and survives repacking, unless the cloth is cut up badly enough.
+
+## 2. What metadata files carry
+
+<Chips items={["EXIF: camera, lens, exposure time, ISO/gain, date and time, orientation, GPS", "XMP: flexible XML (keywords, ratings, editing history)", "ICC profile: what the colour numbers mean", "PNG text chunks", "TIFF tags (resolution, description, custom tags)", "Video: timestamps, frame rate, codec (4.5)"]} />
+
+**EXIF** (Exchangeable image file format) is the most common. It is stored inside JPEG, and also in PNG, WebP, AVIF and TIFF files, as a small TIFF-like table of numbered **tags**: tag 0x0112 is *Orientation*, 0x010E *ImageDescription*, and so on.
+
+## 3. The orientation trap
+
+Phones and some cameras don't rotate the pixels when you hold them sideways; they store the pixels as the sensor read them and set the **Orientation** tag (for example 6 = "rotate 90° clockwise to display").
+
+`cv2.imread` **applies the orientation by default**. So the same file gives different shapes *(Code example 1)*:
+
+| How it was read | Shape |
+| --- | --- |
+| `cv2.imread(path)` | (320, 200, 3): rotated |
+| `cv2.imread(path, cv2.IMREAD_COLOR \| cv2.IMREAD_IGNORE_ORIENTATION)` | (200, 320, 3): as stored |
+
+Another program may do the opposite. If a calibration (2.4) or ROI (3.4) was made on one and used on the other, every coordinate is wrong. Fixed industrial cameras rarely set this tag, but images from **phones** used for datasets or field inspections often do.
+
+## 4. Reading and writing metadata in OpenCV
+
+OpenCV 4.13 has `cv2.imreadWithMetadata` and `cv2.imwriteWithMetadata` (and `imdecodeWithMetadata` / `imencodeWithMetadata` for memory buffers). They return or take the raw EXIF bytes; OpenCV does not interpret the tags for you *(Code example 1)*.
+
+**Plain `cv2.imwrite` writes no metadata.** Loading a phone photo and saving it again drops its EXIF, including the orientation, while the pixels have already been rotated: the saved file now looks right everywhere. Usually fine; but the camera, time and exposure information is gone.
+
+<Flow
+  steps={[
+    { label: "Phone JPEG: pixels + EXIF (orientation 6, time, GPS)", tone: "world" },
+    { label: "cv2.imread: rotates, drops EXIF", tone: "process" },
+    { label: "cv2.imwrite: pixels only", tone: "process" },
+    { label: "New file: upright, no camera, time or GPS", tone: "result" },
+  ]}
+/>
+
+## 5. What to record with inspection images
+
+For traceability, the image is only useful with its context. A practical minimum:
+
+<Columns>
+<Panel title="Always" tone="a">
+
+- Time (UTC, milliseconds) from a **synchronised** clock
+- Line, station, camera serial number
+- Part / lot / batch ID
+- Exposure, gain, light settings
+- Software and recipe version
+- Result (OK / NOK, measured values)
+
+</Panel>
+<Panel title="Where" tone="b">
+
+- **Database** row or **sidecar** JSON next to the image (easy to query, survives format changes)
+- File **name**: ID and time, so files sort and are findable
+- Optionally inside the file (EXIF / TIFF tags), but don't rely on it: many tools drop it
+
+</Panel>
+</Columns>
+
+*(Code example 4 writes a sidecar JSON.)*
+
+## 6. Privacy
+
+EXIF from phones can contain **GPS position**, device serial numbers and owner names. Strip metadata before sharing images outside the company (re-saving with plain `cv2.imwrite` does this). Pixels can also carry personal data: faces and licence plates in camera views need the same care as any personal data under your local rules.
+
+## 7. Watermarks: information in the pixels
+
+<VsTable
+  left="Visible watermark"
+  right="Invisible watermark"
+  rows={[
+    ["Logo or text drawn on the image", "Tiny changes, not visible"],
+    ["Shows ownership at a glance", "Proves ownership or origin when checked with a key"],
+    ["Easy to crop or paint out", "Must survive (robust) or deliberately break (fragile)"],
+    ["cv2.putText + cv2.addWeighted", "LSB, spread spectrum, DCT-domain methods"],
+  ]}
+/>
+
+**Fragile** watermarks break at the smallest change: they prove an image was **not** modified. **Robust** watermarks survive compression, scaling and cropping: they prove where an image came from.
+
+## 8. A fragile mark: the lowest bit
+
+Every 8-bit value has 8 **bit planes** (3.2). Bit 7 carries the coarse picture; bit 0 changes the value by only 1 level and looks like noise. Replacing bit 0 with a message hides it with a maximum change of **1 level** (PSNR 51.1 dB) *(Code example 2)*:
+
+| After hiding "LOT 4711" in bit 0 | Mark bits correct |
+| --- | --- |
+| Saved as PNG | 100.0 % |
+| Saved as JPEG q95 | 50.2 % (random) |
+| Saved as JPEG q75 | 50.0 % (random) |
+
+JPEG rounds away exactly these smallest details (4.3): even at quality 95 the mark is completely gone. That makes LSB marks **fragile**: good for detecting changes, useless for proving origin after sharing.
+
+## 9. Try it
+
+<BitPlaneLab caption="Each pixel's 8 bits, one plane at a time. Hide a mark in bit 0, then save as PNG or JPEG (encoded by your browser) and look at bit 0 again." />
+
+## 10. A robust mark: spread spectrum
+
+Instead of one bit, add a secret pattern of +3 / −3 to **every** pixel, generated from a key (a random seed). To check an image, correlate its fine texture with the pattern for that key: a high score means the mark is there *(Code example 3)*:
+
+| Image | Score | × spread for wrong keys |
+| --- | --- | --- |
+| Original (no mark) | −0.00 | −0.1 |
+| Marked (PSNR 38.6 dB) | 2.57 | 40.6 |
+| Marked, JPEG q90 | 1.36 | 21.3 |
+| Marked, JPEG q75 | 0.65 | 9.6 |
+| Marked, JPEG q50 | 0.29 | 4.8 |
+
+The mark weakens but stays clearly above the level of a wrong key, even at quality 50. Real robust schemes also survive scaling, rotation and cropping, which this simple one does not [2].
+
+## 11. Proving an image is unchanged: hashes
+
+For evidence and audits, a **cryptographic hash** (for example SHA-256) of the pixel bytes is simpler and stronger than a fragile watermark: change one bit of one pixel and the hash is completely different *(Code example 4)*. Store the hash in the database at capture time; anyone can re-compute it later. A **digital signature** over the hash also proves who created it.
+
+## 12. Industrial example
+
+<Flow
+  steps={[
+    { label: "Capture: 16-bit PNG, file name = line_time_partID", tone: "world" },
+    { label: "Database: time, camera, settings, lot, recipe, result", tone: "data" },
+    { label: "SHA-256 of pixels stored with the record", tone: "process" },
+    { label: "Images shared with a customer: visible logo, metadata stripped", tone: "process" },
+    { label: "Audit: re-compute hash = proof the image is original", tone: "result" },
+  ]}
+/>
+
+## What you should remember from 4.6
+
+<Takeaways>
+<Takeaway n={1} title="Metadata">EXIF, XMP, ICC, tags: context next to the pixels; easily lost when re-saving.</Takeaway>
+<Takeaway n={2} title="Orientation">imread applies EXIF orientation by default; IMREAD_IGNORE_ORIENTATION reads as stored.</Takeaway>
+<Takeaway n={3} title="Traceability">Record time, camera, settings, IDs, versions and result in a database or sidecar file.</Takeaway>
+<Takeaway n={4} title="Watermarks">Visible, fragile (LSB) or robust (spread spectrum); JPEG kills LSB marks.</Takeaway>
+<Takeaway n={5} title="Integrity">A SHA-256 hash of the pixels proves an image is unchanged.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A phone photo opens as 4000 × 3000 in one program and 3000 × 4000 in OpenCV. Why?
+
+<Solution>
+
+The file has an EXIF **orientation** tag. OpenCV applies it by default; the other program does not (or the reverse).
+
+</Solution>
+
+**Q2.** Hide a 1 in the LSB of the value 154, and a 0 in the LSB of 155. What is stored?
+
+<Solution>
+
+154 = 1001 1010 (bit 0 is 0) → 1001 1011 = **155**. 155 = 1001 1011 → 1001 1010 = **154**. Each changes by 1 level.
+
+</Solution>
+
+**Q3.** Why is a hash better than an LSB watermark for proving an image is unchanged?
+
+<Solution>
+
+The hash does not change the pixels at all, detects any change, and cannot be "repaired" by someone who rewrites the LSBs. It must be stored separately (database), which is also where the other context lives.
+
+</Solution>
+
+### Next: 5.1 Images as matrices
+
+Module 5 builds the maths toolkit for the rest of the course, starting with the image as a matrix you can add, multiply and slice.
+
+## Code
+
+Four examples: EXIF orientation and metadata, an LSB mark, a spread-spectrum mark, and a sidecar record with a hash. Copy the sample images next to the script.
+
+### 1. OpenCV: EXIF orientation and metadata
+
+```python
+import struct
+import numpy as np
+import cv2
+
+def make_exif(orientation, description):
+    """Minimal EXIF block (little-endian TIFF): ImageDescription (0x010E) and Orientation (0x0112)."""
+    desc = description.encode("ascii") + b"\0"
+    ifd = struct.pack("<H", 2)                                           # 2 entries
+    ifd += struct.pack("<HHII", 0x010E, 2, len(desc), 8 + 2 + 2 * 12 + 4)  # ASCII text, stored after the IFD
+    ifd += struct.pack("<HHIHH", 0x0112, 3, 1, orientation, 0)          # SHORT value, stored in the entry
+    ifd += struct.pack("<I", 0)                                         # no further IFD
+    return np.frombuffer(b"II*\0" + struct.pack("<I", 8) + ifd + desc, np.uint8)
+
+img = cv2.imread("sample-color.png")                                     # 200 x 320
+cv2.imwriteWithMetadata("tagged.jpg", img, [cv2.IMAGE_METADATA_EXIF], [make_exif(6, "line 3, camera 2")])
+
+print("imread                 :", cv2.imread("tagged.jpg").shape)       # EXIF orientation applied
+print("IMREAD_IGNORE_ORIENT.  :", cv2.imread("tagged.jpg", cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION).shape)
+pixels, types, chunks = cv2.imreadWithMetadata("tagged.jpg")
+exif = chunks[0].tobytes()
+print("metadata types         :", [int(t) for t in types], "(0 = EXIF),", len(exif), "bytes")
+print("description in EXIF    :", exif[exif.find(b"line"):exif.find(b"\0", exif.find(b"line"))].decode())
+cv2.imwrite("resaved.jpg", pixels)                                       # plain imwrite: metadata is gone
+print("after plain imwrite    :", [int(t) for t in cv2.imreadWithMetadata("resaved.jpg")[1]], "(no metadata)")
+```
+
+Output:
+
+```text
+imread                 : (320, 200, 3)
+IMREAD_IGNORE_ORIENT.  : (200, 320, 3)
+metadata types         : [0] (0 = EXIF), 55 bytes
+description in EXIF    : line 3, camera 2
+after plain imwrite    : [] (no metadata)
+```
+
+- EXIF is a small TIFF structure: a byte-order mark (`II` = little-endian), then a table of 12-byte entries (tag, type, count, value or offset). `struct.pack("<HHII", …)` writes such fields in little-endian order.
+- Type 2 = ASCII text, type 3 = 16-bit SHORT. Values that fit in 4 bytes are stored in the entry itself.
+- In practice use a library (`piexif`, `exifread`, Pillow's `getexif()`) to read and edit tags; this example only shows what is inside.
+- With OpenCV 4.13.0, EXIF writing worked for JPEG, PNG, WebP and AVIF; for TIFF it printed a warning and wrote none.
+
+### 2. From scratch: a fragile LSB mark
+
+```python
+import numpy as np
+import cv2
+
+gray = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+mark = np.zeros_like(gray)
+cv2.putText(mark, "LOT 4711", (40, 120), cv2.FONT_HERSHEY_SIMPLEX, 1.6, 1, 4)     # 1 = bit set
+stego = (gray & 0xFE) | mark                                                      # replace bit 0 with the mark
+
+def recovered(img):
+    return 100 * np.mean((img & 1) == mark)
+
+print(f"max pixel change   : {np.abs(stego.astype(int) - gray).max()} level, PSNR {cv2.PSNR(gray, stego):.1f} dB")
+print(f"after PNG          : {recovered(cv2.imdecode(cv2.imencode('.png', stego)[1], 0)):5.1f} % of mark bits correct")
+for q in [95, 75]:
+    dec = cv2.imdecode(cv2.imencode(".jpg", stego, [cv2.IMWRITE_JPEG_QUALITY, q])[1], 0)
+    print(f"after JPEG q{q}     : {recovered(dec):5.1f} % of mark bits correct")
+```
+
+Output:
+
+```text
+max pixel change   : 1 level, PSNR 51.1 dB
+after PNG          : 100.0 % of mark bits correct
+after JPEG q95     :  50.2 % of mark bits correct
+after JPEG q75     :  50.0 % of mark bits correct
+```
+
+- `gray & 0xFE` clears bit 0 (0xFE = 11111110); `| mark` sets it where the mark is 1.
+- `cv2.putText(..., color=1, ...)` draws with value 1 so the text is directly a 0/1 mask.
+- 50 % correct = coin flipping: no information left.
+
+### 3. From scratch: a robust spread-spectrum mark
+
+```python
+import numpy as np
+import cv2
+
+gray = cv2.imread("sample-pinhole-scene.png", cv2.IMREAD_GRAYSCALE)
+key = np.random.default_rng(seed=4711).choice([-1.0, 1.0], size=gray.shape)       # the secret pattern (the "key")
+marked = np.clip(gray + 3 * key, 0, 255).astype(np.uint8)                          # add +-3 levels everywhere
+
+def detect(img, k=key):
+    f = img.astype(np.float32)
+    detail = f - cv2.GaussianBlur(f, (5, 5), 0)                                    # drop the picture, keep fine texture
+    return float(np.mean(detail * k))                                              # correlation with the key
+
+others = [np.random.default_rng(seed=s).choice([-1.0, 1.0], size=gray.shape) for s in range(20)]
+print(f"PSNR of the marked image: {cv2.PSNR(gray, marked):.1f} dB")
+for name, img in [("original (no mark)", gray), ("marked", marked)] + [
+        (f"marked, JPEG q{q}", cv2.imdecode(cv2.imencode(".jpg", marked, [cv2.IMWRITE_JPEG_QUALITY, q])[1], 0)) for q in [90, 75, 50]]:
+    noise = np.std([detect(img, k) for k in others])                               # score spread for wrong keys
+    print(f"{name:20s}: score {detect(img):5.2f}  ({detect(img) / noise:5.1f} x the wrong-key spread)")
+```
+
+Output:
+
+```text
+PSNR of the marked image: 38.6 dB
+original (no mark)  : score -0.00  ( -0.1 x the wrong-key spread)
+marked              : score  2.57  ( 40.6 x the wrong-key spread)
+marked, JPEG q90    : score  1.36  ( 21.3 x the wrong-key spread)
+marked, JPEG q75    : score  0.65  (  9.6 x the wrong-key spread)
+marked, JPEG q50    : score  0.29  (  4.8 x the wrong-key spread)
+```
+
+- The key is a seed: only someone who knows 4711 can regenerate the pattern and check for it.
+- Subtracting a blurred copy removes the picture (large, smooth structures), which would otherwise swamp the correlation.
+- The "wrong-key spread" is how much the score varies by chance; a mark is detected when the score is many times that.
+
+### 4. From scratch: a sidecar record with a hash
+
+```python
+import hashlib
+import json
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-plate-good.png", cv2.IMREAD_GRAYSCALE)
+cv2.imwrite("part_000123.png", img)
+record = {
+    "file": "part_000123.png",
+    "time_utc": "2026-10-05T09:14:03.512Z",
+    "line": 3, "camera_serial": "CAM-2-0042", "exposure_us": 800, "gain_db": 0.0,
+    "lot": "4711", "recipe": "plate-v7", "result": "OK",
+    "pixels_sha256": hashlib.sha256(img.tobytes()).hexdigest(),
+}
+with open("part_000123.json", "w") as f:
+    json.dump(record, f, indent=2)
+
+back = cv2.imread("part_000123.png", cv2.IMREAD_UNCHANGED)
+saved = json.load(open("part_000123.json"))
+print("pixels unchanged:", hashlib.sha256(back.tobytes()).hexdigest() == saved["pixels_sha256"])
+back[10, 10] ^= 1                                       # change one bit of one pixel
+print("after 1-bit edit:", hashlib.sha256(back.tobytes()).hexdigest() == saved["pixels_sha256"])
+print("hash starts     :", saved["pixels_sha256"][:16])
+```
+
+Output:
+
+```text
+pixels unchanged: True
+after 1-bit edit: False
+hash starts     : 8145fb8703ee9ceb
+```
+
+- Hash the **pixels** (`img.tobytes()`), not the file: re-saving a PNG with another compression level changes the file bytes but not the pixels.
+- For the hash to match, shape and dtype must match too: hash what you read with `IMREAD_UNCHANGED`.
+- `^= 1` flips bit 0 (XOR).
+
+## OpenCV API notes
+
+**`cv2.imreadWithMetadata(path[, flags]) → img, types, chunks`**, **`cv2.imwriteWithMetadata(path, img, types, chunks[, params])`**, plus `imdecodeWithMetadata` / `imencodeWithMetadata`: `types` are `IMAGE_METADATA_*` constants (`IMAGE_METADATA_EXIF` = 0); `chunks` are `uint8` arrays with the raw bytes. Added in recent OpenCV versions (available in 4.13.0); older versions have no metadata API.
+
+**`cv2.IMREAD_IGNORE_ORIENTATION`**: combine with `IMREAD_COLOR`, `IMREAD_GRAYSCALE` or `IMREAD_UNCHANGED` to skip EXIF rotation.
+
+**Visible marks**: `cv2.putText`, `cv2.addWeighted(img, 1 − α, overlay, α, 0)` for a semi-transparent logo.
+
+## Where it fails
+
+- **Metadata is not trustworthy**: anyone can edit EXIF; camera clocks drift or are set wrong. Use synchronised clocks (NTP/PTP) and record in a controlled database.
+- **Most tools strip or rewrite metadata**: image editors, messengers, web uploads, and plain `cv2.imwrite`.
+- **Simple watermarks are easy to remove** by someone who knows the method; robust schemes are an arms race. Watermarks are not encryption.
+- **Hashes prove "unchanged", not "true"**: an image can be faked before it is hashed. Hash at capture, on the inspection PC.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Calibrating on images rotated by EXIF** and running on unrotated frames (or the reverse).
+- **Storing the only record of a result in EXIF** of a JPEG that will be re-saved.
+- **Local time without time zone** in records: daylight-saving changes create duplicate or missing hours. Use UTC.
+- **Sharing phone photos with GPS** in their metadata.
+- **Hashing the file instead of the pixels**, then failing the check after a lossless re-save.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### EXIF and its relatives
+
+EXIF is defined by CIPA/JEITA (current version 3.0) [1]. It reuses TIFF's tag structure; JPEG stores it in an APP1 segment, PNG in an `eXIf` chunk. XMP (ISO 16684-1) stores metadata as XML and is common in professional tools.
+
+### Robust watermarking
+
+Cox, Kilian, Leighton and Shamoon's spread-spectrum watermarking embeds the mark in the most significant DCT coefficients of the image, so that removing it would visibly damage the image [2]. Modern schemes add synchronisation patterns to survive geometric changes. Steganography (hiding that a message exists at all) is a related but different goal.
+
+### Content provenance
+
+Standards such as C2PA attach cryptographically signed provenance records ("content credentials") to images and videos, recording how they were captured and edited. Some cameras sign images at capture.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does cv2.imread do with an EXIF orientation tag by default?",
+      options: ["Ignores it", "Rotates/flips the pixels accordingly", "Raises an error", "Stores it in img.metadata"],
+      answer: 1,
+      explanation: "The orientation is applied unless IMREAD_IGNORE_ORIENTATION is given.",
+    },
+    {
+      question: "You load a JPEG and save it again with cv2.imwrite. What happens to its EXIF?",
+      options: ["Copied unchanged", "Lost", "Converted to XMP", "Moved into the pixels"],
+      answer: 1,
+      explanation: "Plain imwrite writes pixels only; use imwriteWithMetadata to write metadata.",
+    },
+    {
+      question: "An LSB watermark after JPEG quality 95…",
+      options: ["Survives completely", "Is about 50 % correct: destroyed", "Becomes visible", "Doubles in strength"],
+      answer: 1,
+      explanation: "JPEG changes the lowest bits of almost every pixel (4.2).",
+    },
+    {
+      question: "Best way to prove later that an inspection image was not modified?",
+      options: ["Visible logo", "EXIF description", "SHA-256 of the pixels stored in the database at capture", "Saving as JPEG"],
+      answer: 2,
+      explanation: "Any change to the pixels changes the hash.",
+    },
+    {
+      question: "Which watermark type should still be detectable after compression?",
+      options: ["Fragile", "Robust", "LSB", "None can be"],
+      answer: 1,
+      explanation: "Robust marks (e.g. spread spectrum) are designed to survive processing.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Write the bits of 77 and say which value it becomes when bit 0 is set to 0, and when it is set to 1.
+
+<Solution>
+
+77 = 0100 1101. Bit 0 is 1. Set to 0 → 0100 1100 = **76**; set to 1 → **77** (unchanged).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Extend Code example 2: hide the mark in **bit 1** instead of bit 0, and print the maximum pixel change and the share of mark bits after PNG and after JPEG q95.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+gray = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+mark = np.zeros_like(gray)
+cv2.putText(mark, "LOT 4711", (40, 120), cv2.FONT_HERSHEY_SIMPLEX, 1.6, 1, 4)
+stego = (gray & 0xFD) | (mark << 1)                                               # 0xFD = 11111101: clear bit 1
+print("max change:", np.abs(stego.astype(int) - gray).max())
+png = cv2.imdecode(cv2.imencode(".png", stego)[1], 0)
+jpg = cv2.imdecode(cv2.imencode(".jpg", stego, [cv2.IMWRITE_JPEG_QUALITY, 95])[1], 0)
+for name, im in [("PNG", png), ("JPEG q95", jpg)]:
+    print(f"{name:8s}: {100 * np.mean(((im >> 1) & 1) == mark):5.1f} % correct")
+```
+
+Output:
+
+```text
+max change: 2
+PNG     : 100.0 % correct
+JPEG q95:  50.8 % correct
+```
+
+Bit 1 changes values by up to 2 levels and is no more robust: JPEG q95 still destroys it (50.8 % is guessing). Robustness needs a different approach (Code example 3), not just a higher bit.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A customer asks you to "prove" that a rejected part's image in your system was not edited after capture. What do you set up, from now on?
+
+<Solution>
+
+At capture, on the inspection PC: save the image losslessly, compute a SHA-256 of the pixels and store it with time (UTC, synchronised clock), station, camera and part ID in a database (ideally append-only, with backups). Optionally sign the record. Later, anyone can re-compute the hash from the stored image and compare. Explain the limit: it proves the image is unchanged since capture, not that the capture itself was correct.
+
+</Solution>
+
+## References
+
+1. CIPA DC-008 / JEITA CP-3451, *Exchangeable image file format for digital still cameras: Exif*, version 3.0, 2023.
+2. I. J. Cox, J. Kilian, F. T. Leighton and T. Shamoon, "Secure spread spectrum watermarking for multimedia," *IEEE Transactions on Image Processing*, vol. 6, no. 12, pp. 1673–1687, 1997.
+3. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Chapter 8 (Image compression and watermarking).
+4. NIST FIPS 180-4, *Secure Hash Standard (SHS)*, 2015.
+5. OpenCV 4.13.0 documentation, *Image file reading and writing* (`imreadWithMetadata`, `imwriteWithMetadata`, `ImreadModes`): [docs.opencv.org/4.13.0/d4/da8/group__imgcodecs.html](https://docs.opencv.org/4.13.0/d4/da8/group__imgcodecs.html).

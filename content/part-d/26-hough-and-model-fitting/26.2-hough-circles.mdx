@@ -1,0 +1,333 @@
+export const meta = {
+  number: "26.2",
+  title: "Hough circles",
+  minutes: 25,
+  objectives: [
+    "Explain why circle voting needs the edge gradient to stay fast",
+    "Vote for circle centres by hand along gradient directions",
+    "Use cv2.HoughCircles with HOUGH_GRADIENT and HOUGH_GRADIENT_ALT and set its parameters",
+    "Recognise the limits: concentric circles, small radii, duplicates",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 26.2 (Module 26).
+  Lab: HoughLab mode "circles".
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 26.2 Hough circles
+
+<Definition term="Hough circle transform">voting for circles: each edge point votes for the centres of all circles that could pass through it, and centres with many votes, together with the radius most edge points agree on, are the circles in the image.</Definition>
+
+Round things are everywhere in industry: holes, bolts, bottle caps, coins, pills, washers, wafers. A circle has three parameters (centre x, centre y, radius r), so a full accumulator for a 320 × 200 image and 40 radii already has 2.5 million cells, and every edge point would vote for every radius in a ring. OpenCV avoids this with the **gradient**: the edge direction tells each point where the centre must lie.
+
+## 1. An analogy
+
+Finding the centre of a round table by looking at its edge. From any point of the edge, the centre is straight inward, perpendicular to the edge, at a distance you do not know. Draw a short ray inward from many edge points: all the rays meet at the centre. The radius is then the distance from the centre to the edge points.
+
+## 2. Voting along the gradient
+
+The gradient of the image at an edge point points across the edge, along the circle's radius: towards the centre for a dark hole on a bright plate, away from it for a bright disc. So each edge point votes only along a short line segment in both gradient directions, from `minRadius` to `maxRadius`:
+
+<Flow
+  steps={[
+    { label: "Grey image", tone: "data" },
+    { label: "Canny edges + Sobel gradient direction", tone: "process" },
+    { label: "Each edge point votes along ± gradient for r = minR … maxR", tone: "process" },
+    { label: "Centre accumulator: peaks ≥ votes, ≥ minDist apart", tone: "process" },
+    { label: "Radius: the distance most edge points share", tone: "result" },
+  ]}
+/>
+
+This is the two-stage method of OpenCV's `HOUGH_GRADIENT` (after Yuen, Princen, Illingworth and Kittler 1990 [2]): a 2D centre accumulator, then a radius for each centre.
+
+## 3. A worked example by hand
+
+A circle with centre (10, 10) and radius 5. Three of its edge points and their outward unit gradients:
+
+| Edge point | Gradient direction | Vote at r = 3 | r = 4 | r = 5 | r = 6 | r = 7 |
+| --- | --- | --- | --- | --- | --- | --- |
+| (15, 10) | (1, 0) | (12, 10) | (11, 10) | **(10, 10)** | (9, 10) | (8, 10) |
+| (10, 15) | (0, 1) | (10, 12) | (10, 11) | **(10, 10)** | (10, 9) | (10, 8) |
+| (13, 14) | (0.6, 0.8) | (11.2, 11.6) | (10.6, 10.8) | **(10, 10)** | (9.4, 9.2) | (8.8, 8.4) |
+
+Each point votes at "point − r · direction" (inward; the outward votes land outside the circle and do not meet). The three segments cross only at **(10, 10)**: 3 votes there, 1 elsewhere. Then the distances from (10, 10) to the edge points are all 5: radius **5**.
+
+## 4. On the test image
+
+The image from 26.1 has seven circles: four dark holes in the plate (radius 14, 9, 18, 6), a washer (outer radius 30, inner 13) and a bright disc (22).
+
+`cv2.HoughCircles(img, cv2.HOUGH_GRADIENT, dp=1, minDist=15, param1=150, param2=20, minRadius=5, maxRadius=40)` finds **6**:
+
+| Centre | Radius | Truth |
+| --- | --- | --- |
+| (264.5, 60.5) | 29.9 | washer outer, 30 |
+| (262.5, 150.5) | 21.8 | disc, 22 |
+| (104.5, 125.5) | 17.7 | hole, 18 |
+| (85.5, 75.5) | 13.4 | hole, 14 |
+| (149.5, 84.5) | 8.4 | hole, 9 |
+| (159.5, 128.5) | 5.5 | hole, 6 |
+
+The washer's inner circle is missing. `HOUGH_GRADIENT` keeps **one radius per centre**, and the washer's two rims share a centre: the outer rim has more edge points and wins. Lowering `minDist` to 1 does not fix it either: it returns 14 circles, mostly duplicates of the same objects.
+
+The parameters:
+
+- **param1** is the high Canny threshold (the low one is half of it).
+- **param2** is the minimum number of centre votes. On this image 10 to 20 gives the 6 circles; 30 keeps only the 4 largest.
+- **minDist** is the minimum distance between centres: too small gives duplicates, too large merges neighbours.
+- **minRadius / maxRadius** limit the votes; a tight range is faster and gives fewer false circles.
+
+`HOUGH_GRADIENT_ALT` (OpenCV 4.3 and later) is a more accurate variant: `param2` is a "circle perfectness" between 0 and 1, and it can return concentric circles. With `dp=1, minDist=5, param1=300, param2=0.9` it finds **all 7**, including the inner rim (13.1).
+
+<HoughLab mode="circles" caption="Gradient voting as in HOUGH_GRADIENT. Right: the centre accumulator (bright = many votes). The washer's centre collects votes from both rims, so it is the strongest peak. Raise the vote threshold to keep only the large circles; lower the minimum distance to see duplicates; raise the minimum radius above 6 and the smallest hole disappears."/>
+
+## 5. Industrial use
+
+- **Hole inspection**: presence, position and diameter of drilled holes (tolerance check on the radius).
+- **Caps and closures**: centring and presence of bottle caps on a filling line.
+- **Coins, pills, tablets**: counting and size sorting.
+- **Calibration targets**: circle grids (`cv2.findCirclesGrid`, 41.4) use blob centres, which are more accurate than Hough radii.
+
+For measuring, use Hough to find each circle, then fit a circle to the edge points around it (26.4): Hough radii are quantised to the accumulator step and the radius histogram.
+
+## What you should remember from 26.2
+
+<Takeaways>
+<Takeaway n={1} title="Gradient voting">Each edge point votes along its gradient; centres first, radius second.</Takeaway>
+<Takeaway n={2} title="Parameters">param1 = Canny high, param2 = votes (or perfectness for ALT), minDist, radius range.</Takeaway>
+<Takeaway n={3} title="Limits">HOUGH_GRADIENT gives one circle per centre; use HOUGH_GRADIENT_ALT for concentric rings.</Takeaway>
+<Takeaway n={4} title="Measure">Refine with a circle fit on the edge points.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Why is a full (x, y, r) accumulator rarely used?
+
+<Solution>
+
+It is large (width × height × radii cells) and every edge point would vote on a whole cone of (x, y, r) values. Using the gradient direction reduces each point's votes to one segment in a 2D centre accumulator.
+
+</Solution>
+
+**Q2.** You get three circles on every coin. Which parameter do you change first?
+
+<Solution>
+
+**minDist**: make it about the smallest coin radius, so centres closer than that are merged. Then check `param2`.
+
+</Solution>
+
+### Next: 26.3 RANSAC
+
+Fitting a model when many of the points do not belong to it: random samples and consensus.
+
+## Code
+
+Three examples: centre voting from scratch, `HoughCircles` on the test image, and the ALT variant.
+
+### 1. Centre voting from scratch
+
+```python
+import numpy as np
+import cv2
+
+img = np.zeros((21, 21), np.uint8)
+cv2.circle(img, (10, 10), 5, 255, -1)                               # a bright disc, radius 5
+gx = cv2.Sobel(img.astype(np.float32), cv2.CV_32F, 1, 0)
+gy = cv2.Sobel(img.astype(np.float32), cv2.CV_32F, 0, 1)
+edges = cv2.Canny(img, 50, 150)
+
+acc = np.zeros(img.shape, np.int32)
+ys, xs = np.nonzero(edges)
+for x, y in zip(xs, ys):
+    m = np.hypot(gx[y, x], gy[y, x])
+    dx, dy = gx[y, x] / m, gy[y, x] / m                              # gradient points from dark to bright
+    for r in range(3, 8):
+        for s in (1, -1):                                            # both directions: holes and discs
+            cx, cy = int(round(x + s * r * dx)), int(round(y + s * r * dy))
+            if 0 <= cx < 21 and 0 <= cy < 21:
+                acc[cy, cx] += 1
+cy, cx = np.unravel_index(acc.argmax(), acc.shape)
+print("edge points:", len(xs), "| best centre:", (int(cx), int(cy)), "votes:", int(acc.max()))
+d = np.hypot(xs - cx, ys - cy)
+print("radius (median distance):", round(float(np.median(d)), 2))
+```
+
+Output:
+
+```text
+edge points: 32 | best centre: (10, 10) votes: 12
+radius (median distance): 5.05
+```
+
+- Each of the 32 edge points casts 10 votes (5 radii × 2 directions); after rounding to whole pixels, 12 of them land exactly on (10, 10). The rest form the spokes around it.
+
+### 2. HoughCircles on the test image
+
+```python
+img = cv2.imread("sample-hough.png", cv2.IMREAD_GRAYSCALE)
+for p2 in (10, 20, 30):
+    c = cv2.HoughCircles(img, cv2.HOUGH_GRADIENT, dp=1, minDist=15, param1=150, param2=p2, minRadius=5, maxRadius=40)
+    print("param2", p2, "->", len(c[0]), "circles")
+c = cv2.HoughCircles(img, cv2.HOUGH_GRADIENT, dp=1, minDist=15, param1=150, param2=20, minRadius=5, maxRadius=40)
+for x, y, r in c[0]:
+    print(f"centre ({x:.1f}, {y:.1f})  radius {r:.1f}")
+c1 = cv2.HoughCircles(img, cv2.HOUGH_GRADIENT, dp=1, minDist=1, param1=150, param2=20, minRadius=5, maxRadius=40)
+print("minDist 1 ->", len(c1[0]), "circles")
+```
+
+Output:
+
+```text
+param2 10 -> 6 circles
+param2 20 -> 6 circles
+param2 30 -> 4 circles
+centre (264.5, 60.5)  radius 29.9
+centre (262.5, 150.5)  radius 21.8
+centre (104.5, 125.5)  radius 17.7
+centre (85.5, 75.5)  radius 13.4
+centre (149.5, 84.5)  radius 8.4
+centre (159.5, 128.5)  radius 5.5
+minDist 1 -> 14 circles
+```
+
+- `HoughCircles` takes the **grey image**, not edges: it runs Canny itself with `param1`.
+- The result has shape (1, N, 3): (x, y, r) as float32, strongest first.
+
+### 3. HOUGH_GRADIENT_ALT
+
+```python
+c = cv2.HoughCircles(img, cv2.HOUGH_GRADIENT_ALT, dp=1, minDist=5, param1=300, param2=0.9, minRadius=5, maxRadius=40)
+for x, y, r in c[0]:
+    print(f"centre ({x:.1f}, {y:.1f})  radius {r:.1f}")
+```
+
+Output:
+
+```text
+centre (265.0, 60.0)  radius 30.1
+centre (262.0, 150.0)  radius 22.1
+centre (105.0, 125.0)  radius 18.1
+centre (85.0, 75.0)  radius 14.1
+centre (265.0, 60.0)  radius 13.1
+centre (150.0, 85.0)  radius 9.1
+centre (160.0, 128.0)  radius 6.1
+```
+
+- With ALT, `param1` is higher (300 is the documented suggestion) because it uses the Scharr gradient, and `param2` is a perfectness score, 0.9 or more for clean circles.
+
+## OpenCV API notes
+
+- **`cv2.HoughCircles(image, method, dp, minDist, param1=100, param2=100, minRadius=0, maxRadius=0)`** → (1, N, 3) float32 or `None`. `image`: 8-bit single-channel grey.
+- **`method`**: `cv2.HOUGH_GRADIENT` (votes, one radius per centre) or `cv2.HOUGH_GRADIENT_ALT` (perfectness; concentric circles allowed).
+- **`dp`**: inverse accumulator resolution: 1 = same as the image, 2 = half. Larger `dp` is faster and more tolerant, less precise.
+- **`maxRadius ≤ 0`**: with HOUGH_GRADIENT, only centres are found if negative; 0 means up to the image size.
+- **Pre-smoothing**: the OpenCV tutorial applies `cv2.medianBlur(img, 5)` first to suppress false circles on noisy images.
+
+## Where it fails
+
+- **Concentric circles** with `HOUGH_GRADIENT` (one radius per centre).
+- **Very small circles** (radius below about 5 pixels): too few edge points and unreliable gradient directions.
+- **Ellipses** (circles seen at an angle): votes do not meet in one point; use contours + `fitEllipse` (26.4).
+- **Partial arcs and clutter**: few votes; lower `param2` and expect false circles.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Passing a Canny image**: `HoughCircles` runs Canny internally; give it the grey image.
+- **No radius range**: slower and more false circles; set `minRadius`/`maxRadius` from the expected size.
+- **minDist too small**: several circles per object.
+- **Reading the radius as a measurement**: refine it with a fit on the edge points.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### From 3D to 2D accumulators
+
+The direct circle Hough transform (Duda and Hart [1]) uses a 3D (a, b, r) accumulator. Kimme, Ballard and Sklansky (1975) [3] used the gradient direction to restrict the votes; the 2-1 Hough transform of Yuen et al. [2] splits the problem into a 2D centre search and a 1D radius histogram, which is what `HOUGH_GRADIENT` does. Ellipses (five parameters) are rarely found by voting; contour fitting is used instead.
+
+### Accuracy
+
+Centre accuracy is limited by the accumulator cell size (`dp`) and by errors in the gradient direction; radius accuracy by the radius histogram. A least-squares fit on the edge points (26.4) or sub-pixel edges (22.5) is used when diameters are measured.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does the gradient direction give each edge point in circle voting?",
+      options: ["The radius", "The line on which the centre must lie", "The circle's colour", "Nothing"],
+      answer: 1,
+      explanation: "The centre lies along the gradient, at an unknown distance.",
+    },
+    {
+      question: "param1 in HOUGH_GRADIENT is…",
+      options: ["The vote threshold", "The high Canny threshold", "The minimum radius", "The accumulator resolution"],
+      answer: 1,
+      explanation: "The low Canny threshold is param1 / 2.",
+    },
+    {
+      question: "Why did HOUGH_GRADIENT miss the washer's inner rim?",
+      options: ["Too small", "It finds only one radius per centre", "Wrong colour", "param1 too high"],
+      answer: 1,
+      explanation: "Both rims share a centre; the outer rim wins.",
+    },
+    {
+      question: "Several circles on every object. First fix?",
+      options: ["Increase minDist", "Decrease param2", "Increase dp", "Remove minRadius"],
+      answer: 0,
+      explanation: "minDist merges nearby centres.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+An edge point at (20, 30) has the inward unit direction (−0.8, −0.6). Where does it vote for r = 10?
+
+<Solution>
+
+(20 − 0.8 · 10, 30 − 0.6 · 10) = **(12, 24)**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Use the HOUGH_GRADIENT_ALT result to find concentric circles (centres closer than 2 pixels) and report the ring's inner and outer diameter.
+
+<Solution>
+
+```python
+circles = c[0]
+for i in range(len(circles)):
+    for j in range(i + 1, len(circles)):
+        (x1, y1, r1), (x2, y2, r2) = circles[i], circles[j]
+        if np.hypot(x1 - x2, y1 - y2) < 2:
+            print("ring at", (float(x1), float(y1)), "| outer diameter", round(2 * float(max(r1, r2)), 1), "| inner diameter", round(2 * float(min(r1, r2)), 1))
+```
+
+Output:
+
+```text
+ring at (265.0, 60.0) | outer diameter 60.2 | inner diameter 26.2
+```
+
+The true washer has diameters 60 and 26.
+
+</Solution>
+
+## References
+
+1. R. O. Duda, P. E. Hart, "Use of the Hough transformation to detect lines and curves in pictures", *Communications of the ACM* 15(1), 11–15, 1972.
+2. H. K. Yuen, J. Princen, J. Illingworth, J. Kittler, "Comparative study of Hough transform methods for circle finding", *Image and Vision Computing* 8(1), 71–77, 1990.
+3. C. Kimme, D. Ballard, J. Sklansky, "Finding circles by an array of accumulators", *Communications of the ACM* 18(2), 120–122, 1975.
+4. OpenCV 4.13.0 documentation: `HoughCircles`, `HoughModes`; tutorial "Hough Circle Transform". https://docs.opencv.org/4.13.0/

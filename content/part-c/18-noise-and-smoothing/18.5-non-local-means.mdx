@@ -1,0 +1,310 @@
+export const meta = {
+  number: "18.5",
+  title: "Non-local means",
+  minutes: 25,
+  objectives: [
+    "Explain how non-local means averages pixels whose surrounding patches look alike",
+    "Compute patch distances and weights for a few candidate pixels",
+    "Use cv2.fastNlMeansDenoising and its colour and video variants with sensible h, template and search sizes",
+    "Compare its quality and cost with the Gaussian, median and bilateral filters",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 18.5 (Module 18).
+  Lab: DenoiseLab (NLM against the earlier filters).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 18.5 Non-local means
+
+<Definition term="Non-local means (NLM)">a denoising filter that replaces each pixel by a weighted average of pixels from a larger search window, where the weight depends on how similar the small patch around each candidate is to the patch around the pixel being cleaned. Similar patches can be anywhere in the window, not only next to the pixel: hence "non-local".</Definition>
+
+The bilateral filter (18.4) compares single pixel values, and a single noisy value says little: at low contrast it cannot tell detail from noise. Buades, Coll and Morel (2005) [1] compared whole patches instead. A 7 × 7 patch contains 49 values, so its noise averages out and its structure (an edge, a line, a corner) shows through. Images repeat themselves: the same edge, texture or letter stroke appears many times, and NLM averages these repetitions.
+
+## 1. An analogy
+
+Restoring a damaged word in an old book. You do not average the smudged letter with the letters next to it; you look for other places on the page where the same letter appears and use them. The surrounding letters (the patch) tell you which places are the same letter.
+
+## 2. Compare patches, average pixels
+
+<Flow
+  steps={[
+    { label: "Pixel p and its patch (e.g. 7 × 7)", tone: "data" },
+    { label: "For every q in the search window (e.g. 21 × 21): patch distance d² = mean squared difference", tone: "process" },
+    { label: "Weight w = exp(−d² / h²): similar patches count, different ones almost not", tone: "process" },
+    { label: "Output: Σ w·I(q) / Σ w", tone: "result" },
+  ]}
+/>
+
+A worked example on the noisy test image (Gaussian noise σ = 20). The pixel to clean lies on one of the thin dark lines (clean value 20, noisy value 5). Four candidate pixels, 7 × 7 patches, h = 20:
+
+| Candidate | Noisy value | Patch distance d² | Weight |
+| --- | --- | --- | --- |
+| Same line, 6 px to the right | 26 | 720 | 0.165 |
+| **Next line, 8 px down** | 31 | 693 | 0.177 |
+| Between two lines | 208 | 3 683 | 0.000 |
+| Background left of the lines | 158 | 3 196 | 0.000 |
+
+Two noisy copies of the same structure differ only by noise, so their d² is about 2σ² = 800 (measured: 693 and 720). Patches of a different structure differ by the structure as well, here d² above 3 000. With h equal to the noise σ, the matching patches get weight exp(−2) ≈ 0.14 and the others exp(−8) or less. The pixel is averaged with the other line pixels, including those on a *different* line 8 pixels away, and not with the background right next to it. A Gaussian would do the opposite.
+
+## 3. Quality and parameters
+
+Gaussian noise σ = 20 on the test image; mean absolute error in the area of the thin lines and of the "A7" text, noise left in the flat circle:
+
+| Filter | PSNR | Noise in circle | Error at lines | Error at text |
+| --- | --- | --- | --- | --- |
+| Noisy | 22.2 dB | 19.2 | 15.7 | 15.6 |
+| Gaussian σ = 1 | 23.3 dB | 4.8 | 22.3 | 11.2 |
+| Median 3 × 3 | 24.4 dB | 7.3 | 23.1 | 8.5 |
+| Bilateral σc = 40 | 32.1 dB | 4.6 | 4.9 | 5.6 |
+| NLM h = 15 | 31.8 dB | 2.4 | 6.3 | 7.4 |
+| **NLM h = 20** | **35.6 dB** | 1.1 | 3.3 | 5.0 |
+| NLM h = 30 | 32.3 dB | 0.7 | 3.8 | 5.6 |
+| NLM h = 40 | 28.3 dB | 0.6 | 8.0 | 10.9 |
+
+(NLM: 7 × 7 template, 21 × 21 search window.) h is the strength. Too small (h = 10, not in the table: 23.4 dB) and only the patch itself is "similar"; too large and different structures are averaged too. **h close to the noise σ** is the usual starting point. A larger search window (35 instead of 21) finds more similar patches: 36.3 dB, at about twice the running time in this test (up to (35/21)² ≈ 2.8 times the work).
+
+<DenoiseLab initialFilter="nlm" filters={["none", "gauss", "median", "bilateral", "nlm"]} caption="Gaussian noise σ = 20. Non-local means with a 3 × 3 patch and an 11 × 11 search window (smaller than OpenCV's defaults, so it runs in the browser). Change h from 3 to 40: find where flat areas become clean while the thin lines and the small text survive, then compare with the bilateral and the other filters on PSNR and in the zoom."/>
+
+## 4. Cost
+
+For every pixel, every candidate in the search window, a patch comparison: 21² × 7² ≈ 21 600 operations per pixel in the naive form. OpenCV's "fast" version reuses sums of squared differences as the windows slide (integral images, 17.5), so the patch size hardly matters, but the search window still costs: NLM is typically tens of times slower than a bilateral filter. It suits offline processing, single images, or small regions, not high-resolution video at full rate on a CPU.
+
+## 5. Industrial example
+
+NLM is used where image quality matters more than speed: cleaning low-light or high-gain images before archiving or human review, X-ray images (47.4) with their dose-limited noise, and microscope images of repetitive structures (wafers, printed circuits, fabrics), which are ideal because the structure repeats many times inside the search window. In a production line with millisecond budgets, the bilateral or Gaussian filter (or a GPU version of NLM, `cv2.cuda.fastNlMeansDenoising`) is chosen instead.
+
+## What you should remember from 18.5
+
+<Takeaways>
+<Takeaway n={1} title="Idea">Weights from patch similarity, not from distance or a single value.</Takeaway>
+<Takeaway n={2} title="Repetition">Pixels of the same structure anywhere in the search window are averaged.</Takeaway>
+<Takeaway n={3} title="h">Close to the noise σ; too small does nothing, too large blurs detail.</Takeaway>
+<Takeaway n={4} title="Cost">Best quality of the classical filters, but the slowest.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Two patches of the same flat area, noise σ = 15. Expected d²? Weight with h = 15?
+
+<Solution>
+
+d² ≈ 2σ² = **450**; w = exp(−450/225) = exp(−2) ≈ **0.14**.
+
+</Solution>
+
+**Q2.** Why does NLM need a larger search window than the patch?
+
+<Solution>
+
+The patch defines what "similar" means; the search window is where similar patches are looked for. With the search window equal to the patch, there is almost nothing to average.
+
+</Solution>
+
+### Next: 18.6 Choosing a filter
+
+All five filters side by side on all four noise types, and a decision guide.
+
+## Code
+
+Two examples: patch distances from scratch, then OpenCV's NLM against the other filters.
+
+### 1. Patch distances
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-clean.png", cv2.IMREAD_GRAYSCALE)
+clean = img.astype(float)
+rng = np.random.default_rng(0)
+noisy = np.clip(np.rint(clean + rng.normal(0, 20, clean.shape)), 0, 255)
+
+patch = lambda y, x: noisy[y - 3:y + 4, x - 3:x + 4]          # 7 x 7 patch
+y0, x0, h = 20, 250, 20                                        # a pixel on a thin line
+for name, (y, x) in [("same line", (20, 256)), ("next line", (28, 250)),
+                     ("between lines", (24, 250)), ("background", (20, 226))]:
+    d2 = np.mean((patch(y0, x0) - patch(y, x)) ** 2)
+    print(f"{name:14s} value {noisy[y, x]:5.0f} | d2 {d2:7.1f} | weight {np.exp(-d2 / h ** 2):.3f}")
+```
+
+Output:
+
+```text
+same line      value    26 | d2   720.2 | weight 0.165
+next line      value    31 | d2   692.5 | weight 0.177
+between lines  value   208 | d2  3682.5 | weight 0.000
+background     value   158 | d2  3196.3 | weight 0.000
+```
+
+### 2. NLM against the other filters
+
+```python
+import numpy as np
+import cv2
+
+noisy8 = noisy.astype(np.uint8)
+
+def report(name, x):
+    err = np.abs(x.astype(float) - clean)
+    psnr = 10 * np.log10(255 ** 2 / np.mean(err ** 2))
+    print(f"{name:14s} PSNR {psnr:5.2f} | circle {(x.astype(float) - clean)[50:80, 155:185].std():5.2f}"
+          f" | lines {err[12:55, 230:300].mean():5.2f} | text {err[140:185, 145:200].mean():5.2f}")
+
+report("noisy", noisy8)
+report("bilateral 40", cv2.bilateralFilter(noisy8, 9, 40, 3))
+for h in (15, 20, 30):
+    report(f"nlm h={h}", cv2.fastNlMeansDenoising(noisy8, None, h, 7, 21))
+report("nlm h=20 s=35", cv2.fastNlMeansDenoising(noisy8, None, 20, 7, 35))
+```
+
+Output:
+
+```text
+noisy          PSNR 22.24 | circle 19.16 | lines 15.69 | text 15.58
+bilateral 40   PSNR 32.09 | circle  4.62 | lines  4.91 | text  5.63
+nlm h=15       PSNR 31.83 | circle  2.37 | lines  6.32 | text  7.37
+nlm h=20       PSNR 35.56 | circle  1.14 | lines  3.33 | text  4.98
+nlm h=30       PSNR 32.32 | circle  0.72 | lines  3.81 | text  5.61
+nlm h=20 s=35  PSNR 36.32 | circle  0.88 | lines  2.46 | text  4.38
+```
+
+- Arguments: `fastNlMeansDenoising(src, dst, h, templateWindowSize, searchWindowSize)`; `None` lets OpenCV allocate the output.
+
+## OpenCV API notes
+
+**`cv2.fastNlMeansDenoising(src, dst=None, h=3, templateWindowSize=7, searchWindowSize=21)`**:
+- `src`: 8-bit, 1 to 4 channels (a uint16 version takes `h` as a list and `normType=cv2.NORM_L1`).
+- `h`: filter strength. The default 3 is for mild noise; start near the noise σ.
+- `templateWindowSize`: patch size, odd (7 recommended); `searchWindowSize`: odd (21 recommended); time grows with its square.
+
+**`cv2.fastNlMeansDenoisingColored(src, dst, h, hColor, templateWindowSize, searchWindowSize)`**: converts to CIELAB, denoises luminance with `h` and the two colour channels with `hColor`, converts back. Colour noise is usually removed with a stronger `hColor` than `h`.
+
+**`cv2.fastNlMeansDenoisingMulti(srcImgs, imgToDenoiseIndex, temporalWindowSize, ...)`** and the `Colored` variant: also search in neighbouring frames of a video (temporalWindowSize odd), which finds many more similar patches for a static scene.
+
+**GPU**: `cv2.cuda.fastNlMeansDenoising` in CUDA builds.
+
+## Where it fails
+
+- **Speed**: too slow on a CPU for high-resolution real-time video.
+- **Unique detail**: a feature that appears only once has no similar patches; it is kept but stays noisy.
+- **Very strong noise**: patch distances are dominated by noise and every patch looks alike; the image is over-smoothed.
+- **Non-Gaussian noise**: impulses distort patch distances; remove them first with a median. Shot noise varies with brightness; one h cannot fit both dark and bright areas (use a variance-stabilising transform, 18.1 Go deeper).
+- **Texture**: fine random textures (sand, fabric) look like noise and can be flattened.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Leaving h at the default 3** on clearly noisy images: almost nothing happens.
+- **Huge search windows** "for quality": the gain is small, the cost grows with the square.
+- **Using the grey version on colour images**: denoise colour with `fastNlMeansDenoisingColored`, so luminance and colour get separate strengths.
+- **Benchmarking NLM in a real-time loop** without measuring the time per frame.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The original algorithm
+
+Buades, Coll and Morel [1] define the weight with a Gaussian-weighted patch distance and explain why the method is consistent: as the number of similar patches grows, the estimate converges to the true value. OpenCV's version uses plain mean squared differences, ignores weights below a small threshold, and computes patch distances incrementally as the windows slide.
+
+### BM3D and beyond
+
+BM3D (Dabov et al., 2007) [2] groups similar patches into a 3-D stack, transforms the stack, shrinks small coefficients and transforms back; it was the reference for classical denoising for about a decade. Learned denoisers (DnCNN and later networks, Part J) now reach higher PSNR on Gaussian noise when trained on similar images; NLM and BM3D need no training data, which matters for unusual sensors.
+
+### Choosing h from the noise
+
+The noise σ can be estimated from the image itself, for example from the median absolute deviation of a high-pass filtered image (Donoho's estimator) or from flat regions (18.1), and h set from it automatically.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What decides an NLM weight?",
+      options: ["Distance between the pixels", "Difference between the two pixel values", "Similarity of the patches around the two pixels", "The gradient"],
+      answer: 2,
+      explanation: "w = exp(−d²/h²) with d² the patch distance.",
+    },
+    {
+      question: "Two patches of the same structure with noise σ have d² of about…",
+      options: ["0", "σ²", "2σ²", "σ⁴"],
+      answer: 2,
+      explanation: "Each difference of two noisy values has variance 2σ².",
+    },
+    {
+      question: "A good starting value for h with noise σ = 20:",
+      options: ["3", "20", "100", "255"],
+      answer: 1,
+      explanation: "Close to the noise σ.",
+    },
+    {
+      question: "What does searchWindowSize mainly change?",
+      options: ["Patch similarity", "Where similar patches are looked for, and the running time", "The colour space", "The output depth"],
+      answer: 1,
+      explanation: "Larger windows find more similar patches but cost the square of the size.",
+    },
+    {
+      question: "Which images suit NLM best?",
+      options: ["Unique objects with no repetition", "Repetitive structure, offline processing", "Salt-and-pepper noise", "Real-time 4K video on a CPU"],
+      answer: 1,
+      explanation: "Repetition gives many similar patches; the cost needs time.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+h = 20. Weights for patch distances d² = 400, 800 and 3 200? Which of these would you expect for two copies of the same structure with noise σ = 20?
+
+<Solution>
+
+exp(−1) = **0.37**, exp(−2) = **0.14**, exp(−8) = **0.0003**. Copies of the same structure: d² ≈ 2σ² = **800**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Find the best h for the noisy test image by trying h = 10 to 40 in steps of 5 (7 × 7 template, 21 × 21 search) and printing PSNR. Where is the maximum compared with σ = 20?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+for h in range(10, 45, 5):
+    out = cv2.fastNlMeansDenoising(noisy8, None, h, 7, 21).astype(float)
+    print(h, round(float(10 * np.log10(255 ** 2 / np.mean((out - clean) ** 2))), 2))
+```
+
+Output:
+
+```text
+10 23.42
+15 31.83
+20 35.56
+25 35.18
+30 32.32
+35 29.95
+40 28.27
+```
+
+The maximum is at h = 20, equal to the noise σ, with h = 25 almost as good. Below σ the filter barely acts; above, detail is averaged away.
+
+</Solution>
+
+## References
+
+1. A. Buades, B. Coll, J.-M. Morel, "A non-local algorithm for image denoising", *Proc. CVPR*, vol. 2, 60–65, 2005.
+2. K. Dabov, A. Foi, V. Katkovnik, K. Egiazarian, "Image denoising by sparse 3-D transform-domain collaborative filtering", *IEEE Trans. Image Processing* 16(8), 2080–2095, 2007.
+3. D. L. Donoho, I. M. Johnstone, "Ideal spatial adaptation by wavelet shrinkage", *Biometrika* 81(3), 425–455, 1994.
+4. OpenCV 4.13.0 documentation: `fastNlMeansDenoising`, `fastNlMeansDenoisingColored`, `fastNlMeansDenoisingMulti`. https://docs.opencv.org/4.13.0/

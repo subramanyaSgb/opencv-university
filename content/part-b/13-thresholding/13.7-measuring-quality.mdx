@@ -1,0 +1,315 @@
+export const meta = {
+  number: "13.7",
+  title: "Measuring quality",
+  minutes: 25,
+  objectives: [
+    "Count true and false positives and negatives of a binary mask against ground truth",
+    "Compute precision, recall, F1 (Dice) and IoU, and know why accuracy misleads",
+    "Use a precision–recall sweep to choose a parameter",
+    "Allow for boundary tolerance and evaluate at object level",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 13.7 (last chapter of Module 13).
+  Reuses ThreshLab (all methods, metrics panel).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 13.7 Measuring quality
+
+<Definition term="Segmentation quality">how well a binary result matches the truth, measured by counting pixels (or objects) that are correctly or wrongly marked, against a ground-truth mask made carefully by a person or by construction.</Definition>
+
+Every chapter of this module quoted an F1 score. This chapter explains those numbers and how to use them: to compare methods, to choose parameters, and to decide whether a threshold is good enough for production. Without a measure, "it looks fine on this image" is the only argument, and it is a weak one.
+
+## 1. An analogy
+
+A smoke alarm can fail in two ways: it stays silent in a fire (a miss) or it goes off when you make toast (a false alarm). A good alarm is judged on both. Saying "it was right 99 % of the time" means little if fires are rare: an alarm that never rings is also right most of the time.
+
+## 2. Four counts
+
+<Flow
+  steps={[
+    { label: "Result mask + ground-truth mask", tone: "data" },
+    { label: "Compare pixel by pixel", tone: "process" },
+    { label: "TP (both object), FP (result only), FN (truth only), TN (neither)", tone: "process" },
+    { label: "Precision, recall, F1, IoU", tone: "result" },
+  ]}
+/>
+
+| | Truth: object | Truth: background |
+| --- | --- | --- |
+| **Result: object** | TP (true positive) | FP (false positive, false alarm) |
+| **Result: background** | FN (false negative, miss) | TN (true negative) |
+
+| Measure | Formula | Question it answers |
+| --- | --- | --- |
+| Precision | TP / (TP + FP) | Of what I marked, how much is really object? |
+| Recall | TP / (TP + FN) | Of the real object, how much did I find? |
+| F1 (= Dice) | 2 TP / (2 TP + FP + FN) | Balance of both (harmonic mean) |
+| IoU (Jaccard) | TP / (TP + FP + FN) | Overlap ÷ union of result and truth |
+| Accuracy | (TP + TN) / all | Misleading when objects are rare |
+
+Real numbers, faint crack (13.6), 64 000 pixels, 1 298 crack pixels:
+
+| Result | TP | FP | FN | Accuracy | Precision | Recall | F1 | IoU |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Empty mask (finds nothing) | 0 | 0 | 1 298 | **0.980** | 0 | 0 | 0 | 0 |
+| Threshold T = 151 | 739 | 595 | 559 | 0.982 | 0.554 | 0.569 | 0.562 | 0.390 |
+
+An empty mask scores 98 % accuracy because 98 % of the image is background. **Never report accuracy for small objects**; report precision and recall (or F1/IoU). F1 and IoU always rank results the same way (IoU = F1 / (2 − F1)); IoU is the stricter-looking number.
+
+<ThreshLab methods={["manual", "otsu", "triangle", "kapur", "mean", "gauss", "niblack", "sauvola", "hysteresis"]} initial="sauvola" caption="All methods of this module with the metrics panel. Watch precision and recall move in opposite directions as you change a parameter, and notice which errors (red false alarms, blue misses) each method makes." />
+
+## 3. Choosing a parameter: the precision–recall trade-off
+
+Most parameters trade precision against recall. Sauvola's k on the label (blockSize 25):
+
+| k | 0.0 | 0.1 | 0.2 | 0.34 | 0.5 | 0.7 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Precision | 0.406 | 0.922 | 0.960 | 0.991 | 1.000 | 1.000 |
+| Recall | 1.000 | 0.999 | 0.998 | 0.983 | 0.937 | 0.853 |
+| F1 | 0.577 | 0.959 | 0.979 | **0.987** | 0.967 | 0.920 |
+
+- Maximising F1 weights misses and false alarms equally (k = 0.34).
+- If a miss is far more expensive (a cracked part shipped), choose a parameter with higher recall and accept more false alarms, which a second check or a person can reject. If false alarms stop the line, favour precision. The right point is a **business decision**, written down with the costs.
+
+## 4. Boundaries, objects, and ground truth
+
+**Boundary tolerance.** A result shifted by one pixel against the truth (the text mask moved right by 1 px) has F1 0.813, although nobody could see the difference. Where boundaries are uncertain (blur, anti-aliasing, hand-drawn truth), count a pixel as correct if it is within 1 or 2 pixels of the other mask; with a 1-pixel tolerance the shifted mask scores 1.000.
+
+**Object level.** For counting and detection, what matters is objects, not pixels: is each crack found (any overlap, or IoU ≥ 0.5 with its true region), and how many false objects are reported? A method with pixel F1 0.95 can still miss a small defect completely. Report both when objects vary in size.
+
+**Ground truth.** Draw it carefully, at full resolution, with a written rule for unclear pixels (is the blurred edge object?). Use enough images to cover the variation of production (lighting, parts, defects), keep a separate set for the final check, and never tune parameters on the images used for the final number.
+
+## 5. Industrial example
+
+A team choosing between Otsu and Sauvola for a code-reading station labels 40 images that cover the production variation: different packages, lighting positions, reflections. For each method it reports the mean F1, the **worst** image and its F1, and the read rate of the OCR downstream, which is what finally matters. A method with a slightly lower mean but a much better worst case usually wins, because the worst case is what stops the line. The report lists per-image scores, the chosen parameters and the 10 images kept back for the final check, so a reviewer can repeat every number.
+
+## What you should remember from 13.7
+
+<Takeaways>
+<Takeaway n={1} title="Counts">TP, FP, FN, TN against a careful ground truth.</Takeaway>
+<Takeaway n={2} title="Measures">Precision, recall, F1 (Dice), IoU; not accuracy for small objects.</Takeaway>
+<Takeaway n={3} title="Trade-off">Parameters move precision against recall; choose with the costs of each error.</Takeaway>
+<Takeaway n={4} title="Fair evaluation">Boundary tolerance, object-level counts, worst case, held-out test images.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** TP = 80, FP = 20, FN = 40. Compute precision, recall, F1 and IoU.
+
+<Solution>
+
+Precision 80/100 = **0.80**; recall 80/120 = **0.667**; F1 = 160/220 = **0.727**; IoU = 80/140 = **0.571**.
+
+</Solution>
+
+**Q2.** Why can an empty mask have 98 % accuracy?
+
+<Solution>
+
+Because 98 % of the pixels are background, and the empty mask labels all of them correctly (TN). It finds no object at all: recall 0.
+
+</Solution>
+
+### Next: Module 14, Masks and arithmetic
+
+Binary images as masks: bitwise operations, saturating arithmetic, blending and frame differencing.
+
+## Code
+
+Two examples: the metrics from scratch, then a parameter sweep and boundary tolerance.
+
+### 1. Confusion counts and measures
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-crack-faint.png", cv2.IMREAD_GRAYSCALE)
+gt = cv2.imread("sample-plate-crack-mask.png", cv2.IMREAD_GRAYSCALE) > 0
+
+def scores(pred, truth):
+    tp = int((pred & truth).sum()); fp = int((pred & ~truth).sum())
+    fn = int((~pred & truth).sum()); tn = int((~pred & ~truth).sum())
+    return dict(tp=tp, fp=fp, fn=fn, tn=tn,
+                accuracy=(tp + tn) / truth.size,
+                precision=tp / max(tp + fp, 1), recall=tp / max(tp + fn, 1),
+                f1=2 * tp / max(2 * tp + fp + fn, 1), iou=tp / max(tp + fp + fn, 1))
+
+for name, pred in [("empty mask", np.zeros_like(gt)), ("T = 151", img <= 151)]:
+    s = scores(pred, gt)
+    print(f"{name:10s} TP {s['tp']:4d} FP {s['fp']:4d} FN {s['fn']:4d} | accuracy {s['accuracy']:.3f} "
+          f"precision {s['precision']:.3f} recall {s['recall']:.3f} F1 {s['f1']:.3f} IoU {s['iou']:.3f}")
+```
+
+Output:
+
+```text
+empty mask TP    0 FP    0 FN 1298 | accuracy 0.980 precision 0.000 recall 0.000 F1 0.000 IoU 0.000
+T = 151    TP  739 FP  595 FN  559 | accuracy 0.982 precision 0.554 recall 0.569 F1 0.562 IoU 0.390
+```
+
+- The two results differ hugely in usefulness and hardly at all in accuracy.
+- `max(..., 1)` avoids dividing by zero for empty masks.
+
+### 2. A parameter sweep and boundary tolerance
+
+```python
+import numpy as np
+import cv2
+
+label = cv2.imread("sample-print-uneven.png", cv2.IMREAD_GRAYSCALE)
+text = cv2.imread("sample-print-uneven-gt.png", cv2.IMREAD_GRAYSCALE) > 0
+f = label.astype(np.float64)
+m = cv2.boxFilter(f, -1, (25, 25), borderType=cv2.BORDER_REPLICATE)
+sd = np.sqrt(np.maximum(cv2.boxFilter(f * f, -1, (25, 25), borderType=cv2.BORDER_REPLICATE) - m * m, 0))
+for k in (0.0, 0.1, 0.2, 0.34, 0.5, 0.7):
+    s = scores(label <= m * (1 + k * (sd / 128 - 1)), text)                      # Sauvola (13.5)
+    print(f"k={k:4}: precision {s['precision']:.3f} recall {s['recall']:.3f} F1 {s['f1']:.3f}")
+
+shifted = np.roll(text, 1, axis=1)                                                # perfect mask, 1 px to the right
+k3 = np.ones((3, 3), np.uint8)
+near_truth = cv2.dilate(text.astype(np.uint8), k3) > 0                           # within 1 px of the truth
+near_pred = cv2.dilate(shifted.astype(np.uint8), k3) > 0
+p_tol = (shifted & near_truth).sum() / shifted.sum()
+r_tol = (text & near_pred).sum() / text.sum()
+print(f"shifted by 1 px: F1 {scores(shifted, text)['f1']:.3f} | with 1-px tolerance: F1 {2 * p_tol * r_tol / (p_tol + r_tol):.3f}")
+```
+
+Output:
+
+```text
+k= 0.0: precision 0.406 recall 1.000 F1 0.577
+k= 0.1: precision 0.922 recall 0.999 F1 0.959
+k= 0.2: precision 0.960 recall 0.998 F1 0.979
+k=0.34: precision 0.991 recall 0.983 F1 0.987
+k= 0.5: precision 1.000 recall 0.937 F1 0.967
+k= 0.7: precision 1.000 recall 0.853 F1 0.920
+shifted by 1 px: F1 0.813 | with 1-px tolerance: F1 1.000
+```
+
+- Precision rises and recall falls as k grows; F1 peaks in between.
+- The tolerant version counts a marked pixel as correct if it lies within one pixel of a true pixel (and vice versa for recall); this is the idea behind the boundary F-measure used in segmentation benchmarks.
+
+## OpenCV API notes
+
+**Counting**: `cv2.countNonZero(cv2.bitwise_and(pred, gt))` for TP with 0/255 masks; NumPy boolean logic (`pred & gt`, `pred & ~gt`) is often clearer.
+
+**Tolerance**: `cv2.dilate(mask, np.ones((2r+1, 2r+1), np.uint8))` builds "within r pixels" masks (Module 16); `cv2.distanceTransform` gives exact distances for boundary metrics.
+
+**Objects**: `cv2.connectedComponentsWithStats` labels objects and gives their areas and boxes for object-level matching.
+
+**scikit-learn**: `sklearn.metrics.precision_recall_fscore_support`, `jaccard_score`, `precision_recall_curve` on flattened masks.
+
+## Where it fails
+
+- **Bad ground truth**: the measure is only as good as the truth; inconsistent labelling caps the achievable score.
+- **Pixel metrics for objects of very different sizes**: large objects dominate; small, important defects barely count.
+- **Few test images**: one lucky image proves nothing; report the spread and the worst case.
+- **Tuning on the test set**: the score becomes optimistic.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Reporting accuracy** for small objects.
+- **Comparing masks of different polarity** (object = 0 in one, 255 in the other).
+- **Averaging F1 over images** without also looking at the worst image.
+- **Choosing parameters and reporting the score on the same images**.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Dice, Jaccard and F1
+
+The Dice coefficient (1945) for comparing two sets, 2|A ∩ B| / (|A| + |B|), is exactly F1 for binary masks; the Jaccard index (1901), |A ∩ B| / |A ∪ B|, is IoU. They are monotonic functions of each other: J = D / (2 − D) [2].
+
+### Boundary F-measure and object metrics
+
+Martin, Fowlkes and Malik (2004) evaluated boundary detectors by matching boundary pixels within a small distance tolerance and computing precision and recall of the matches; this is the basis of the Berkeley segmentation benchmark [3]. For detection, PASCAL VOC and COCO count an object as found if IoU ≥ 0.5 (or average over several IoU thresholds) and summarise the precision–recall curve as average precision.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Recall answers which question?",
+      options: ["Of what I marked, how much is object?", "Of the real object, how much did I find?", "How many pixels are background?", "How fast is the method?"],
+      answer: 1,
+      explanation: "Recall = TP / (TP + FN).",
+    },
+    {
+      question: "Defects cover 1 % of the image. A method that marks nothing has accuracy…",
+      options: ["0 %", "1 %", "50 %", "99 %"],
+      answer: 3,
+      explanation: "All background pixels are correct: that is why accuracy misleads.",
+    },
+    {
+      question: "F1 = 0.8. What is the IoU?",
+      options: ["0.8", "0.667", "0.64", "0.9"],
+      answer: 1,
+      explanation: "IoU = F1 / (2 − F1) = 0.8 / 1.2.",
+    },
+    {
+      question: "A missed defect costs 100 times more than a false alarm. Which way should you move the threshold from the best-F1 point?",
+      options: ["Towards higher precision", "Towards higher recall", "Leave it", "Use accuracy instead"],
+      answer: 1,
+      explanation: "Accept more false alarms to miss fewer defects.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A defect has 200 pixels. A result marks 150 pixels, 120 of them on the defect. Compute precision, recall, F1 and IoU.
+
+<Solution>
+
+TP = 120, FP = 30, FN = 80. Precision **0.80**, recall **0.60**, F1 = 240 / 350 = **0.686**, IoU = 120 / 230 = **0.522**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Evaluate the label at object level: label the true text with `cv2.connectedComponents` (8-connected) and count a true component as found if at least 50 % of its pixels are marked by Otsu, and by Sauvola (k = 0.34). Print both counts.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+n, lab = cv2.connectedComponents(text.astype(np.uint8), connectivity=8)
+otsu = label <= cv2.threshold(label, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[0]
+sauvola = label <= m * (1 + 0.34 * (sd / 128 - 1))
+for name, pred in [("Otsu", otsu), ("Sauvola", sauvola)]:
+    found = sum(pred[lab == i].mean() >= 0.5 for i in range(1, n))
+    print(f"{name}: {found} of {n - 1} text components found")
+```
+
+Output:
+
+```text
+Otsu: 52 of 52 text components found
+Sauvola: 52 of 52 text components found
+```
+
+Both methods "find" every character, yet their pixel F1 values are 0.41 and 0.99: Otsu finds the characters but also marks a large dark area as text (false alarms), which object-level recall alone does not show. Report object-level precision too (false objects), or pixel and object metrics together.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 10 (segmentation).
+2. L. R. Dice, "Measures of the amount of ecologic association between species", *Ecology* 26(3), 297–302, 1945.
+3. D. R. Martin, C. C. Fowlkes, J. Malik, "Learning to detect natural image boundaries using local brightness, color, and texture cues", *IEEE Transactions on Pattern Analysis and Machine Intelligence* 26(5), 530–549, 2004.
+4. OpenCV 4.13.0 documentation: `countNonZero`, `connectedComponents`, `dilate`. https://docs.opencv.org/4.13.0/

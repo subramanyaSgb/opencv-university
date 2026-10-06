@@ -1,0 +1,276 @@
+export const meta = {
+  number: "25.2",
+  title: "Region statistics",
+  minutes: 20,
+  objectives: [
+    "Get area, bounding box and centroid of every component with cv2.connectedComponentsWithStats",
+    "Compute grey-value statistics per component with np.bincount",
+    "Derive features such as equivalent diameter, aspect ratio and fill ratio",
+    "Filter and classify components by their statistics without loops over pixels",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 25.2 (Module 25).
+  Lab: LabelLab (click a component for its statistics; particles source).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 25.2 Region statistics
+
+<Definition term="Region statistics">numbers computed for every labelled component: its area (pixel count), bounding box, centroid, and from them derived features such as equivalent diameter, aspect ratio and fill ratio; plus statistics of the original image inside each component, such as mean brightness. They turn a label image into a table with one row per object.</Definition>
+
+Labelling (25.1) says which pixel belongs to which object. Most decisions need numbers per object: is it big enough to be a particle and not noise, too big to be a single particle, too dark, too elongated? `cv2.connectedComponentsWithStats` returns the basic table in the same pass as the labels; NumPy adds anything else without looping over pixels.
+
+## 1. An analogy
+
+A census. Labelling is drawing the boundary of every household; region statistics are the census form: how many people (area), where the house is (centroid), how big the plot is (bounding box), the average age (mean brightness). With the forms filled in, questions like "how many households have more than five people" are a single query.
+
+## 2. The statistics table
+
+<Flow
+  steps={[
+    { label: "Mask (+ the original grey image)", tone: "data" },
+    { label: "connectedComponentsWithStats → labels, stats (left, top, width, height, area), centroids", tone: "process" },
+    { label: "Derived features: equivalent diameter, aspect, fill; per-label grey statistics with bincount", tone: "process" },
+    { label: "Filter / classify rows → objects", tone: "result" },
+  ]}
+/>
+
+On the particle image (Otsu threshold, 3 × 3 opening), 35 components:
+
+| Feature | How | Min | Median | Max |
+| --- | --- | --- | --- | --- |
+| Area (px) | stats[:, CC_STAT_AREA] | 112 | 244 | 948 |
+| Equivalent diameter | 2 · √(area / π) | 11.9 | 17.6 | 34.7 |
+| Aspect ratio | width / height of the box | | | 1.74 |
+| Fill ratio | area / (width · height) | 0.51 | | |
+| Mean brightness | bincount with weights | 170.2 | | 176.8 |
+
+A single round particle has an aspect ratio near 1 and a fill ratio near π/4 ≈ 0.79. The three largest components have fill ratios of 0.51, 0.62 and 0.70 and boxes of 34 × 55, 23 × 36 and 37 × 27 pixels: they are pairs of touching particles. A simple rule (fill below 0.72 or aspect above 1.3) flags four suspicious components. There are 40 particles but 35 components, so five merges happened: one touching pair is compact enough to pass the rule. Statistics flag most merged components before any attempt to split them (25.4), but not all.
+
+<LabelLab initialSource="particles" caption="The particle mask, labelled. Click particles to read their area, bounding box, centroid and fill ratio: single particles fill about 0.75–0.8 of their box, touching pairs much less. Use the minimum-area slider to see how many components a size filter would keep."/>
+
+## 3. Grey-value statistics per component
+
+`np.bincount(labels.ravel(), weights=image.ravel())` sums the image values per label in one pass; dividing by the areas gives the mean brightness of every component. With `weights=image**2` the same gives variances; with other images (a depth map, a temperature image, 46.5) it gives mean depth or temperature per object. For minimum and maximum per label, sort or use `scipy.ndimage` functions, or loop over the bounding boxes (which are small).
+
+Typical derived features:
+
+- **Equivalent diameter** 2√(A/π): size of a disc with the same area.
+- **Aspect ratio** of the box (or of the minAreaRect, 24.4, for rotated objects).
+- **Fill ratio (extent)** A / (w · h); **solidity** needs the hull (24.5).
+- **Mean, standard deviation of brightness** inside the object: contrast, uniformity, colour (per channel).
+- **Touches the border**: left = 0, top = 0, left + width = W or top + height = H: partly visible objects, usually excluded from measurements.
+
+## 4. Industrial example
+
+Particle-size analysis of powders, sand or pellets labels each particle and reports the distribution of equivalent diameters (often as d10, d50, d90 percentiles), discarding components that touch the image border (their size is unknown) and flagging those with low fill ratio (agglomerates). Defect inspection does the same with defect candidates: area in mm², mean contrast against the surrounding surface, elongation; a rule or a classifier (36) on these few features decides "scratch", "spot" or "dust".
+
+## What you should remember from 25.2
+
+<Takeaways>
+<Takeaway n={1} title="One call">connectedComponentsWithStats: labels, [left, top, width, height, area], centroids.</Takeaway>
+<Takeaway n={2} title="Derived">Equivalent diameter, aspect ratio, fill ratio, border contact.</Takeaway>
+<Takeaway n={3} title="Grey values">np.bincount with weights: mean (and variance) of any image per label.</Takeaway>
+<Takeaway n={4} title="Use">Vectorised filters and rules on the table, not loops over pixels.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A component has area 314 px and a box of 20 × 20. Equivalent diameter and fill ratio?
+
+<Solution>
+
+2√(314/π) ≈ **20 px**; fill 314 / 400 = **0.785**: a disc of diameter 20.
+
+</Solution>
+
+**Q2.** How do you find components touching the image border from the stats?
+
+<Solution>
+
+left == 0, top == 0, left + width == image width, or top + height == image height.
+
+</Solution>
+
+### Next: 25.3 Blob detectors (LoG, MSER)
+
+Finding blobs directly in grey images, without a global threshold.
+
+## Code
+
+Two examples: the stats table with derived features, then grey statistics per component.
+
+### 1. Stats and derived features
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-particles.png", cv2.IMREAD_GRAYSCALE)
+_, mask = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+n, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+s = stats[1:]                                                        # drop the background row
+area = s[:, cv2.CC_STAT_AREA]
+w, h = s[:, cv2.CC_STAT_WIDTH], s[:, cv2.CC_STAT_HEIGHT]
+diameter = 2 * np.sqrt(area / np.pi)
+aspect = np.maximum(w, h) / np.minimum(w, h)
+fill = area / (w * h)
+print("components:", n - 1, "| area min/median/max:", int(area.min()), int(np.median(area)), int(area.max()))
+print("equivalent diameter median:", round(float(np.median(diameter)), 1))
+merged = (fill < 0.72) | (aspect > 1.3)
+print("suspected touching pairs:", int(merged.sum()), "| their boxes:", s[merged][:, :4].tolist())
+border = (s[:, 0] == 0) | (s[:, 1] == 0) | (s[:, 0] + w == img.shape[1]) | (s[:, 1] + h == img.shape[0])
+print("touching the image border:", int(border.sum()))
+```
+
+Output:
+
+```text
+components: 35 | area min/median/max: 112 244 948
+equivalent diameter median: 17.6
+suspected touching pairs: 4 | their boxes: [[272, 10, 23, 36], [81, 55, 34, 55], [264, 112, 37, 27], [277, 143, 33, 19]]
+touching the image border: 0
+```
+
+### 2. Grey-value statistics per component
+
+```python
+import numpy as np
+import cv2
+
+counts = np.bincount(labels.ravel(), minlength=n)
+mean = np.bincount(labels.ravel(), weights=img.ravel().astype(float), minlength=n) / counts
+var = np.bincount(labels.ravel(), weights=img.ravel().astype(float) ** 2, minlength=n) / counts - mean ** 2
+print("mean brightness per particle: min", round(float(mean[1:].min()), 1), "max", round(float(mean[1:].max()), 1))
+print("background mean:", round(float(mean[0]), 1), "| particle std (median):", round(float(np.median(np.sqrt(var[1:]))), 1))
+k = int(np.argmax(stats[1:, cv2.CC_STAT_AREA])) + 1
+print(f"largest component #{k}: area {stats[k, cv2.CC_STAT_AREA]}, centroid ({centroids[k][0]:.1f}, {centroids[k][1]:.1f}), mean {mean[k]:.1f}")
+```
+
+Output:
+
+```text
+mean brightness per particle: min 170.2 max 176.8
+background mean: 61.4 | particle std (median): 21.7
+largest component #11: area 948, centroid (96.7, 81.6), mean 175.9
+```
+
+- Particle brightness is uniform from particle to particle (170–177); inside each particle it varies by about 22 (domes from 160 at the rim to 200 at the centre, plus noise). A particle much darker than the others would stand out in `mean` immediately.
+
+## OpenCV API notes
+
+**`n, labels, stats, centroids = cv2.connectedComponentsWithStats(image, connectivity=8, ltype=cv2.CV_32S)`**:
+- `stats`: n × 5 int32: `CC_STAT_LEFT`, `CC_STAT_TOP`, `CC_STAT_WIDTH`, `CC_STAT_HEIGHT`, `CC_STAT_AREA` (row 0 = background).
+- `centroids`: n × 2 float64 (x, y).
+- `cv2.connectedComponentsWithStatsWithAlgorithm` chooses the labelling algorithm.
+
+**Per-label statistics**: `np.bincount` (sums, counts), `cv2.mean(img, mask=(labels == k).astype(np.uint8))` for one component, `scipy.ndimage.labeled_comprehension` / `mean` / `maximum` for many.
+
+## Where it fails
+
+- **Merged and split objects**: statistics describe components, not objects; a touching pair looks like one big object.
+- **Box-based features** (aspect, fill) depend on orientation: a diagonal bar has a low fill ratio; use minAreaRect (24.4) or moments (24.6) for rotation-independent shape features.
+- **Small components**: shape features of a few pixels are meaningless.
+- **Border objects**: partially visible; their size is wrong.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Including row 0** (the background) in statistics.
+- **Python loops over labels with `labels == k`** for hundreds of components: slow; use bincount.
+- **Mean brightness from the thresholded mask** instead of the original image.
+- **Measuring objects that touch the image border**.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Region properties
+
+Libraries such as scikit-image's `regionprops` compute dozens of features per region: moments, orientation, eccentricity, solidity, Euler number, Feret diameters, intensity statistics. Each is a few lines from the labels and the moments (24.6); the art is choosing features that separate the classes you care about (36.1).
+
+### Particle size statistics
+
+ISO 9276 [1] standardises how particle size distributions are reported (number- or volume-weighted, d10/d50/d90). Image-based sizing measures a 2-D projection: the equivalent diameter of the projected area is one of several possible "sizes" and differs from sieve or laser-diffraction results for non-spherical particles.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which column of stats holds the pixel count?",
+      options: ["CC_STAT_LEFT", "CC_STAT_WIDTH", "CC_STAT_AREA", "CC_STAT_TOP"],
+      answer: 2,
+      explanation: "The fifth column.",
+    },
+    {
+      question: "How do you compute the mean brightness of every component at once?",
+      options: ["A loop with cv2.mean", "np.bincount(labels, weights=image) / areas", "cv2.threshold", "findContours"],
+      answer: 1,
+      explanation: "One pass over the pixels.",
+    },
+    {
+      question: "A component's fill ratio is 0.5 while single particles have 0.78. It is probably…",
+      options: ["Noise", "Two touching particles", "A hole", "The background"],
+      answer: 1,
+      explanation: "Merged blobs fill their box poorly.",
+    },
+    {
+      question: "Why exclude components touching the image border from size statistics?",
+      options: ["They are noise", "Only part of the object is visible", "They have no centroid", "They are always merged"],
+      answer: 1,
+      explanation: "Their measured size is too small.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Stats row [40, 10, 12, 30, 250]. Give the bounding box corners, aspect ratio and fill ratio.
+
+<Solution>
+
+Box from (40, 10) to (51, 39) (width 12, height 30). Aspect 30 / 12 = **2.5**; fill 250 / 360 ≈ **0.69**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Compute d10, d50 and d90 of the equivalent diameters of the particles, once with all components and once without the suspected touching pairs.
+
+<Solution>
+
+```python
+import numpy as np
+
+for name, d in [("all components", diameter), ("without touching pairs", diameter[~merged])]:
+    p10, p50, p90 = np.percentile(d, [10, 50, 90])
+    print(f"{name:23s} n={len(d):2d} d10 {p10:.1f} | d50 {p50:.1f} | d90 {p90:.1f}")
+```
+
+Output:
+
+```text
+all components          n=35 d10 13.1 | d50 17.6 | d90 24.9
+without touching pairs  n=31 d10 13.1 | d50 16.3 | d90 23.0
+```
+
+The merged pairs shift the distribution upwards (d50 17.6 → 16.3, d90 24.9 → 23.0): agglomerates make a powder look coarser than it is. Splitting them (25.4) instead of dropping them recovers all 40 particles.
+
+</Solution>
+
+## References
+
+1. ISO 9276-1:1998, Representation of results of particle size analysis, Part 1: Graphical representation.
+2. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 11 (regional descriptors).
+3. OpenCV 4.13.0 documentation: `connectedComponentsWithStats`. https://docs.opencv.org/4.13.0/

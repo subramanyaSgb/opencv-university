@@ -1,0 +1,322 @@
+export const meta = {
+  number: "20.3",
+  title: "Blending",
+  minutes: 25,
+  objectives: [
+    "Explain why a hard cut shows a seam and a wide feather shows ghosting",
+    "Blend two images with Laplacian pyramids and a Gaussian pyramid of the mask (multiband blending)",
+    "Choose the number of levels from the size of the structures that must transition",
+    "Use cv2.detail_MultiBandBlender from the stitching module",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 20.3 (Module 20).
+  Lab: PyramidLab (mode blend, sample-blend-a/b).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 20.3 Blending
+
+<Definition term="Multiband (pyramid) blending">combining two images along a seam separately for each band of detail sizes: coarse brightness and colour change gradually over a wide zone, fine texture switches over a narrow zone. Each band gets a transition as wide as its own detail size, so the seam is invisible and nothing is doubled.</Definition>
+
+Panoramas (34.6), exposure fusion (48.1), inserting a defect into a good image for training data (58.3) and replacing a background all need two images joined without a visible seam. 14.4 blended with one mask; this chapter shows why a single mask cannot work at all scales, and how Burt and Adelson's 1983 multiresolution spline [1] solves it with the Laplacian pyramid of 20.2.
+
+## 1. An analogy
+
+Joining two pieces of wallpaper with different patterns and slightly different shades. Fading one into the other over a metre gives a smooth shade change but a strip where both patterns show through on top of each other. A sharp cut keeps the patterns clean but leaves a visible line where the shades jump. What you want: the shade fades over a metre, while the pattern switches at a clean line.
+
+## 2. Blend each band separately
+
+<Flow
+  steps={[
+    { label: "Images A, B and a mask M (1 = take A)", tone: "data" },
+    { label: "Laplacian pyramids LA, LB; Gaussian pyramid GM of the mask", tone: "process" },
+    { label: "Each level: L = GMᵢ · LAᵢ + (1 − GMᵢ) · LBᵢ", tone: "process" },
+    { label: "Collapse L → blended image", tone: "result" },
+  ]}
+/>
+
+The trick is in GM. At level 0 the mask is still sharp, so the finest detail switches within a pixel or two. At level 3, the mask has been blurred and halved three times; enlarged back to full size, its transition is about 8 times wider, which is right for structures 8 times larger. The residual level (very coarse) uses a very soft mask, so the overall colour changes slowly across a wide zone.
+
+Measured on the two 256 × 256 textures (steel on the left, brick on the right, mask = left half). "Colour jump": the largest step across the seam after blurring the result with σ = 8 (coarse brightness and colour). "Ghost zone": the number of columns where the fine texture matches neither A nor B, i.e. both patterns are mixed:
+
+| Method | Colour jump | Ghost zone (columns) |
+| --- | --- | --- |
+| Hard cut | 3.23 | 5 |
+| Feathered mask, σ = 2 | 3.14 | 4 |
+| Feathered mask, σ = 8 | 2.31 | 6 |
+| Feathered mask, σ = 32 | 0.94 | **28** |
+| Pyramid, 4 levels | 2.62 | 2 |
+| Pyramid, 6 levels | 1.27 | 2 |
+| **Pyramid, 8 levels** | **0.51** | **2** |
+
+A feather can be smooth (σ = 32) or clean (σ = 2), not both. The pyramid gets the smoothest colour transition *and* the narrowest mixing zone. More levels give a softer coarse transition; with 8 levels on a 256-pixel image the residual is 2 × 2 pixels, so the colour transition spans the whole image.
+
+<PyramidLab mode="blend" caption="Steel (A) and brick (B). Compare the hard cut, the feathered mask (try σ = 4 and σ = 30: seam versus double texture) and the pyramid blend with 1 to 7 levels. With the circular mask, the pyramid blend sets the brick into the steel with a soft colour transition but without a ghost ring of mixed texture."/>
+
+## 3. How many levels
+
+The coarsest level decides how wide the slowest transition is: roughly 2^(levels) pixels. Rules of thumb:
+
+- Enough levels that the residual is small compared with the overlap region, so differences in overall brightness are spread across it.
+- Not so many that the soft transition reaches into parts of A or B that must stay unchanged.
+- The mask must be defined everywhere at the coarse levels: for a small region (the circle), too many levels blur the mask into a weak grey cloud and the inserted object fades.
+
+Brightness differences larger than the blend can hide (one image much darker) should be corrected first (gain compensation, as in stitching).
+
+## 4. Industrial example
+
+Panorama stitching in OpenCV (`cv2.Stitcher`, 34.6) uses multiband blending by default to hide seams between overlapping camera images; inspection systems that tile a large part (a solar panel, a printed web, a wafer) from many camera images use the same blender so that tile borders do not show up as false defects. Synthetic defect generation for training classifiers (58.3) pastes cut-out defects into good images with pyramid blending, so that the network learns the defect and not the pasting seam.
+
+## What you should remember from 20.3
+
+<Takeaways>
+<Takeaway n={1} title="Problem">Hard cut: visible seam. Wide feather: double texture (ghosting).</Takeaway>
+<Takeaway n={2} title="Solution">Blend Laplacian levels with the Gaussian pyramid of the mask, then collapse.</Takeaway>
+<Takeaway n={3} title="Result">Each detail size gets a transition of its own width.</Takeaway>
+<Takeaway n={4} title="Levels">More levels: softer colour change; limited by image and region size.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** At level 3 of the mask pyramid, the mask's transition is about 2 pixels wide. How wide is it at full resolution?
+
+<Solution>
+
+2 × 2³ = **16 pixels**: each level doubles the width when enlarged back.
+
+</Solution>
+
+**Q2.** Why is the mask pyramid Gaussian and not Laplacian?
+
+<Solution>
+
+At every level the mask must be a weight between 0 and 1 for that level's band. The Gaussian pyramid gives a blurred, downscaled copy of the mask; a Laplacian level of the mask would be a signed detail image, not a weight.
+
+</Solution>
+
+### Next: 20.4 Difference of Gaussians
+
+Subtracting two blurred copies: a band-pass filter, a blob detector and the core of SIFT.
+
+## Code
+
+Two examples: pyramid blending from scratch against a cut and a feather, then OpenCV's MultiBandBlender.
+
+### 1. Pyramid blending
+
+```python
+import numpy as np
+import cv2
+
+A = cv2.imread("sample-blend-a.png").astype(np.float32)
+B = cv2.imread("sample-blend-b.png").astype(np.float32)
+h, w = A.shape[:2]
+M = np.zeros((h, w), np.float32)
+M[:, : w // 2] = 1                                                   # take A on the left
+
+def gaussian_pyr(x, n):
+    g = [x]
+    for _ in range(n - 1):
+        g.append(cv2.pyrDown(g[-1]))
+    return g
+
+def laplacian_pyr(x, n):
+    g = gaussian_pyr(x, n)
+    return [g[i] - cv2.pyrUp(g[i + 1], dstsize=(g[i].shape[1], g[i].shape[0])) for i in range(n - 1)] + [g[-1]]
+
+def collapse(L):
+    cur = L[-1]
+    for level in reversed(L[:-1]):
+        cur = level + cv2.pyrUp(cur, dstsize=(level.shape[1], level.shape[0]))
+    return cur
+
+def pyramid_blend(a, b, m, n):
+    La, Lb, Gm = laplacian_pyr(a, n), laplacian_pyr(b, n), gaussian_pyr(m, n)
+    return collapse([g[..., None] * la + (1 - g[..., None]) * lb for la, lb, g in zip(La, Lb, Gm)])
+
+highpass = lambda x: x - cv2.GaussianBlur(x, (0, 0), 2)
+hA, hB = highpass(A), highpass(B)
+
+def seam_report(name, R):
+    low = cv2.GaussianBlur(R, (0, 0), 8)
+    jump = np.abs(np.diff(low, axis=1)).mean(axis=(0, 2)).max()       # coarse colour step
+    hR = highpass(R)
+    eA, eB = ((hR - hA) ** 2).sum((0, 2)), ((hR - hB) ** 2).sum((0, 2))
+    ghost = ((eA > 0.25 * (hA ** 2).sum((0, 2))) & (eB > 0.25 * (hB ** 2).sum((0, 2)))).sum()
+    print(f"{name:12s} colour jump {jump:4.2f} | ghost columns {int(ghost):3d}")
+
+seam_report("cut", M[..., None] * A + (1 - M[..., None]) * B)
+for s in (2, 32):
+    m = cv2.GaussianBlur(M, (0, 0), s)[..., None]
+    seam_report(f"feather {s}", m * A + (1 - m) * B)
+for n in (4, 8):
+    seam_report(f"pyramid {n}", pyramid_blend(A, B, M, n))
+```
+
+Output:
+
+```text
+cut          colour jump 3.23 | ghost columns   5
+feather 2    colour jump 3.14 | ghost columns   4
+feather 32   colour jump 0.94 | ghost columns  28
+pyramid 4    colour jump 2.62 | ghost columns   2
+pyramid 8    colour jump 0.51 | ghost columns   2
+```
+
+- All arithmetic in float32; clip to 0–255 and convert to uint8 only for saving.
+- The mask can be any shape and soft-edged; it should be float in 0–1.
+
+### 2. OpenCV's MultiBandBlender
+
+```python
+import numpy as np
+import cv2
+
+a8, b8 = cv2.imread("sample-blend-a.png"), cv2.imread("sample-blend-b.png")
+mask_a = np.zeros((h, w), np.uint8)
+mask_a[:, : w // 2] = 255
+blender = cv2.detail_MultiBandBlender(0, 5)                          # try_gpu = 0, 5 bands
+blender.prepare((0, 0, w, h))                                         # output rectangle x, y, w, h
+blender.feed(a8.astype(np.int16), mask_a, (0, 0))                     # image, mask, top-left corner
+blender.feed(b8.astype(np.int16), 255 - mask_a, (0, 0))
+result, result_mask = blender.blend(None, None)
+out = np.clip(result, 0, 255).astype(np.uint8)
+print(result.dtype, out.shape, "| differs from my 5-level blend by", 
+      round(float(np.abs(out.astype(float) - np.clip(pyramid_blend(A, B, M, 6), 0, 255)).mean()), 2), "on average")
+```
+
+Output:
+
+```text
+int16 (256, 256, 3) | differs from my 5-level blend by 1.99 on average
+```
+
+- The stitching blender expects int16 images (CV_16SC3), uint8 masks and the top-left corner of each image in the output; it is designed for many overlapping, differently placed images.
+- `num_bands` counts band levels, so 5 bands correspond to 6 pyramid levels including the residual. The small average difference (about 2 grey levels) comes from the blender's integer arithmetic and its own mask weighting and border handling; visually the two results are the same.
+
+## OpenCV API notes
+
+**Pyramid blending from primitives**: `cv2.pyrDown`, `cv2.pyrUp(dstsize=...)` and float arithmetic, as in example 1.
+
+**`cv2.detail_MultiBandBlender(try_gpu=0, num_bands=5, weight_type=cv2.CV_32F)`**: `prepare(rect)`, `feed(img_int16, mask_uint8, top_left)` for each image, `blend(None, None)` → (int16 result, mask). Used by `cv2.Stitcher`.
+
+**`cv2.detail_FeatherBlender(sharpness=0.02)`**: distance-based feathering, the cheaper alternative.
+
+**`cv2.seamlessClone(src, dst, mask, center, flags)`**: Poisson blending (photo module), which matches gradients instead of pyramids: ideal for pasting an object into a different background.
+
+## Where it fails
+
+- **Misaligned images**: blending hides seams, not misregistration; edges that do not line up stay doubled (21).
+- **Large brightness differences**: the coarse transition becomes a visible gradient; compensate gains first.
+- **Small masked regions with many levels**: the coarse mask becomes too weak and the region fades.
+- **Moving objects in overlap regions**: ghosts; choose the seam to avoid them (graph-cut seam finders in stitching).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Blending in uint8**: band levels are signed (20.2).
+- **Building the mask pyramid as a Laplacian pyramid**.
+- **Mask and images of different sizes** or pyramids with different numbers of levels.
+- **Forgetting the colour channels**: the mask must be broadcast to all three.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The multiresolution spline
+
+Burt and Adelson [1] showed that a transition zone of about one wavelength is ideal for each frequency band: narrower makes a visible step, wider makes a double image. A pyramid provides exactly that, one band per octave, at a cost of about twice a single blur.
+
+### Poisson blending
+
+Pérez, Gangnet and Blake (2003) [2] paste the gradients of the source into the target and solve a Poisson equation so that the result matches the target at the region border. The source's colour is changed to fit the background; good for objects, less good when the colours must stay exact. OpenCV: `cv2.seamlessClone` (NORMAL_CLONE, MIXED_CLONE).
+
+### Seam finding
+
+Before blending, stitching chooses where the seam runs: through areas where the two images agree (graph cut, Kwatra et al. 2003), so that moving objects and parallax errors are not cut in half. OpenCV: `cv2.detail_GraphCutSeamFinder`.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A very wide feathered mask causes…",
+      options: ["A sharp seam", "Ghosting: both textures visible in the transition zone", "Aliasing", "Colour clipping"],
+      answer: 1,
+      explanation: "Fine texture from both images is mixed over a wide zone.",
+    },
+    {
+      question: "In pyramid blending, which pyramid is built from the mask?",
+      options: ["Laplacian", "Gaussian", "None", "A DoG pyramid"],
+      answer: 1,
+      explanation: "A blurred, downscaled weight per level.",
+    },
+    {
+      question: "Why is the result seamless and ghost-free?",
+      options: ["Each detail size gets a transition about as wide as itself", "The images are averaged", "It uses a median", "The mask is binary"],
+      answer: 0,
+      explanation: "Fine detail switches quickly, coarse colour slowly.",
+    },
+    {
+      question: "More pyramid levels make…",
+      options: ["The fine-texture switch wider", "The coarse colour transition wider", "The image smaller", "No difference"],
+      answer: 1,
+      explanation: "The residual level carries the softest mask.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 256-pixel-wide blend with 6 pyramid levels. How wide (approximately) is the transition of the residual level at full resolution, if the mask transition is 2 pixels at that level?
+
+<Solution>
+
+The residual is level 5: 2 × 2⁵ = **64 pixels**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Blend with a circular mask (radius 0.3 × width, centred) using 4 and 7 levels, and report the mean of the blended mask weight inside the circle at the coarsest level, i.e. how much of A survives there.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+yy, xx = np.mgrid[0:h, 0:w]
+C = (np.hypot(xx - w / 2, yy - h / 2) < 0.3 * w).astype(np.float32)
+for n in (4, 7):
+    g = gaussian_pyr(C, n)[-1]
+    top = cv2.resize(g, (w, h), interpolation=cv2.INTER_LINEAR)
+    print(f"{n} levels: coarsest mask {g.shape}, mean weight inside the circle {top[C > 0].mean():.2f}")
+```
+
+Output:
+
+```text
+4 levels: coarsest mask (32, 32), mean weight inside the circle 0.93
+7 levels: coarsest mask (4, 4), mean weight inside the circle 0.47
+```
+
+With 7 levels the coarsest mask is a 4 × 4 blur in which the circle has become a weak grey: only about half of A's overall colour survives inside it, and the inserted region looks washed out. For small regions, use fewer levels.
+
+</Solution>
+
+## References
+
+1. P. J. Burt, E. H. Adelson, "A multiresolution spline with application to image mosaics", *ACM Trans. Graphics* 2(4), 217–236, 1983.
+2. P. Pérez, M. Gangnet, A. Blake, "Poisson image editing", *ACM Trans. Graphics (SIGGRAPH)* 22(3), 313–318, 2003.
+3. M. Brown, D. G. Lowe, "Automatic panoramic image stitching using invariant features", *Int. J. Computer Vision* 74(1), 59–73, 2007.
+4. OpenCV 4.13.0 documentation: `pyrDown`, `pyrUp`, `detail::MultiBandBlender`, `seamlessClone`. https://docs.opencv.org/4.13.0/

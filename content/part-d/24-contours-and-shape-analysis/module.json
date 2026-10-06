@@ -1,0 +1,13 @@
+{
+  "number": 24,
+  "title": "Contours and shape analysis",
+  "summary": "From masks to outlines: finding contours, their hierarchy of holes and parts, area, perimeter and centroid, bounding shapes, convex hulls and defects, and image moments.",
+  "chapters": [
+    { "number": "24.1", "slug": "24.1-finding-contours", "title": "Finding contours" },
+    { "number": "24.2", "slug": "24.2-hierarchy", "title": "Hierarchy" },
+    { "number": "24.3", "slug": "24.3-area-perimeter-centroid", "title": "Area, perimeter, centroid" },
+    { "number": "24.4", "slug": "24.4-bounding-shapes", "title": "Bounding shapes" },
+    { "number": "24.5", "slug": "24.5-convex-hull-and-defects", "title": "Convex hull and defects" },
+    { "number": "24.6", "slug": "24.6-moments", "title": "Moments" }
+  ]
+}

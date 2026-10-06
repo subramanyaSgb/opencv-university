@@ -1,0 +1,301 @@
+export const meta = {
+  number: "20.1",
+  title: "Gaussian pyramid",
+  minutes: 20,
+  objectives: [
+    "Build a Gaussian pyramid with cv2.pyrDown and explain why each level is blurred before it is halved",
+    "Compute one pyrDown output by hand with the 1-4-6-4-1 kernel",
+    "Predict level sizes and the memory cost of a pyramid",
+    "Use pyramids for coarse-to-fine search and multi-scale processing",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 20.1 (first chapter of Module 20).
+  New lab: PyramidLab (lib/pyr-ops.ts; pyrDown/pyrUp equal OpenCV on 8-bit, float pyramids and blending equal OpenCV float).
+  New samples: sample-blend-a.png, sample-blend-b.png (used in 20.3).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 20.1 Gaussian pyramid
+
+<Definition term="Gaussian pyramid">a stack of copies of an image, each half the width and half the height of the one before, made by blurring with a small Gaussian and then keeping every second row and column. The bottom level is the original; the top is a tiny thumbnail.</Definition>
+
+Objects appear at different sizes: a part close to the camera is large, the same part far away is small. A detector tuned to one size misses the other. Searching a large image for a template is slow. Both problems become easier if the image exists at several resolutions at once. Burt and Adelson's pyramids (1983) [1] are the classic way to build them, and they are inside many OpenCV functions: optical flow (40.3), template matching speed-ups (32.3), feature detectors (33, 34) and blending (20.3).
+
+## 1. An analogy
+
+A map atlas: a world map, a country map, a city map, a street map. Each is a smaller-scale version of the next, and each leaves out details too small to show at its scale. To find a street, you start on the country map, then zoom in, instead of scanning street maps of the whole world.
+
+## 2. Blur, then halve
+
+<Flow
+  steps={[
+    { label: "Level 0: original (w × h)", tone: "data" },
+    { label: "Blur with the 5 × 5 Gaussian (1-4-6-4-1 in each direction, / 256)", tone: "process" },
+    { label: "Keep every second row and column", tone: "process" },
+    { label: "Level 1: (w + 1)/2 × (h + 1)/2; repeat", tone: "result" },
+  ]}
+/>
+
+A worked example on one row (the same blur runs down the columns too). Row 10, 20, 30, 40, 50, 60, 70, 80; the outputs come from pixels 0, 2, 4, 6:
+
+| Output | Window (reflected at the border) | Weighted sum / 16 | Result |
+| --- | --- | --- | --- |
+| 0 | 30, 20, **10**, 20, 30 | (30 + 80 + 60 + 80 + 30) / 16 = 17.5 | 18 |
+| 1 | 10, 20, **30**, 40, 50 | (10 + 80 + 180 + 160 + 50) / 16 = 30 | 30 |
+| 2 | 30, 40, **50**, 60, 70 | 800 / 16 = 50 | 50 |
+| 3 | 50, 60, **70**, 80, 70 | (50 + 240 + 420 + 320 + 70) / 16 = 68.75 | 69 |
+
+`cv2.pyrDown` gives exactly 18, 30, 50, 69. In the middle of a straight ramp the blur changes nothing; at the borders the reflection pulls the values in.
+
+Sizes for the 320 × 200 scene: 320 × 200, 160 × 100, 80 × 50, 40 × 25, 20 × 13 (odd sizes round up). All levels together hold 1.33 times the pixels of the original: 1 + 1/4 + 1/16 + … < 4/3. A pyramid is cheap.
+
+## 3. Why blur first
+
+Keeping every second pixel halves the sampling rate, so the highest frequency the new level can represent halves too (Nyquist, 5.4). Anything finer must be removed *before* subsampling, or it aliases into false patterns. On the zone plate, whose rings get finer towards the corners, the standard deviation in the top-left corner region (where the rings are finest) shows it:
+
+| Level | Size | Blur + subsample (pyrDown) | Subsample only |
+| --- | --- | --- | --- |
+| 0 | 320 × 200 | 90.2 | 90.2 |
+| 1 | 160 × 100 | 8.8 | 90.4 |
+| 2 | 80 × 50 | 0.1 | 92.8 |
+| 3 | 40 × 25 | 0.0 | 89.5 |
+
+With the blur, rings that are too fine for the level fade to flat grey (std near 0): correct, the detail is simply absent at that scale. Without it, they stay at full contrast as moiré rings of the wrong frequency: false detail that was never in the scene.
+
+<PyramidLab mode="gauss" caption="Gaussian pyramid of the zone plate. The top row shows the levels at their true sizes, the bottom row three levels enlarged to the same width. Switch to 'no blur' and watch false rings (aliasing) appear in the corners of the small levels; switch the image to the scene or the test chart to see what survives at each scale."/>
+
+## 4. Coarse to fine
+
+The main use is search. Matching a 64 × 64 template over a 1024 × 1024 image tests about a million positions. At level 3 both are 8 times smaller in each direction: about 15 000 positions with an 8 × 8 template, roughly 4 000 times less work. The best match found there is refined at level 2 in a small neighbourhood, then level 1, then level 0. The same coarse-to-fine idea is used by pyramidal Lucas–Kanade optical flow (`cv2.calcOpticalFlowPyrLK`, 40.3), ECC registration (21.3) and many feature detectors, which detect at every level to find features of every size.
+
+## 5. Industrial example
+
+A pick-and-place or label-verification system must locate a part anywhere in a 5-megapixel image within a few milliseconds. It searches for the part on level 3 or 4 of a pyramid, where the image is a few hundred pixels wide, and refines the position on finer levels only around the candidate. The same pyramid gives a fast preview for the operator screen (the level that fits the display) and is reused by every stage that needs multi-scale data, so it is built once per frame.
+
+## What you should remember from 20.1
+
+<Takeaways>
+<Takeaway n={1} title="Build">Blur with 1-4-6-4-1 (5 × 5), keep every second row and column, repeat.</Takeaway>
+<Takeaway n={2} title="Blur first">Subsampling without blur aliases fine detail into false patterns.</Takeaway>
+<Takeaway n={3} title="Cost">All levels together: 4/3 of the original.</Takeaway>
+<Takeaway n={4} title="Use">Coarse-to-fine search, multi-scale detection, previews.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Sizes of the first four levels of a 1920 × 1080 image?
+
+<Solution>
+
+1920 × 1080, 960 × 540, 480 × 270, 240 × 135 (then 120 × 68, rounding up).
+
+</Solution>
+
+**Q2.** Compute pyrDown output 2 for the row 0, 0, 0, 0, 160, 0, 0, 0, 0 (output 2 is centred on pixel 4).
+
+<Solution>
+
+Window 0, 0, 160, 0, 0 with weights 1, 4, 6, 4, 1: 6 · 160 / 16 = **60**. Outputs 1 and 3 (centred on pixels 2 and 6) see the spike with weight 1: 160 / 16 = **10**. A one-pixel spike is spread and reduced, as it must be at half the resolution.
+
+</Solution>
+
+### Next: 20.2 Laplacian pyramid
+
+What each level loses compared with the one below it, stored so that the image can be rebuilt exactly.
+
+## Code
+
+Two examples: pyrDown by hand and with OpenCV, then a pyramid with and without the blur.
+
+### 1. pyrDown
+
+```python
+import numpy as np
+import cv2
+
+row = np.array([10, 20, 30, 40, 50, 60, 70, 80], np.uint8)
+print("pyrDown of the row:", cv2.pyrDown(np.repeat(row[None, :], 5, axis=0))[1].tolist())
+
+def blur_row(r):                                          # 1-4-6-4-1 / 16 with BORDER_REFLECT_101
+    p = np.pad(r.astype(float), 2, mode="reflect")
+    return np.convolve(p, [1, 4, 6, 4, 1], mode="valid") / 16
+print("by hand:", blur_row(row)[::2].tolist())
+
+scene = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+levels = [scene]
+for _ in range(4):
+    levels.append(cv2.pyrDown(levels[-1]))
+print("sizes (w x h):", [(l.shape[1], l.shape[0]) for l in levels])
+print("total pixels / original:", round(sum(l.size for l in levels) / scene.size, 3))
+```
+
+Output:
+
+```text
+pyrDown of the row: [18, 30, 50, 69]
+by hand: [17.5, 30.0, 50.0, 68.75]
+sizes (w x h): [(320, 200), (160, 100), (80, 50), (40, 25), (20, 13)]
+total pixels / original: 1.332
+```
+
+- NumPy's `mode="reflect"` is OpenCV's BORDER_REFLECT_101 (the edge pixel is not repeated).
+- The 8-bit result rounds 17.5 up to 18 and 68.75 to 69.
+
+### 2. Aliasing without the blur
+
+```python
+import numpy as np
+import cv2
+
+zone = cv2.imread("sample-zoneplate.png", cv2.IMREAD_GRAYSCALE)
+blurred, dropped = [zone], [zone]
+for _ in range(3):
+    blurred.append(cv2.pyrDown(blurred[-1]))
+    dropped.append(dropped[-1][::2, ::2])                 # subsample only
+corner = lambda x: x[:x.shape[0] // 4, :x.shape[1] // 4].std()
+for i in range(4):
+    print(f"level {i}: corner std with blur {corner(blurred[i]):5.1f} | without {corner(dropped[i]):5.1f}")
+```
+
+Output:
+
+```text
+level 0: corner std with blur  90.2 | without  90.2
+level 1: corner std with blur   8.8 | without  90.4
+level 2: corner std with blur   0.1 | without  92.8
+level 3: corner std with blur   0.0 | without  89.5
+```
+
+## OpenCV API notes
+
+**`cv2.pyrDown(src, dstsize=None, borderType=cv2.BORDER_DEFAULT)`**: blur with the 5 × 5 kernel and drop every second row and column. Default size ((w + 1)/2, (h + 1)/2); `dstsize` may differ by at most one pixel from that.
+
+**`cv2.pyrUp(src, dstsize=None, ...)`**: the reverse direction, 2× larger (20.2).
+
+**`buildPyramid`**: exists in C++ (`cv::buildPyramid`) but is not exposed in the Python bindings of 4.13 (`cv2.buildPyramid` raises AttributeError); in Python, loop over `cv2.pyrDown`.
+
+**Types**: 8-bit, 16-bit, 16-bit signed, float32 and float64, any number of channels.
+
+**Other factors**: for scale steps other than 2 (e.g. 1.2 for detectors), use `cv2.resize` with `INTER_AREA` after a matching Gaussian blur, or `INTER_AREA` alone for moderate steps.
+
+## Where it fails
+
+- **Fixed factor 2**: objects whose size falls between levels are seen at a scale up to √2 off; detectors that need finer steps build their own scale series.
+- **Fine detail is gone** at coarse levels, by design: thin scratches or small text vanish after one or two levels.
+- **Coarse-to-fine search can lock onto the wrong candidate** if the target is indistinct at the coarsest level; keep several candidates.
+- **Not shift-invariant**: shifting the input by one pixel changes the coarse levels noticeably (subsampling phase).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Downscaling with `img[::2, ::2]`** or `INTER_NEAREST`: aliasing.
+- **Mixing up coordinates between levels**: a position (x, y) at level k is (x · 2ᵏ, y · 2ᵏ) at level 0, plus up to 2ᵏ − 1 pixels of uncertainty.
+- **Going too coarse**: below about 16 pixels on the object, it is no longer recognisable.
+- **Odd sizes**: pyrUp of a level gives an even size; pass `dstsize` to match the level below (20.2).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The generating kernel
+
+Burt and Adelson chose a 5-tap kernel (c, b, a, b, c) satisfying normalisation, symmetry and "equal contribution" (each input pixel contributes the same total weight to the next level). That leaves one parameter a; a = 0.375 gives 1-4-6-4-1 / 16, close to a Gaussian with σ ≈ 1 [1]. Repeated application approximates Gaussians of growing σ, which is why the levels form a discrete scale-space.
+
+### Scale-space
+
+A continuous scale-space is the family of images blurred with Gaussians of every σ (Witkin 1983, Koenderink 1984, Lindeberg [2]). A pyramid samples that family at σ doubling per level and saves memory by subsampling. SIFT (34.1) uses several blur levels per octave, between the halvings, to get finer scale steps.
+
+### Shift-invariant alternatives
+
+Undecimated ("à trous") wavelet transforms and steerable pyramids keep every level at full size or add orientation bands, trading memory for shift-invariance and direction selectivity (31.2).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Each Gaussian pyramid level is made by…",
+      options: ["Dropping every second pixel", "Blurring, then dropping every second row and column", "Averaging 2 × 2 blocks only", "Cropping"],
+      answer: 1,
+      explanation: "Blur first to avoid aliasing.",
+    },
+    {
+      question: "All levels of a pyramid together use about…",
+      options: ["2 × the original", "4/3 of the original", "log₂ of the original", "The same as the original"],
+      answer: 1,
+      explanation: "1 + 1/4 + 1/16 + … = 4/3.",
+    },
+    {
+      question: "What appears if you subsample without blurring?",
+      options: ["Nothing", "Aliasing: false patterns", "A brighter image", "Noise only"],
+      answer: 1,
+      explanation: "Detail above the new Nyquist limit folds into wrong frequencies.",
+    },
+    {
+      question: "A match found at (12, 7) on level 3 is near which position at level 0?",
+      options: ["(12, 7)", "(36, 21)", "(96, 56)", "(1.5, 0.9)"],
+      answer: 2,
+      explanation: "Multiply by 2³ = 8.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+How many pyramid levels does a 640 × 480 image have until the smaller side is 30 pixels or less? Give the sizes.
+
+<Solution>
+
+640 × 480 → 320 × 240 → 160 × 120 → 80 × 60 → 40 × 30: **5 levels** (0 to 4).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Write a `build_pyramid(img, levels)` function, and check that `hasattr(cv2, "buildPyramid")` is False in Python. Then compare level 1 with `cv2.resize(..., interpolation=cv2.INTER_AREA)` to half size: how large is the difference?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+def build_pyramid(img, levels):
+    pyr = [img]
+    for _ in range(levels):
+        pyr.append(cv2.pyrDown(pyr[-1]))
+    return pyr
+
+pyr = build_pyramid(scene, 3)
+print("levels:", len(pyr), "| cv2.buildPyramid in Python:", hasattr(cv2, "buildPyramid"))
+area = cv2.resize(scene, (160, 100), interpolation=cv2.INTER_AREA)
+diff = np.abs(pyr[1].astype(int) - area)
+print("pyrDown vs INTER_AREA: mean abs diff", round(float(diff.mean()), 2), "| max", int(diff.max()))
+```
+
+Output:
+
+```text
+levels: 4 | cv2.buildPyramid in Python: False
+pyrDown vs INTER_AREA: mean abs diff 3.23 | max 91
+```
+
+Both are reasonable half-size images, but they are not the same: they differ by 3 grey levels on average and by up to 91 at sharp edges and fine detail, where pyrDown's 5 × 5 kernel blurs much more than the 2 × 2 average of INTER_AREA (which lets more fine detail, and some aliasing, through).
+
+</Solution>
+
+## References
+
+1. P. J. Burt, E. H. Adelson, "The Laplacian pyramid as a compact image code", *IEEE Trans. Communications* 31(4), 532–540, 1983.
+2. T. Lindeberg, *Scale-Space Theory in Computer Vision*, Springer, 1994.
+3. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022: Section 3.5 (pyramids and wavelets).
+4. OpenCV 4.13.0 documentation: `pyrDown`, `pyrUp`, `buildPyramid`. https://docs.opencv.org/4.13.0/

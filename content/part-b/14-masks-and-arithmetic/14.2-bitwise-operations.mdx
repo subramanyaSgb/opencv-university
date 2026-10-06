@@ -1,0 +1,306 @@
+export const meta = {
+  number: "14.2",
+  title: "Bitwise operations",
+  minutes: 20,
+  objectives: [
+    "Combine masks with AND, OR, XOR and NOT as set operations",
+    "Understand what the same operations do to ordinary pixel values bit by bit",
+    "Paste a non-rectangular overlay into an image with a mask and its inverse",
+    "Use XOR to find differences between binary images",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 14.2 (Module 14 plan).
+  Reuses MaskLab in mode="logic".
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 14.2 Bitwise operations
+
+<Definition term="Bitwise operations">operations that combine two values bit by bit: AND (1 where both are 1), OR (1 where either is 1), XOR (1 where they differ) and NOT (flip every bit). On masks with values 0 and 255 they act as set operations: intersection, union, difference, complement.</Definition>
+
+Masks rarely come from one source. "The part, but not its label", "where the old and new results differ", "anything that is either scratch or dent": these are combinations of masks. OpenCV's `bitwise_and`, `bitwise_or`, `bitwise_xor` and `bitwise_not` do them in one fast call, and they also accept a third mask to restrict where they write.
+
+## 1. An analogy
+
+Two overlapping transparencies with shapes cut out: hold them together and look through. Light passes where **both** are cut (AND); a lamp under either shows its shape (OR); colour only the parts cut in exactly one of them (XOR); and swap cut and uncut (NOT).
+
+## 2. Masks as sets
+
+<Flow
+  steps={[
+    { label: "Mask A, mask B (0 / 255, same size)", tone: "data" },
+    { label: "Per pixel: 255 & 255 = 255, 255 & 0 = 0, …", tone: "process" },
+    { label: "AND = A ∩ B, OR = A ∪ B, XOR = (A ∪ B) − (A ∩ B), NOT = complement", tone: "result" },
+  ]}
+/>
+
+Real numbers: A is a filled circle of radius 70, B a 150 × 120 rectangle overlapping it, in a 320 × 200 image (64 000 pixels).
+
+| Operation | Pixels | Check |
+| --- | --- | --- |
+| A | 15 373 | |
+| B | 18 000 | |
+| A AND B | 4 862 | |
+| A OR B | 28 511 | = 15 373 + 18 000 − 4 862 |
+| A XOR B | 23 649 | = 28 511 − 4 862 |
+| NOT A | 48 627 | = 64 000 − 15 373 |
+| A AND NOT B | 10 511 | = 15 373 − 4 862 |
+
+<MaskLab mode="logic" caption="Combine the circle A and the rectangle B. The dim colours show where A and B are when they are not part of the result. Below the images: the matching OpenCV call." />
+
+## 3. On ordinary pixel values
+
+The same functions work on any 8-bit values, bit by bit: 181 (10110101) AND 240 (11110000) = 176 (10110000). That is how bit planes are extracted (11.5) and why `bitwise_and(img, 0xF0)` quantises to 16 levels. With 0/255 masks the results are always 0 or 255, so the set view applies.
+
+| | Bits | Value |
+| --- | --- | --- |
+| a | 10110101 | 181 |
+| b | 11110000 | 240 |
+| a AND b | 10110000 | 176 |
+| a OR b | 11110101 | 245 |
+| a XOR b | 01000101 | 69 |
+| NOT a | 01001010 | 74 |
+
+## 4. Pasting a shape: mask and inverse mask
+
+To place a non-rectangular overlay (a logo, a marker, a cut-out object) on an image:
+
+1. Make a mask of the overlay's shape and its inverse.
+2. `bitwise_and(roi, roi, mask=inverse)`: the image with a hole where the overlay goes.
+3. `bitwise_and(overlay, overlay, mask=mask)`: the overlay with a black surrounding.
+4. Add the two: holes and black surroundings fit together exactly.
+
+Simply adding the overlay to the image would mix their colours where they overlap; the two masks make the overlay replace the image instead.
+
+## 5. Industrial example
+
+A label inspection compares today's print with the approved master after alignment. Both are thresholded to binary ink masks; `bitwise_xor(master, current)` marks every pixel where ink is missing or extra. A small opening (Module 16) removes one-pixel edge jitter, and the remaining XOR area is the defect measure. `bitwise_and(xor, master)` splits it into missing ink, `bitwise_and(xor, current)` into extra ink, which the operator sees in two colours.
+
+## What you should remember from 14.2
+
+<Takeaways>
+<Takeaway n={1} title="Sets">AND = intersection, OR = union, XOR = differs, NOT = complement.</Takeaway>
+<Takeaway n={2} title="Values">Bit by bit on any 8-bit values; with 0/255 masks the result stays 0/255.</Takeaway>
+<Takeaway n={3} title="Overlay">Hole with the inverse mask + overlay with the mask, then add.</Takeaway>
+<Takeaway n={4} title="Differences">XOR of two binary images shows what changed; AND with each splits missing and extra.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A has 300 pixels, B 200, A AND B 50. How many pixels have A OR B, and A XOR B?
+
+<Solution>
+
+OR = 300 + 200 − 50 = **450**; XOR = 450 − 50 = **400**.
+
+</Solution>
+
+**Q2.** What is 255 XOR 255, and 100 XOR 100?
+
+<Solution>
+
+Both **0**: XOR of a value with itself is always 0. That is why XOR of two identical masks is empty.
+
+</Solution>
+
+### Next: 14.3 Saturating vs wrapping arithmetic
+
+Adding and subtracting images: what happens at 0 and 255 in OpenCV and in NumPy.
+
+## Code
+
+Two examples: set operations on masks and bits, then pasting an overlay.
+
+### 1. Masks and bits
+
+```python
+import numpy as np
+import cv2
+
+A = np.zeros((200, 320), np.uint8)
+cv2.circle(A, (120, 100), 70, 255, -1)
+B = np.zeros_like(A)
+cv2.rectangle(B, (140, 40), (289, 159), 255, -1)
+n = cv2.countNonZero
+print("A", n(A), "| B", n(B), "| AND", n(cv2.bitwise_and(A, B)), "| OR", n(cv2.bitwise_or(A, B)),
+      "| XOR", n(cv2.bitwise_xor(A, B)), "| NOT A", n(cv2.bitwise_not(A)), "| A AND NOT B", n(cv2.bitwise_and(A, cv2.bitwise_not(B))))
+print("NumPy equivalent of AND:", int(((A > 0) & (B > 0)).sum()))
+
+a, b = np.uint8(0b10110101), np.uint8(0b11110000)
+for name, v in [("a & b", a & b), ("a | b", a | b), ("a ^ b", a ^ b), ("~a", ~a)]:
+    print(f"{name:6s} = {int(v):3d} = {int(v):08b}")
+```
+
+Output:
+
+```text
+A 15373 | B 18000 | AND 4862 | OR 28511 | XOR 23649 | NOT A 48627 | A AND NOT B 10511
+NumPy equivalent of AND: 4862
+a & b  = 176 = 10110000
+a | b  = 245 = 11110101
+a ^ b  =  69 = 01000101
+~a     =  74 = 01001010
+```
+
+- NumPy's `&`, `|`, `^`, `~` on uint8 arrays give the same results as the OpenCV functions; on boolean arrays they are logical operations.
+- `cv2.rectangle` takes the two **inclusive** corners: (140, 40) to (289, 159) is 150 × 120 pixels.
+
+### 2. Pasting an overlay with a mask
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+logo = np.zeros((40, 60, 3), np.uint8)
+cv2.putText(logo, "OK", (5, 32), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 200, 0), 3)    # green text on black
+mask = cv2.threshold(cv2.cvtColor(logo, cv2.COLOR_BGR2GRAY), 10, 255, cv2.THRESH_BINARY)[1]
+inv = cv2.bitwise_not(mask)
+
+roi = img[150:190, 250:310]                                  # where the logo goes (over the orange bar)
+hole = cv2.bitwise_and(roi, roi, mask=inv)                   # image with a logo-shaped hole
+shape = cv2.bitwise_and(logo, logo, mask=mask)               # logo, black around it
+pasted = img.copy()
+pasted[150:190, 250:310] = cv2.add(hole, shape)
+
+naive = img.copy()
+naive[150:190, 250:310] = cv2.add(roi, logo)                 # no masks: colours mix
+inside = mask > 0
+print("logo pixels:", int(inside.sum()))
+print("pasted, inside the logo:", pasted[150:190, 250:310][inside].mean(0).round(1).tolist())
+print("naive add, inside the logo:", naive[150:190, 250:310][inside].mean(0).round(1).tolist())
+print("outside the logo unchanged:", np.array_equal(pasted[150:190, 250:310][~inside], roi[~inside]))
+```
+
+Output:
+
+```text
+logo pixels: 673
+pasted, inside the logo: [0.0, 200.0, 0.0]
+naive add, inside the logo: [40.0, 246.5, 171.0]
+outside the logo unchanged: True
+```
+
+- With the masks, the logo's pixels are exactly its own green (0, 200, 0); the naive addition mixes the logo with the orange bar and the background underneath.
+- `roi` is a view into `img` (6.3); writing into `pasted` (a copy) leaves `img` unchanged.
+
+## OpenCV API notes
+
+**`cv2.bitwise_and(src1, src2, dst=None, mask=None)`**, `bitwise_or`, `bitwise_xor`: element-wise on any depth (bit patterns of the stored values); `src2` can be a scalar. With `mask`, only pixels where the mask is non-zero are computed; the others are 0 in a new output (or left unchanged in a given `dst`).
+
+**`cv2.bitwise_not(src, dst=None, mask=None)`**: flips all bits (255 − v for uint8).
+
+**NumPy**: `&`, `|`, `^`, `~` (and `np.logical_and` etc. for booleans). Note that `~` on a NumPy `bool` array is logical NOT, on uint8 it is 255 − v.
+
+**Float images**: bitwise operations act on the binary representation of the floats, which is rarely meaningful; convert masks to uint8 first.
+
+## Where it fails
+
+- **Non-binary masks**: AND of 200 and 100 is 64 (bit pattern), not "both true"; threshold masks to 0/255 first.
+- **Misaligned masks**: XOR of two images shifted by one pixel marks every edge; align first.
+- **Hard overlay edges**: binary masks give jagged edges; for smooth compositing use alpha blending (14.4).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using `bitwise_and(img, mask)`** with a 1-channel mask on a 3-channel image (size/type error); use `mask=mask`.
+- **Mixing 0/1 and 0/255 masks**: 1 AND 255 = 1, which looks black.
+- **Using Python `and`/`or`** on arrays (error or wrong result); use `&`, `|` or the OpenCV functions.
+- **Forgetting that `cv2.rectangle` corners are inclusive** when building exact-size masks.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Boolean algebra on images
+
+Masks with AND, OR and NOT form a Boolean algebra: De Morgan's laws hold (NOT (A AND B) = NOT A OR NOT B), and every combination of masks can be written with these three operations. Inspection rules such as "defect if dark AND inside the part AND NOT inside the label" become one line each.
+
+### Run-length and packed masks
+
+Bitwise operations on packed masks (`np.packbits`, 13.1) process 8 pixels per byte operation, and run-length encoded masks (as used by some segmentation datasets) can be combined without unpacking. For very large masks (line-scan images, wafer maps) this saves memory and time.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which operation keeps only pixels that are in mask A but not in mask B?",
+      options: ["A OR B", "A XOR B", "A AND NOT B", "NOT A"],
+      answer: 2,
+      explanation: "The set difference A − B.",
+    },
+    {
+      question: "What is 200 AND 100 for uint8 values?",
+      options: ["100", "64", "0", "200"],
+      answer: 1,
+      explanation: "11001000 AND 01100100 = 01000000 = 64; bitwise operations act on bits.",
+    },
+    {
+      question: "XOR of two identical binary masks is…",
+      options: ["All 255", "Empty (all 0)", "The mask itself", "Its inverse"],
+      answer: 1,
+      explanation: "XOR marks only pixels that differ.",
+    },
+    {
+      question: "To paste a logo without mixing colours you add…",
+      options: ["The logo and the image", "The image with a logo-shaped hole and the logo with a black surrounding", "The mask and the image", "The inverse mask and the logo"],
+      answer: 1,
+      explanation: "The hole and the black surroundings fit together exactly.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Compute 0b11001100 XOR 0b10101010 and the result of NOT on it.
+
+<Solution>
+
+XOR = **01100110** (102); NOT = **10011001** (153).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Simulate a print check: `master` is the text mask of `sample-print-uneven-gt.png`; `current` is the same mask with a 20 × 20 block of ink removed at (rows 30–49, columns 20–39) and a 10 × 10 spot of extra ink at (rows 150–159, columns 280–289). Use XOR and AND to count missing and extra ink pixels.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+master = cv2.imread("sample-print-uneven-gt.png", cv2.IMREAD_GRAYSCALE)
+current = master.copy()
+current[30:50, 20:40] = 0                                # missing ink
+current[150:160, 280:290] = 255                          # extra ink
+diff = cv2.bitwise_xor(master, current)
+missing = cv2.bitwise_and(diff, master)
+extra = cv2.bitwise_and(diff, current)
+print("changed:", cv2.countNonZero(diff), "| missing:", cv2.countNonZero(missing), "| extra:", cv2.countNonZero(extra))
+```
+
+Output:
+
+```text
+changed: 193 | missing: 93 | extra: 100
+```
+
+Of the 400 pixels in the removed block only 93 were ink; of the 100 pixels in the extra spot all 100 were paper. XOR finds exactly the changed pixels, and the two ANDs say which kind of change each is.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 2.6 (set and logical operations).
+2. OpenCV 4.13.0 documentation: `bitwise_and`, `bitwise_or`, `bitwise_xor`, `bitwise_not`; tutorial "Arithmetic Operations on Images". https://docs.opencv.org/4.13.0/

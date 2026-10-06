@@ -1,0 +1,11 @@
+{
+  "number": 20,
+  "title": "Pyramids and scale-space",
+  "summary": "Representing an image at many resolutions: Gaussian and Laplacian pyramids, seamless multiband blending, and differences of Gaussians as band-pass and blob detectors.",
+  "chapters": [
+    { "number": "20.1", "slug": "20.1-gaussian-pyramid", "title": "Gaussian pyramid" },
+    { "number": "20.2", "slug": "20.2-laplacian-pyramid", "title": "Laplacian pyramid" },
+    { "number": "20.3", "slug": "20.3-blending", "title": "Blending" },
+    { "number": "20.4", "slug": "20.4-difference-of-gaussians", "title": "Difference of Gaussians" }
+  ]
+}

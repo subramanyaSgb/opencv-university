@@ -1,0 +1,320 @@
+export const meta = {
+  number: "7.3",
+  title: "BGR vs RGB",
+  minutes: 20,
+  objectives: [
+    "Know which libraries and devices use BGR and which use RGB",
+    "Convert at the right place with cvtColor or a channel flip, and only once",
+    "Recognise colour-order bugs in conversions (HSV, gray, Lab), drawing and deep-learning input",
+    "Exchange images safely between OpenCV, Pillow, matplotlib and DNN models",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 7.3 (Module 7 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3 and Pillow 12.3.0.
+*/}
+
+# 7.3 BGR vs RGB
+
+<Definition term="Channel order">the order in which a colour pixel's three numbers are stored. OpenCV stores **B, G, R**; almost everything else in Python stores **R, G, B**. The array itself does not say which.</Definition>
+
+Chapter 3.3 introduced channels and the BGR order; 6.5 showed what it does to matplotlib plots. This chapter is the practical rulebook: where the order changes, how to convert, and the less obvious places where a wrong order silently gives wrong numbers.
+
+## 1. An analogy
+
+Writing dates: 03/04 is 3 April in Europe and March 4 in the USA. Both are valid; the trouble starts when a date written in one convention is read in the other, and nothing on the paper tells you which was meant. A colour pixel (0, 0, 220) is "red" in BGR and "blue" in RGB.
+
+## 2. Who uses which
+
+| BGR | RGB |
+| --- | --- |
+| `cv2.imread`, `cv2.VideoCapture` | Pillow (`Image.open`), imageio, scikit-image |
+| `cv2.imshow`, `cv2.imwrite` | matplotlib (`plt.imshow`, `plt.imread`) |
+| OpenCV colour arguments: `(0, 0, 255)` is red | most deep-learning models and their preprocessing |
+| some camera SDKs (BGR8 pixel format) | other camera SDKs (RGB8), web images in browsers |
+
+Why BGR? When OpenCV started (around 2000), BGR byte order was common in Windows bitmaps and camera drivers, and the choice stuck for compatibility.
+
+## 3. Try it
+
+<ColorOrderLab caption="Choose where an array comes from and what it goes into. If the orders differ, red parts turn blue: convert once, at the boundary." />
+
+## 4. Converting
+
+All of these do the same swap of channels 0 and 2 *(Code example 1)*:
+
+- `cv2.cvtColor(img, cv2.COLOR_BGR2RGB)` (a new contiguous array).
+- `cv2.cvtColor(img, cv2.COLOR_RGB2BGR)`: the **same** conversion code (4); a swap is a swap.
+- `img[..., ::-1]`: a view (no copy, not contiguous, 6.2); wrap in `np.ascontiguousarray` if a library needs it.
+
+With alpha: `COLOR_BGRA2RGBA`, and `img[..., [2, 1, 0, 3]]` (fancy indexing: a copy).
+
+**Convert once, at the boundary** between libraries. Converting twice cancels out; converting in several places in a pipeline is how bugs are born.
+
+## 5. Silent errors: wrong numbers, not wrong colours
+
+When the order is wrong, images do not just look odd; **measurements** are wrong. A pure red pixel (B, G, R) = (0, 0, 220) *(Code example 1)*:
+
+| Operation | Correct (`BGR2…`) | Wrong order (`RGB2…`) |
+| --- | --- | --- |
+| HSV hue (OpenCV scale 0–179) | **0** (red) | **120** (blue) |
+| Gray value | **66** | **25** |
+
+The gray weights are 0.299 R + 0.587 G + 0.114 B (3.3); with swapped channels the red is weighted as blue. A colour sorter or a brightness threshold built on the wrong order gives wrong decisions without any visible error.
+
+## 6. Deep-learning models
+
+Most models are trained on RGB images. `cv2.dnn.blobFromImage(img, scalefactor, size, mean, swapRB=True)` converts an OpenCV BGR frame to an (N, C, H, W) float blob **with channels swapped** to RGB *(Code example 2)*. With PyTorch or ONNX Runtime you do it yourself: `rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)` before normalising. Models trained with OpenCV-loaded (BGR) images need BGR: check the model's documentation; a swap error typically costs a few percent of accuracy rather than a total failure, which makes it hard to notice.
+
+## 7. Industrial example
+
+A sorting line classifies painted parts by colour with an ONNX model trained on RGB photos, while the camera SDK delivers BGR8:
+
+<Flow
+  steps={[
+    { label: "SDK buffer (BGR8) → NumPy array", tone: "world" },
+    { label: "OpenCV preprocessing (crop, resize): stays BGR", tone: "process" },
+    { label: "One conversion: cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)", tone: "process" },
+    { label: "Normalise and feed the RGB model", tone: "result" },
+  ]}
+/>
+
+Write the order into variable names (`frame_bgr`, `crop_rgb`) and into the model's configuration file: the next person cannot see it in the array.
+
+## What you should remember from 7.3
+
+<Takeaways>
+<Takeaway n={1} title="Who">OpenCV = BGR; Pillow, matplotlib, most models = RGB.</Takeaway>
+<Takeaway n={2} title="How">cv2.cvtColor(img, COLOR_BGR2RGB) or img[..., ::-1] (a view).</Takeaway>
+<Takeaway n={3} title="Where">Once, at the boundary between libraries.</Takeaway>
+<Takeaway n={4} title="Silent errors">Wrong order changes hue, gray values and model accuracy, not just display.</Takeaway>
+<Takeaway n={5} title="Name it">frame_bgr, crop_rgb: arrays carry no label.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** What colour does `cv2.rectangle(img, p1, p2, (255, 0, 0), 2)` draw?
+
+<Solution>
+
+**Blue**: OpenCV colour tuples are (B, G, R).
+
+</Solution>
+
+**Q2.** A gray conversion gives 25 for a bright red part. What went wrong?
+
+<Solution>
+
+The image is RGB but was converted with `COLOR_BGR2GRAY` (or the reverse): red was weighted with the blue weight 0.114.
+
+</Solution>
+
+**Q3.** Why might `Image.fromarray(img[..., ::-1])` fail or behave unexpectedly?
+
+<Solution>
+
+`img[..., ::-1]` is a non-contiguous view; some library versions require contiguous data. Use `np.ascontiguousarray(img[..., ::-1])` or `cv2.cvtColor`.
+
+</Solution>
+
+### Next: 7.4 Video and camera capture
+
+Reading frames from files and cameras, and writing video.
+
+## Code
+
+Two examples: what a wrong order does to conversions, and exchanging images with Pillow and DNN models. Copy the sample images next to the script. Example 2 needs Pillow (`pip install pillow`, tested with 12.3.0).
+
+### 1. OpenCV: the cost of the wrong order
+
+```python
+import numpy as np
+import cv2
+
+red = np.uint8([[[0, 0, 220]]])                           # one pixel, BGR: pure red
+print("as BGR -> HSV :", cv2.cvtColor(red, cv2.COLOR_BGR2HSV).ravel(), "(hue 0 = red)")
+print("as RGB -> HSV :", cv2.cvtColor(red, cv2.COLOR_RGB2HSV).ravel(), "(hue 120 = blue: wrong order)")
+print("BGR2GRAY      :", cv2.cvtColor(red, cv2.COLOR_BGR2GRAY).ravel(), "| RGB2GRAY:", cv2.cvtColor(red, cv2.COLOR_RGB2GRAY).ravel())
+print("same code     :", cv2.COLOR_BGR2RGB == cv2.COLOR_RGB2BGR, "(a swap is a swap)")
+img = cv2.imread("sample-color.png")
+print("cvtColor == [..., ::-1]:", np.array_equal(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), img[..., ::-1]))
+```
+
+Output:
+
+```text
+as BGR -> HSV : [  0 255 220] (hue 0 = red)
+as RGB -> HSV : [120 255 220] (hue 120 = blue: wrong order)
+BGR2GRAY      : [66] | RGB2GRAY: [25]
+same code     : True (a swap is a swap)
+cvtColor == [..., ::-1]: True
+```
+
+- `np.uint8([[[0, 0, 220]]])` is a 1 × 1 image with 3 channels, the smallest valid input for `cvtColor`.
+- OpenCV's 8-bit hue runs 0–179 (degrees ÷ 2): 120 means 240°, blue (Part B).
+
+### 2. OpenCV, Pillow and DNN: crossing library boundaries
+
+```python
+import numpy as np
+import cv2
+from PIL import Image
+
+bgr = cv2.imread("sample-color.png")
+rgb = np.array(Image.open("sample-color.png").convert("RGB"))       # Pillow gives RGB
+print("cv2 pixel [100, 70]   :", bgr[100, 70], "(B, G, R)")
+print("Pillow pixel [100, 70]:", rgb[100, 70], "(R, G, B)")
+print("same after flipping   :", np.array_equal(bgr[..., ::-1], rgb))
+Image.fromarray(np.ascontiguousarray(bgr[..., ::-1])).save("via_pillow.png")   # Pillow must get RGB
+print("saved with Pillow, read back with cv2 equal:", np.array_equal(cv2.imread("via_pillow.png"), bgr))
+blob = cv2.dnn.blobFromImage(bgr, scalefactor=1 / 255, size=(320, 200), swapRB=True)   # for a model trained on RGB
+print("blob shape (N, C, H, W):", blob.shape, "| channel 0 at [100, 70] =", round(float(blob[0, 0, 100, 70]) * 255), "(red)")
+```
+
+Output:
+
+```text
+cv2 pixel [100, 70]   : [  0   0 220] (B, G, R)
+Pillow pixel [100, 70]: [220   0   0] (R, G, B)
+same after flipping   : True
+saved with Pillow, read back with cv2 equal: True
+blob shape (N, C, H, W): (1, 3, 200, 320) | channel 0 at [100, 70] = 220 (red)
+```
+
+- `Image.open(…).convert("RGB")` also drops alpha and expands palette images to RGB.
+- `blobFromImage(…, size=(width, height))` resizes, scales and (with `swapRB=True`) reorders channels; channel 0 of the blob is now red.
+
+## OpenCV API notes
+
+**`cv2.cvtColor(src, code)`** with `COLOR_BGR2RGB` / `COLOR_RGB2BGR` (identical), `COLOR_BGRA2RGBA`, `COLOR_BGR2RGBA`, and every colour-space conversion in both `BGR2…` and `RGB2…` versions (`BGR2HSV`, `RGB2HSV`, `BGR2Lab`, …). Use the one that matches the array.
+
+**`cv2.dnn.blobFromImage(image, scalefactor, size, mean, swapRB, crop)`**: `swapRB=True` for models trained on RGB; with `swapRB=True` the documentation asks for `mean` in (R, G, B) order, i.e. the model's order.
+
+**Bayer conversions** (2.7) have their own naming trap: since OpenCV 4.x, `COLOR_BayerRGGB2BGR` equals the legacy `COLOR_BayerBG2BGR`; check results on a test pattern.
+
+## Where it fails
+
+- **Single-channel and 4-channel images**: a gray image has no order; BGRA keeps alpha last. `img[..., ::-1]` on BGRA gives ARGB, not RGBA.
+- **Camera SDKs** can deliver BGR, RGB, Bayer or YUV; the pixel format must be read from the SDK, not guessed from pictures of gray objects.
+- **Video decoders** in some libraries (PyAV, decord) return RGB, unlike `cv2.VideoCapture`.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Converting twice** (once in a helper, once at the call site): back to the original order.
+- **`COLOR_RGB2HSV` on an OpenCV image**: hue shifted by ⅓ of the circle.
+- **Feeding BGR frames to an RGB-trained model** and accepting a small accuracy loss as "normal".
+- **Using `img[..., ::-1]` on BGRA**.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Byte order in memory
+
+Many frame grabbers and graphics APIs describe pixels as 32-bit words (for example `0xAARRGGBB`); on little-endian CPUs such a word is stored in memory as B, G, R, A. That is one reason BGR(A) byte order is so common in imaging hardware and in Windows' DIB format [1].
+
+### Colour management
+
+R, G and B values only describe a colour together with a colour space (sRGB, Adobe RGB, a camera's native space). Channel order is the first question; the colour space is the second (Part B) [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "cv2.imread returns pixels in which order?",
+      options: ["RGB", "BGR", "Depends on the file format", "GBR"],
+      answer: 1,
+      explanation: "OpenCV always returns B, G, R for colour images.",
+    },
+    {
+      question: "Pillow's np.array(Image.open(path)) for a colour JPEG is…",
+      options: ["BGR", "RGB", "HSV", "Gray"],
+      answer: 1,
+      explanation: "Pillow, matplotlib and most other Python libraries use RGB.",
+    },
+    {
+      question: "Which is the same as cv2.cvtColor(img, cv2.COLOR_BGR2RGB)?",
+      options: ["img.T", "img[::-1]", "img[..., ::-1]", "img[:, ::-1]"],
+      answer: 2,
+      explanation: "Reverse the last (channel) axis.",
+    },
+    {
+      question: "An OpenCV image converted with COLOR_RGB2HSV gives a red part a hue of…",
+      options: ["0", "60", "120", "179"],
+      answer: 2,
+      explanation: "The channels are read in the wrong order: red is treated as blue (hue 120 on OpenCV's 0–179 scale).",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A BGR pixel is (30, 200, 90). Write it as RGB, and say which colour OpenCV's `cv2.circle(…, color=(30, 200, 90))` draws.
+
+<Solution>
+
+RGB (90, 200, 30): a fresh **green**. OpenCV interprets the colour tuple as (B, G, R) = (30, 200, 90), the same green.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Write `to_rgb(img)` that accepts gray, BGR and BGRA OpenCV images and returns a contiguous RGB (or RGBA) array suitable for Pillow. Test it on a gray, a colour and a BGRA image and print the shapes and the first pixel of each result.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+def to_rgb(img):
+    if img.ndim == 2:
+        return cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+    if img.shape[2] == 3:
+        return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    if img.shape[2] == 4:
+        return cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA)
+    raise ValueError(f"unexpected shape {img.shape}")
+
+bgr = cv2.imread("sample-color.png")
+for name, im in [("gray", cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)), ("bgr", bgr), ("bgra", cv2.cvtColor(bgr, cv2.COLOR_BGR2BGRA))]:
+    out = to_rgb(im)
+    print(f"{name:4s} -> {out.shape}, contiguous {out.flags['C_CONTIGUOUS']}, pixel [100, 70] = {out[100, 70]}")
+```
+
+Output:
+
+```text
+gray -> (200, 320, 3), contiguous True, pixel [100, 70] = [66 66 66]
+bgr  -> (200, 320, 3), contiguous True, pixel [100, 70] = [220   0   0]
+bgra -> (200, 320, 4), contiguous True, pixel [100, 70] = [220   0   0 255]
+```
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colour-inspection threshold works on the developer's PC (images loaded with Pillow) but rejects good parts on the line (frames from `cv2.VideoCapture`). What do you check first?
+
+<Solution>
+
+The channel order: Pillow gives RGB, `VideoCapture` gives BGR, so the same code sees red and blue swapped on the line. Find where colours are converted (HSV, Lab, thresholds), make the input order explicit (convert once at the boundary) and test both paths with a known colour target.
+
+</Solution>
+
+## References
+
+1. Microsoft documentation, *Bitmap storage* and *BITMAPINFOHEADER* (DIB pixel layout, blue first).
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022, Section 2.3.2 (Color).
+3. OpenCV 4.13.0 documentation, *Color conversions* (`cvtColor`, `ColorConversionCodes`): [docs.opencv.org/4.13.0/d8/d01/group__imgproc__color__conversions.html](https://docs.opencv.org/4.13.0/d8/d01/group__imgproc__color__conversions.html); *Deep Neural Network module* (`blobFromImage`): [docs.opencv.org/4.13.0/d6/d0f/group__dnn.html](https://docs.opencv.org/4.13.0/d6/d0f/group__dnn.html).
+4. Pillow documentation, *Image module*: [pillow.readthedocs.io](https://pillow.readthedocs.io/en/stable/reference/Image.html).

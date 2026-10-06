@@ -1,0 +1,9 @@
+{
+  "number": 28,
+  "title": "Active contours",
+  "summary": "Curves that move to object boundaries: parametric snakes with internal and external energy, and level sets that can split and merge.",
+  "chapters": [
+    { "number": "28.1", "slug": "28.1-snakes", "title": "Snakes" },
+    { "number": "28.2", "slug": "28.2-level-sets", "title": "Level sets" }
+  ]
+}

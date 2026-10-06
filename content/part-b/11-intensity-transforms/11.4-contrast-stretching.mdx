@@ -1,0 +1,269 @@
+export const meta = {
+  number: "11.4",
+  title: "Contrast stretching",
+  minutes: 20,
+  objectives: [
+    "Stretch a narrow grey range linearly over 0–255",
+    "Choose the limits robustly: min-max vs percentiles vs fixed physical limits",
+    "Build piecewise-linear curves with control points",
+    "Use cv2.normalize, cv2.convertScaleAbs and LUTs, and know their pitfalls",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 11.4 (Module 11 plan).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 11.4 Contrast stretching
+
+<Definition term="Contrast stretching">a point operation that maps a chosen input range [low, high] linearly onto the full output range [0, 255]: values below low become 0, above high become 255, and the range in between is spread out.</Definition>
+
+Low-contrast images use only part of the 256 grey levels: a grey plate under flat light may span 70 to 180. Stretching spreads them over the full range, which makes differences easier to see and gives later steps (thresholds, edges) a larger signal. The key question is how to choose low and high.
+
+## 1. An analogy
+
+Zooming the y-axis of a chart. A temperature curve between 20 °C and 23 °C looks flat on a 0–100 °C axis; set the axis to 20–23 °C and every variation is clearly visible. Contrast stretching sets the "axis" of the grey values.
+
+## 2. The linear stretch
+
+<Equation terms={[{ value: "s" }, { op: "=", value: "(r − low) · 255 / (high − low), clipped to 0…255", result: true }]} />
+
+<Flow
+  steps={[
+    { label: "Measure the range: min/max, percentiles, or physical limits", tone: "data" },
+    { label: "low → 0, high → 255, linear in between", tone: "process" },
+    { label: "Clip outside; apply with a LUT or convertScaleAbs", tone: "result" },
+  ]}
+/>
+
+| Choice of limits | Pros | Cons |
+| --- | --- | --- |
+| **min and max** of the image | nothing is clipped | one hot pixel or speck of dust ruins it |
+| **percentiles** (e.g. 1 % and 99 %) | robust against outliers | clips a small, controlled fraction |
+| **fixed limits** (from the process) | same appearance on every image; comparable | must be chosen with care; can clip if the process changes |
+
+<CurveLab kinds={["identity", "stretch", "contrast"]} initial="stretch" src="/images/sample-plate-poor.png" caption="A low-contrast plate (grey values about 70–180). Set low and high around the occupied range and watch the histogram spread over the full width." />
+
+Things to try: low 92, high 166 (the 1st and 99th percentiles): the plate's texture becomes clear and only about 2 % of pixels clip. Low 0, high 255: no change. Low 120, high 140: extreme contrast, most pixels clip.
+
+## 3. Piecewise-linear curves
+
+A single straight segment treats the whole range equally. With a few **control points** you can stretch the important range strongly and keep the rest gently compressed instead of clipped:
+
+- (0, 0) → (92, 20) → (129, 128) → (166, 235) → (255, 255): steep around the plate's grey values, shallow at the ends.
+- Build the table with `np.interp(np.arange(256), xs, ys)`, apply with `cv2.LUT`.
+
+## 4. Stretching in practice
+
+- **Display**: percentiles or fixed limits; never per-frame min-max for video (flicker).
+- **Before a threshold**: a fixed linear stretch does not change which pixels are above a correspondingly scaled threshold; it helps only if later steps work on absolute grey values (edge thresholds, OCR).
+- **Colour images**: stretch each channel with the **same** limits (keeps colours) or stretch only L/Y; separate per-channel limits act as an automatic white balance (and change colours).
+- **16-bit data**: stretch from the 16-bit range to 8 bits for display (`cv2.normalize` with `dtype=cv2.CV_8U`, or percentiles); this is how 12-bit camera images are shown.
+
+## 5. Industrial example
+
+A camera inspecting matte aluminium sheets sees grey values only between 110 and 150. Scratches differ from the surface by 3–5 levels: hard to see, and too small for the fixed edge threshold of the existing algorithm. A fixed stretch of 100–160 to 0–255 (gain 4.25) makes the scratches differ by 13–21 levels, comfortably above the edge threshold, without retuning the algorithm. The limits are fixed, not per image, so the scratch contrast is the same on every sheet; a monitor of the 1 % and 99 % percentiles raises an alarm if the surface brightness ever drifts out of 100–160.
+
+## What you should remember from 11.4
+
+<Takeaways>
+<Takeaway n={1} title="Formula">s = (r − low) · 255 / (high − low), clipped.</Takeaway>
+<Takeaway n={2} title="Limits">Min-max is fragile; percentiles are robust; fixed limits give consistent results.</Takeaway>
+<Takeaway n={3} title="Piecewise">Control points + np.interp + LUT for any shape.</Takeaway>
+<Takeaway n={4} title="Colour">Same limits for all channels, or stretch Y/L only.</Takeaway>
+<Takeaway n={5} title="No new information">Stretching spreads existing levels; noise is stretched too.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Stretch low = 80, high = 180. What happens to 80, 130, 200?
+
+<Solution>
+
+80 → **0**; 130 → (50 · 255/100) = **127.5 → 128**; 200 → **255** (clipped).
+
+</Solution>
+
+**Q2.** Why can min-max stretching fail on an image with one white dust particle?
+
+<Solution>
+
+max = 255 because of the particle, so the stretch hardly changes anything: the rest of the image keeps its low contrast.
+
+</Solution>
+
+### Next: 11.5 Level and bit-plane slicing
+
+Highlighting a band of grey values, and looking at the image one bit at a time.
+
+## Code
+
+Two examples: min-max vs percentile stretch from scratch, and the OpenCV ways to stretch.
+
+### 1. From scratch: why percentiles are safer
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-plate-poor.png", cv2.IMREAD_GRAYSCALE)
+noisy = img.copy()
+noisy[5, 5], noisy[150, 300] = 0, 255                               # two outlier pixels (dust, a hot pixel)
+
+def stretch(a, lo, hi):
+    out = (a.astype(np.float64) - lo) * 255 / (hi - lo)              # from scratch: map lo -> 0, hi -> 255
+    return np.clip(np.round(out), 0, 255).astype(np.uint8)
+
+print(f"original: range {img.min()}..{img.max()}, std {img.std():.1f}")
+for name, a in [("clean", img), ("with 2 outliers", noisy)]:
+    mm = stretch(a, int(a.min()), int(a.max()))
+    lo, hi = np.percentile(a, [1, 99])
+    pc = stretch(a, lo, hi)
+    print(f"{name:15s}: min-max -> std {mm.std():5.1f} | 1-99 % ({lo:.0f}..{hi:.0f}) -> std {pc.std():5.1f}, clipped {np.mean((pc == 0) | (pc == 255)):.1%}")
+```
+
+Output:
+
+```text
+original: range 69..183, std 17.0
+clean          : min-max -> std  38.0 | 1-99 % (92..166) -> std  58.0, clipped 2.2%
+with 2 outliers: min-max -> std  17.0 | 1-99 % (92..166) -> std  58.0, clipped 2.2%
+```
+
+- The standard deviation measures contrast. Two outlier pixels out of 64 000 make the min-max stretch useless (std stays 17.0); the percentile stretch is unaffected.
+- The percentile stretch clips 2.2 % of the pixels: the price of a much stronger contrast.
+
+### 2. OpenCV: normalize, convertScaleAbs and a piecewise LUT
+
+```python
+import numpy as np
+import cv2
+
+a = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)               # min-max stretch
+b = cv2.convertScaleAbs(img, alpha=255 / (166 - 92), beta=-92 * 255 / (166 - 92))   # fixed limits 92..166
+table = np.round(np.interp(np.arange(256), [0, 92, 129, 166, 255], [0, 20, 128, 235, 255])).astype(np.uint8)
+c = cv2.LUT(img, table)                                             # piecewise: steep in the middle, gentle at the ends
+for name, out in [("normalize MINMAX", a), ("convertScaleAbs 92..166", b), ("piecewise LUT", c)]:
+    print(f"{name:24s}: range {out.min():3d}..{out.max():3d} | std {out.std():5.1f} | median {int(np.median(out))}")
+```
+
+Output:
+
+```text
+normalize MINMAX        : range   0..255 | std  38.0 | median 134
+convertScaleAbs 92..166 : range   0..255 | std  57.7 | median 127
+piecewise LUT           : range  15..239 | std  48.9 | median 128
+```
+
+- `cv2.normalize(..., NORM_MINMAX)` is the min-max stretch (with its outlier problem).
+- `cv2.convertScaleAbs(img, alpha, beta)` computes |α·r + β| with saturation: a linear stretch with fixed limits. Beware the absolute value: the about 1 % of pixels darker than 92 give negative results, which are **mirrored** (69 → |−79| = 79) instead of becoming 0. Exercise 2 shows the effect; clip with NumPy when that matters.
+- The piecewise curve gives high contrast in the middle but keeps the ends visible (15 and 239 instead of clipping).
+
+## OpenCV API notes
+
+**`cv2.normalize(src, dst, alpha, beta, norm_type, dtype, mask)`**: with `NORM_MINMAX`, maps the min and max (inside `mask`) to `alpha` and `beta`; `dtype=cv2.CV_8U` for 16-bit → 8-bit display.
+
+**`cv2.convertScaleAbs(src, alpha, beta)`**: |α·src + β| saturated to uint8.
+
+**LUTs**: `cv2.LUT(img, table)` with `table = np.interp(...)`; **percentiles**: `np.percentile(img, [1, 99])` (or a histogram, 12.1, for speed on large images).
+
+## Where it fails
+
+- **Outliers** with min-max limits.
+- **Uneven illumination**: a global stretch cannot fix a gradient; use local methods (CLAHE 12.3, flat field 15.3).
+- **Noise**: stretched along with the signal.
+- **Quantisation gaps**: stretching an 8-bit range of 74 levels over 256 leaves gaps in the histogram (most output levels unused).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **convertScaleAbs with negative intermediate values**: −40 becomes +40 (absolute value), not 0. Clip explicitly with NumPy if values below `low` must become black.
+- **Per-frame min-max stretch on video**: brightness pumps from frame to frame.
+- **Different limits per colour channel** when colours must be preserved.
+- **Thresholding after a per-image stretch** with a fixed threshold (the threshold's meaning changes from image to image).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Stretching and the histogram
+
+A linear stretch with gain k = 255 / (high − low) multiplies the width of every histogram peak by k: the standard deviation of the image grows by the same factor (if nothing clips), which is why std is a convenient contrast measure. Histogram equalization (12.2) goes further: it chooses a non-linear curve so that the output histogram becomes flat [1].
+
+### Robust limits for streams
+
+For video or production streams, compute the percentiles over a running window (or with exponential smoothing) instead of per frame, and limit how fast the limits may change. This gives the benefit of adaptation without visible pumping; many camera "auto contrast" functions work this way.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why use percentiles instead of min and max for the limits?",
+      options: ["They are faster", "A few outlier pixels cannot spoil them", "They never clip", "OpenCV requires it"],
+      answer: 1,
+      explanation: "Min and max are set by single pixels.",
+    },
+    {
+      question: "cv2.normalize with NORM_MINMAX maps…",
+      options: ["the mean to 128", "the image's min and max to the given range", "the 1 % and 99 % percentiles", "nothing"],
+      answer: 1,
+      explanation: "It is a min-max stretch.",
+    },
+    {
+      question: "What does contrast stretching do to noise?",
+      options: ["Removes it", "Stretches it by the same gain as the signal", "Reduces it", "Nothing"],
+      answer: 1,
+      explanation: "A point operation cannot tell noise from signal.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 12-bit camera image uses values 400 to 2400. Which α and β map this range to 0–255 with `convertScaleAbs`?
+
+<Solution>
+
+α = 255 / (2400 − 400) = **0.1275**; β = −400 · α = **−51**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Show the absolute-value trap: apply `cv2.convertScaleAbs(img, alpha=3.0, beta=-300)` to the values [50, 90, 100, 120] and compare with a clipped NumPy stretch.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+v = np.array([[50, 90, 100, 120]], np.uint8)
+print("convertScaleAbs:", cv2.convertScaleAbs(v, alpha=3.0, beta=-300).tolist())
+print("clipped stretch:", np.clip(3.0 * v.astype(np.float64) - 300, 0, 255).astype(np.uint8).tolist())
+```
+
+Output:
+
+```text
+convertScaleAbs: [[150, 30, 0, 60]]
+clipped stretch: [[0, 0, 0, 60]]
+```
+
+50 → 3·50 − 300 = −150 → |−150| = **150**: a dark pixel becomes mid-grey with `convertScaleAbs`, while the clipped stretch correctly gives 0.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 3.2 (piecewise linear transformation functions, contrast stretching).
+2. OpenCV 4.13.0 documentation: `normalize`, `convertScaleAbs`, `LUT`. https://docs.opencv.org/4.13.0/

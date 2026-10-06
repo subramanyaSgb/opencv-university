@@ -1,0 +1,397 @@
+export const meta = {
+  number: "5.6",
+  title: "Least squares",
+  minutes: 40,
+  objectives: [
+    "Fit a line to noisy points by minimising the sum of squared residuals",
+    "Solve least-squares problems with the normal equations and np.linalg.lstsq",
+    "Choose between vertical and perpendicular residuals (cv2.fitLine) and handle outliers with robust fitting",
+    "Fit circles and ellipses to edge points",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 5.6 (Module 5 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 5.6 Least squares
+
+<Definition term="Least squares">the method of finding the line, circle or model that best fits many noisy points, by making the sum of the squared distances (residuals) from the points to the model as small as possible.</Definition>
+
+Edge points are never exactly on a straight line: noise (5.4), pixel steps and small surface defects scatter them. A measurement that uses only two points (5.2) inherits all their errors. Fitting **one** line to **many** points averages the errors away. Least squares is how.
+
+## 1. An analogy
+
+Hanging a straight wooden rod among 20 pins that are almost, but not exactly, in a line. Tie each pin to the rod with a rubber band. The rod settles where the bands' total pull is balanced. Rubber bands pull harder when stretched further, so far-off pins matter a lot; least squares behaves the same way (and so do its problems with outliers).
+
+## 2. Residuals and the goal
+
+For a line y = a x + b and a point (xᵢ, yᵢ), the **residual** is rᵢ = yᵢ − (a xᵢ + b). Least squares chooses a and b to minimise
+
+<Equation terms={[{ value: "E(a, b)" }, { op: "=", value: "Σ rᵢ²" }, { op: "=", value: "Σ (yᵢ − a xᵢ − b)²", result: true }]} />
+
+Squaring makes all residuals positive, punishes big ones more, and (the real reason) makes the minimum easy to compute.
+
+## 3. The normal equations
+
+Write all points as one matrix equation A p ≈ y with p = (a, b): each row of A is [xᵢ, 1]. Setting the derivatives of E to zero (5.5) gives the **normal equations**:
+
+<Equation terms={[{ value: "(AᵀA) p" }, { op: "=", value: "Aᵀ y" }, { op: "→", value: "p = (AᵀA)⁻¹ Aᵀ y", result: true }]} />
+
+20 edge points along a part edge, true line y = 0.25 x + 40, noise 1 px *(Code example 1)*:
+
+| Method | a | b |
+| --- | --- | --- |
+| Normal equations | 0.2490 | 39.789 |
+| `np.polyfit(x, y, 1)` | 0.2490 | 39.789 |
+| `np.linalg.lstsq` | 0.2490 | 39.789 |
+
+The fitted angle is 13.982° (true 14.036°), even though each point is off by about 1 px: 20 points averaged. The residuals have RMS 0.70 px and sum to exactly zero (the line passes through the centroid of the points).
+
+## 4. Which distance? Vertical vs perpendicular
+
+y = a x + b measures residuals **vertically**. That is natural when x is exact (time, position along a scan line) but wrong for image edges, where both x and y are noisy, and it **fails completely for vertical edges** (a would be infinite).
+
+**Total least squares** measures the **perpendicular** distance to the line and works at any angle. The answer is the line through the centroid along the main direction of the point cloud (the largest eigenvector of their covariance, 5.7). OpenCV: `cv2.fitLine(points, cv2.DIST_L2, …)` returns a direction (vx, vy) and a point (x0, y0).
+
+## 5. Outliers
+
+Squares give a far-off point a huge influence. Two bad points (dirt, a burr) on an almost vertical edge *(Code example 2)*:
+
+| Fit | Angle from vertical |
+| --- | --- |
+| True edge | 1.15° |
+| `fitLine` DIST_L2 (least squares) | **−2.10°** |
+| `fitLine` DIST_HUBER (robust) | 1.17° |
+
+**Robust** fits (Huber, Tukey, "M-estimators") square small residuals but grow only linearly (or not at all) for large ones, so outliers lose their pull. When outliers are many or large, **RANSAC** (Part F) is the stronger tool: fit to random minimal subsets, keep the model most points agree with.
+
+## 6. Try it
+
+<FitLab caption="Sixteen edge points, three fits. Turn the edge, add noise and outliers, and switch which residuals are shown." />
+
+Things to try: angle 90° (the y = a x + b fit fails); 2 outliers (plain least squares tilts, robust stays); noise 0 (all fits agree exactly).
+
+## 7. Circles and ellipses
+
+A circle (x − cx)² + (y − cy)² = r² is not linear in its parameters, but rewritten as
+
+<Equation terms={[{ value: "x² + y² + D x + E y + F" }, { op: "=", value: "0", result: true }]} />
+
+it is linear in D, E, F: a 3-column least-squares problem, solved with `lstsq`; then cx = −D/2, cy = −E/2, r = √(cx² + cy² − F). For 40 noisy edge points of a hole (true centre (120, 90), r = 35) *(Code example 3)*:
+
+| Method | Centre | Size |
+| --- | --- | --- |
+| Least-squares circle | (120.01, 89.98) | r = 34.90 |
+| `cv2.fitEllipse` | (120.04, 89.94) | 69.41 × 70.24 (diameters) |
+| `cv2.minEnclosingCircle` | (119.79, 89.68) | r = 36.10 |
+
+The minimum enclosing circle touches the **outermost** noisy points, so it is always too big: it answers "what fits around", not "what is the best estimate". For dimensions, fit.
+
+## 8. How good is the fit?
+
+- **RMS residual**: the typical scatter of points around the model; compare with the expected noise. Much larger → wrong model or outliers.
+- **Uncertainty shrinks with √n**: 4× more points, half the error (5.4).
+- **Spread matters**: points spread over a long edge pin the angle down much better than points bunched together (5.2, Exercise 3).
+- Look at the residuals: a pattern (a curve, a step) means the model is wrong (a bent edge, two edges).
+
+## 9. Industrial example
+
+Measuring the diameter of drilled holes in a flange:
+
+<Flow
+  steps={[
+    { label: "Sub-pixel edge points around each hole (5.5)", tone: "process" },
+    { label: "Least-squares circle → centre and radius", tone: "process" },
+    { label: "Robust re-fit without points > 3 × RMS (burrs)", tone: "process" },
+    { label: "Diameter × mm/px; centre distances (pitch)", tone: "result" },
+  ]}
+/>
+
+Hundreds of edge points per hole give centres and diameters to a small fraction of a pixel.
+
+## What you should remember from 5.6
+
+<Takeaways>
+<Takeaway n={1} title="Goal">Minimise the sum of squared residuals: many noisy points → one precise model.</Takeaway>
+<Takeaway n={2} title="Solve">Normal equations (AᵀA) p = Aᵀy, or np.linalg.lstsq / np.polyfit.</Takeaway>
+<Takeaway n={3} title="Edges">Use perpendicular residuals (cv2.fitLine), not y = ax + b, for image edges.</Takeaway>
+<Takeaway n={4} title="Outliers">Squares amplify them; use robust fits (DIST_HUBER) or RANSAC.</Takeaway>
+<Takeaway n={5} title="Circles">x² + y² + Dx + Ey + F = 0 is linear: least squares; enclosing circles are not fits.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Points (0, 1), (1, 3), (2, 2), (3, 5). Fit y = a x + b by hand.
+
+<Solution>
+
+Means: x̄ = 1.5, ȳ = 2.75. a = Σ(x − x̄)(y − ȳ) / Σ(x − x̄)² = 5.5 / 5 = **1.1**; b = ȳ − a x̄ = 2.75 − 1.65 = **1.1**.
+
+</Solution>
+
+**Q2.** Why can't you fit y = a x + b to the left edge of a vertical bar?
+
+<Solution>
+
+All points have (almost) the same x; the slope a would be infinite, and small x noise gives arbitrary results. Fit with perpendicular distances (`cv2.fitLine`) or swap x and y.
+
+</Solution>
+
+**Q3.** Your circle fit has RMS residual 0.3 px, but one region of the hole has residuals of 4 px. What could it be?
+
+<Solution>
+
+A local defect (burr, chip, dirt) or a wrong edge there. Look at the image; refit without those points (robust fit) and report the defect separately.
+
+</Solution>
+
+### Next: 5.7 Eigenvectors and SVD
+
+The main directions of a point cloud, a shape or a matrix: orientation, principal components, and solving least squares the stable way.
+
+## Code
+
+Three examples: a line by normal equations and NumPy, plain vs robust line fits with OpenCV, and circle fits. No sample images needed.
+
+### 1. From scratch and NumPy: fitting y = a x + b
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=10)
+x = np.arange(0, 200, 10, dtype=float)                       # 20 edge points along a part
+y = 0.25 * x + 40 + rng.normal(0, 1.0, x.size)               # true line y = 0.25 x + 40, noise 1 px
+A = np.column_stack([x, np.ones_like(x)])                    # each row: [x, 1]
+a, b = np.linalg.solve(A.T @ A, A.T @ y)                     # normal equations (A^T A) p = A^T y
+print(f"normal equations : y = {a:.4f} x + {b:.3f}")
+print("np.polyfit       :", np.round(np.polyfit(x, y, 1), 4))
+p, res, rank, sv = np.linalg.lstsq(A, y, rcond=None)
+print("np.linalg.lstsq  :", np.round(p, 4))
+r = y - (a * x + b)
+print(f"residuals: RMS {np.sqrt(np.mean(r ** 2)):.3f} px, they sum to zero: {abs(r.sum()) < 1e-9}")
+print(f"angle {np.degrees(np.arctan(a)):.3f} deg (true {np.degrees(np.arctan(0.25)):.3f})")
+```
+
+Output:
+
+```text
+normal equations : y = 0.2490 x + 39.789
+np.polyfit       : [ 0.249  39.7892]
+np.linalg.lstsq  : [ 0.249  39.7892]
+residuals: RMS 0.699 px, they sum to zero: True
+angle 13.982 deg (true 14.036)
+```
+
+- `np.column_stack` builds the matrix A from columns.
+- `np.linalg.solve(M, v)` solves M p = v; never compute `inv(M) @ v` explicitly (slower, less accurate).
+- `np.linalg.lstsq` solves the least-squares problem directly via the SVD (5.7) and is the most stable choice. `np.polyfit(x, y, deg)` returns the coefficients from the highest power down.
+
+### 2. OpenCV: perpendicular and robust line fits
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(seed=11)
+t = np.linspace(0, 100, 30)
+pts = np.column_stack([150 + 0.02 * t, 20 + t]) + rng.normal(0, 0.7, (30, 2))   # an almost vertical edge
+pts[[5, 20]] += [[25, 0], [-30, 0]]                                             # two bad points (dirt, a burr)
+for name, dist in [("L2 (least squares)", cv2.DIST_L2), ("Huber (robust)", cv2.DIST_HUBER)]:
+    vx, vy, x0, y0 = cv2.fitLine(pts.astype(np.float32), dist, 0, 0.01, 0.01).ravel()
+    if vy < 0:                                                                  # a direction and its opposite are the same line
+        vx, vy = -vx, -vy
+    print(f"{name:19s}: direction ({vx:.4f}, {vy:.4f}), angle from vertical {np.degrees(np.arctan2(vx, vy)):6.2f} deg")
+print(f"{'true':19s}: angle from vertical {np.degrees(np.arctan2(0.02, 1)):6.2f} deg")
+a, b = np.polyfit(pts[:, 0], pts[:, 1], 1)
+print(f"y = a x + b on a vertical edge: a = {a:.1f} (meaningless)")
+```
+
+Output:
+
+```text
+L2 (least squares) : direction (-0.0367, 0.9993), angle from vertical  -2.10 deg
+Huber (robust)     : direction (0.0204, 0.9998), angle from vertical   1.17 deg
+true               : angle from vertical   1.15 deg
+y = a x + b on a vertical edge: a = -0.6 (meaningless)
+```
+
+- `cv2.fitLine(points, distType, param, reps, aeps)`: points as `float32` (N, 2); `param` 0 picks a default constant for the robust distances; `reps`/`aeps` are accuracies for the distance and angle (0.01 is a usual value).
+- It returns (vx, vy, x0, y0): a unit direction and a point on the line. The line is x0 + t·vx, y0 + t·vy.
+- Other robust choices: `DIST_L1`, `DIST_L12`, `DIST_FAIR`, `DIST_WELSCH`.
+
+### 3. From scratch and OpenCV: fitting a circle
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(seed=12)
+ang = rng.uniform(0, 2 * np.pi, 40)
+x = 120 + 35 * np.cos(ang) + rng.normal(0, 0.8, 40)          # edge points of a hole: centre (120, 90), radius 35
+y = 90 + 35 * np.sin(ang) + rng.normal(0, 0.8, 40)
+# circle x^2 + y^2 + D x + E y + F = 0 is LINEAR in D, E, F: solve by least squares
+A = np.column_stack([x, y, np.ones_like(x)])
+D, E, F = np.linalg.lstsq(A, -(x ** 2 + y ** 2), rcond=None)[0]
+cx, cy = -D / 2, -E / 2
+r = np.sqrt(cx ** 2 + cy ** 2 - F)
+print(f"least-squares circle : centre ({cx:.2f}, {cy:.2f}), radius {r:.2f}")
+(ex, ey), (w, h), _ = cv2.fitEllipse(np.column_stack([x, y]).astype(np.float32))
+print(f"cv2.fitEllipse       : centre ({ex:.2f}, {ey:.2f}), diameters {w:.2f} x {h:.2f}")
+(mx, my), mr = cv2.minEnclosingCircle(np.column_stack([x, y]).astype(np.float32))
+print(f"minEnclosingCircle   : centre ({mx:.2f}, {my:.2f}), radius {mr:.2f}  (touches the outermost points)")
+```
+
+Output:
+
+```text
+least-squares circle : centre (120.01, 89.98), radius 34.90
+cv2.fitEllipse       : centre (120.04, 89.94), diameters 69.41 x 70.24
+minEnclosingCircle   : centre (119.79, 89.68), radius 36.10  (touches the outermost points)
+```
+
+- This "algebraic" circle fit (Kåsa's method) is fast and good when points cover most of the circle; for short arcs, a geometric fit (minimising true distances, iteratively) is more accurate.
+- `cv2.fitEllipse` needs at least 5 points and returns ((cx, cy), (width, height), angle): full axes, not radii.
+
+## OpenCV API notes
+
+**`cv2.fitLine(points, distType, param, reps, aeps)`** → (vx, vy, x0, y0) for 2-D points (6 values for 3-D).
+
+**`cv2.fitEllipse(points)`**, **`cv2.fitEllipseAMS`**, **`cv2.fitEllipseDirect`**: least-squares ellipse fits (the last two are more stable on partial arcs).
+
+**`cv2.solve(A, b, flags=cv2.DECOMP_SVD)`**: least-squares solution of A x = b in OpenCV; `DECOMP_QR` and `DECOMP_NORMAL` are other options.
+
+**Robust model fitting**: `cv2.findHomography(…, cv2.RANSAC)`, `cv2.estimateAffine2D(…, method=cv2.RANSAC)` (5.3; Part F).
+
+**NumPy**: `np.linalg.lstsq`, `np.polyfit` (with `w=` weights), `np.linalg.solve`.
+
+## Where it fails
+
+- **Outliers**: one far-off point can ruin a plain fit; check residuals, use robust methods.
+- **Wrong model**: a slightly curved edge fitted with a line gives a meaningless "average" line and systematic residuals.
+- **Short arcs** make circle radius very uncertain (centre and radius trade off).
+- **Badly scaled numbers** (x in the thousands, squared) make the normal equations ill-conditioned; centre the data or use `lstsq`.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **y = a x + b for near-vertical edges**.
+- **Using `minEnclosingCircle` or `boundingRect` as a measurement** of a noisy outline.
+- **Ignoring the sign of the fitLine direction** when comparing angles (v and −v are the same line).
+- **Fitting all edge points** including those from neighbouring features or the background: select points in a region of interest first.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why least squares?
+
+If the noise is Gaussian (5.4), the least-squares solution is the **maximum-likelihood** estimate: the model under which the observed points are most probable (Gauss, Legendre, around 1800). With other noise distributions, other cost functions are optimal: absolute values for Laplacian noise, robust functions for noise with outliers [1].
+
+### Weighted and non-linear least squares
+
+Points with different reliability get weights (`np.polyfit(…, w=…)`). Models that are not linear in their parameters (a geometric circle fit, camera calibration, bundle adjustment) are solved by repeating linear least-squares steps: Gauss–Newton and Levenberg–Marquardt [2].
+
+### Total least squares and PCA
+
+Minimising perpendicular distances is equivalent to finding the direction of largest variance of the centred points: the first principal component, computed with eigenvectors or the SVD (5.7).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Least squares minimises…",
+      options: ["The largest residual", "The sum of residuals", "The sum of squared residuals", "The number of outliers"],
+      answer: 2,
+      explanation: "Squared, so positive and negative residuals cannot cancel and the minimum is easy to compute.",
+    },
+    {
+      question: "Which is best for fitting a line to edge points at any angle?",
+      options: ["np.polyfit(x, y, 1)", "cv2.fitLine with perpendicular distances", "Two end points", "cv2.boundingRect"],
+      answer: 1,
+      explanation: "Perpendicular residuals work for vertical edges too.",
+    },
+    {
+      question: "Two dirt points pull your line fit. The quickest fix in OpenCV?",
+      options: ["More smoothing", "cv2.fitLine with DIST_HUBER", "Use fewer points", "Increase reps"],
+      answer: 1,
+      explanation: "A robust distance reduces the influence of large residuals.",
+    },
+    {
+      question: "Why is a circle fit possible with linear least squares?",
+      options: ["It is not", "x² + y² + Dx + Ey + F = 0 is linear in D, E, F", "Circles are lines in polar coordinates", "OpenCV linearises everything"],
+      answer: 1,
+      explanation: "The unknowns appear linearly; x² + y² is just a known number per point.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Points (1, 2), (2, 2), (3, 5). Fit y = a x + b and give the three residuals.
+
+<Solution>
+
+x̄ = 2, ȳ = 3. Σ(x − x̄)(y − ȳ) = (−1)(−1) + 0 + (1)(2) = 3; Σ(x − x̄)² = 2 → **a = 1.5**, **b = 3 − 3 = 0**. Predictions 1.5, 3, 4.5 → residuals **0.5, −1, 0.5** (sum 0).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Fit a line with `cv2.fitLine` (DIST_L2) to 50 points on the line y = 0.5 x + 10 for x from 0 to 100, with Gaussian noise σ = 2 in both x and y. Repeat for 1000 noise seeds and print the spread of the angle error. Then do the same with only 10 points (x from 0 to 100) and compare.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+def fit_angle(n, seed=13):
+    rng = np.random.default_rng(seed)
+    x = np.linspace(0, 100, n)
+    pts = np.column_stack([x, 0.5 * x + 10]) + rng.normal(0, 2, (n, 2))
+    vx, vy, _, _ = cv2.fitLine(pts.astype(np.float32), cv2.DIST_L2, 0, 0.01, 0.01).ravel()
+    return np.degrees(np.arctan2(vy, vx)) % 180
+
+true = np.degrees(np.arctan(0.5))
+for n in [50, 10]:
+    errors = [fit_angle(n, s) - true for s in range(1000)]
+    print(f"{n:2d} points: angle error std over 1000 trials {np.std(errors):.3f} deg")
+```
+
+Output:
+
+```text
+50 points: angle error std over 1000 trials 0.490 deg
+10 points: angle error std over 1000 trials 0.998 deg
+```
+
+Five times fewer points: about **2×** larger angle error, close to the √5 ≈ 2.2 expected from 5.4. Repeating the experiment many times (1000 noise seeds) is how you measure the repeatability of a method before trusting it.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+You can measure 20 edge points of a part either all within a 10 mm stretch or spread over 100 mm. Which gives a better angle, and by roughly how much?
+
+<Solution>
+
+Spread over 100 mm. The angle error of a fitted line scales like (point noise) / (length of the spread) / √n: ten times the spread gives roughly **ten times** smaller angle error with the same number of points.
+
+</Solution>
+
+## References
+
+1. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022, Appendix A.2 (Linear least squares) and A.3 (Non-linear least squares), and Section 8.1.4 (Robust least squares and RANSAC).
+2. R. Hartley and A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004, Appendix 5 (Least-squares minimization) and Appendix 6 (Iterative estimation methods).
+3. P. J. Huber, "Robust estimation of a location parameter," *Annals of Mathematical Statistics*, vol. 35, no. 1, pp. 73–101, 1964.
+4. OpenCV 4.13.0 documentation, *Structural analysis and shape descriptors* (`fitLine`, `fitEllipse`, `minEnclosingCircle`): [docs.opencv.org/4.13.0/d3/dc0/group__imgproc__shape.html](https://docs.opencv.org/4.13.0/d3/dc0/group__imgproc__shape.html).

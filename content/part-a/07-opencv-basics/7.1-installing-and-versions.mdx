@@ -1,0 +1,383 @@
+export const meta = {
+  number: "7.1",
+  title: "Installing and versions",
+  minutes: 25,
+  objectives: [
+    "Choose the right one of the four OpenCV pip packages and install it in a virtual environment",
+    "Pin and check versions so code behaves the same on every machine",
+    "Read the build information: GUI, video backends, CPU optimisations, parallel framework",
+    "Know what the pip wheels do not contain (CUDA, some contrib modules)",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 7.1 (Module 7 plan).
+  Reference tail: printed outputs produced by the opencv-python-headless 4.13.0.92 wheel (same OpenCV 4.13.0 core as opencv-python) with NumPy 2.5.3.
+  Blocks marked "typical output" depend on the package and the machine and are not compared automatically.
+*/}
+
+# 7.1 Installing and versions
+
+<Definition term="OpenCV package">the compiled OpenCV library plus its Python bindings (`import cv2`), installed with pip as one of four packages that differ only in which optional parts they include.</Definition>
+
+Many OpenCV problems are installation problems: two packages fighting over `cv2`, a server package without windows, a different version on the line PC than on the developer's laptop. Ten minutes of care here saves days later.
+
+## 1. An analogy
+
+Buying a car: the engine (OpenCV's core) is the same in every version, but you choose the trim. With or without a screen (GUI), with or without the extra equipment package (contrib). You buy **one** car; owning two with the same number plate causes chaos. And you write down the exact model year, so the garage orders the right parts.
+
+## 2. The four pip packages
+
+<VsTable
+  left="With windows (desktop)"
+  right="Headless (servers, Docker, CI)"
+  rows={[
+    ["opencv-python: main modules", "opencv-python-headless: main modules, no GUI"],
+    ["opencv-contrib-python: main + contrib", "opencv-contrib-python-headless: main + contrib, no GUI"],
+  ]}
+/>
+
+All four install the same Python module, `cv2`. **Install only one per environment**: a second package silently overwrites files of the first, and uninstalling one can break the other.
+
+- **GUI** = HighGUI: `cv2.imshow`, `cv2.waitKey`, trackbars, mouse callbacks (7.2, 7.6). Headless builds raise an error ("The function is not implemented …") when you call them.
+- **Contrib** = extra modules (`ximgproc`, `xfeatures2d`, `text`, `face` …), less tested and not always stable between versions.
+
+## 3. Try it
+
+<InstallPicker caption="Answer the questions; the recommended package and the pip command update." />
+
+## 4. A clean environment
+
+<Flow
+  steps={[
+    { label: "python -m venv .venv", tone: "process" },
+    { label: "activate: .venv\\Scripts\\activate (Windows) or source .venv/bin/activate", tone: "process" },
+    { label: "pip install \"opencv-python==4.13.0.92\" \"numpy==2.5.3\"", tone: "process" },
+    { label: "python -c \"import cv2; print(cv2.__version__)\" → 4.13.0", tone: "result" },
+  ]}
+/>
+
+A **virtual environment** keeps each project's packages separate, so a tool needing a different OpenCV cannot break your line software. Write the exact versions into `requirements.txt` and install from it on every machine (`pip install -r requirements.txt`).
+
+## 5. Version numbers
+
+| Part | Example | Meaning |
+| --- | --- | --- |
+| OpenCV version | 4.13.0 | major . minor . patch of the C++ library (`cv2.__version__`) |
+| Wheel build | 4.13.0.**92** | the pip packaging build number |
+| NumPy | 2.5.3 | OpenCV wheels are built against a NumPy ABI; keep both pinned |
+| Python | 3.13 | each wheel exists only for certain Python versions (see PyPI) |
+
+Minor versions add functions and sometimes change defaults or results slightly (a new demosaicing default, a changed angle convention). This course is verified on **4.13.0**; results quoted in chapters may differ by a pixel or a digit on other versions. The 5.x series is covered in 8.10.
+
+## 6. What is inside your build
+
+`cv2.getBuildInformation()` prints a long report of how the library was compiled *(Code example 3)*. The most useful lines:
+
+| Line | Tells you |
+| --- | --- |
+| GUI | NONE for headless; a toolkit (WIN32UI, GTK, Cocoa, Qt) otherwise |
+| Video I/O: FFMPEG | whether video files and RTSP streams can be read (4.5, 7.4) |
+| Parallel framework | how OpenCV uses several cores (pthreads, TBB, OpenMP) |
+| CPU features: Baseline / Dispatched | SIMD instructions used (SSE, AVX2, NEON …) |
+| NVIDIA CUDA | missing in the pip wheels: `cv2.cuda` exists but finds 0 devices |
+| OpenCL | whether `cv2.UMat` can use a GPU via OpenCL (8.6) |
+
+## 7. Main modules vs contrib
+
+With the main package *(Code example 2)*:
+
+| Module | Available? |
+| --- | --- |
+| `cv2.dnn` (deep-learning inference) | yes |
+| `cv2.aruco` (markers, moved to main in 4.7) | yes |
+| `cv2.SIFT_create` (patent expired 2020, moved to main in 4.4) | yes |
+| `cv2.ximgproc`, `cv2.xfeatures2d` | no: contrib only |
+| CUDA devices | 0 (wheels are built without CUDA) |
+
+## 8. Industrial example
+
+Deploying an inspection program to five line PCs:
+
+<Flow
+  steps={[
+    { label: "Developer laptop: venv + requirements.txt with pinned versions", tone: "data" },
+    { label: "Line PCs: same Python, pip install -r requirements.txt (or an offline wheel folder)", tone: "process" },
+    { label: "Program start: log cv2.__version__ and fail if not 4.13.x", tone: "process" },
+    { label: "Every PC runs identical code paths; results are comparable", tone: "result" },
+  ]}
+/>
+
+Line PCs often have no internet: download the wheels once (`pip download -r requirements.txt -d wheels`) and install from the folder (`pip install --no-index --find-links wheels -r requirements.txt`).
+
+## What you should remember from 7.1
+
+<Takeaways>
+<Takeaway n={1} title="Four packages">opencv(-contrib)-python(-headless): pick one, never two.</Takeaway>
+<Takeaway n={2} title="Headless">No imshow/waitKey; right for servers and Docker.</Takeaway>
+<Takeaway n={3} title="Pin">Exact versions in requirements.txt; check cv2.__version__ at start-up.</Takeaway>
+<Takeaway n={4} title="Build info">cv2.getBuildInformation(): GUI, FFMPEG, SIMD, threads, CUDA, OpenCL.</Takeaway>
+<Takeaway n={5} title="Not in wheels">CUDA and contrib (unless the contrib package): build from source when needed.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Which package for a Docker container that processes images and writes results to a database?
+
+<Solution>
+
+**opencv-python-headless** (or the contrib-headless variant if contrib modules are needed): no GUI libraries needed or wanted.
+
+</Solution>
+
+**Q2.** `cv2.imshow` raises "The function is not implemented. Rebuild the library with Windows, GTK+ … support". Why?
+
+<Solution>
+
+A **headless** package is installed (perhaps pulled in by another library). Uninstall all opencv packages and install `opencv-python`, or use matplotlib to display.
+
+</Solution>
+
+**Q3.** Your colleague's results differ slightly from yours. First thing to check?
+
+<Solution>
+
+The versions: `cv2.__version__` (and NumPy) on both machines, and which opencv package is installed.
+
+</Solution>
+
+### Next: 7.2 Read, show, save
+
+The three most-used functions, and the details that decide whether they do what you expect.
+
+## Code
+
+Three examples: checking the version, checking which modules exist, and reading the build information. These need no images.
+
+### 1. OpenCV: version checks
+
+```python
+import numpy as np
+import cv2
+
+major, minor, patch = (int(x) for x in cv2.__version__.split(".")[:3])
+print("cv2.__version__      :", cv2.__version__)
+print("as numbers           :", (major, minor, patch))
+print("at least 4.13?       :", (major, minor) >= (4, 13))
+print("cv2.getVersionString :", cv2.getVersionString())
+print("NumPy major version  :", np.__version__.split(".")[0])
+```
+
+Output:
+
+```text
+cv2.__version__      : 4.13.0
+as numbers           : (4, 13, 0)
+at least 4.13?       : True
+cv2.getVersionString : 4.13.0
+NumPy major version  : 2
+```
+
+- Compare versions as **tuples of numbers**, never as strings: "4.9" > "4.13" is True for strings.
+- Put such a check at the start of production programs and refuse to run on the wrong version.
+
+### 2. OpenCV: which modules are available?
+
+```python
+import numpy as np
+import cv2
+
+for module in ["dnn", "aruco", "ximgproc", "xfeatures2d"]:
+    print(f"cv2.{module:12s}: {'available' if hasattr(cv2, module) else 'missing (contrib only)'}")
+print("CUDA devices        :", cv2.cuda.getCudaEnabledDeviceCount(), "(pip wheels are built without CUDA)")
+print("SIFT in main module :", hasattr(cv2, "SIFT_create"), "(patent expired in 2020, moved to main)")
+```
+
+Output:
+
+```text
+cv2.dnn         : available
+cv2.aruco       : available
+cv2.ximgproc    : missing (contrib only)
+cv2.xfeatures2d : missing (contrib only)
+CUDA devices        : 0 (pip wheels are built without CUDA)
+SIFT in main module : True (patent expired in 2020, moved to main)
+```
+
+- `hasattr(module, name)` checks for an attribute without raising an error.
+- This output is for the main packages (`opencv-python`, `opencv-python-headless`). With `opencv-contrib-python`, `ximgproc` and `xfeatures2d` are available.
+
+### 3. OpenCV: installed package and build information
+
+```python
+import numpy as np
+import cv2
+import importlib.metadata as md
+
+for pkg in ["opencv-python", "opencv-contrib-python", "opencv-python-headless", "opencv-contrib-python-headless"]:
+    try:
+        print(f"{pkg:32s} {md.version(pkg)}")
+    except md.PackageNotFoundError:
+        pass
+info = cv2.getBuildInformation()
+for key in ["GUI:", "FFMPEG:", "Parallel framework:", "Baseline:", "OpenCL:"]:
+    line = next((l.strip() for l in info.splitlines() if key in l), key + " (not listed)")
+    print(" ".join(line.split()))
+print("threads:", cv2.getNumThreads(), "| optimised code paths:", cv2.useOptimized())
+```
+
+Typical output on our headless test machine (yours differs with package and hardware):
+
+```text
+opencv-python-headless           4.13.0.92
+GUI: NONE
+FFMPEG: YES
+Parallel framework: pthreads
+Baseline: SSE SSE2 SSE3
+OpenCL: YES (no extra features)
+threads: 2 | optimised code paths: True
+```
+
+- `importlib.metadata.version(name)` reads the installed package version; more than one line printed here means a conflicting install.
+- `next(generator, default)` returns the first matching line, or the default if none matches.
+- With `opencv-python` on Windows you would see `GUI: WIN32UI`; the thread count follows your CPU.
+
+## OpenCV API notes
+
+**Version**: `cv2.__version__`, `cv2.getVersionString()`, `cv2.getVersionMajor()`, `cv2.getVersionMinor()`, `cv2.getVersionRevision()`.
+
+**Build and runtime**: `cv2.getBuildInformation()`, `cv2.getNumThreads()` / `cv2.setNumThreads(n)`, `cv2.useOptimized()` / `cv2.setUseOptimized(flag)`, `cv2.getNumberOfCPUs()`, `cv2.ocl.haveOpenCL()`, `cv2.cuda.getCudaEnabledDeviceCount()`.
+
+**Install from source** when you need CUDA, a different GUI toolkit (Qt), non-free modules or special CPU targets: CMake with `opencv` and `opencv_contrib` repositories (8.5).
+
+## Where it fails
+
+- **Mixed installs**: pip + conda, or two opencv packages, produce a `cv2` that imports but misbehaves; start from a fresh environment.
+- **Other libraries pulling in OpenCV**: some packages depend on `opencv-python-headless` and install it next to your `opencv-python`; check with `pip list | findstr opencv` (Windows) or `pip list | grep opencv`.
+- **Old Python**: new wheels drop old Python versions; old wheels may not exist for new Python versions.
+- **ARM boards** (Jetson, Raspberry Pi): wheels may be missing or lack hardware acceleration; use the vendor's build.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **`pip install opencv-python opencv-contrib-python`** (two packages for one module).
+- **Comparing versions as strings**.
+- **Unpinned `pip install opencv-python`** on production PCs: next month's install gets a different version.
+- **Expecting `cv2.cuda` to use the GPU** with pip wheels.
+- **Developing with GUI, deploying headless** and keeping `cv2.imshow` calls in the code path.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### How the wheels are built
+
+The official wheels are produced by the `opencv-python` project: OpenCV is compiled with CMake, bundled with its dependencies (FFmpeg, libjpeg-turbo, …) into one wheel per platform and Python version. The four variants are the same build with GUI and contrib switched on or off [1].
+
+### Releases and support
+
+OpenCV publishes several 4.x minor releases per year; the 5.x series modernises the API (8.10). Release notes list changed defaults and deprecated functions; read them before upgrading a production system [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "How many opencv-* pip packages should be installed in one environment?",
+      options: ["One", "Two: main and contrib", "All four", "It does not matter"],
+      answer: 0,
+      explanation: "They all provide cv2 and overwrite each other.",
+    },
+    {
+      question: "Which package lacks cv2.imshow?",
+      options: ["opencv-python", "opencv-contrib-python", "opencv-python-headless", "None"],
+      answer: 2,
+      explanation: "Headless builds have no GUI backend.",
+    },
+    {
+      question: "Is '4.9' >= '4.13' as strings?",
+      options: ["False, correctly", "True, wrongly", "Error", "Depends on Python"],
+      answer: 1,
+      explanation: "String comparison goes character by character: '9' > '1'. Compare tuples of ints.",
+    },
+    {
+      question: "Your pip-installed OpenCV reports 0 CUDA devices on a PC with an NVIDIA GPU. Why?",
+      options: ["Driver missing", "The pip wheels are built without CUDA", "The GPU is too old", "CUDA needs headless"],
+      answer: 1,
+      explanation: "Build from source with CUDA or use a CUDA-enabled distribution.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Write a `requirements.txt` for a desktop inspection tool that needs only main OpenCV modules and plots with matplotlib, pinned to the versions used in this course.
+
+<Solution>
+
+```text
+opencv-python==4.13.0.92
+numpy==2.5.3
+matplotlib==3.11.2
+```
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Write a function `require_opencv(min_version)` that raises a `RuntimeError` with a clear message when the installed OpenCV is older than `min_version` (a string like "4.13"). Test it with "4.13" and "9.0".
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+def require_opencv(min_version):
+    have = tuple(int(x) for x in cv2.__version__.split(".")[:3])
+    need = tuple(int(x) for x in min_version.split("."))
+    if have[:len(need)] < need:
+        raise RuntimeError(f"OpenCV {min_version} or newer required, found {cv2.__version__}")
+    return have
+
+print("4.13 ->", require_opencv("4.13"))
+try:
+    require_opencv("9.0")
+except RuntimeError as e:
+    print("9.0  ->", e)
+```
+
+Output:
+
+```text
+4.13 -> (4, 13, 0)
+9.0  -> OpenCV 9.0 or newer required, found 4.13.0
+```
+
+`have[:len(need)]` compares only as many parts as the requirement gives, so "4.13" accepts 4.13.0, 4.13.1 and anything newer.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+After installing a third-party "image toolkit" package, `cv2.imshow` stops working on your desktop. What happened, and how do you repair the environment?
+
+<Solution>
+
+The toolkit probably depends on `opencv-python-headless`, which was installed next to (and over) your `opencv-python`. Check `pip list` for opencv packages; uninstall **all** of them, then install exactly one (`opencv-python==4.13.0.92`). If the toolkit insists on headless, keep it in a separate environment or display with matplotlib.
+
+</Solution>
+
+## References
+
+1. opencv-python project, *Pre-built CPU-only OpenCV packages for Python* (package variants and build notes): [github.com/opencv/opencv-python](https://github.com/opencv/opencv-python).
+2. OpenCV releases and change logs: [opencv.org/releases](https://opencv.org/releases/).
+3. OpenCV 4.13.0 documentation, *Installation in Windows / Linux* and *Utility and system functions* (`getBuildInformation`, `getNumThreads`): [docs.opencv.org/4.13.0/db/de0/group__core__utils.html](https://docs.opencv.org/4.13.0/db/de0/group__core__utils.html).
+4. Python documentation, *venv — Creation of virtual environments*: [docs.python.org/3/library/venv.html](https://docs.python.org/3/library/venv.html).

@@ -1,0 +1,309 @@
+export const meta = {
+  number: "22.5",
+  title: "Sub-pixel edges",
+  minutes: 25,
+  objectives: [
+    "Explain why edge positions can be measured much more precisely than one pixel",
+    "Locate an edge to a fraction of a pixel by parabola fit, threshold crossing and gradient centroid",
+    "Estimate how noise and averaging along the edge affect precision",
+    "Refine corners with cv2.cornerSubPix and know the limits (blur model, lens distortion, calibration)",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 22.5 (last chapter of Module 22).
+  Lab: DerivLab (from 5.5: profile, derivatives, parabola sub-pixel edge).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 22.5 Sub-pixel edges
+
+<Definition term="Sub-pixel edge location">estimating the position of an edge with a precision finer than the pixel grid, using the grey values of several pixels across the edge. A blurred edge spreads over a few pixels, and the exact shape of that spread tells where the edge lies between pixel centres.</Definition>
+
+Canny (22.4) marks whole pixels: an edge position is uncertain by up to half a pixel. For gauging, half a pixel can be the whole tolerance: at 0.05 mm per pixel it is 25 µm. Yet machine-vision tools routinely measure edges to 1/10 or 1/20 of a pixel. This is not magic: a pixel is not a point sample of a perfectly sharp edge; it averages the light over its area, and the optics blur the edge over two or three pixels (19.3). The grey values across the edge encode where the edge is.
+
+## 1. An analogy
+
+A thermometer with marks only every degree. If the liquid ends exactly at a mark, you read 20 °C. If it ends a third of the way to the next mark, you read 20.3 °C even though there is no mark there: you interpolate between the marks. Sub-pixel edge methods interpolate between pixels in the same way.
+
+## 2. Three estimators
+
+<Flow
+  steps={[
+    { label: "Profile across the edge (one row, or perpendicular to the edge)", tone: "data" },
+    { label: "Coarse position: the pixel with the largest gradient", tone: "process" },
+    { label: "Refine: parabola through 3 gradient values, 50 % crossing, or gradient centroid", tone: "process" },
+    { label: "Edge position, e.g. 19.37 px", tone: "result" },
+  ]}
+/>
+
+- **Parabola fit**: fit a parabola through the gradient magnitudes at the peak pixel k and its neighbours (a, b, c). Its vertex lies at k + ½ · (a − c) / (a − 2b + c). Example: gradients 40, 100, 70 → offset ½ · (40 − 70) / (40 − 200 + 70) = 0.17: the edge is 0.17 pixel to the right of the peak pixel.
+- **Threshold (50 %) crossing**: find where the profile crosses the level halfway between the dark and bright plateaus, by linear interpolation between the two pixels around it.
+- **Gradient centroid**: the weighted mean position of the gradient values in a small window (the centre of mass of the line spread function, 19.3).
+
+Simulated edges (a step from 50 to 200 blurred with σ = 1, each pixel averaging its area) at true positions 19.0, 19.1, …, 19.9:
+
+| Noise σ | Whole pixel (RMS error) | Parabola | 50 % crossing | Centroid |
+| --- | --- | --- | --- | --- |
+| 0 | 0.292 | 0.022 | 0.010 | 0.008 |
+| 2 | 0.298 | 0.066 | 0.043 | 0.044 |
+| 5 | 0.326 | 0.153 | 0.108 | 0.114 |
+
+Without noise every method reaches a few hundredths of a pixel; the whole-pixel answer is off by 0.29 on average, as expected for a uniform error of ±0.5. Noise limits the precision: with σ = 5 grey levels on an edge of 150, single-row estimates scatter by about a tenth of a pixel.
+
+<DerivLab caption="A pixel row across an edge with its first and second differences. The amber marker is the parabola-fit sub-pixel edge. Add noise and watch the marker jitter; smooth before differencing and the jitter falls, at the price of a wider peak."/>
+
+## 3. Averaging along the edge
+
+A straight edge is measured in many rows at once. The errors of independent rows average out by √N: with noise σ = 5, single rows scatter with a standard deviation of 0.08 pixel; the mean of 50 rows is off by 0.003 pixel. This is why caliper tools measure over a band tens of pixels long, and why fitting a line to many edge points (26.4) is more precise than any single point.
+
+For **corners**, `cv2.cornerSubPix` uses the same idea in 2-D: every gradient vector near a corner is perpendicular to the line from that pixel to the corner, and it solves for the point that best satisfies all of them. On a synthetic chessboard corner at (30.3, 29.6) it returns (30.33, 29.57).
+
+## 4. What limits real precision
+
+Sub-pixel precision (repeatability) is not the same as accuracy:
+
+- **The edge model**: methods assume a symmetric blur; asymmetric PSFs, sharpening halos (19.1) or saturated pixels shift the estimate.
+- **Illumination and the object**: a rounded or chamfered edge, a shadow or a reflection moves the visible edge away from the physical one.
+- **Lens distortion and calibration** (41.3, 49.1): a pixel position becomes millimetres only through a calibrated model, which has its own error.
+- **Pixel response non-uniformity and quantization**: limit the best case to roughly 1/50 to 1/100 of a pixel in practice.
+
+Validate with a reference: measure a calibrated gauge block many times (repeatability) and compare with its certified size (accuracy). Chapter 49 covers measurement error analysis.
+
+## 5. Industrial example
+
+A shaft-diameter gauge with back-lighting images the shaft as a dark silhouette. Two caliper bands perpendicular to its sides each find 200 edge points with sub-pixel interpolation; a line fit to each side gives the two edges to about 1/20 of a pixel, and their distance, converted with the calibrated scale, gives the diameter. At 20 µm per pixel the measurement repeats within about 1 µm, well inside a typical tolerance of ±10 µm, even though each pixel is 20 µm wide.
+
+## What you should remember from 22.5
+
+<Takeaways>
+<Takeaway n={1} title="Why it works">Blurred edges spread over pixels; their grey values encode the position.</Takeaway>
+<Takeaway n={2} title="Methods">Parabola through the gradient peak, 50 % crossing, gradient centroid: ~0.01–0.02 px without noise.</Takeaway>
+<Takeaway n={3} title="Noise">Limits single-row precision; averaging N rows improves it by √N.</Takeaway>
+<Takeaway n={4} title="Accuracy">Precision is not accuracy: edge model, lighting and calibration set the real error.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Gradient values 60, 90, 90 at pixels 11, 12, 13. Where is the parabola vertex?
+
+<Solution>
+
+Peak pixel 12 (or 13, equal): offset ½ · (60 − 90) / (60 − 180 + 90) = ½ · (−30) / (−30) = 0.5 → **12.5**, exactly between the two equal values.
+
+</Solution>
+
+**Q2.** Single-row edge estimates scatter with σ = 0.1 px. How many rows are needed for σ = 0.01 px?
+
+<Solution>
+
+√N = 10 → **N = 100** rows (if their noise is independent).
+
+</Solution>
+
+### Next: Module 23, Morphology
+
+Shaping binary and grey images with structuring elements: erosion, dilation, opening, closing and more.
+
+## Code
+
+Two examples: the three estimators on simulated edges, then averaging rows and refining a corner.
+
+### 1. Sub-pixel estimators
+
+```python
+import numpy as np
+from math import erf
+
+def edge_row(position, sigma=1.0, lo=50, hi=200, n=40):
+    """A step at `position`, blurred with sigma, each pixel averaging its area (pixel i covers i-0.5 .. i+0.5)."""
+    sub = np.linspace(-0.5, 0.5, 41)
+    v = [np.mean([0.5 * (1 + erf((i + d - position) / (np.sqrt(2) * sigma))) for d in sub]) for i in range(n)]
+    return lo + (hi - lo) * np.array(v)
+
+def estimate(r):
+    g = np.abs(np.convolve(r, [0.5, 0, -0.5], mode="same"))           # central difference
+    g[0] = g[-1] = 0
+    k = int(np.argmax(g))
+    a, b, c = g[k - 1], g[k], g[k + 1]
+    parabola = k + 0.5 * (a - c) / (a - 2 * b + c)
+    half = (r[2] + r[-3]) / 2                                        # halfway between the plateaus
+    j = int(np.nonzero(r > half)[0][0])
+    crossing = j - 1 + (half - r[j - 1]) / (r[j] - r[j - 1])
+    w = g[k - 3:k + 4]
+    centroid = (w * np.arange(k - 3, k + 4)).sum() / w.sum()
+    return k, parabola, crossing, centroid
+
+rng = np.random.default_rng(0)
+for noise in (0, 2, 5):
+    errors = []
+    for t in np.arange(19.0, 20.0, 0.1):
+        for _ in range(20 if noise else 1):
+            r = edge_row(t) + (rng.normal(0, noise, 40) if noise else 0)
+            errors.append(np.array(estimate(r)) - t)
+    rms = np.sqrt((np.array(errors) ** 2).mean(axis=0))
+    print(f"noise {noise}: RMS error  pixel {rms[0]:.3f} | parabola {rms[1]:.3f} | 50% {rms[2]:.3f} | centroid {rms[3]:.3f}")
+```
+
+Output:
+
+```text
+noise 0: RMS error  pixel 0.292 | parabola 0.022 | 50% 0.010 | centroid 0.008
+noise 2: RMS error  pixel 0.298 | parabola 0.066 | 50% 0.043 | centroid 0.044
+noise 5: RMS error  pixel 0.326 | parabola 0.153 | 50% 0.108 | centroid 0.114
+```
+
+### 2. Averaging rows and refining a corner
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(1)
+t = 19.37
+rows = [estimate(edge_row(t) + rng.normal(0, 5, 40))[2] for _ in range(50)]   # 50% crossing per row
+print(f"single rows: std {np.std(np.array(rows) - t):.3f} px | mean of 50 rows: error {np.mean(rows) - t:+.3f} px")
+
+cx, cy, S = 30.3, 29.6, 8                                            # true corner, supersampling factor
+y, x = np.mgrid[0:60, 0:60].astype(np.float64)
+cover = np.zeros((60, 60))
+for dy in (np.arange(S) + 0.5) / S - 0.5:
+    for dx in (np.arange(S) + 0.5) / S - 0.5:
+        cover += ((x + dx) > cx) ^ ((y + dy) > cy)                   # chessboard quadrants
+corner_img = (50 + 150 * cover / S ** 2).astype(np.float32)
+start = np.array([[[30.0, 30.0]]], np.float32)
+criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 50, 0.001)
+refined = cv2.cornerSubPix(corner_img, start, (5, 5), (-1, -1), criteria)
+print("cornerSubPix:", np.round(refined.ravel().astype(float), 3).tolist(), "| true:", [cx, cy])
+```
+
+Output:
+
+```text
+single rows: std 0.081 px | mean of 50 rows: error -0.003 px
+cornerSubPix: [30.326, 29.574] | true: [30.3, 29.6]
+```
+
+- `cornerSubPix` modifies and returns the corner array; its window (5, 5) means an 11 × 11 search area.
+
+## OpenCV API notes
+
+- **`cv2.cornerSubPix(image, corners, winSize, zeroZone, criteria)`**: refines corners (chessboards, 41.4; Shi–Tomasi, 33.3) to sub-pixel accuracy; image 8-bit or float32, corners float32 N × 1 × 2.
+- **Edges**: OpenCV has no sub-pixel Canny; take profiles with `cv2.remap` or `cv2.getRectSubPix` perpendicular to the edge, or refine Canny pixels with a parabola on the gradient magnitude along the gradient direction.
+- **Line and circle fits**: `cv2.fitLine`, `cv2.fitEllipse` on many sub-pixel points (26.4).
+- **`cv2.find4QuadCornerSubpix`**: another corner refinement used in calibration.
+
+## Where it fails
+
+- **Noise and low contrast**: precision degrades roughly in proportion to noise / contrast.
+- **Very sharp edges** (no blur, pixel-aligned): a step that falls exactly on a pixel boundary gives no information about where inside the transition the edge lies; some optical blur is needed.
+- **Nearby edges**: two edges closer than the blur width bias each other.
+- **Wrong edge model**: halos, saturation, chamfers, shadows.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Reporting sub-pixel precision as accuracy** without a reference measurement.
+- **Sharpening the image before sub-pixel measurement**: halos shift the gradient peak.
+- **Profiles along rows when the edge is tilted**: measure perpendicular to the edge.
+- **Mixing pixel conventions** (pixel centres at integers vs at +0.5) between tools.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Moment-based and fitting methods
+
+Tabatabai and Mitchell (1984) [1] located edges from the first three grey-value moments of a profile, an exact method for an ideal blurred step. Model fitting (fitting an error-function profile with position, contrast and blur as parameters) reaches the noise-limited precision (the Cramér–Rao bound) and also returns the blur.
+
+### Sub-pixel Canny
+
+Devernay (1995) [2] added a parabola correction along the gradient direction to Canny's non-maximum suppression, with almost no extra cost; Trujillo-Pino et al. (2013) [3] derived a correction based on the partial area effect that also handles curved edges.
+
+### Precision limit
+
+For a blurred step with contrast C, noise σ and blur width w, the standard deviation of the best position estimate from one profile is roughly proportional to (σ / C) · √w. Contrast matters most, which is why gauging uses back-lighting.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why can edges be located more precisely than one pixel?",
+      options: ["Pixels are smaller than they seem", "The blurred edge spreads over several pixels whose values encode its position", "Cameras oversample", "It cannot be done"],
+      answer: 1,
+      explanation: "Interpolation between pixel values.",
+    },
+    {
+      question: "With no noise, which error do the sub-pixel estimators reach in the simulation?",
+      options: ["About 0.3 px", "About 0.01–0.02 px", "Exactly 0", "About 1 px"],
+      answer: 1,
+      explanation: "The whole-pixel answer has 0.29 px RMS error.",
+    },
+    {
+      question: "Averaging the edge position over 100 independent rows reduces the noise error by…",
+      options: ["2", "10", "100", "Nothing"],
+      answer: 1,
+      explanation: "√100.",
+    },
+    {
+      question: "Which OpenCV function refines corners to sub-pixel accuracy?",
+      options: ["cv2.Canny", "cv2.cornerSubPix", "cv2.pyrUp", "cv2.resize"],
+      answer: 1,
+      explanation: "Used for chessboard calibration corners.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A profile across an edge: 50, 52, 80, 160, 196, 200. Find the 50 % crossing by linear interpolation (plateaus 50 and 200).
+
+<Solution>
+
+Half level: 125. It lies between 80 (index 2) and 160 (index 3): 2 + (125 − 80) / (160 − 80) = 2 + 45/80 = **2.56**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+How does the blur width affect precision? Repeat the noise σ = 2 experiment with edge blur σ = 0.5, 1 and 2 for the 50 % crossing estimator.
+
+<Solution>
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(3)
+for blur in (0.5, 1.0, 2.0):
+    errs = [estimate(edge_row(t, sigma=blur) + rng.normal(0, 2, 40))[2] - t
+            for t in np.arange(19.0, 20.0, 0.1) for _ in range(20)]
+    print(f"blur sigma {blur}: RMS error {np.sqrt(np.mean(np.square(errs))):.3f} px")
+```
+
+Output:
+
+```text
+blur sigma 0.5: RMS error 0.040 px
+blur sigma 1.0: RMS error 0.042 px
+blur sigma 2.0: RMS error 0.073 px
+```
+
+Wider edges are measured less precisely: the transition is shallower, so the same noise moves the crossing further (0.073 px at σ = 2 against 0.04 px at σ = 0.5–1). Very sharp edges carry another risk not visible here: with almost no blur, the transition covers only one or two pixels and the interpolation becomes biased (Where it fails). A blur of about one pixel is a safe target for gauging optics.
+
+</Solution>
+
+## References
+
+1. A. J. Tabatabai, O. R. Mitchell, "Edge location to subpixel values in digital imagery", *IEEE Trans. PAMI* 6(2), 188–201, 1984.
+2. F. Devernay, "A non-maxima suppression method for edge detection with sub-pixel accuracy", INRIA Research Report RR-2724, 1995.
+3. A. Trujillo-Pino, K. Krissian, M. Alemán-Flores, D. Santana-Cedrés, "Accurate subpixel edge location based on partial area effect", *Image and Vision Computing* 31(1), 72–90, 2013.
+4. C. Steger, M. Ulrich, C. Wiedemann, *Machine Vision Algorithms and Applications*, 2nd ed., Wiley-VCH, 2018: sub-pixel edge extraction.
+5. OpenCV 4.13.0 documentation: `cornerSubPix`, `fitLine`. https://docs.opencv.org/4.13.0/

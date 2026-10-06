@@ -1,0 +1,285 @@
+export const meta = {
+  number: "23.6",
+  title: "Grayscale morphology",
+  minutes: 20,
+  objectives: [
+    "Apply erosion and dilation to grey images as minimum and maximum filters",
+    "Use grey opening and closing to remove bright or dark structures by size",
+    "Compute the morphological gradient and find local maxima with a dilation",
+    "Recognise the bias of grey morphology on noisy images",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 23.6 (last chapter of Module 23).
+  Lab: MorphLab (mode grey, on sample-plate-good).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 23.6 Grayscale morphology
+
+<Definition term="Grayscale morphology">erosion and dilation applied to grey values: erosion replaces each pixel by the minimum under the structuring element, dilation by the maximum. Opening and closing, top-hats and gradients follow exactly as for binary images. Bright structures narrower than the element are removed by an opening, dark ones by a closing; everything else keeps its shape and level.</Definition>
+
+Every operation of this module was defined on binary masks but works unchanged on grey images: OpenCV's `erode`, `dilate` and `morphologyEx` take any image. On a binary image, the minimum of 0s and 255s is exactly "all white"; on a grey image, it is the darkest value in the neighbourhood. 23.3 already used grey closings as background estimates. This chapter looks at the operations themselves.
+
+## 1. An analogy
+
+A grey image as a landscape: brightness is height. Erosion lowers every point to the lowest ground within reach: peaks are cut, valleys widen. Dilation raises every point to the highest ground within reach. An opening pushes a flat board up from below: it reaches into wide hills but not into narrow peaks, so the narrow peaks are cut off. A closing pushes the board down from above: narrow valleys and cracks are bridged.
+
+## 2. Minimum and maximum filters
+
+<Flow
+  steps={[
+    { label: "Grey image", tone: "data" },
+    { label: "Erosion: minimum over the element (dark grows, bright shrinks)", tone: "process" },
+    { label: "Dilation: maximum over the element (bright grows, dark shrinks)", tone: "process" },
+    { label: "Opening / closing / gradient / top-hat: combinations as in 23.1–23.3", tone: "result" },
+  ]}
+/>
+
+A worked example on one row, 1 × 3 element:
+
+| | Values |
+| --- | --- |
+| Input | 10, 10, **50**, 10, 10, 80, 80, 80, 20, 20 |
+| Erosion (min of 3) | 10, 10, 10, 10, 10, 10, 80, 20, 20, 20 |
+| Dilation (max of 3) | 10, 50, 50, 50, 80, 80, 80, 80, 80, 20 |
+| Opening | 10, 10, 10, 10, 10, 80, 80, 80, 20, 20 |
+| Closing | 10, 10, 50, 50, 50, 80, 80, 80, 20, 20 |
+
+The opening removed the one-pixel bright spike (50) and kept the 3-pixel plateau at 80 exactly. The closing filled the two-pixel valley between 50 and 80 with 50: it bridges dark gaps narrower than the element. Unlike a blur, neither operation creates new grey values: the output always consists of values from the input.
+
+On the metal plate (background about 200 with noise σ = 4, a dark crack about 6 pixels wide at about 50), closing with discs of growing size, mean grey value on the crack pixels:
+
+| Closing element | Crack mean | Background change (mean absolute) |
+| --- | --- | --- |
+| (input) | 49.7 | 0 |
+| 3 × 3 | 53.3 | 2.4 |
+| 5 × 5 | 56.4 | 4.6 |
+| **7 × 7** | **199.1** | 5.8 |
+| 11 × 11 | 204.9 | 7.4 |
+
+Once the element is wider than the crack (7 × 7), the closing fills it completely with the surrounding level: the result is a crack-free background estimate, and closing − image is the black-hat of 23.3.
+
+<MorphLab mode="grey" initialOp="close" caption="Grey morphology on the metal plate with a dark crack. Closing with a growing element: the crack fills once the element is wider than the crack (about 7 pixels). Try erosion (the crack widens, bright noise disappears), dilation (the crack narrows), opening (almost no change: there are no narrow bright structures) and the morphological gradient (an edge map)."/>
+
+## 3. Bias, gradient and local maxima
+
+- **Bias on noisy backgrounds**: a closing takes a maximum, then a minimum. On noise, the maximum of many pixels is high, and the following minimum does not bring it fully back: the background rises (by 5.8 grey levels with 7 × 7 above, 7.4 with 11 × 11). Openings lower noisy backgrounds the same way. Smooth first, or use the result only as a relative estimate.
+- **Morphological gradient** (dilation − erosion): the range of values under the element. It is large at edges and small in flat areas, an edge map without directions: on the plate, 108 around the crack against 12 in the background (3 × 3).
+- **Local maxima**: a pixel is a local maximum when it equals the dilation of the image at that pixel (`img == cv2.dilate(img, k)`). This is how peaks are found in correlation maps (21.2, 32), distance transforms (23.5) and heat maps (54).
+
+## 4. Industrial example
+
+Grey closings and openings serve as robust, shape-aware background estimators for surface inspection: the closing of a plate or web image with an element wider than any expected scratch is "the plate without scratches", and its difference with the image is the defect map, insensitive to the slowly changing illumination and texture. Morphological gradients are used as fast edge maps on embedded hardware (min and max filters are cheap). Peak finding with a dilation is the standard non-maximum suppression in heat-map-based detectors and in particle and spot detection.
+
+## What you should remember from 23.6
+
+<Takeaways>
+<Takeaway n={1} title="Grey erosion / dilation">Minimum / maximum under the element; no new grey values.</Takeaway>
+<Takeaway n={2} title="Opening / closing">Remove bright / dark structures narrower than the element; keep the rest.</Takeaway>
+<Takeaway n={3} title="Bias">On noise, closings raise and openings lower the background.</Takeaway>
+<Takeaway n={4} title="Tools">Gradient = dilation − erosion; local maxima = pixels equal to their dilation.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Row 100, 100, 30, 100, 100. Grey opening and closing with 1 × 3?
+
+<Solution>
+
+Opening: erosion 100, 30, 30, 30, 100; dilation of that 100, 100, 30, 100, 100: **unchanged** (opening removes bright, not dark, structures). Closing: dilation 100, 100, 100, 100, 100; erosion 100 everywhere: the dark pixel is **removed**.
+
+</Solution>
+
+**Q2.** How do you find all local maxima in a 5 × 5 neighbourhood?
+
+<Solution>
+
+`peaks = (img == cv2.dilate(img, np.ones((5, 5), np.uint8)))`, usually combined with a minimum height (`& (img > t)`) to ignore flat background, where every pixel equals its dilation.
+
+</Solution>
+
+### Next: Module 24, Contours and shape analysis
+
+From binary masks to object outlines: finding contours, their hierarchy, and measuring area, perimeter and shape.
+
+## Code
+
+Two examples: grey morphology on a row and on the plate, then local maxima with a dilation.
+
+### 1. Grey erosion, dilation, opening, closing
+
+```python
+import numpy as np
+import cv2
+
+row = np.array([[10, 10, 50, 10, 10, 80, 80, 80, 20, 20]], np.uint8)
+k = np.ones((1, 3), np.uint8)
+for name, op in [("erode", cv2.MORPH_ERODE), ("dilate", cv2.MORPH_DILATE), ("open", cv2.MORPH_OPEN), ("close", cv2.MORPH_CLOSE)]:
+    print(f"{name:6s}", cv2.morphologyEx(row, op, k).ravel().tolist())
+
+plate = cv2.imread("sample-plate-good.png", cv2.IMREAD_GRAYSCALE)
+crack = cv2.imread("sample-plate-crack-mask.png", cv2.IMREAD_GRAYSCALE) > 0
+for size in (3, 5, 7, 11):
+    closed = cv2.morphologyEx(plate, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size)))
+    print(f"close {size:2d}x{size:<2d}: crack mean {closed[crack].mean():6.1f} | background change {np.abs(closed.astype(int) - plate)[~crack].mean():.2f}")
+grad = cv2.morphologyEx(plate, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
+near = cv2.dilate(crack.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+far = cv2.dilate(crack.astype(np.uint8), np.ones((5, 5), np.uint8)) == 0
+print(f"gradient: around the crack {grad[near].mean():.1f} | background {grad[far].mean():.1f}")
+```
+
+Output:
+
+```text
+erode  [10, 10, 10, 10, 10, 10, 80, 20, 20, 20]
+dilate [10, 50, 50, 50, 80, 80, 80, 80, 80, 20]
+open   [10, 10, 10, 10, 10, 80, 80, 80, 20, 20]
+close  [10, 10, 50, 50, 50, 80, 80, 80, 20, 20]
+close  3x3 : crack mean   53.3 | background change 2.42
+close  5x5 : crack mean   56.4 | background change 4.63
+close  7x7 : crack mean  199.1 | background change 5.80
+close 11x11: crack mean  204.9 | background change 7.36
+gradient: around the crack 108.3 | background 11.8
+```
+
+### 2. Local maxima
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(6)
+spots = np.zeros((100, 160), np.float32)
+for x, y, a in [(30, 30, 200), (80, 50, 150), (130, 70, 120), (50, 75, 90)]:
+    spots[y, x] = a
+spots = cv2.GaussianBlur(spots, (0, 0), 4) * 50 + rng.normal(0, 1, spots.shape).astype(np.float32)
+peaks = (spots == cv2.dilate(spots, np.ones((15, 15), np.uint8))) & (spots > 20)
+ys, xs = np.nonzero(peaks)
+print("peaks at (x, y):", sorted(zip(xs.tolist(), ys.tolist())))
+```
+
+Output:
+
+```text
+peaks at (x, y): [(30, 30), (49, 75), (80, 50), (130, 69)]
+```
+
+- All four spots are found, within one pixel of their true centres (30, 30), (50, 75), (80, 50), (130, 70): the noise shifts the maxima slightly. The height threshold (`spots > 20`) rejects the many local maxima of the noise; the element size sets the minimum distance between reported peaks.
+
+## OpenCV API notes
+
+- **`cv2.erode`, `cv2.dilate`, `cv2.morphologyEx`**: identical calls for grey, colour (per channel) and float images; float images keep their precision.
+- **Border**: the default border value is neutral (maximum for erosion, minimum for dilation), so borders do not darken or brighten the result.
+- **Large elements**: rectangular elements are separable and fast; for large discs, approximate with a sequence of smaller elements or rectangles + crosses.
+- **Per-channel colour morphology** creates colours that were not in the image (each channel takes its own min/max): convert to a single channel (L of Lab, or grey) when colours must stay valid.
+
+## Where it fails
+
+- **Noise**: min and max are extreme statistics; noise biases the results (Section 3). Smooth first or use rank filters (for example the 20 % and 80 % values instead of min and max).
+- **Structures of similar width but different meaning**: morphology separates by size and polarity only.
+- **Colour**: no natural order of colours; per-channel results can be wrong.
+- **Large elements on large images**: elliptical elements are slow.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Expecting a closing to leave a noisy background unchanged**.
+- **Using `img == cv2.dilate(img)` without a height threshold**: every flat pixel counts as a maximum.
+- **Opening to remove dark defects** (it removes bright ones).
+- **Morphology on JPEG-compressed images**: block artefacts behave like small structures.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Umbra and threshold decomposition
+
+Grey morphology with a flat element equals binary morphology applied to every threshold level of the image and stacked back (threshold decomposition). Non-flat (grey-valued) structuring elements add a height profile to the min and max and model rolling a ball rather than pushing a flat board: the "rolling ball" background subtraction of ImageJ is a grey opening with a spherical element [1].
+
+### Reconstruction and attribute filters
+
+Grey reconstruction (Vincent [2]) restores peaks that survive a marker image without changing their shape: h-maxima, regional maxima and opening by reconstruction are built on it. Attribute openings (area openings) remove bright structures by their area instead of their width, whatever their shape.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Grey erosion with a 3 × 3 element replaces each pixel by…",
+      options: ["The mean of 9 pixels", "The minimum of 9 pixels", "The median", "The maximum"],
+      answer: 1,
+      explanation: "Erosion = minimum filter.",
+    },
+    {
+      question: "Which operation removes a dark crack 6 px wide from a grey image?",
+      options: ["Opening with 3 × 3", "Closing with 7 × 7 or larger", "Erosion", "Gradient"],
+      answer: 1,
+      explanation: "Closing bridges dark structures narrower than the element.",
+    },
+    {
+      question: "The morphological gradient is…",
+      options: ["Sobel magnitude", "Dilation − erosion", "Opening − closing", "Image − blur"],
+      answer: 1,
+      explanation: "The local range of values.",
+    },
+    {
+      question: "On a noisy flat background, a grey closing…",
+      options: ["Leaves it unchanged", "Raises it slightly", "Lowers it", "Removes the noise exactly"],
+      answer: 1,
+      explanation: "Max then min of noisy values is biased upwards.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Row 20, 90, 95, 20, 20, 20, 100, 20. Compute the grey opening with a 1 × 3 element. Which bright structures survive?
+
+<Solution>
+
+Erosion (min of 3, borders neutral): 20, 20, 20, 20, 20, 20, 20, 20. Dilation: 20 everywhere. Both bright structures (the 2-pixel one at 90–95 and the 1-pixel one at 100) are narrower than 3 and **vanish**. A 3-pixel-wide plateau would survive.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Compare a grey closing (7 × 7 ellipse) with a median filter (7 × 7) as background estimators for the plate: mean value on the crack and mean absolute change on the background.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+closing = cv2.morphologyEx(plate, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
+median = cv2.medianBlur(plate, 7)
+for name, est in [("closing 7x7", closing), ("median 7x7", median)]:
+    print(f"{name}: crack mean {est[crack].mean():.1f} | background change {np.abs(est.astype(int) - plate)[~crack].mean():.2f}")
+```
+
+Output:
+
+```text
+closing 7x7: crack mean 199.1 | background change 5.80
+median 7x7: crack mean 55.3 | background change 3.16
+```
+
+The median keeps the crack almost unchanged (55): around the crack's centre line more than half of the 7 × 7 window is crack, so the median is a crack value. The closing removes it completely (199) but biases the noisy background more. Morphology removes structures by width, the median by area fraction.
+
+</Solution>
+
+## References
+
+1. S. R. Sternberg, "Grayscale morphology", *Computer Vision, Graphics, and Image Processing* 35(3), 333–355, 1986.
+2. L. Vincent, "Morphological grayscale reconstruction in image analysis: applications and efficient algorithms", *IEEE Trans. Image Processing* 2(2), 176–201, 1993.
+3. P. Soille, *Morphological Image Analysis: Principles and Applications*, 2nd ed., Springer, 2003.
+4. OpenCV 4.13.0 documentation: `erode`, `dilate`, `morphologyEx`. https://docs.opencv.org/4.13.0/

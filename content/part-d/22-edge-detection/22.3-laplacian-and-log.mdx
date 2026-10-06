@@ -1,0 +1,290 @@
+export const meta = {
+  number: "22.3",
+  title: "Laplacian and LoG",
+  minutes: 20,
+  objectives: [
+    "Find edges as zero crossings of the Laplacian of Gaussian (LoG)",
+    "Compute the LoG with GaussianBlur + Laplacian and detect zero crossings with a slope threshold",
+    "Explain the effect of σ, and the behaviour of zero crossings at noise, corners and curved edges",
+    "Compare the LoG with gradient-based detectors",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 22.3 (Module 22).
+  Lab: EdgeLab (mode log).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 22.3 Laplacian and LoG
+
+<Definition term="Laplacian of Gaussian (LoG) edge detector">smooth the image with a Gaussian of σ, take the Laplacian (the sum of second derivatives, 19.2), and mark the pixels where the result changes sign. Those zero crossings lie on the edges, at the scale set by σ.</Definition>
+
+22.1 showed two ways to locate an edge in a profile: the peak of the first derivative and the zero crossing of the second. Gradient methods (22.2, 22.4) use the first. Marr and Hildreth (1980) [1] built an edge detector on the second, using the Laplacian because it needs no direction: one rotation-invariant operator instead of two directional ones. It also connects edges to blob detection (20.4, 25.3).
+
+## 1. An analogy
+
+Driving over a hill: going up, the road curves upwards (you are pressed into the seat), then near the top it starts curving downwards (you feel lighter). The point where the curvature changes sign is the steepest part of the slope. The LoG finds edges as the places where the brightness "curvature" changes sign.
+
+## 2. Smooth, Laplacian, zero crossings
+
+<Flow
+  steps={[
+    { label: "Image I", tone: "data" },
+    { label: "Gaussian blur, σ", tone: "process" },
+    { label: "Laplacian ∇² (4- or 8-neighbour), times σ² to normalise", tone: "process" },
+    { label: "Zero crossings with enough slope → edges", tone: "result" },
+  ]}
+/>
+
+On the dark side of an edge the Laplacian is positive (its neighbours are brighter on average), on the bright side negative. A worked example with the 4-neighbour Laplacian on the dark corner pixel of a bright region:
+
+<PixelMatrix values={[[50, 50, 50], [50, 50, 150], [50, 150, 150]]} highlight={[[1, 1]]} />
+
+∇² = 50 + 150 + 50 + 150 − 4 · 50 = **200**: strongly positive. The bright pixel diagonally below-right has a strongly negative value; between them the sign changes, and that is where the edge is.
+
+Real numbers: σ²·LoG with σ = 2 along row 100 of the scene, across the left edge of the white disc (columns 30–39):
+
+```text
+4.3, 14.2, 29.4, 40.4, 33.7, 6.1, −27.1, −45.0, −41.5, −26.7
+```
+
+Positive on the dark side, negative on the bright side, crossing zero between columns 35 and 36.
+
+## 3. Too many zero crossings
+
+Every tiny wobble of noise also changes the sign of the Laplacian. Counting zero-crossing pixels on the scene:
+
+| σ | All sign changes | Jump across the crossing > 4 | Jump > 10 |
+| --- | --- | --- | --- |
+| 1 | 34 049 | 6 904 | 1 506 |
+| 2 | 17 663 | 1 422 | 1 249 |
+| 4 | 7 435 | 1 218 | 673 |
+
+(For comparison, `cv2.Canny(scene, 50, 150)` marks 1 490 pixels.) Without a slope test, half the image is "edge": flat regions with noise cross zero everywhere. Requiring a minimum jump between the positive and negative side keeps only real edges. Larger σ removes fine structure and noise; at σ = 4 even parts of the letters disappear.
+
+<EdgeLab mode="log" caption="σ²·LoG (grey = 0, bright = positive, dark = negative) and its zero crossings. Set the minimum jump to 0 to see every sign change, then raise it until only the object outlines remain. Increase σ: edges become smoother, rounder and fewer; small letters and corners are lost. Note that zero-crossing curves are closed or end at the border."/>
+
+## 4. Properties and caveats
+
+- **Closed contours**: zero crossings of a smooth function form closed curves (or end at the image border), which is attractive for outlining objects; but they also close around every noise blob.
+- **Curved edges and corners move**: for a straight edge the zero crossing lies exactly on the step; on curved edges it is displaced by a fraction of a pixel, by an amount that depends on σ and the curvature, and corners are rounded off. Along row 100 of the noisy scene the steepest grey-value step lies at 34.5 and the zero crossing at 35.2; on a clean synthetic disc (Exercise 2) the displacement is up to about half a pixel. For precise measurement, check the bias on your own geometry.
+- **No direction**: the LoG does not give an edge orientation; take the gradient if you need it.
+- **One operator for edges and blobs**: the same filter detects edges (zero crossings) and blobs (extrema, 20.4, 25.3).
+
+In practice Canny (22.4) gives thinner, better-localised and less noisy edges for the same effort, and is the default; the LoG survives in blob detection, in sharpening, and as a focus measure.
+
+## 5. Industrial example
+
+LoG filtering is used to find small round features, such as solder paste deposits, holes in perforated sheet, or particles on a filter: their extrema at the matching σ are strong and the response is the same in every direction. As an edge detector it is used on images of objects with smooth, closed outlines (cells, pellets) where closed contours are wanted, with a slope threshold to suppress the background.
+
+## What you should remember from 22.3
+
+<Takeaways>
+<Takeaway n={1} title="LoG">Gaussian blur, then Laplacian; positive on the dark side, negative on the bright side.</Takeaway>
+<Takeaway n={2} title="Edges">At zero crossings; keep only those with a large jump.</Takeaway>
+<Takeaway n={3} title="σ">Sets the scale: small σ fine edges and noise, large σ smooth outlines.</Takeaway>
+<Takeaway n={4} title="Caveats">No direction; corners and curved edges shift; Canny is usually better for edges.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Values of the LoG along a row: 12, 30, 8, −15, −40. Between which samples is the zero crossing, and what is the jump?
+
+<Solution>
+
+Between 8 and −15 (third and fourth samples); jump 23. By linear interpolation the zero lies 8 / 23 ≈ 0.35 of the way from the third to the fourth sample.
+
+</Solution>
+
+**Q2.** Why multiply the LoG by σ²?
+
+<Solution>
+
+The Laplacian of a blurred image gets weaker as σ grows; σ² normalises it (20.4) so that the same slope threshold works at every scale.
+
+</Solution>
+
+### Next: 22.4 Canny step by step
+
+The standard edge detector: gradients, thin ridges by non-maximum suppression, and two thresholds with hysteresis.
+
+## Code
+
+Two examples: the LoG and its zero crossings, then the shift of a curved edge.
+
+### 1. LoG zero crossings
+
+```python
+import numpy as np
+import cv2
+
+scene = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+
+def log_response(img, sigma):
+    return cv2.Laplacian(cv2.GaussianBlur(img, (0, 0), sigma), cv2.CV_32F) * sigma ** 2
+
+def zero_crossings(L, min_jump):
+    a, right, down = L[:-1, :-1], L[:-1, 1:], L[1:, :-1]
+    zc = ((a * right < 0) & (np.abs(a - right) > min_jump)) | ((a * down < 0) & (np.abs(a - down) > min_jump))
+    return zc
+
+for sigma in (1, 2, 4):
+    L = log_response(scene, sigma)
+    print(f"sigma {sigma}: all {int(zero_crossings(L, 0).sum()):6d} | jump > 4 {int(zero_crossings(L, 4).sum()):5d} | jump > 10 {int(zero_crossings(L, 10).sum()):5d}")
+print("Canny(50, 150):", int((cv2.Canny(scene.astype(np.uint8), 50, 150) > 0).sum()))
+```
+
+Output:
+
+```text
+sigma 1: all  34049 | jump > 4  6904 | jump > 10  1506
+sigma 2: all  17663 | jump > 4  1422 | jump > 10  1249
+sigma 4: all   7435 | jump > 4  1218 | jump > 10   673
+Canny(50, 150): 1490
+```
+
+- `cv2.Laplacian` uses the 4-neighbour kernel for `ksize=1` (the default); `ksize=3` gives a different 3 × 3 kernel (19.2).
+
+### 2. Where the zero crossing lies
+
+```python
+import numpy as np
+import cv2
+
+row = scene[100, 30:40]
+step = int(np.argmax(np.diff(row))) + 30                            # largest grey-value step: between step and step + 1
+L = log_response(scene, 2)[100, 30:40]
+k = int(np.nonzero(np.sign(L[:-1]) != np.sign(L[1:]))[0][0])
+zero = 30 + k + L[k] / (L[k] - L[k + 1])                             # linear interpolation
+print("sigma^2 LoG:", np.round(L.astype(float), 1).tolist())
+print(f"steepest step at {step + 0.5:.1f}, LoG zero crossing at {zero:.2f}")
+```
+
+Output:
+
+```text
+sigma^2 LoG: [4.3, 14.2, 29.4, 40.4, 33.7, 6.1, -27.1, -45.0, -41.5, -26.7]
+steepest step at 34.5, LoG zero crossing at 35.18
+```
+
+## OpenCV API notes
+
+OpenCV has no LoG or zero-crossing function; combine:
+
+- **`cv2.GaussianBlur(src, (0, 0), sigma)`** then **`cv2.Laplacian(src, cv2.CV_32F, ksize=1)`** (or `ksize=3, 5` for larger, smoother Laplacian kernels).
+- Zero crossings with NumPy (sign changes between neighbours plus a slope test), as in example 1.
+- A LoG kernel can also be built explicitly and applied with `cv2.filter2D`, or approximated by a difference of Gaussians (20.4).
+
+## Where it fails
+
+- **Noise**: many spurious zero crossings without a slope threshold.
+- **Corners and curved edges**: rounded and shifted.
+- **Thin lines**: a line produces two zero crossings, one on each side, not one at the line.
+- **No orientation information**.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Laplacian without smoothing** on noisy images.
+- **Thresholding the LoG magnitude** instead of finding zero crossings: thick, double edges.
+- **Uint8 output depth**: the negative half is lost and no zero crossings remain.
+- **Comparing thresholds across σ** without σ² normalisation.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Marr–Hildreth theory
+
+Marr and Hildreth [1] argued that intensity changes occur at many scales and should be detected separately at each, with zero crossings of ∇²G; edges that appear at several neighbouring scales are physically meaningful. Their model connected to the centre-surround receptive fields of the retina (20.4).
+
+### Why the zero crossing moves
+
+For a straight edge, the LoG zero crossing lies exactly at the step. For a curved edge, the Laplacian also contains the curvature of the iso-brightness lines, which displaces the zero crossing; Berzins (1984) [2] derived the localisation error for corners and curved edges as a function of σ. Gradient-maximum methods (Canny) have biases at curves too, generally smaller.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Where does the LoG detector place an edge?",
+      options: ["At maxima of the Laplacian", "At zero crossings of the Laplacian of the smoothed image", "Where the gradient is zero", "At bright pixels"],
+      answer: 1,
+      explanation: "Positive on the dark side, negative on the bright side.",
+    },
+    {
+      question: "Why add a minimum-jump test to the zero crossings?",
+      options: ["To find more edges", "To ignore sign changes caused by noise in flat areas", "To speed it up", "To get directions"],
+      answer: 1,
+      explanation: "Without it, noise gives zero crossings everywhere.",
+    },
+    {
+      question: "Increasing σ…",
+      options: ["Finds finer edges", "Gives fewer, smoother edges at a coarser scale", "Has no effect", "Gives edge directions"],
+      answer: 1,
+      explanation: "Fine structure and noise are smoothed away.",
+    },
+    {
+      question: "What happens to zero crossings at curved edges?",
+      options: ["Nothing", "They can be displaced by a fraction of a pixel", "They disappear", "They double"],
+      answer: 1,
+      explanation: "Up to about half a pixel on the synthetic disc, depending on σ.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+1-D signal 10, 10, 10, 50, 90, 90, 90. Compute the 1-D Laplacian (second difference) and find the zero crossing.
+
+<Solution>
+
+Second differences at positions 1–5: 0, 40, 0, −40, 0. The sign changes from +40 to −40 around position 3 (value 50), with an exact zero there: the middle of the ramp, where the first difference is largest.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Measure the shift of the LoG zero crossing on a synthetic disc of radius 20 (value 200 on 50) along its horizontal diameter, for σ = 1, 2 and 4, compared with the true edge at radius 20.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+disc = np.full((101, 101), 50, np.float32)
+cv2.circle(disc, (50, 50), 20, 200, -1, cv2.LINE_AA)
+for sigma in (1, 2, 4):
+    L = log_response(disc, sigma)[50, 50:80]                         # from the centre outwards
+    k = int(np.nonzero((np.sign(L[:-1]) != np.sign(L[1:])) & (np.abs(L[:-1] - L[1:]) > 1))[0][0])   # ignore rounding wiggles
+    zero = k + L[k] / (L[k] - L[k + 1])
+    print(f"sigma {sigma}: zero crossing at radius {zero:.2f}")
+```
+
+Output:
+
+```text
+sigma 1: zero crossing at radius 20.48
+sigma 2: zero crossing at radius 19.90
+sigma 4: zero crossing at radius 20.16
+```
+
+The anti-aliased disc edge lies at about 20.5 (the pixel centre at 20 is still inside). The zero crossing is close to it at σ = 1 and displaced by 0.3–0.6 pixel at σ = 2 and 4, not in a simple monotonic way: the bias depends on how the Gaussian's width compares with the radius. A sub-pixel measurement with LoG needs this kind of check.
+
+</Solution>
+
+## References
+
+1. D. Marr, E. Hildreth, "Theory of edge detection", *Proc. Royal Society of London B* 207, 187–217, 1980.
+2. V. Berzins, "Accuracy of Laplacian edge detectors", *Computer Vision, Graphics, and Image Processing* 27(2), 195–210, 1984.
+3. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 10 (the Marr–Hildreth edge detector).
+4. OpenCV 4.13.0 documentation: `Laplacian`, `GaussianBlur`. https://docs.opencv.org/4.13.0/

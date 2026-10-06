@@ -1,0 +1,418 @@
+export const meta = {
+  number: "3.5",
+  title: "Aliasing and Nyquist",
+  minutes: 40,
+  objectives: [
+    "Explain aliasing: fine patterns that turn into false, coarser patterns when sampled",
+    "State the Nyquist limit and compute alias frequencies",
+    "Recognize moiré, jagged edges and the wagon-wheel effect as aliasing",
+    "Prevent aliasing when capturing and when shrinking images",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 3.5 (Module 3 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 3.5 Aliasing and Nyquist
+
+<Definition term="Aliasing">a pattern too fine for the sampling grid showing up as a different, false, coarser pattern.</Definition>
+
+In 3.1, stripes sampled too coarsely **vanished**. That was a lucky case. More often they turn into **something else**: wide false stripes, curved rings, a wheel that turns backwards. This false pattern is an **alias**: a disguise. The **Nyquist limit** tells you how fine you must sample to avoid it.
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Pattern finer than 2 pixels per period", tone: "world" },
+    { label: "Sampled by the pixel grid", tone: "process" },
+    { label: "Samples match a slower pattern", tone: "data" },
+    { label: "False pattern in the image", tone: "result" },
+  ]}
+/>
+
+## 1. Two patterns, the same samples
+
+A wave with **0.6 cycles per pixel** and a wave with **0.4 cycles per pixel** give **exactly the same pixel values** when sampled once per pixel (Code example 1):
+
+<PixelMatrix values={[[255, 24, 167, 167, 24, 255, 24, 167]]} caption="Eight samples (shown as gray levels) of either wave. Once sampled, nothing tells them apart." />
+
+The camera records the samples, not the wave. The finer pattern is **indistinguishable** from the coarser one: it has taken its **alias**.
+
+## 2. The Nyquist limit
+
+The rule (the sampling theorem, after Nyquist and Shannon):
+
+<Callout kind="key">
+
+To capture a repeating pattern, you need **more than 2 samples per period**. The highest frequency a grid can show is **half its sampling rate**: the **Nyquist limit**.
+
+</Callout>
+
+For pixels: at most **0.5 cycles per pixel**, i.e. a period of at least **2 pixels** (one dark, one bright: the line pair of 3.1).
+
+## 3. Where the alias lands
+
+A pattern above the limit is "folded back" below it:
+
+```text
+alias = | f − round(f / fs) × fs |
+```
+
+At 1 sample per pixel:
+
+| Pattern (cycles/px) | Seen as (cycles/px) |
+| --- | --- |
+| 0.3 | 0.3 |
+| 0.5 | 0.5 (limit) |
+| 0.6 | **0.4** |
+| 0.8 | **0.2** |
+| 0.9 | **0.1** |
+| 1.0 | **0.0** (flat!) |
+| 1.2 | **0.2** |
+
+*(Code example 2.)* A pattern **just** above the limit appears **slower**, the closer to 1.0 the slower; at exactly 1.0 cycle per pixel every sample hits the same phase and the pattern disappears (the 3.1 case).
+
+## 4. Try it
+
+<AliasLab caption="Sixteen pixels, each sampling the pattern at its centre. Move the pattern above 0.5 cycles per pixel and the samples trace the dashed alias." />
+
+## 5. Moiré: aliasing in 2D
+
+In 2D, fine textures alias into **large curved or striped patterns**: **moiré**. You see it when photographing screens, fabrics, fences or fine meshes.
+
+<ImageCompare
+  before={{ src: "/images/sample-zoneplate.png", label: "Original" }}
+  after={{ src: "/images/sample-zoneplate-nearest.png", label: "1/4 size, point-sampled" }}
+  width={320}
+  height={200}
+  alt="A zone plate of rings that get finer outwards, and its 4× point-sampled version showing false ring patterns repeating across the image"
+  caption="A zone plate: rings get finer towards the edges. Shrunk 4× by taking every fourth pixel and shown back at full size, false rings appear where the real rings were too fine."
+/>
+
+## 6. Jagged edges
+
+A sharp, slanted edge contains detail at **all** frequencies, including ones above the limit. Sampled without blur, it becomes a **staircase** ("jaggies"). Drawing functions use **anti-aliasing** (`cv2.LINE_AA`) to soften this by giving edge pixels in-between values.
+
+## 7. Aliasing in time
+
+Video samples time (3.1). A wheel with spokes turning faster than half the frame rate (per spoke spacing) appears to turn **slowly, stop or turn backwards**: the **wagon-wheel effect**. A fan or roller that looks still in a video may in fact be spinning fast. Flicker banding in 2.9 is another time-sampling effect.
+
+## 8. Prevention 1: blur before sampling
+
+The cure is to remove detail finer than the Nyquist limit **before** sampling. This is an **anti-aliasing filter** (a low-pass filter):
+
+<Flow direction="right" steps={["Scene with very fine detail", "Low-pass: blur slightly", "Sample", { label: "No false patterns", tone: "result" }]} />
+
+In cameras, the lens blur, the pixel's own area (3.1) and sometimes an **optical low-pass filter** (2.7) do this. The cost: some sharpness.
+
+## 9. Prevention 2: shrink images properly
+
+Software has the same problem. Shrinking by **taking every n-th pixel** (`INTER_NEAREST`) is point sampling: it aliases. **Averaging** (`INTER_AREA`) or **blurring first** reduces it:
+
+| Method (shrink 2×, stripes of period 3 px) | Strength of the false pattern |
+| --- | --- |
+| Every 2nd pixel (`INTER_NEAREST`) | 63.8 |
+| Area average (`INTER_AREA`) | 31.9 |
+| Gaussian blur, then every 2nd pixel | 2.7 |
+
+*(Code example 3.)* Image pyramids (`cv2.pyrDown`) blur and then subsample for exactly this reason.
+
+<ImageCompare
+  before={{ src: "/images/sample-zoneplate-nearest.png", label: "Every 4th pixel" }}
+  after={{ src: "/images/sample-zoneplate-area.png", label: "Area average" }}
+  width={320}
+  height={200}
+  alt="The zone plate shrunk 4× by point sampling, with strong false rings, and by area averaging, where the fine rings turn mostly gray"
+  caption="Same 4× reduction. Area averaging turns the too-fine rings into gray instead of false rings (some weaker aliasing remains)."
+/>
+
+## 10. Prevention 3: sample finer
+
+If the fine pattern **matters** (you need to see the mesh, the thread, the crack), blurring it away is not acceptable. Then you need **finer sampling**: more pixels on the object, a closer camera or a longer lens (2.4), so that the pattern is below the Nyquist limit.
+
+## 11. Why aliasing is dangerous in inspection
+
+Aliases look **real**. A false periodic pattern can be mistaken for a **defect** (or hide a real one), a measurement of a pitch or thread can come out wrong, and a texture classifier can see a different texture. Unlike noise, aliasing does not average away: the same scene gives the same false pattern every time.
+
+## 12. Industrial example
+
+A camera inspects **woven wire mesh** with a wire pitch of 0.5 mm, at 0.3 mm per pixel. The mesh frequency is 0.3 / 0.5 = **0.6 cycles per pixel**: above Nyquist. The image shows a false mesh with a pitch of 1 / 0.4 = 2.5 pixels (0.75 mm) and slow moiré bands. Measuring the pitch from this image gives a wrong answer with full confidence. The fix: at least 0.2 mm/px (pitch = 2.5 px, 0.4 c/px), better 0.1 mm/px.
+
+## What you should remember from 3.5
+
+<Takeaways>
+<Takeaway n={1} title="Aliasing">Too-fine patterns turn into false, coarser patterns after sampling.</Takeaway>
+<Takeaway n={2} title="Nyquist">Need more than 2 samples per period: at most 0.5 cycles per pixel.</Takeaway>
+<Takeaway n={3} title="Folding">Above the limit, f appears as |f − round(f/fs)·fs|.</Takeaway>
+<Takeaway n={4} title="Prevent">Blur (low-pass) before sampling, shrink with INTER_AREA or pyrDown, or sample finer.</Takeaway>
+<Takeaway n={5} title="Danger">Aliases look real and do not average away.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** What is the Nyquist limit for a camera at 0.25 mm per pixel, in line pairs per mm?
+
+<Solution>
+
+4 pixels per mm → **2 line pairs per mm** (a period of 0.5 mm).
+
+</Solution>
+
+**Q2.** A pattern of 0.7 cycles per pixel is sampled once per pixel. What frequency appears?
+
+<Solution>
+
+|0.7 − 1| = **0.3 cycles per pixel**.
+
+</Solution>
+
+**Q3.** Why does `cv2.resize(..., interpolation=cv2.INTER_NEAREST)` cause more aliasing than `INTER_AREA` when shrinking?
+
+<Solution>
+
+Nearest takes single samples (point sampling) and keeps all the too-fine detail, which aliases; area averaging acts as a low-pass filter first.
+
+</Solution>
+
+**Q4.** A video at 25 fps shows a 4-spoke wheel standing still. Give one possible true speed.
+
+<Solution>
+
+Any speed where the wheel turns by a multiple of 90° between frames, e.g. 90° per frame = 25 × ¼ = **6.25 revolutions per second**.
+
+</Solution>
+
+### Next: 3.6 Neighbours, connectivity, distance
+
+The last chapter of Module 3: which pixels count as **neighbours**, when two pixels are **connected**, and how to measure **distance** on a grid. The basis of region labelling, morphology and shape analysis.
+
+## Code
+
+Three experiments: two waves with identical samples, where aliases land, and shrinking stripes with and without anti-aliasing.
+
+### 1. From scratch: two different waves, identical samples
+
+```python
+import numpy as np
+
+n = np.arange(8)                                   # sample positions (pixels)
+fine = np.cos(2 * np.pi * 0.6 * n)                 # 0.6 cycles per pixel: too fine
+slow = np.cos(2 * np.pi * 0.4 * n)                 # 0.4 cycles per pixel
+print("0.6 c/px samples:", np.round(fine, 3))
+print("0.4 c/px samples:", np.round(slow, 3))
+print("identical:", np.allclose(fine, slow))
+```
+
+Output:
+
+```text
+0.6 c/px samples: [ 1.    -0.809  0.309  0.309 -0.809  1.    -0.809  0.309]
+0.4 c/px samples: [ 1.    -0.809  0.309  0.309 -0.809  1.    -0.809  0.309]
+identical: True
+```
+
+- cos(2π·0.6·n) = cos(2π·n − 2π·0.4·n) = cos(2π·0.4·n) for whole numbers n. The difference is a whole number of cycles between samples, which the samples cannot see.
+
+### 2. From scratch: where aliases land
+
+```python
+import numpy as np
+
+fs = 1.0                                           # 1 sample per pixel
+print("pattern (c/px)   seen as (c/px)")
+for f in [0.1, 0.3, 0.5, 0.6, 0.8, 0.9, 1.0, 1.2]:
+    alias = abs(f - round(f / fs) * fs)            # fold back into 0 .. fs/2
+    print(f"{f:9.1f}   {alias:12.1f}" + ("   <- aliased" if f > fs / 2 else ""))
+```
+
+Output:
+
+```text
+pattern (c/px)   seen as (c/px)
+      0.1            0.1
+      0.3            0.3
+      0.5            0.5
+      0.6            0.4   <- aliased
+      0.8            0.2   <- aliased
+      0.9            0.1   <- aliased
+      1.0            0.0   <- aliased
+      1.2            0.2   <- aliased
+```
+
+- Frequencies "fold" around multiples of the sampling rate. Everything ends up between 0 and 0.5.
+
+### 3. OpenCV: shrinking stripes with and without anti-aliasing
+
+```python
+import numpy as np
+import cv2
+
+x = np.arange(600)
+stripes = (127.5 + 127.5 * np.cos(2 * np.pi * x / 3.0)).astype(np.float32)[None, :]  # period 3 px
+img = np.repeat(stripes, 8, axis=0)
+
+def main_period(row):
+    spec = np.abs(np.fft.rfft(row - row.mean()))
+    k = int(np.argmax(spec))
+    return len(row) / k if k else float("inf"), spec[k] / len(row)
+
+for name, small in [("every 2nd pixel (nearest)", cv2.resize(img, (300, 8), interpolation=cv2.INTER_NEAREST)),
+                    ("area average", cv2.resize(img, (300, 8), interpolation=cv2.INTER_AREA)),
+                    ("blur, then every 2nd", cv2.resize(cv2.GaussianBlur(img, (0, 0), 1.2), (300, 8), interpolation=cv2.INTER_NEAREST))]:
+    period, amp = main_period(small[4])
+    print(f"{name:26s}: strongest pattern period {period:4.1f} px, amplitude {amp:5.1f}")
+```
+
+Output:
+
+```text
+every 2nd pixel (nearest) : strongest pattern period  3.0 px, amplitude  63.8
+area average              : strongest pattern period  3.0 px, amplitude  31.9
+blur, then every 2nd      : strongest pattern period  3.0 px, amplitude   2.7
+```
+
+- After shrinking 2×, the true stripes would have a period of 1.5 new pixels: impossible (below 2). What appears instead is a **false** period of 3 new pixels.
+- Point sampling keeps the false pattern at full strength; area averaging halves it; blurring first (σ = 1.2) almost removes it.
+- `np.fft.rfft` finds the strongest repeating component (Chapter 20).
+
+## OpenCV API notes
+
+**Shrinking**: `cv2.resize(..., interpolation=cv2.INTER_AREA)`; for repeated halving, `cv2.pyrDown(img)` (Gaussian blur + drop every other row and column).
+
+**Blurring first**: `cv2.GaussianBlur(img, (0, 0), sigma)`: for a reduction by a factor k, a sigma around 0.5·k is a common starting point.
+
+**Anti-aliased drawing**: pass `lineType=cv2.LINE_AA` to `cv2.line`, `cv2.circle`, `cv2.putText` and others.
+
+**`cv2.warpAffine` / `cv2.remap`** (Chapter 21) also sample; when they shrink, they alias unless you blur first.
+
+## Where it fails
+
+- **Blurring removes real detail too.** If the fine detail matters, sample finer instead.
+- **Bayer sensors** (2.7) sample each colour more coarsely than the pixel grid, so colour aliasing appears earlier than gray aliasing.
+- **Non-periodic detail** (a single thin crack) does not create neat aliases but can be lost or misplaced in the same way.
+- **The simple folding formula** is for pure point sampling of a single frequency; real images contain many frequencies and pixels average over their area.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Shrinking with `INTER_NEAREST`** (or slicing `img[::4, ::4]`) and analysing textures in the result.
+- **Trusting a periodic pattern in an image** without checking that it is below the Nyquist limit.
+- **Judging motion from video** of fast rotating parts without considering the frame rate.
+- **Assuming "more sharpening" helps**: sharpening amplifies aliasing artefacts.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The sampling theorem
+
+A signal containing no frequencies above B can be reconstructed exactly from samples taken at a rate above 2B (Nyquist; Shannon). Below that rate, spectral copies created by sampling overlap and the information is lost irreversibly [1][2].
+
+### Sampling in the frequency domain
+
+Sampling multiplies the signal by an impulse train; in frequency, the spectrum is repeated every fs. Frequencies above fs/2 from one copy fall into the band of the next: that is the folding formula of section 3 [2].
+
+### Anti-aliasing filters
+
+An ideal anti-aliasing filter would pass everything below fs/2 and nothing above, which needs an infinitely wide kernel. Practical filters (Gaussian, Lanczos, area) trade sharpness against residual aliasing [3].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is the highest pattern frequency a pixel grid can represent?",
+      options: ["1 cycle per pixel", "0.5 cycles per pixel", "2 cycles per pixel", "0.25 cycles per pixel"],
+      answer: 1,
+      explanation: "The Nyquist limit is half the sampling rate: a period of at least 2 pixels.",
+    },
+    {
+      question: "A 0.8 cycles/pixel pattern is sampled once per pixel. It appears as…",
+      options: ["0.8", "0.4", "0.2", "1.6"],
+      answer: 2,
+      explanation: "|0.8 − 1| = 0.2 cycles per pixel.",
+    },
+    {
+      question: "Which shrinking method aliases the most?",
+      options: ["INTER_AREA", "pyrDown", "INTER_NEAREST", "GaussianBlur then INTER_NEAREST"],
+      answer: 2,
+      explanation: "Nearest is point sampling with no low-pass filter.",
+    },
+    {
+      question: "What is moiré?",
+      options: ["Sensor noise", "Aliasing of fine 2D textures into large false patterns", "Lens distortion", "A colour space"],
+      answer: 1,
+      explanation: "Fine meshes and screens alias into big curved or striped patterns.",
+    },
+    {
+      question: "You must measure the pitch of a fine mesh that aliases. Best fix?",
+      options: ["Blur the image", "Sample finer (more pixels per mm)", "Sharpen", "Convert to colour"],
+      answer: 1,
+      explanation: "Blurring would remove the mesh you want to measure; finer sampling brings it below Nyquist.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A thread has a pitch of 1.5 mm. (a) What is the largest mm per pixel that can represent it? (b) At 1.0 mm/px, what pitch would appear?
+
+<Solution>
+
+(a) At least 2 pixels per pitch: **0.75 mm/px** (and in practice less). (b) f = 1.0 / 1.5 ≈ 0.667 c/px → alias |0.667 − 1| = 0.333 c/px → period 3 px = **3 mm**: the thread appears with twice its real pitch.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Draw a 400 × 400 image of thin diagonal lines with `cv2.line` every 3 pixels. Shrink it to 100 × 100 with `INTER_NEAREST` and with `INTER_AREA`, and print the standard deviation of each result. Which still has strong (false) structure?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+img = np.zeros((400, 400), np.uint8)
+for k in range(-400, 400, 3):
+    cv2.line(img, (k, 0), (k + 400, 400), 255, 1)
+for name, interp in [("nearest", cv2.INTER_NEAREST), ("area", cv2.INTER_AREA)]:
+    small = cv2.resize(img, (100, 100), interpolation=interp)
+    print(f"{name:7s}: std {small.std():5.1f}")
+```
+
+Output:
+
+```text
+nearest: std 120.2
+area   : std   7.5
+```
+
+The nearest version keeps full-contrast structure, but it is a false pattern; area averaging turns lines that are too fine into almost uniform gray, which is the honest result at that resolution.
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+A conveyor roller with 8 bolts around it is filmed at 30 fps. On video the bolts look stationary. What is the slowest possible true rotation speed (other than zero)?
+
+<Solution>
+
+The pattern repeats every 1/8 turn. Looking still means a whole number of 1/8 turns per frame: the slowest is 1/8 turn per frame = 30/8 = **3.75 revolutions per second** (225 rpm).
+
+</Solution>
+
+## References
+
+1. C. E. Shannon, "Communication in the presence of noise," *Proceedings of the IRE*, vol. 37, no. 1, pp. 10–21, 1949.
+2. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed. Pearson, 2018. Sec. 4.3–4.5 (sampling, the sampling theorem, aliasing).
+3. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. Springer, 2022. Sec. 2.3 (sampling and aliasing) and Sec. 3.5 (pyramids and resampling). Free online edition: [szeliski.org/Book](https://szeliski.org/Book/).
+4. OpenCV 4.13.0 documentation, *Geometric Image Transformations* (`resize`) and *Image Filtering* (`pyrDown`, `GaussianBlur`): [docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html](https://docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html).

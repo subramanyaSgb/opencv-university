@@ -1,0 +1,444 @@
+export const meta = {
+  number: "5.1",
+  title: "Images as matrices",
+  minutes: 35,
+  objectives: [
+    "Describe gray and colour images as matrices and arrays, with the right notation",
+    "Apply element-wise operations (add, subtract, scale, blend, mask) and predict overflow",
+    "Tell element-wise multiplication from the matrix product and know where each is used",
+    "Use row and column sums (projections) and frame averaging in real tasks",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 5.1 (Module 5 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 5.1 Images as matrices
+
+<Definition term="Image as a matrix">a gray image is a table of numbers with H rows and W columns; a colour image is three such tables stacked. Image processing is maths on these tables.</Definition>
+
+Module 5 collects the maths used in the rest of the course, always with images as the examples. You have used most of it already without the names: adding brightness, cutting an ROI, averaging frames. This chapter gives the names and shows the operations side by side.
+
+## 1. An analogy
+
+A **spreadsheet**. Each cell holds one number. You can add 10 to every cell, add two sheets cell by cell, sum each row, or swap rows and columns. A gray image is a spreadsheet with one cell per pixel; a colour image is a workbook with three sheets (B, G, R).
+
+## 2. Notation
+
+<PixelMatrix
+  values={[[50, 80, 120, 160], [60, 100, 150, 200], [70, 120, 180, 240], [80, 140, 210, 250]]}
+  label="A 4 × 4 image I"
+  size="sm"
+/>
+
+- **I** is a matrix of size **H × W** (here 4 × 4). In NumPy: `img.shape == (H, W)`.
+- **I(r, c)** or **I<sub>r,c</sub>** is the value in row r, column c (from 0 in code). `img[r, c]` in NumPy (3.4). Here I(2, 3) = 240.
+- Many books write **I(x, y)** with x = column, y = row: the same value, the order swapped. OpenCV functions take points as (x, y); NumPy indexes [row, col].
+- A colour image is an **H × W × 3 array** (a "tensor"): three matrices. `img[:, :, 0]` is the blue matrix.
+
+## 3. Element-wise operations
+
+Most image operations work **element by element**: the same rule for every pixel, independent of its neighbours (a "point operation", 1.3):
+
+<Equation terms={[{ value: "C(r, c)" }, { op: "=", value: "f( A(r, c), B(r, c) )", result: true }]} />
+
+| Operation | Formula | Typical use | OpenCV |
+| --- | --- | --- | --- |
+| Add | A + B | brightening, merging exposures | `cv2.add` |
+| Subtract | A − B | change detection, background subtraction | `cv2.subtract`, `cv2.absdiff` |
+| Scale | k · A | contrast, gain | `cv2.convertScaleAbs`, `cv2.multiply` |
+| Blend | (1 − α) A + α B | overlays, cross-fades | `cv2.addWeighted` |
+| Mask | A where M > 0 | keep only a region | `cv2.bitwise_and(A, A, mask=M)` |
+
+Results can leave the 0–255 range. OpenCV's functions **clip** (saturate); NumPy `uint8` arithmetic **wraps around** (3.2). Work in `int16`/`float32` when in doubt.
+
+## 4. Linear combinations: averaging frames
+
+A weighted sum of images, a·A + b·B + c·C …, is a **linear combination**. The most useful one: the **average of N frames** of a still scene. The scene stays; the random noise (2.5) partly cancels. Its standard deviation drops by **√N** *(Code example 3)*:
+
+| Frames averaged | Noise std (measured) | 10 / √N |
+| --- | --- | --- |
+| 1 | 9.97 | 10.00 |
+| 4 | 4.99 | 5.00 |
+| 16 | 2.50 | 2.50 |
+| 64 | 1.24 | 1.25 |
+
+Four times the frames halves the noise. Industrial uses: a clean reference image for a static part, a background model, dark-frame and flat-field calibration (2.5).
+
+## 5. Masks
+
+A **mask** is a matrix of 0 and 1 (or 0 and 255) of the same size. Multiplying element by element keeps the image where the mask is 1 and sets it to 0 elsewhere:
+
+<MatrixTransform
+  before={[[120, 130, 140], [125, 200, 145], [130, 140, 150]]}
+  after={[[0, 0, 0], [0, 200, 145], [0, 140, 150]]}
+  rule="× mask [[0,0,0],[0,1,1],[0,1,1]]"
+  beforeLabel="Image"
+  afterLabel="Masked"
+  size="sm"
+/>
+
+Masks restrict measurements to a region (a part, not the background), combine detections, and are the output of thresholding (Part C).
+
+## 6. Rearranging: transpose, flip, rotate
+
+These move values without changing them:
+
+- **Transpose** Aᵀ: row r becomes column r (mirror about the main diagonal). `A.T`, `cv2.transpose`.
+- **Flip**: reverse the column order (left-right) or row order (up-down). `cv2.flip(img, 1)` / `cv2.flip(img, 0)`.
+- **Rotate 90°**: a transpose followed by a flip. `cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)` *(Code example 1)*.
+
+A camera mounted upside down needs a flip of both axes (= 180° rotation), not a re-calibration.
+
+## 7. Element-wise product vs matrix product
+
+Two different "multiplications":
+
+<Columns>
+<Panel title="Element-wise: A * B" tone="a">
+
+Each value times the value at the same place. Both matrices have the same size.
+
+`[[1,2],[3,4]] * [[10,0],[0,1]] = [[10,0],[0,4]]`
+
+Used for: masks, gain maps, shading correction.
+
+</Panel>
+<Panel title="Matrix product: A @ B" tone="b">
+
+Row of A times column of B, summed. Inner sizes must match (H × K times K × W).
+
+`[[1,2],[3,4]] @ [[10,0],[0,1]] = [[10,2],[30,4]]`
+
+Used for: transforms of points and colours (5.2, 5.3).
+
+</Panel>
+</Columns>
+
+Multiplying two **images** with `@` almost never makes sense. But a matrix product applied to **every pixel's colour** does: BGR → gray is the 1 × 3 matrix [0.114 0.587 0.299] times each pixel's (B, G, R). `cv2.transform` does exactly this and gives the same result as `cv2.cvtColor` *(Code example 4)*.
+
+## 8. Sums along rows and columns: projections
+
+Summing each **column** gives a 1-D **profile** (a "projection"): one number per column. Objects show up as bumps, gaps as zeros. Five round parts in a row *(Code example 2)*:
+
+```text
+column profile (every 10th column): [ 0 19 29 19  0 27 27  0 19 29 19  0 27 27  0 19 29 19  0  0]
+objects found by the projection: 5
+```
+
+Projections are cheap (one addition per pixel) and robust to noise, because many pixels are summed. Industrial uses: counting parts in a row, finding the edges of a strip, finding a faint scratch along a row (Exercise 2), locating text lines before OCR.
+
+## 9. Try it
+
+<MatrixLab caption="Two 4 × 4 images, A and B. Choose an operation and an overflow rule. The extra row and column show the column and row sums of the result." />
+
+Things to try: **A + B** with "Wrap" (bright corners become dark); **A − B** with "Clip" (negative results become 0, information lost); **Rotate 90°** and compare the row sums with the column sums of A; **A @ B** (huge numbers: not an image operation).
+
+## 10. Industrial example
+
+Counting steel rods leaving a cutting machine, seen from above against a bright background:
+
+<Flow
+  steps={[
+    { label: "Average 4 frames: noise ÷ 2", tone: "process" },
+    { label: "Threshold: rods = 1, background = 0 (mask)", tone: "process" },
+    { label: "Column sums: one bump per rod", tone: "process" },
+    { label: "Count bumps; gap width = spacing check", tone: "result" },
+  ]}
+/>
+
+Three of this chapter's operations, a few milliseconds per frame.
+
+## What you should remember from 5.1
+
+<Takeaways>
+<Takeaway n={1} title="Matrix">Gray = H × W matrix; colour = H × W × 3 array. I(r, c) is img[r, c].</Takeaway>
+<Takeaway n={2} title="Element-wise">Add, subtract, scale, blend, mask: same rule per pixel; watch the 0–255 range.</Takeaway>
+<Takeaway n={3} title="Averaging">N frames reduce random noise by √N.</Takeaway>
+<Takeaway n={4} title="Two products">A * B per element (masks); A @ B rows × columns (transforms).</Takeaway>
+<Takeaway n={5} title="Projections">Row/column sums turn an image into a profile: cheap counting and locating.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** I = [[10, 20], [30, 40]]. Compute 2·I, Iᵀ and the column sums.
+
+<Solution>
+
+2·I = [[20, 40], [60, 80]]; Iᵀ = [[10, 30], [20, 40]]; column sums = [40, 60].
+
+</Solution>
+
+**Q2.** How many frames must you average to reduce noise from σ = 6 to σ = 2?
+
+<Solution>
+
+6 / √N = 2 → √N = 3 → **N = 9**.
+
+</Solution>
+
+**Q3.** Can you compute A @ B for a 480 × 640 image A and a 480 × 640 image B?
+
+<Solution>
+
+No: the inner sizes (640 and 480) differ. And even with square images, the result would not be a meaningful image. Use A * B for per-pixel products.
+
+</Solution>
+
+### Next: 5.2 Vectors and transforms
+
+Points as vectors, and the 2 × 2 matrices that rotate, scale and shear them.
+
+## Code
+
+Four examples: products and rearrangements, a projection, frame averaging, and a colour transform as a matrix. Copy the sample images next to the script.
+
+### 1. From scratch: products, transpose and rotation
+
+```python
+import numpy as np
+import cv2
+
+A = np.array([[1, 2], [3, 4]])
+B = np.array([[10, 0], [0, 1]])
+print("A * B (element-wise):\n", A * B)
+print("A @ B (matrix product):\n", A @ B)
+print("A.T (transpose):\n", A.T)
+img = cv2.imread("sample-color.png")
+print("rotate 90 clockwise == transpose + flip left-right:",
+      np.array_equal(cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE), np.fliplr(img.transpose(1, 0, 2))))
+```
+
+Output:
+
+```text
+A * B (element-wise):
+ [[10  0]
+ [ 0  4]]
+A @ B (matrix product):
+ [[10  2]
+ [30  4]]
+A.T (transpose):
+ [[1 3]
+ [2 4]]
+rotate 90 clockwise == transpose + flip left-right: True
+```
+
+- `img.transpose(1, 0, 2)` swaps rows and columns but keeps the channel axis last; `img.T` would also reverse the channels.
+- `np.fliplr` reverses the column order (axis 1).
+
+### 2. OpenCV: column projection to count objects
+
+```python
+import numpy as np
+import cv2
+
+img = np.zeros((60, 200), np.uint8)
+for x in [20, 55, 90, 125, 160]:
+    cv2.circle(img, (x, 30), 14, 255, -1)                        # five round parts
+cols = cv2.reduce(img, 0, cv2.REDUCE_SUM, dtype=cv2.CV_32S).ravel() // 255   # column sums: pixels per column
+print("column profile (every 10th column):", cols[::10])
+on = cols > 0
+starts = np.flatnonzero(on[1:] & ~on[:-1]) + 1
+print("objects found by the projection:", len(starts), "starting at columns", starts)
+print("same with NumPy:", np.array_equal(cols, img.sum(axis=0) // 255))
+```
+
+Output:
+
+```text
+column profile (every 10th column): [ 0 19 29 19  0 27 27  0 19 29 19  0 27 27  0 19 29 19  0  0]
+objects found by the projection: 5 starting at columns [  6  41  76 111 146]
+same with NumPy: True
+```
+
+- `cv2.reduce(src, dim, rtype, dtype)`: `dim=0` reduces to a single **row** (one value per column), `dim=1` to a single column. `REDUCE_SUM`, `REDUCE_AVG`, `REDUCE_MAX`, `REDUCE_MIN`.
+- `dtype=cv2.CV_32S` is needed: a sum of 60 values of 255 does not fit in `uint8`.
+- `on[1:] & ~on[:-1]` is True where a column is "on" and the previous one was "off": the start of an object.
+
+### 3. From scratch: averaging N noisy frames
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(seed=5)
+clean = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+for n in [1, 4, 16, 64]:
+    frames = clean + rng.normal(0, 10, (n,) + clean.shape)       # n noisy frames, noise sigma 10
+    mean = frames.mean(axis=0)
+    print(f"average of {n:2d} frames: noise std {np.std(mean - clean):5.2f}   (10 / sqrt({n}) = {10 / np.sqrt(n):5.2f})")
+```
+
+Output:
+
+```text
+average of  1 frames: noise std  9.97   (10 / sqrt(1) = 10.00)
+average of  4 frames: noise std  4.99   (10 / sqrt(4) =  5.00)
+average of 16 frames: noise std  2.50   (10 / sqrt(16) =  2.50)
+average of 64 frames: noise std  1.24   (10 / sqrt(64) =  1.25)
+```
+
+- `(n,) + clean.shape` makes a stack of n frames: shape (n, 200, 320). `mean(axis=0)` averages along the stack.
+- Averaging only works for a **still** scene and **random** noise; fixed-pattern noise (2.5) does not average out. With a camera, `cv2.accumulate` / `cv2.accumulateWeighted` keep a running sum or average.
+
+### 4. OpenCV: a colour conversion is a matrix product per pixel
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+M = np.array([[0.114, 0.587, 0.299]], np.float32)               # one row: B, G, R weights
+gray_m = cv2.transform(img, M)                                    # every pixel (B, G, R) -> M @ (B, G, R)
+gray_c = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+print("shape:", gray_m.shape, "| max difference to cvtColor:", np.abs(gray_m.astype(int).squeeze() - gray_c).max())
+sepia = np.array([[0.131, 0.534, 0.272], [0.168, 0.686, 0.349], [0.189, 0.769, 0.393]], np.float32)   # rows give B', G', R'
+print("pixel", img[100, 70], "-> sepia", cv2.transform(img, sepia)[100, 70])
+```
+
+Output:
+
+```text
+shape: (200, 320) | max difference to cvtColor: 0
+pixel [  0   0 220] -> sepia [60 77 86]
+```
+
+- `cv2.transform(src, m)`: for every pixel, output = m @ (its channel values). An m of size k × 3 gives k output channels; the output keeps the input depth (`uint8`, rounded and clipped).
+- The sepia matrix is a widely used "sepia tone" recipe (originally written for R, G, B; reordered here for BGR).
+- First output channel: B' = 0.131·0 + 0.534·0 + 0.272·220 = 59.8 → 60.
+
+## OpenCV API notes
+
+**Arithmetic**: `cv2.add`, `cv2.subtract`, `cv2.multiply`, `cv2.divide` (saturating, optional `mask`, `dtype`), `cv2.absdiff`, `cv2.addWeighted(a, α, b, β, γ)`, `cv2.scaleAdd`. NumPy operators wrap for integer types.
+
+**Rearranging**: `cv2.transpose`, `cv2.flip(img, code)` (0 = up-down, 1 = left-right, −1 = both), `cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE | ROTATE_180 | ROTATE_90_COUNTERCLOCKWISE)`.
+
+**Reductions**: `cv2.reduce`, `cv2.sumElems`, `cv2.mean(img, mask)`, `cv2.countNonZero`; NumPy `sum`, `mean` with `axis=`.
+
+**Per-pixel matrices**: `cv2.transform(src, m)` (k × c or k × (c+1) with an offset column), `cv2.gemm` for general matrix products, `cv2.perspectiveTransform` for points (5.3).
+
+**Speed**: whole-array operations run in optimised C++ (SIMD, multi-threaded); never loop over pixels in Python (Module 6).
+
+## Where it fails
+
+- **Projections assume alignment**: tilted rows of parts smear the bumps together; rotate first (5.2) or use 2-D methods (Part C).
+- **Averaging blurs motion**: moving parts become ghosts; average only static scenes.
+- **Integer arithmetic** loses information through clipping or wrapping; subtracting first and scaling later (or using float) avoids it.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using `@` when you meant `*`** (or the reverse); NumPy raises an error only if the sizes don't fit.
+- **`img.T` on a colour image**: it also reverses the channel axis; use `img.transpose(1, 0, 2)` or `cv2.transpose`.
+- **Summing `uint8` with OpenCV without a wider `dtype`**: the sum overflows.
+- **Mixing (x, y) and (row, col)** when reading I(x, y) formulas from books.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Images as vectors
+
+Flattening an H × W image gives a vector with H·W entries (`img.ravel()`). Then the **dot product** of two images measures similarity (the basis of template matching and correlation), and the **Euclidean distance** ‖A − B‖ measures difference. Eigenfaces and PCA (5.7) treat whole images as points in this high-dimensional space [1].
+
+### Linear operators
+
+Any operation where output = sum of input pixels times fixed weights (blur, derivatives, resizing, geometric warps with fixed sampling) is a matrix product with the flattened image, using a huge, mostly-zero matrix. Thinking this way explains why such operations can be undone or analysed with linear algebra (Szeliski, Ch. 3 [2]).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A colour image has shape (480, 640, 3). How many matrices of what size?",
+      options: ["3 of 640 × 480", "3 of 480 × 640", "640 of 480 × 3", "1 of 1440 × 640"],
+      answer: 1,
+      explanation: "Three channel matrices, each H × W = 480 × 640.",
+    },
+    {
+      question: "Which operation is element-wise?",
+      options: ["A @ B", "A * B", "np.dot(A, B)", "cv2.gemm(A, B, …)"],
+      answer: 1,
+      explanation: "* multiplies values at the same position; the others are matrix products.",
+    },
+    {
+      question: "Averaging 25 frames reduces random noise by…",
+      options: ["25×", "5×", "2.5×", "Not at all"],
+      answer: 1,
+      explanation: "By √25 = 5.",
+    },
+    {
+      question: "What do column sums of a binary image of parts in a row give you?",
+      options: ["The parts' colours", "A profile with one bump per part", "The image rotated", "The noise level"],
+      answer: 1,
+      explanation: "Each column's count of object pixels; parts appear as bumps separated by zeros.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A = [[100, 200], [50, 250]], B = [[100, 100], [100, 100]]. Compute A + B with saturation and with `uint8` wrap-around, and A − B with saturation.
+
+<Solution>
+
+A + B = [[200, 300], [150, 350]] → saturated **[[200, 255], [150, 255]]**; wrapped **[[200, 44], [150, 94]]** (300 − 256, 350 − 256). A − B = [[0, 100], [−50, 150]] → saturated **[[0, 100], [0, 150]]**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Make an 80 × 120 noisy surface (mean 150, σ 12, seed 8) with a faint scratch: row 37, columns 10–109, 10 levels darker. Find the scratch row with a row projection, and compare with the darkest single pixel.
+
+<Solution>
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=8)
+img = rng.normal(150, 12, (80, 120))                 # a noisy, bright surface
+img[37, 10:110] -= 10                                 # a faint dark scratch along row 37
+img = np.clip(img, 0, 255).astype(np.uint8)
+profile = img.mean(axis=1)                            # mean of each row: 80 numbers
+print("darkest row:", int(np.argmin(profile)), "| its mean:", round(float(profile.min()), 1),
+      "| typical row mean:", round(float(np.median(profile)), 1))
+print("darkest single pixel is in row:", int(np.unravel_index(np.argmin(img), img.shape)[0]))
+```
+
+Output:
+
+```text
+darkest row: 37 | its mean: 140.3 | typical row mean: 149.3
+darkest single pixel is in row: 49
+```
+
+The scratch is smaller than the noise (10 vs σ = 12), so no single pixel reveals it. Averaging 120 pixels along the row reduces the noise to about 12 / √120 ≈ 1.1, and the 9-level dip stands out clearly.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A camera on a robot arm is mounted rotated by 90°. A colleague suggests re-training the defect detector on rotated images. What is simpler?
+
+<Solution>
+
+Rotate the incoming frames with `cv2.rotate` (a transpose + flip: no interpolation, no loss) before the existing pipeline. Also rotate any stored ROIs or calibration accordingly, or apply the rotation right after capture so nothing downstream changes.
+
+</Solution>
+
+## References
+
+1. M. Turk and A. Pentland, "Eigenfaces for recognition," *Journal of Cognitive Neuroscience*, vol. 3, no. 1, pp. 71–86, 1991.
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022, Chapter 3 (Image processing).
+3. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Chapter 2 (Digital image fundamentals: mathematical tools).
+4. OpenCV 4.13.0 documentation, *Operations on arrays* (`add`, `addWeighted`, `reduce`, `transform`, `rotate`): [docs.opencv.org/4.13.0/d2/de8/group__core__array.html](https://docs.opencv.org/4.13.0/d2/de8/group__core__array.html).

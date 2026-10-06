@@ -1,0 +1,284 @@
+export const meta = {
+  number: "14.1",
+  title: "Masks",
+  minutes: 20,
+  objectives: [
+    "Explain what a mask is and how OpenCV functions use one",
+    "Build masks from shapes, thresholds and colour ranges",
+    "Restrict statistics, histograms and copies to a region of any shape",
+    "Avoid the usual mask errors: dtype, size, polarity",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 14.1 (first chapter of Module 14).
+  New lab: MaskLab (lib/mask-ops.ts), also used in 14.2.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 14.1 Masks
+
+<Definition term="Mask">a single-channel 8-bit image of the same size as the image it belongs to, where non-zero pixels (usually 255) mark the region an operation should use, and 0 marks pixels to ignore.</Definition>
+
+A rectangle ROI (7.4) can only select boxes. Real regions are circles, rings, polygons or whatever a threshold found. A mask selects **any** set of pixels. Many OpenCV functions take a `mask` argument: they then compute only over the marked pixels, or change only those. Masks connect segmentation (Module 13) with measurement: threshold once, then measure inside the result.
+
+## 1. An analogy
+
+A painter's masking tape: you cover what must not be painted, spray over everything, and only the uncovered parts change. An OpenCV mask is the tape in reverse: white is where the paint goes.
+
+## 2. Making and using a mask
+
+<Flow
+  steps={[
+    { label: "Make the mask: draw a shape, threshold, inRange", tone: "data" },
+    { label: "Mask = uint8, one channel, same height and width, 0 / 255", tone: "process" },
+    { label: "Pass it: mean, calcHist, copyTo, bitwise_and(…, mask=), setTo", tone: "process" },
+    { label: "Result only from or only in the marked pixels", tone: "result" },
+  ]}
+/>
+
+Real numbers on `sample-color.png` with a filled circle of radius 45 around the red disc (6 361 pixels):
+
+| Measure | Whole image | Inside the mask |
+| --- | --- | --- |
+| `cv2.mean` B, G, R | 42.9, 56.5, 62.4 | 5.3, 4.2, 194.8 |
+| Pixels with R in 192–255 (`calcHist`, 4 bins) | — | 5 525 of 6 361 |
+
+The mask turns "the average colour of the picture" into "the average colour of the disc". The remaining 836 dark pixels inside the mask are background at the circle's edge: the mask is slightly larger than the disc, which pulls the mean down. **Measurements inside a mask are only as good as the mask.**
+
+<MaskLab caption="Choose a mask shape and what to do with it. The mean below is computed only over the white pixels of the mask, exactly like cv2.mean(img, mask=mask). The ring measures the disc's border region only." />
+
+## 3. Where masks come from
+
+| Source | Code | Typical use |
+| --- | --- | --- |
+| Drawing | `cv2.circle`, `cv2.rectangle`, `cv2.fillPoly`, `cv2.ellipse` with thickness −1 | fixed inspection regions from a drawing or a template |
+| Threshold | `cv2.threshold`, `cv2.adaptiveThreshold` (Module 13) | regions defined by brightness |
+| Colour range | `cv2.inRange` (10.7) | regions defined by colour |
+| Back-projection | `cv2.calcBackProject` + threshold (12.5) | regions defined by a colour model |
+| Contours | `cv2.drawContours(mask, cnts, i, 255, -1)` (Module 18) | one object's exact area |
+| Combination | `cv2.bitwise_and/or/not` (14.2) | "inside the part but not the label" |
+
+## 4. Industrial example
+
+A gasket inspection checks the rubber ring for cuts. The station places a ring-shaped mask (two circles, outer minus inner) on the gasket position found by a locator. The brightness histogram and dark-pixel count are computed **only inside the ring**: the metal housing, the screw holes and the background, which vary from part to part, never enter the statistics. Without the mask, a shiny housing would change the mean more than any cut could.
+
+## What you should remember from 14.1
+
+<Takeaways>
+<Takeaway n={1} title="Mask">uint8, one channel, same size; non-zero = use this pixel.</Takeaway>
+<Takeaway n={2} title="Functions">mean, meanStdDev, calcHist, minMaxLoc, copyTo, setTo, bitwise_* take a mask.</Takeaway>
+<Takeaway n={3} title="Sources">Shapes, thresholds, inRange, contours, and their combinations.</Takeaway>
+<Takeaway n={4} title="Quality">The measurement inherits the mask's errors.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A mask is 0/1 instead of 0/255. Does `cv2.mean(img, mask=mask)` still work?
+
+<Solution>
+
+**Yes.** OpenCV uses every non-zero mask pixel; 1 counts like 255. Only displaying it would look black.
+
+</Solution>
+
+**Q2.** You want the mean colour of a ring between radius 30 and 45. How do you build the mask with two drawing calls?
+
+<Solution>
+
+Draw a filled circle of radius 45 with 255, then a filled circle of radius 30 with **0** on the same mask.
+
+</Solution>
+
+### Next: 14.2 Bitwise operations
+
+AND, OR, XOR and NOT on masks and images: combining regions and cutting images apart.
+
+## Code
+
+Two examples: masked statistics and copies, then the errors OpenCV raises for wrong masks.
+
+### 1. Statistics and copies inside a mask
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+mask = np.zeros(img.shape[:2], np.uint8)                   # one channel, same height and width
+cv2.circle(mask, (70, 95), 45, 255, -1)                    # thickness -1: filled
+print("mask pixels:", cv2.countNonZero(mask))
+print("mean B, G, R inside:", [round(v, 1) for v in cv2.mean(img, mask=mask)[:3]],
+      "| whole image:", [round(v, 1) for v in cv2.mean(img)[:3]])
+print("same with NumPy:", img[mask > 0].mean(axis=0).round(1).tolist())
+
+ring = mask.copy()
+cv2.circle(ring, (70, 95), 30, 0, -1)                      # cut out the centre
+print("ring pixels:", cv2.countNonZero(ring), "| mean B, G, R:", [round(v, 1) for v in cv2.mean(img, mask=ring)[:3]])
+
+print("R histogram inside (4 bins):", cv2.calcHist([img], [2], mask, [4], [0, 256]).ravel().astype(int).tolist())
+
+kept = cv2.bitwise_and(img, img, mask=mask)                # outside -> 0
+white = np.full_like(img, 255)
+cv2.copyTo(img, mask, white)                               # copy only masked pixels onto a white canvas
+print("kept at centre / corner:", kept[95, 70].tolist(), kept[10, 10].tolist(), "| copyTo corner:", white[10, 10].tolist())
+```
+
+Output:
+
+```text
+mask pixels: 6361
+mean B, G, R inside: [5.3, 4.2, 194.8] | whole image: [42.9, 56.5, 62.4]
+same with NumPy: [5.3, 4.2, 194.8]
+ring pixels: 3540 | mean B, G, R: [9.4, 7.6, 174.7]
+R histogram inside (4 bins): [836, 0, 0, 5525]
+kept at centre / corner: [0, 0, 220] [0, 0, 0] | copyTo corner: [255, 255, 255]
+```
+
+- `cv2.mean` returns 4 values (B, G, R and an unused fourth channel); take `[:3]`.
+- The ring's mean red is lower (174.7) because the ring contains more of the disc's edge and background than the full circle does: a mask that hugs the object closely is essential for colour measurement.
+
+### 2. What OpenCV accepts as a mask
+
+```python
+import numpy as np
+import cv2
+
+for name, m in [("bool array", mask > 0), ("wrong size", mask[:100]), ("3 channels", cv2.merge([mask] * 3))]:
+    try:
+        cv2.bitwise_and(img, img, mask=m)
+        print(name, ": accepted")
+    except cv2.error as e:
+        msg = str(e)
+        print(name, ": error:", msg.split("Assertion failed) ")[1].split(" in function")[0] if "Assertion" in msg else "wrong type for 'mask'")
+
+painted = img.copy()
+painted[mask > 0] = (255, 0, 255)                          # NumPy boolean indexing: paint inside
+print("painted centre:", painted[95, 70].tolist())
+```
+
+Output:
+
+```text
+bool array : error: wrong type for 'mask'
+wrong size : error: (mtype == CV_8U || mtype == CV_8S) && _mask.sameSize(*psrc1)
+3 channels : error: (mtype == CV_8U || mtype == CV_8S) && _mask.sameSize(*psrc1)
+painted centre: [255, 0, 255]
+```
+
+- OpenCV wants `uint8` (or `int8`), one channel, same size. A NumPy boolean mask works for NumPy indexing (`img[mask]`) but must be converted for OpenCV: `m.astype(np.uint8) * 255`.
+- The assertion names the check: the mask type must be `CV_8U` or `CV_8S` with **one** channel (`CV_8U` means `CV_8UC1`; a 3-channel mask is `CV_8UC3`), and it must have the same size as the image.
+
+## OpenCV API notes
+
+**Functions with a `mask` argument** (selection): `mean`, `meanStdDev`, `minMaxLoc`, `countNonZero` (no mask, counts the image itself), `norm`, `calcHist`, `copyTo` / `Mat.copyTo(dst, mask)`, `bitwise_and/or/xor/not`, `add`, `subtract`, `Mat.setTo` (C++), `goodFeaturesToTrack`, `detectAndCompute` (features only inside the mask), `inpaint` (the mask marks pixels to repair).
+
+**Type**: `CV_8UC1` (some functions also `CV_8SC1`); same width and height as the image; any non-zero value counts.
+
+**Drawing**: `cv2.circle(mask, center, radius, 255, -1)`, `cv2.fillPoly(mask, [pts], 255)` with `pts` an int32 array of shape (N, 2).
+
+**NumPy**: boolean masks for indexing and statistics: `img[m]`, `img[m].mean(axis=0)`, `np.count_nonzero(m)`.
+
+## Where it fails
+
+- **Inaccurate masks**: edges of the mask include background or miss object; statistics shift (the circle vs ring example).
+- **Fixed masks on moving parts**: the region must follow the part (locate first, then place the mask; Module 23 on matching and alignment).
+- **Hard edges**: a 0/255 mask switches abruptly; for compositing use a soft (alpha) mask (14.4).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Passing a boolean or 3-channel mask** to OpenCV.
+- **Mask and image of different sizes** after resizing one of them.
+- **Inverted polarity**: measuring the background instead of the object.
+- **Using `bitwise_and(img, mask)`** without `mask=`: this ANDs pixel values with 255/0 per channel, which only works if the mask has as many channels as the image.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Masks as sets
+
+A binary mask is the indicator function of a set of pixel coordinates. Masked statistics are statistics over that set; combining masks is set algebra (14.2). Morphology (Module 16) changes the set's shape: eroding a mask by one pixel is a standard trick to keep measurements away from uncertain object edges, exactly the problem shown by the circle example.
+
+### Masks in deep learning
+
+Segmentation networks output per-pixel probabilities; thresholding them gives the same kind of binary mask as in this chapter, and the same evaluation applies (13.7). Many training pipelines also use "ignore" masks so that unlabelled or uncertain pixels do not contribute to the loss.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which is a valid mask for cv2.mean on a 200 × 320 colour image?",
+      options: ["A 200 × 320 bool array", "A 200 × 320 uint8 array with 0 and 255", "A 200 × 320 × 3 uint8 array", "A 100 × 160 uint8 array"],
+      answer: 1,
+      explanation: "One channel, uint8, same height and width.",
+    },
+    {
+      question: "How do you draw a filled circle into a mask?",
+      options: ["thickness = 0", "thickness = -1", "thickness = 255", "fill=True"],
+      answer: 1,
+      explanation: "A negative thickness fills the shape.",
+    },
+    {
+      question: "cv2.bitwise_and(img, img, mask=mask) sets the pixels outside the mask to…",
+      options: ["255", "0", "Their original value", "The mask value"],
+      answer: 1,
+      explanation: "Only masked pixels are written; the output starts at zero.",
+    },
+    {
+      question: "A mask is slightly larger than the object. What happens to the masked mean colour?",
+      options: ["Nothing", "It is pulled towards the background colour", "It becomes exact", "OpenCV raises an error"],
+      answer: 1,
+      explanation: "Background pixels at the edge are included in the statistics.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 4 × 4 image has values 1 to 16 row by row. The mask marks the four centre pixels. What is the masked mean?
+
+<Solution>
+
+Centre pixels are 6, 7, 10, 11: mean = 34 / 4 = **8.5**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Build a mask of the red disc with `cv2.inRange` on HSV (H 0–10 or 170–179, S ≥ 100, V ≥ 100), and print its pixel count and the masked mean colour. Compare with the circle-mask numbers.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+red = cv2.bitwise_or(cv2.inRange(hsv, (0, 100, 100), (10, 255, 255)), cv2.inRange(hsv, (170, 100, 100), (179, 255, 255)))
+print("pixels:", cv2.countNonZero(red), "| mean B, G, R:", [round(v, 1) for v in cv2.mean(img, mask=red)[:3]])
+```
+
+Output:
+
+```text
+pixels: 5525 | mean B, G, R: [0.0, 0.0, 220.0]
+```
+
+The colour-based mask hugs the disc exactly (5 525 pixels, the same as the bright-red bin in example 1), so the mean is the disc's true colour (0, 0, 220). The drawn circle was 836 pixels too large.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 2.6 (set and logical operations).
+2. OpenCV 4.13.0 documentation: `mean`, `calcHist`, `copyTo`, `bitwise_and`, `circle`, `fillPoly`. https://docs.opencv.org/4.13.0/

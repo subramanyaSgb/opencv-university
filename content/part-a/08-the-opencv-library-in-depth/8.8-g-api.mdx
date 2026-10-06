@@ -1,0 +1,384 @@
+export const meta = {
+  number: "8.8",
+  title: "G-API",
+  minutes: 25,
+  objectives: [
+    "Explain the idea of a graph API: describe a pipeline first, run it later",
+    "Build and run a G-API computation in Python (GMat, cv2.gapi.*, GComputation, apply)",
+    "Know what the backends (CPU, Fluid, OpenCL) and streaming mode are for",
+    "Add a custom operation with @cv2.gapi.op and @cv2.gapi.kernel",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 8.8 (Module 8 plan).
+  Reference tail: all examples are deterministic and compared automatically on OpenCV 4.13.0.
+  GraphLab uses a simplified memory model (stated in the figure).
+*/}
+
+# 8.8 G-API
+
+<Definition term="G-API">OpenCV's graph API: you first describe a pipeline as a graph of operations on placeholder images, then compile and run it on real data. Because OpenCV sees the whole pipeline, it can choose backends, avoid storing intermediate images and run stages efficiently.</Definition>
+
+Everything so far was **eager**: each `cv2.` call runs immediately and returns a full result image. G-API is a different style. It is not needed for most programs, but it explains how OpenCV can optimise whole pipelines, and it is the basis of OpenCV's streaming and inference pipelines.
+
+## 1. An analogy
+
+Cooking from a recipe vs cooking by improvising. Improvising (eager), you do one step, put the result in a bowl, look at the next step, use another bowl. With the whole recipe in front of you (graph), you can plan: chop while the water heats, reuse a bowl, skip a step whose result nobody uses. The food is the same; the kitchen is used better.
+
+## 2. Describe, then run
+
+<Flow
+  steps={[
+    { label: "Placeholders: g_in = cv2.GMat()", tone: "data" },
+    { label: "Describe: g_out = cv2.gapi.blur(cv2.gapi.BGR2Gray(g_in), (5, 5))", tone: "process" },
+    { label: "Graph: comp = cv2.GComputation(cv2.GIn(g_in), cv2.GOut(g_out))", tone: "process" },
+    { label: "Run: out = comp.apply(cv2.gin(img)) → NumPy array", tone: "result" },
+  ]}
+/>
+
+- A `cv2.GMat` holds **no pixels**. It stands for "an image that will exist when the graph runs".
+- `cv2.gapi.*` functions take and return placeholders (`GMat`, `GScalar`, `GOpaque`, `GArray`). Calling them only adds nodes to the graph.
+- `GComputation` names the inputs and outputs. `apply()` compiles the graph for the input sizes and types (the first time) and runs it.
+
+## 3. Why bother?
+
+| Eager (classic cv2) | Graph (G-API) |
+| --- | --- |
+| Each step writes a full intermediate image to memory | The engine knows all steps; intermediates can be small or fused |
+| You choose the device per call (UMat, cuda) | Choose a backend for the whole graph, per kernel package |
+| Easy to debug: look at any intermediate | Intermediates are hidden unless you make them outputs |
+| Best for exploration, small programs | Best for fixed, repeated pipelines (video, embedded) |
+
+The main backends:
+
+- **CPU (OpenCV)**: each operation calls the normal OpenCV function. Same results, little gain on its own.
+- **Fluid**: processes the image **line by line**: each stage keeps only the few lines its kernel needs, so intermediate images never exist in full and data stays in the CPU cache. Very useful on embedded devices with little memory.
+- **OpenCL**: runs the graph's operations on a GPU (8.6).
+- **Inference backends** (OpenVINO, ONNX Runtime) run networks inside the graph (`cv2.gapi.infer`).
+
+## 4. Memory: eager vs Fluid
+
+Build an inspection graph and compare how much memory the intermediate results need.
+
+<GraphLab caption="Pick stages and an image size. Eager keeps every intermediate image; Fluid keeps only a window of lines per stage. The code shows the G-API description of the graph you built." />
+
+For a 5 MP image and all six stages, eager processing writes and reads five 5 MB intermediate images; Fluid needs about 13 lines (32 kB). The arithmetic is the same; the memory traffic is not, and memory traffic is often what limits speed (7.7).
+
+## 5. Streaming mode
+
+For video, G-API can compile a graph for streaming: a source (camera or file) feeds the graph, and stages run **pipelined** on consecutive frames, like the pipeline in 7.7, without writing the threading code yourself:
+
+```text
+comp = cv2.GComputation(cv2.GIn(g_in), cv2.GOut(g_out))
+cc = comp.compileStreaming()
+cc.setSource(cv2.gin(cv2.gapi.wip.make_capture_src("video.mp4")))
+cc.start()
+while True:
+    ok, (out,) = cc.pull()
+    if not ok:
+        break
+```
+
+The same mechanism connects to inference: a graph can contain `cv2.gapi.infer` nodes that run a network on each frame or on regions found by earlier nodes (detect → crop → classify).
+
+## 6. Industrial example
+
+A smart camera with an ARM processor and 512 MB of RAM inspects 4096-pixel-wide line-scan blocks. The classic pipeline (difference to a golden template, blur, threshold, opening, count) allocated five full intermediate images per block and the camera ran out of memory at 4096 × 4096. The same pipeline described with G-API and compiled with the Fluid kernels processes each block line by line; peak memory for intermediates drops to tens of kilobytes, and the results are identical (example 2 checks this on a small image). The team kept the classic version for development and debugging, and uses the G-API version on the device.
+
+## What you should remember from 8.8
+
+<Takeaways>
+<Takeaway n={1} title="Two phases">Describe a graph with placeholders (GMat), then apply it to real data.</Takeaway>
+<Takeaway n={2} title="Whole-pipeline view">OpenCV can choose backends and avoid full intermediate images.</Takeaway>
+<Takeaway n={3} title="Backends">CPU, Fluid (line-based, low memory), OpenCL, inference backends.</Takeaway>
+<Takeaway n={4} title="Streaming">compileStreaming pipelines video sources through the graph.</Takeaway>
+<Takeaway n={5} title="When">Fixed, repeated pipelines on video or small devices; eager cv2 for exploring.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** What does `g = cv2.gapi.blur(cv2.GMat(), (5, 5))` compute?
+
+<Solution>
+
+Nothing yet. It adds a blur node to a graph; `g` is a placeholder. Pixels are processed only when a `GComputation` containing it is applied to real images.
+
+</Solution>
+
+**Q2.** A Fluid pipeline on 8192-wide images has stages with kernel heights 5, 3 and 3. Roughly how much memory do the stage windows need (8-bit)?
+
+<Solution>
+
+(5 + 3 + 3) lines × 8192 bytes ≈ **90 kB**, compared with several full images (8192 × height bytes each) in eager mode.
+
+</Solution>
+
+### Next: 8.9 OpenCV.js
+
+OpenCV compiled to WebAssembly: image processing in the browser.
+
+## Code
+
+Three examples: a deferred-execution graph from scratch, a G-API inspection graph checked against classic OpenCV (CPU and Fluid), and a custom operation.
+
+### 1. From scratch: deferred execution
+
+The idea of a graph API in 25 lines: nodes remember what to do; `run` evaluates them on demand.
+
+```python
+import numpy as np
+import cv2
+
+class Node:
+    """A deferred operation: remembers what to do, does nothing until run()."""
+    def __init__(self, fn, *inputs, name=""):
+        self.fn, self.inputs, self.name = fn, inputs, name
+
+def Input(name):
+    return Node(None, name=name)
+
+def run(node, feeds, log):
+    if node.fn is None:                                        # a graph input: look up the real array
+        return feeds[node.name]
+    args = [run(i, feeds, log) for i in node.inputs]
+    log.append(node.name)
+    return node.fn(*args)
+
+# Describe the pipeline (nothing is computed yet)
+a, b = Input("ref"), Input("test")
+diff = Node(lambda x, y: np.abs(x.astype(np.int16) - y.astype(np.int16)).astype(np.uint8), a, b, name="absdiff")
+mask = Node(lambda d: (d > 40).astype(np.uint8) * 255, diff, name="threshold")
+count = Node(lambda m: int(np.count_nonzero(m)), mask, name="count")
+print("graph built; nothing computed yet")
+
+ref = cv2.imread("sample-plate-good.png", cv2.IMREAD_GRAYSCALE)
+test = ref.copy()
+cv2.circle(test, (120, 80), 6, 0, -1)
+log = []
+print("count:", run(count, {"ref": ref, "test": test}, log), "| execution order:", log)
+```
+
+Output:
+
+```text
+graph built; nothing computed yet
+count: 113 | execution order: ['absdiff', 'threshold', 'count']
+```
+
+- The graph is built before any image exists; the same graph can run on many image pairs.
+- A real graph engine adds what this toy lacks: type and size checks at compile time, memory planning, backend selection, fused or line-based execution.
+
+### 2. OpenCV: the inspection as a G-API graph
+
+```python
+import numpy as np
+import cv2
+
+ref = cv2.imread("sample-plate-good.png", cv2.IMREAD_GRAYSCALE)
+test = ref.copy()
+cv2.circle(test, (120, 80), 6, 0, -1)                          # a dark "defect"
+
+# 1. Describe the graph: no pixels are processed here
+g_ref, g_test = cv2.GMat(), cv2.GMat()
+g_diff = cv2.gapi.absDiff(g_ref, g_test)
+g_mask = cv2.gapi.threshold(g_diff, cv2.GScalar(40.0), cv2.GScalar(255.0), cv2.THRESH_BINARY)
+g_clean = cv2.gapi.morphologyEx(g_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+g_count = cv2.gapi.countNonZero(g_clean)
+comp = cv2.GComputation(cv2.GIn(g_ref, g_test), cv2.GOut(g_clean, g_count))
+
+# 2. Run it on real images
+mask, count = comp.apply(cv2.gin(ref, test))
+print("outputs:", type(mask).__name__, mask.shape, "| count", count)
+
+# 3. Same pipeline, classic OpenCV
+m = cv2.threshold(cv2.absdiff(ref, test), 40, 255, cv2.THRESH_BINARY)[1]
+m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+print("classic count", cv2.countNonZero(m), "| identical masks:", np.array_equal(m, mask))
+
+# 4. Run with the Fluid kernels where available
+mask_f, count_f = comp.apply(cv2.gin(ref, test), args=cv2.gapi.compile_args(cv2.gapi.core.fluid.kernels()))
+print("fluid count", count_f, "| identical:", np.array_equal(mask_f, mask))
+```
+
+Output:
+
+```text
+outputs: ndarray (200, 320) | count 109
+classic count 109 | identical masks: True
+fluid count 109 | identical: True
+```
+
+- Scalars in the graph are placeholders too: `threshold` takes `cv2.GScalar` values, not plain numbers.
+- The opening removes 4 of the 113 thresholded pixels (the anti-aliased edge of the circle); G-API and classic OpenCV agree exactly.
+- `compile_args` passes kernel packages and other options; kernels not in the given package come from the default CPU package.
+
+### 3. OpenCV: a custom operation
+
+Your own processing step can become a graph node: declare the operation (its inputs, outputs and output metadata) and provide a kernel that implements it.
+
+```python
+import numpy as np
+import cv2
+
+@cv2.gapi.op("course.Gamma", in_types=[cv2.GMat, float], out_types=[cv2.GMat])
+class GGamma:
+    @staticmethod
+    def outMeta(desc, gamma):
+        return desc                                            # same size and type as the input
+
+@cv2.gapi.kernel(GGamma)
+class GGammaImpl:
+    @staticmethod
+    def run(img, gamma):
+        lut = (255 * (np.arange(256) / 255) ** gamma).round().astype(np.uint8)
+        return cv2.LUT(img, lut)
+
+g_in = cv2.GMat()
+g_out = cv2.gapi.blur(GGamma.on(g_in, 0.5), (3, 3))
+comp = cv2.GComputation(cv2.GIn(g_in), cv2.GOut(g_out))
+img = np.array([[0, 64, 128, 255]] * 4, np.uint8)
+out = comp.apply(cv2.gin(img), args=cv2.gapi.compile_args(cv2.gapi.kernels(GGammaImpl)))
+print("gamma 0.5 then 3x3 blur, row 1:", out[1].tolist())
+lut = (255 * (np.arange(256) / 255) ** 0.5).round().astype(np.uint8)
+print("classic:", cv2.blur(cv2.LUT(img, lut), (3, 3))[1].tolist())
+```
+
+Output:
+
+```text
+gamma 0.5 then 3x3 blur, row 1: [85, 103, 188, 206]
+classic: [85, 103, 188, 206]
+```
+
+- `outMeta` tells the graph the output's size and type before any data exists; that is how G-API checks and plans the whole graph at compile time.
+- The kernel is Python here (convenient, slower); in C++ the same mechanism adds optimised kernels for any backend.
+
+## OpenCV API notes
+
+**Placeholders**: `cv2.GMat()`, `cv2.GScalar(value)`, `cv2.GOpaque`, `cv2.GArray`; **operations**: `cv2.gapi.*` (core: `add`, `absDiff`, `threshold`, `resize`, `countNonZero` …; imgproc: `blur`, `gaussianBlur`, `Canny`, `morphologyEx`, `BGR2Gray` …).
+
+**Graph and run**: `cv2.GComputation(cv2.GIn(...), cv2.GOut(...))`, `comp.apply(cv2.gin(...), args=cv2.gapi.compile_args(...))`, `comp.compileStreaming()` → `setSource`, `start`, `pull`, `stop`.
+
+**Kernel packages**: `cv2.gapi.core.cpu.kernels()`, `cv2.gapi.core.fluid.kernels()`, `cv2.gapi.core.ocl.kernels()`, `cv2.gapi.combine(pkg1, pkg2)`, `cv2.gapi.kernels(MyImpl, …)` for custom kernels.
+
+**Custom operations**: `@cv2.gapi.op(name, in_types, out_types)` with `outMeta`, `@cv2.gapi.kernel(Op)` with `run`.
+
+**Inference**: `cv2.gapi.infer`, `cv2.gapi.onnx.params`, `cv2.gapi.ov.params` (OpenVINO), `cv2.gapi.networks(...)`.
+
+## Where it fails
+
+- **Debugging**: intermediate images are not visible unless added as outputs.
+- **Coverage**: not every OpenCV function exists as a G-API operation; missing ones need custom kernels.
+- **Python overhead**: custom kernels written in Python run at Python speed and break line-based execution.
+- **Learning curve and documentation**: fewer examples than classic OpenCV, especially for Python.
+- **Small, one-off scripts**: the graph setup is not worth it.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Expecting a GMat to contain pixels** (printing it, indexing it).
+- **Passing plain numbers where a GScalar is expected** (`threshold`).
+- **Rebuilding the GComputation for every frame** instead of building it once and applying it many times.
+- **Assuming Fluid makes everything faster**: it saves memory traffic; the gain depends on the pipeline and the CPU.
+- **Forgetting outMeta** (or returning the wrong metadata) in a custom operation.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Compilation
+
+`apply()` on a new input format compiles the graph: it checks every node's input and output metadata (from `outMeta`), selects a kernel for each node from the kernel packages (custom packages first), partitions the graph into "islands" per backend, and plans memory. The compiled object is cached for the same input metadata, so later `apply()` calls only execute [1].
+
+### Line-based processing
+
+Fluid kernels declare a window (for example 5 lines for a 5 × 5 filter) and a border. The executor runs each island top to bottom: it produces one output line of the last stage by pulling just enough lines through every earlier stage, keeping circular line buffers between stages. Intermediate data stays in the L1/L2 cache, which is why line-based pipelines are popular on embedded vision processors [1].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "When does cv2.gapi.blur(g, (5, 5)) process pixels?",
+      options: ["Immediately", "When the GComputation is applied to real data", "Never", "When the module is imported"],
+      answer: 1,
+      explanation: "G-API calls build the graph; apply() runs it.",
+    },
+    {
+      question: "What is the main advantage of the Fluid backend?",
+      options: ["It uses the GPU", "Intermediate images are processed line by line, so they never need full-size buffers", "It trains networks", "It changes the results"],
+      answer: 1,
+      explanation: "Less memory and memory traffic; same results.",
+    },
+    {
+      question: "Which object names the inputs and outputs of a graph?",
+      options: ["cv2.GMat", "cv2.GComputation(cv2.GIn(...), cv2.GOut(...))", "cv2.gapi.kernels", "cv2.UMat"],
+      answer: 1,
+      explanation: "GComputation is the graph; apply() runs it.",
+    },
+    {
+      question: "What does outMeta of a custom operation return?",
+      options: ["The output pixels", "The output's description (size, type) computed from the input descriptions", "The kernel source code", "A timing"],
+      answer: 1,
+      explanation: "Metadata lets G-API check and plan the graph before data exists.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A pipeline on 2448 × 2048 8-bit images has 4 stages; 3 of their outputs are intermediate. How many megabytes of intermediate images does eager processing write per frame? At 40 fps, how much memory traffic is that (write + read)?
+
+<Solution>
+
+3 × 2448 × 2048 ≈ **15 MB** per frame written, and read once more: ≈ 30 MB per frame, × 40 fps ≈ **1.2 GB/s** of memory traffic for intermediates alone.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Turn the from-scratch graph of example 1 into G-API: two inputs, `absDiff`, `threshold` at 40 and `countNonZero` as the output. Check that it gives 113 like the NumPy graph.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+g_a, g_b = cv2.GMat(), cv2.GMat()
+g_n = cv2.gapi.countNonZero(cv2.gapi.threshold(cv2.gapi.absDiff(g_a, g_b), cv2.GScalar(40.0), cv2.GScalar(255.0), cv2.THRESH_BINARY))
+comp = cv2.GComputation(cv2.GIn(g_a, g_b), cv2.GOut(g_n))
+print("G-API count:", comp.apply(cv2.gin(ref, test)))
+```
+
+Output:
+
+```text
+G-API count: 113
+```
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Your team wants to rewrite a working classic OpenCV inspection in G-API "for speed". What do you ask before starting?
+
+<Solution>
+
+Where the time goes now (7.7): if the bottleneck is one heavy function or I/O, a graph will not help much. Whether memory traffic or memory size is a real problem (large images, embedded device). Whether all functions exist in G-API or need custom kernels. Who will maintain the G-API version and how it will be debugged. A good path: keep the classic version as the reference, port the fixed core pipeline, and compare outputs and timings on the target.
+
+</Solution>
+
+## References
+
+1. OpenCV 4.13.0 documentation, "Graph API" (G-API) overview, kernel API, Fluid backend, and Python G-API tutorials. https://docs.opencv.org/4.13.0/
+2. OpenCV 4.0 release notes (introduction of G-API). https://github.com/opencv/opencv/wiki/ChangeLog
+3. J. Ragan-Kelley et al., "Halide: A Language and Compiler for Optimizing Parallelism, Locality, and Recomputation in Image Processing Pipelines", *PLDI* 2013 (background on line-based scheduling and fusion).

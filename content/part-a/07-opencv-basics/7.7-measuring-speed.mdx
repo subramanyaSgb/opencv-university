@@ -1,0 +1,398 @@
+export const meta = {
+  number: "7.7",
+  title: "Measuring speed",
+  minutes: 30,
+  objectives: [
+    "Measure execution time correctly: warm-up, repeats, median and percentiles",
+    "Tell latency from throughput and compare them with the frame budget",
+    "Time each stage of a pipeline and find the bottleneck",
+    "Know the usual speed levers: image size, threads, data types, pipelining",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 7.7 (Module 7 plan).
+  Reference tail: Code example 1 is deterministic and compared automatically; the timing examples show typical
+  results on the course's 2-core cloud test machine and vary between computers.
+*/}
+
+# 7.7 Measuring speed
+
+<Definition term="Measuring speed">timing how long each part of an image-processing program takes, on the real hardware and with real images, so you know whether it keeps up with the camera and where to optimise.</Definition>
+
+"Is it fast enough?" is one of the first questions on every vision project. Answering it needs more than one `print(time.time() - t)`: the first call is slow, times vary, and the average hides the slow frames that cause missed parts. This chapter shows how to measure properly.
+
+## 1. An analogy
+
+Timing a delivery driver. One trip tells you little: the first trip includes finding the address, and one day there is a traffic jam. You time many trips, look at the **typical** trip (median) and at the **bad days** (the slowest 5 %), because a customer remembers the late deliveries, not the average.
+
+## 2. The frame budget
+
+A camera at f frames per second gives you **1000 / f milliseconds** per frame:
+
+| Camera | Budget per frame |
+| --- | --- |
+| 10 fps | 100 ms |
+| 25 fps | 40 ms |
+| 40 fps | 25 ms |
+| 100 fps | 10 ms |
+
+Everything for one frame (capture, conversion, processing, decision, saving, display) must fit, on average **and** in the bad cases, or frames queue up (7.4) or are dropped.
+
+## 3. Latency vs throughput
+
+- **Latency**: time from capture to result for one frame. Matters for reject gates, robots and alarms.
+- **Throughput**: frames processed per second. Matters for keeping up with the camera.
+
+With stages running one after another, throughput = 1 / latency. With a **pipeline** (stages in separate threads working on consecutive frames), throughput = 1 / (slowest stage), while latency stays the sum of all stages.
+
+<BudgetLab caption="Five pipeline stages and a frame budget. Change stage times and the frame rate; compare a single loop with a pipeline." />
+
+Things to try: 30 fps with the default times (43 ms: too slow as one loop, fine as a pipeline at 55 fps); make "detect" 40 ms (it becomes the bottleneck even in a pipeline).
+
+## 4. How to time correctly
+
+<Flow
+  steps={[
+    { label: "Real images, real size, real hardware", tone: "world" },
+    { label: "Warm-up: run once before timing (allocation, code loading, caches)", tone: "process" },
+    { label: "Repeat: time each run with time.perf_counter()", tone: "process" },
+    { label: "Report median, p95/p99 and max, not just the mean", tone: "result" },
+  ]}
+/>
+
+From 1000 recorded frame times *(Code example 1)*:
+
+| Statistic | Value |
+| --- | --- |
+| Mean | 21.0 ms |
+| Median | 20.3 ms |
+| p95 (95 % of frames are faster) | 25.0 ms |
+| p99 | 28.0 ms |
+| Max | 75.0 ms |
+| Frames over the 25 ms budget | 51 of 1000 |
+
+The mean (21 ms) says "fits a 25 ms budget easily"; the percentiles say 5 % of frames don't, and three hiccups took 3× the budget. Design for the p99, and find out what the hiccups are (disk writes, garbage collection, other programs).
+
+## 5. Time each stage
+
+Total time tells you **whether**; stage times tell you **where**. On a 5 MP image on our test machine *(Code example 2, typical)*: Gaussian blur ≈ 6 ms, threshold ≈ 0.2 ms, contours ≈ 7 ms, **PNG encoding ≈ 65 ms**. Saving every frame as PNG would dominate everything: save only NOK frames, use a lower PNG compression level, or save in a separate thread.
+
+`cv2.TickMeter` (start/stop/getAvgTimeMilli) and Python's `cProfile` (for whole programs) help; for OpenCV calls, simple `perf_counter` timing around each stage is usually enough.
+
+## 6. Speed levers
+
+| Lever | Typical effect |
+| --- | --- |
+| Smaller images: crop an ROI (6.2), resize (`INTER_AREA`) | half the width and height → about 4× less work |
+| Threads: `cv2.setNumThreads` (default: all cores) | blur 15 × 15 on 5 MP: 10 ms with 1 thread, 5 ms with 2 |
+| Data types: uint8 instead of float64 (6.1) | less memory traffic, SIMD paths |
+| Vectorise (6.4), no Python pixel loops | 10–1000× |
+| Pipeline stages in threads | throughput up to 1 / slowest stage |
+| Do less: process only when a part is present (trigger, 7.4) | idle frames cost nothing |
+| Hardware: GPU (`cv2.cuda`, 8.5), OpenCL (`UMat`, 8.6) | large gains for big filters and DNNs; transfer cost |
+
+## 7. Industrial example
+
+A new defect detector must run at 25 fps on the existing line PC:
+
+<Flow
+  steps={[
+    { label: "Record 1000 real frames from the line", tone: "data" },
+    { label: "Run the pipeline offline on the line PC, time every stage", tone: "process" },
+    { label: "p99 total 48 ms > 40 ms: detect is the bottleneck", tone: "process" },
+    { label: "Crop to the belt ROI (−55 %), save in a thread: p99 31 ms", tone: "result" },
+  ]}
+/>
+
+Measure on the **target** PC: a developer laptop with more cores and a faster CPU gives numbers that the line PC will not reach.
+
+## What you should remember from 7.7
+
+<Takeaways>
+<Takeaway n={1} title="Budget">1000 / fps ms per frame for everything.</Takeaway>
+<Takeaway n={2} title="Two numbers">Latency (one frame) vs throughput (frames per second); pipelines raise throughput, not latency.</Takeaway>
+<Takeaway n={3} title="Method">Warm-up, many repeats, perf_counter; median, p95/p99, max.</Takeaway>
+<Takeaway n={4} title="Where">Time every stage; fix the bottleneck first.</Takeaway>
+<Takeaway n={5} title="Levers">Smaller ROI, threads, uint8, vectorise, pipeline, do less; measure on the target PC.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A camera runs at 60 fps. What is the budget per frame?
+
+<Solution>
+
+1000 / 60 ≈ **16.7 ms**.
+
+</Solution>
+
+**Q2.** Stages take 5, 12 and 8 ms. Throughput as one loop, and as a 3-thread pipeline? Latency in both cases?
+
+<Solution>
+
+One loop: 25 ms → **40 fps**, latency 25 ms. Pipeline: slowest stage 12 ms → **≈ 83 fps**, latency still **25 ms**.
+
+</Solution>
+
+**Q3.** Your mean frame time is 30 ms for a 40 ms budget, but parts are sometimes missed. What do you measure next?
+
+<Solution>
+
+The distribution: p95, p99 and the maximum, and when the slow frames happen (with timestamps), to find the hiccups.
+
+</Solution>
+
+### Next: 8.1 Architecture and modules
+
+Module 8 looks inside OpenCV: how the library is organised, its C++ core and the Python bindings.
+
+## Code
+
+Three examples: statistics of frame times, timing pipeline stages, and two speed levers (threads, image size). Copy the sample images next to the script.
+
+### 1. From scratch: what the mean hides
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(seed=7)
+times = 18 + rng.gamma(2.0, 1.5, 1000)                     # 1000 frame times in ms: mostly ~21 ms, a long tail
+times[[100, 400, 900]] = [62, 75, 58]                      # three hiccups (disk write, garbage collection …)
+budget = 1000 / 40                                         # 40 fps camera -> 25 ms per frame
+print(f"mean {times.mean():.1f} ms | median {np.median(times):.1f} ms | p95 {np.percentile(times, 95):.1f} ms | "
+      f"p99 {np.percentile(times, 99):.1f} ms | max {times.max():.1f} ms")
+print(f"frames over the {budget:.0f} ms budget: {int(np.sum(times > budget))} of {times.size}")
+print(f"throughput if every frame took the mean: {1000 / times.mean():.1f} fps")
+```
+
+Output:
+
+```text
+mean 21.0 ms | median 20.3 ms | p95 25.0 ms | p99 28.0 ms | max 75.0 ms
+frames over the 25 ms budget: 51 of 1000
+throughput if every frame took the mean: 47.7 fps
+```
+
+- The times are simulated (a gamma distribution has the typical long right tail of real frame times) so the example is reproducible; log your real frame times the same way.
+- `np.percentile(times, 95)` is the value below which 95 % of the times lie.
+
+### 2. OpenCV: timing each stage
+
+```python
+import time
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+big = cv2.resize(img, (2448, 2048))                        # a 5 MP frame
+stages = {
+    "blur":      lambda f: cv2.GaussianBlur(f, (5, 5), 0),
+    "threshold": lambda f: cv2.threshold(f, 128, 255, cv2.THRESH_BINARY)[1],
+    "contours":  lambda f: cv2.findContours(cv2.threshold(f, 128, 255, cv2.THRESH_BINARY)[1], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0],
+    "encode png": lambda f: cv2.imencode(".png", f)[1],
+}
+for name, fn in stages.items():
+    fn(big)                                                # warm-up (first call allocates, loads code)
+    ts = []
+    for _ in range(20):
+        t0 = time.perf_counter(); fn(big); ts.append(1000 * (time.perf_counter() - t0))
+    print(f"{name:10s}: median {np.median(ts):6.2f} ms, p95 {np.percentile(ts, 95):6.2f} ms")
+tm = cv2.TickMeter()
+for _ in range(20):
+    tm.start(); cv2.GaussianBlur(big, (5, 5), 0); tm.stop()
+print(f"TickMeter blur average: {tm.getAvgTimeMilli():.2f} ms over {tm.getCounter()} runs")
+```
+
+Typical result on our 2-core test machine (yours will differ):
+
+```text
+blur      : median   5.64 ms, p95   6.22 ms
+threshold : median   0.18 ms, p95   0.35 ms
+contours  : median   7.31 ms, p95   7.62 ms
+encode png: median  65.32 ms, p95  71.88 ms
+TickMeter blur average: 2.27 ms over 20 runs
+```
+
+- Short operations (threshold: 0.2 ms) vary a lot relative to their size; time many repeats.
+- The two blur results differ (5.6 vs 2.3 ms) between runs on the same machine: caches, CPU frequency and other processes change timings. Compare alternatives in the same run, several times.
+
+### 3. OpenCV: threads and image size
+
+```python
+import time
+import numpy as np
+import cv2
+
+img = cv2.resize(cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE), (2448, 2048))   # 5 MP
+
+def best_ms(fn, repeats=10):
+    fn()                                                    # warm-up
+    times = []
+    for _ in range(repeats):
+        t0 = time.perf_counter()
+        fn()
+        times.append(time.perf_counter() - t0)
+    return 1000 * min(times)
+
+for threads in [1, cv2.getNumberOfCPUs()]:
+    cv2.setNumThreads(threads)
+    print(f"{threads} thread(s): GaussianBlur 15x15 {best_ms(lambda: cv2.GaussianBlur(img, (15, 15), 0)):.1f} ms")
+cv2.setNumThreads(-1)                                       # back to the default
+small = cv2.resize(img, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
+print(f"full size {best_ms(lambda: cv2.GaussianBlur(img, (15, 15), 0)):.1f} ms | half size {best_ms(lambda: cv2.GaussianBlur(small, (15, 15), 0)):.1f} ms")
+```
+
+Typical result on our 2-core test machine:
+
+```text
+1 thread(s): GaussianBlur 15x15 10.0 ms
+2 thread(s): GaussianBlur 15x15 5.0 ms
+full size 4.9 ms | half size 1.4 ms
+```
+
+- `cv2.setNumThreads(n)` limits OpenCV's internal threads; `-1` restores the default. Fewer threads per process can be better when several processes share a PC.
+- Half the width and height is a quarter of the pixels: here 3.5× faster.
+
+## OpenCV API notes
+
+**Timing**: `cv2.getTickCount()`, `cv2.getTickFrequency()`, `cv2.TickMeter()` (`start`, `stop`, `reset`, `getTimeMilli`, `getAvgTimeMilli`, `getFPS`, `getCounter`).
+
+**Threads and optimisation**: `cv2.setNumThreads`, `cv2.getNumThreads`, `cv2.getNumberOfCPUs`, `cv2.setUseOptimized`, `cv2.useOptimized`.
+
+**Python**: `time.perf_counter()`, `timeit`, `cProfile` / `python -m cProfile -s cumtime script.py`, `tracemalloc` for memory.
+
+## Where it fails
+
+- **Laptop vs line PC**: CPU, cores, thermal throttling and power settings differ; always measure on the target.
+- **Synthetic images** (all black, tiny) make some algorithms unrealistically fast (contours, feature detectors scale with image content).
+- **Micro-benchmarks** of single calls ignore memory traffic between stages and the cost of Python glue; time the whole pipeline too.
+- **Multi-process systems**: two programs each using all cores slow each other down.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Timing the first call** (includes warm-up).
+- **Reporting only the mean**.
+- **Measuring on the developer laptop** and promising that speed on the line.
+- **Optimising a stage that takes 1 % of the time** instead of the bottleneck.
+- **`time.time()` for short intervals**; use `time.perf_counter()`.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Amdahl's law
+
+If a fraction p of the work can be sped up by a factor s, the total speed-up is 1 / ((1 − p) + p / s). Speeding up a stage that takes 20 % of the time infinitely gives at most 1.25×: measure before optimising [1].
+
+### Real-time systems
+
+"Real-time" means guaranteed deadlines, not "fast". Hard real-time control (a reject gate firing at the right millisecond) is usually done by a PLC or the camera's I/O with hardware timestamps, while the PC only decides OK/NOK with a known maximum latency.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A 50 fps camera gives you how much time per frame?",
+      options: ["50 ms", "20 ms", "5 ms", "2 ms"],
+      answer: 1,
+      explanation: "1000 / 50 = 20 ms.",
+    },
+    {
+      question: "A three-thread pipeline with stages 10, 30 and 10 ms. Throughput?",
+      options: ["20 fps", "about 33 fps", "100 fps", "50 fps"],
+      answer: 1,
+      explanation: "Limited by the slowest stage: 1000 / 30.",
+    },
+    {
+      question: "Why report the p99 frame time?",
+      options: ["It is always equal to the mean", "Slow frames cause missed parts even when the average fits", "It is required by OpenCV", "It is faster to compute"],
+      answer: 1,
+      explanation: "Real-time behaviour is decided by the slow cases.",
+    },
+    {
+      question: "Halving image width and height typically reduces the work of a filter by about…",
+      options: ["2×", "4×", "8×", "Nothing"],
+      answer: 1,
+      explanation: "A quarter of the pixels.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A pipeline spends 40 ms per frame: 8 ms capture, 24 ms detection, 8 ms saving. If detection is made 3× faster, what is the new frame time, and the overall speed-up?
+
+<Solution>
+
+Detection 24 → 8 ms: total 8 + 8 + 8 = **24 ms**; speed-up 40 / 24 ≈ **1.67×** (not 3×: Amdahl's law).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Write a small `StageTimer` class with a context manager (`with timer("blur"): …`) that collects times per stage and prints median and p95 for each. Use it on two OpenCV operations (no fixed output: the times depend on your machine).
+
+<Solution>
+
+```python
+import time
+from collections import defaultdict
+from contextlib import contextmanager
+import numpy as np
+import cv2
+
+class StageTimer:
+    def __init__(self):
+        self.times = defaultdict(list)
+
+    @contextmanager
+    def __call__(self, name):
+        t0 = time.perf_counter()
+        yield
+        self.times[name].append(1000 * (time.perf_counter() - t0))
+
+    def report(self):
+        for name, ts in self.times.items():
+            print(f"{name:8s}: n={len(ts):3d}, median {np.median(ts):.2f} ms, p95 {np.percentile(ts, 95):.2f} ms")
+
+timer = StageTimer()
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+for _ in range(50):
+    with timer("blur"):
+        b = cv2.GaussianBlur(img, (5, 5), 0)
+    with timer("canny"):
+        e = cv2.Canny(b, 50, 150)
+timer.report()
+```
+
+Typical output: two lines (blur, canny) with n = 50 and times well below 1 ms for this small image. Keep such a timer in production code and log the percentiles regularly.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague proposes buying a GPU to speed up an inspection that runs at 18 fps but must reach 25 fps. What do you ask first?
+
+<Solution>
+
+Where the time goes: per-stage timings with percentiles, measured on the target PC. If the bottleneck is image saving, Python glue, capture or an ROI that could be smaller, a GPU will not help; if it is a large filter or a DNN, a GPU may. Also check simple levers first: ROI, threads, pipelining, data types.
+
+</Solution>
+
+## References
+
+1. G. M. Amdahl, "Validity of the single processor approach to achieving large scale computing capabilities," *AFIPS Conference Proceedings*, vol. 30, pp. 483–485, 1967.
+2. OpenCV 4.13.0 documentation, *Utility and system functions* (`TickMeter`, `getTickCount`, `setNumThreads`): [docs.opencv.org/4.13.0/db/de0/group__core__utils.html](https://docs.opencv.org/4.13.0/db/de0/group__core__utils.html).
+3. OpenCV 4.13.0 tutorial, *Performance Measurement and Improvement Techniques* (Python): [docs.opencv.org/4.13.0/dc/d71/tutorial_py_optimization.html](https://docs.opencv.org/4.13.0/dc/d71/tutorial_py_optimization.html).
+4. Python documentation, *time.perf_counter* and *The Python Profilers*: [docs.python.org/3/library/profile.html](https://docs.python.org/3/library/profile.html).

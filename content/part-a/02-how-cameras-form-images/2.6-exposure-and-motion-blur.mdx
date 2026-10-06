@@ -1,0 +1,510 @@
+export const meta = {
+  number: "2.6",
+  title: "Exposure and motion blur",
+  minutes: 45,
+  objectives: [
+    "Explain exposure time and how it changes brightness and noise",
+    "Balance exposure time, aperture, gain and lighting",
+    "Compute motion blur in pixels from speed, exposure and mm per pixel",
+    "Choose the longest exposure that keeps motion blur acceptable",
+    "Explain strobe lighting, triggering and why hot steel needs short exposures",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 2.6 (Module 2 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+  Sensor numbers are illustrative (same model as Chapter 2.5).
+*/}
+
+# 2.6 Exposure and motion blur
+
+<Definition term="Exposure time">how long the sensor collects light for one image.</Definition>
+
+In 2.5 the pixels were **buckets in the rain**. Exposure time is **how long the buckets stay open**. Longer means more light and less noise. But if the object moves while the buckets are open, its image **smears**: that is **motion blur**.
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Longer exposure", tone: "process" },
+    { label: "More light, less noise", tone: "result" },
+    { label: "but: more motion blur", tone: "world" },
+  ]}
+/>
+
+## 1. What exposure does
+
+When the camera takes a picture, every pixel starts empty, collects light for the **exposure time**, and is then read out. Nothing that happens **outside** that window is recorded; everything **inside** it is added together.
+
+## 2. Units
+
+Exposure times are short. You will see:
+
+<Chips items={["10 µs (microseconds)", "100 µs", "1 ms = 1000 µs", "10 ms", "33 ms ≈ one frame at 30 fps"]} />
+
+Industrial cameras typically allow exposures from a few microseconds up to seconds.
+
+## 3. Exposure and brightness
+
+Collected light is **proportional** to exposure time. Double the time → double the electrons → double the pixel value, until the pixel is full (2.5).
+
+| Exposure | Electrons (mid-gray) | DN (8-bit) |
+| --- | --- | --- |
+| 200 µs | 800 | 20 |
+| 1000 µs | 4000 | 102 |
+| 2500 µs | 10 000 (full) | 255, saturated |
+
+*(Numbers from Code example 3.)*
+
+## 4. Four ways to get more light
+
+Exposure time is one of four controls. Each has a price:
+
+<VsTable
+  left="Control"
+  right="Price"
+  rows={[
+    ["Longer exposure", "More motion blur"],
+    ["Larger aperture (smaller f-number)", "Less depth of field (2.3)"],
+    ["More gain", "No SNR gain, noise amplified (2.5)"],
+    ["More / better lighting", "Cost, heat, power; usually the best fix"],
+  ]}
+/>
+
+Photographers call the first three the **exposure triangle**. In machine vision the fourth, **lighting**, is usually the strongest lever.
+
+## 5. Stops: a common unit
+
+A **stop** is a factor of 2 in light. One stop more = double the exposure time, or one f-stop wider (f/5.6 → f/4), or double the light. These are interchangeable: halving the exposure and opening one stop gives the **same brightness**.
+
+## 6. Too dark, too bright
+
+- **Under-exposed**: few photons → noisy, dark, low contrast; details in shadows vanish.
+- **Over-exposed**: bright parts **saturate** at 255 → detail lost, edges move.
+
+A quick check is the image **histogram** (Chapter 12): the important part of the scene should sit well inside 0–255, not piled up at either end.
+
+## 7. Motion blur
+
+If the object moves while the shutter is open, each point of it is recorded at **many positions**, and the image is **smeared** along the direction of motion.
+
+<ExposureTimeline />
+
+<ImageCompare
+  before={{ src: "/images/sample-pinhole-scene.png", label: "Still" }}
+  after={{ src: "/images/sample-motion-blur.png", label: "15 px motion" }}
+  width={320}
+  height={200}
+  alt="The test chart still, and the same chart smeared 15 pixels horizontally by motion during the exposure"
+  caption="Simulated: the object moved 15 pixels to the right while the shutter was open. Vertical edges smear; horizontal edges stay sharp."
+/>
+
+## 8. How much blur?
+
+Blur in pixels is simply **how far the object moves** during the exposure, divided by **mm per pixel** (2.4):
+
+```text
+blur (px) = speed × exposure time ÷ mm per pixel
+```
+
+**Example.** A billet moves at **2 m/s** (2000 mm/s). Exposure **1 ms**. Scale **0.5 mm/px**.
+
+<Equation
+  terms={[
+    { value: "2000 mm/s", label: "speed" },
+    { op: "×", value: "0.001 s", label: "exposure" },
+    { op: "=", value: "2 mm", label: "travel" },
+    { op: "÷", value: "0.5 mm/px", label: "scale" },
+    { op: "=", value: "4 px", label: "blur", result: true },
+  ]}
+/>
+
+## 9. How much blur is acceptable?
+
+It depends on the task:
+
+<Columns>
+<Panel title="Measurement" tone="a">Keep blur **below about 1 pixel** (often 0.5) along the measured direction, or edges shift and widen.</Panel>
+<Panel title="Detection / counting" tone="c">A few pixels may be fine, as long as objects stay separated and features stay visible.</Panel>
+</Columns>
+
+Turn the formula around to get the **longest allowed exposure**:
+
+```text
+max exposure = allowed blur (px) × mm per pixel ÷ speed
+```
+
+At 0.5 mm/px and 0.5 px allowed blur: **500 µs** at 0.5 m/s, **125 µs** at 2 m/s, **25 µs** at 10 m/s.
+
+## 10. The conflict
+
+Fast objects need **short exposures**. Short exposures collect **little light**, so the image is **dark and noisy** (2.5). This is the central trade-off of moving inspection.
+
+**Try it.** Change the speed, the scale and the exposure. Watch the blur and the noise.
+
+<MotionLab caption="Illustrative sensor (Chapter 2.5 model): 4 million electrons per second on a white pixel, full well 10 000 e⁻, read noise 6 e⁻. The chart moves to the right." />
+
+## 11. Strobe lighting
+
+The cleanest way out is **strobe** (flash) lighting: a very **bright** LED pulse lasting only a few microseconds, synchronized with the camera. The exposure can stay longer; the **flash duration** sets the motion blur, because almost all the light arrives during the flash.
+
+<StrobeTimeline />
+
+LED strobes can be driven far above their continuous power for short pulses ("overdrive"), so they give a lot of light in a short time. Ambient light still enters during the whole exposure, so keep the exposure short or the ambient light low.
+
+## 12. Global shutter
+
+All of this assumes every pixel starts and stops at the **same moment**: a **global shutter**. Many cheaper cameras use a **rolling shutter**, which exposes rows one after another; moving objects then **skew** or **wobble**. Chapter 2.9 explains it. For moving parts, choose **global shutter** cameras.
+
+## 13. Triggering
+
+To image a moving part **at the right place**, the camera is **triggered**: a photoelectric sensor, a PLC output or an encoder on the conveyor sends a pulse, and the camera exposes exactly then.
+
+<Flow direction="right" steps={["Part reaches the sensor", "Trigger pulse", "Strobe + exposure", "Image of the part in the same place every time"]} />
+
+With an **encoder**, the camera can also fire every N millimetres of travel, independent of speed.
+
+## 14. Auto exposure
+
+Auto exposure adjusts the exposure to keep the image brightness constant. It is handy when the light changes, but it makes images **inconsistent**: the same part can look different, and thresholds tuned on one image fail on another.
+
+<Callout kind="key">
+
+In most inspection systems: **fixed exposure, fixed gain, controlled lighting**. Use auto exposure only when the scene brightness truly changes, and then limit its range and region.
+
+</Callout>
+
+## 15. Hot steel lights itself
+
+A billet at 1000 °C **glows**: it is its own light source, and very bright. Cameras looking at hot steel often need **very short exposures** (or a small aperture or a filter) just to avoid saturation, and the brightness changes as the steel cools. That is one case where a controlled auto-exposure on the object region makes sense.
+
+## 16. High dynamic range scenes
+
+A glowing slab next to a dark floor can exceed the sensor's dynamic range (2.5). Options: expose for the **important part** and accept clipping elsewhere, use a **HDR** mode that combines short and long exposures, or use a **filter** to dim the brightest light.
+
+## 17. Exposure and frame rate
+
+A camera cannot expose longer than one frame period: at **100 fps** each frame lasts 10 ms, so the exposure is at most about 10 ms (minus readout overheads on some sensors). If you need both high frame rate and plenty of light, again: **more light**.
+
+## 18. Blur has a direction
+
+Motion blur smears only **along the motion**. Edges perpendicular to the motion blur; edges parallel to it stay sharp (Code example 2 measures this). So:
+
+- Measuring a billet's **width** (across the motion) can tolerate more exposure than measuring its **length** (along the motion).
+- Orient the camera so the **critical measurement** is across the motion when possible.
+
+## 19. Industrial example: bars on a fast line
+
+Bars leave a rolling mill at around **10 m/s**. At 0.5 mm/px and ≤ 1 px of blur, the exposure must be at most **50 µs**. At that exposure a normal continuous light gives a dark, noisy image; the usual answer is **high-power strobe** lighting or, for glowing hot bars, using the bars' **own glow** with a very short exposure.
+
+## What you should remember from 2.6
+
+<Takeaways>
+<Takeaway n={1} title="Exposure time">How long the pixels collect light. Brightness grows with it, until saturation.</Takeaway>
+<Takeaway n={2} title="Motion blur">blur (px) = speed × exposure ÷ mm per pixel.</Takeaway>
+<Takeaway n={3} title="Max exposure">allowed blur × mm/px ÷ speed: decide it from the task.</Takeaway>
+<Takeaway n={4} title="The conflict">Short exposure stops motion but costs light; fix it with lighting or strobes, not gain.</Takeaway>
+<Takeaway n={5} title="Industrial practice">Global shutter, triggering, fixed exposure, controlled light.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A part moves at 1 m/s, scale 0.2 mm/px, exposure 500 µs. How many pixels of blur?
+
+<Solution>
+
+1000 mm/s × 0.0005 s = 0.5 mm; 0.5 / 0.2 = **2.5 px**.
+
+</Solution>
+
+**Q2.** For the same part, what is the longest exposure for at most 1 px of blur?
+
+<Solution>
+
+1 × 0.2 mm ÷ 1000 mm/s = 0.0002 s = **200 µs**.
+
+</Solution>
+
+**Q3.** You halve the exposure to reduce blur. Name two ways to keep the image brightness without adding much noise.
+
+<Solution>
+
+Double the **light** (stronger lighting or strobe), or open the **aperture** one stop (if depth of field allows).
+
+</Solution>
+
+**Q4.** Why does motion blur hurt length measurement more than width measurement for a billet moving lengthwise?
+
+<Solution>
+
+Blur smears only along the motion, so the **front and back edges** (length) are smeared; the side edges (width) stay sharp.
+
+</Solution>
+
+**Q5.** Why is auto exposure usually switched off in inspection systems?
+
+<Solution>
+
+It changes brightness from image to image, so thresholds and measurements become inconsistent. Fixed settings with controlled light are repeatable.
+
+</Solution>
+
+### Next: 2.7 Bayer filter and demosaicing
+
+A sensor pixel only counts light; it cannot see colour. We'll see how a mosaic of tiny colour filters and a clever interpolation give us colour images, and what that costs in resolution.
+
+## Code
+
+Three calculations: blur and maximum exposure, simulated motion blur measured with OpenCV, and exposure vs brightness, saturation and noise.
+
+### 1. From scratch: blur and the longest allowed exposure
+
+```python
+import numpy as np
+
+mm_per_px = 0.5
+print("speed      exposure   travel    blur")
+for speed in [0.5, 2.0, 10.0]:                     # m/s
+    for t_ms in [10.0, 1.0, 0.1]:                  # exposure time, ms
+        travel = speed * 1000 * t_ms / 1000        # mm moved while the shutter is open
+        print(f"{speed:4.1f} m/s  {t_ms:6.1f} ms  {travel:6.2f} mm  {travel / mm_per_px:6.1f} px")
+max_blur_px = 0.5
+for speed in [0.5, 2.0, 10.0]:
+    t_max = max_blur_px * mm_per_px / (speed * 1000)   # seconds
+    print(f"{speed:4.1f} m/s: exposure <= {t_max * 1e6:6.1f} us for {max_blur_px} px blur")
+```
+
+Output:
+
+```text
+speed      exposure   travel    blur
+ 0.5 m/s    10.0 ms    5.00 mm    10.0 px
+ 0.5 m/s     1.0 ms    0.50 mm     1.0 px
+ 0.5 m/s     0.1 ms    0.05 mm     0.1 px
+ 2.0 m/s    10.0 ms   20.00 mm    40.0 px
+ 2.0 m/s     1.0 ms    2.00 mm     4.0 px
+ 2.0 m/s     0.1 ms    0.20 mm     0.4 px
+10.0 m/s    10.0 ms  100.00 mm   200.0 px
+10.0 m/s     1.0 ms   10.00 mm    20.0 px
+10.0 m/s     0.1 ms    1.00 mm     2.0 px
+ 0.5 m/s: exposure <=  500.0 us for 0.5 px blur
+ 2.0 m/s: exposure <=  125.0 us for 0.5 px blur
+10.0 m/s: exposure <=   25.0 us for 0.5 px blur
+```
+
+- Convert units carefully: m/s × 1000 = mm/s; ms ÷ 1000 = s.
+- A typical "10 ms" webcam exposure is useless for a 10 m/s bar: 200 pixels of smear.
+
+### 2. OpenCV: simulate motion blur and see its direction
+
+```python
+import numpy as np
+import cv2
+
+chart = cv2.imread("sample-pinhole-scene.png", cv2.IMREAD_GRAYSCALE)
+
+def motion_blur(img, length):
+    # the object moves `length` pixels to the right during the exposure
+    k = np.zeros((1, length), np.float32)
+    k[0, :] = 1.0 / length
+    return cv2.filter2D(img, -1, k)
+
+for length in [1, 5, 15]:
+    img = motion_blur(chart, length) if length > 1 else chart
+    gx = cv2.Sobel(img, cv2.CV_64F, 1, 0)       # changes along x (direction of motion)
+    gy = cv2.Sobel(img, cv2.CV_64F, 0, 1)       # changes along y
+    print(f"blur {length:2d} px: edge energy x {np.mean(np.abs(gx)):6.1f}, y {np.mean(np.abs(gy)):6.1f}")
+```
+
+Output:
+
+```text
+blur  1 px: edge energy x   75.7, y   21.3
+blur  5 px: edge energy x   64.9, y   20.9
+blur 15 px: edge energy x   30.7, y   18.1
+```
+
+- Horizontal motion blur is an average along a **row**: a 1 × L kernel of 1/L values.
+- `cv2.Sobel(img, cv2.CV_64F, 1, 0)` measures change along x (vertical edges); `(0, 1)` along y.
+- The x edge energy falls by more than half at 15 px; the y edge energy barely changes. (It drops a little because the letters' slanted edges also have an x component.)
+
+### 3. From scratch: exposure, brightness, saturation and SNR
+
+```python
+import numpy as np
+
+rate = 4_000_000          # electrons per second reaching one pixel (mid-gray part of the scene)
+full_well, read = 10_000, 6.0
+for t_us in [50, 200, 1000, 2500, 5000]:
+    e_raw = rate * t_us * 1e-6
+    e = min(e_raw, full_well)
+    dn = round(e / full_well * 255)
+    if e_raw >= full_well:
+        print(f"{t_us:5d} us: {e:7.0f} e-, {dn:3d} DN, saturated: information lost")
+    else:
+        print(f"{t_us:5d} us: {e:7.0f} e-, {dn:3d} DN, SNR {e / np.sqrt(e + read ** 2):5.1f}")
+```
+
+Output:
+
+```text
+   50 us:     200 e-,   5 DN, SNR  13.0
+  200 us:     800 e-,  20 DN, SNR  27.7
+ 1000 us:    4000 e-, 102 DN, SNR  63.0
+ 2500 us:   10000 e-, 255 DN, saturated: information lost
+ 5000 us:   10000 e-, 255 DN, saturated: information lost
+```
+
+- Brightness and electrons grow linearly with exposure until the full well.
+- SNR grows only with √exposure: 5× the exposure (200 → 1000 µs) gives about 2.3× the SNR.
+- Past saturation, more exposure gives nothing but lost detail.
+
+## OpenCV API notes
+
+**`cv2.filter2D(src, ddepth, kernel)`** with a 1 × L kernel simulates horizontal motion blur; an L × 1 kernel simulates vertical motion. For an angled motion, draw a line into a square kernel with `cv2.line` and normalize it.
+
+**`cv2.Sobel(src, ddepth, dx, dy[, ksize=3])`** returns derivative images; use `cv2.CV_64F` (or `CV_16S`) to keep negative values. Chapter 17 covers it in depth.
+
+**Exposure is a camera setting.** Exposure time, gain, trigger mode and strobe output are set through the camera's SDK (GenICam names such as `ExposureTime`, `Gain`, `TriggerMode`, `LineSource`). `cv2.VideoCapture` can set `cv2.CAP_PROP_EXPOSURE` on some webcams, but its units and behaviour depend on the backend and driver.
+
+## Where it fails
+
+- **Simulated blur** assumes constant speed and a uniform shutter. Real objects accelerate, vibrate and rotate.
+- **Strobes** fight ambient light: if the plant lighting is bright, the long exposure still collects it and blurs.
+- **Glowing hot objects** change brightness as they cool and with emissivity; one fixed exposure may not fit all products.
+- **Rolling-shutter cameras** add skew that is not simple blur (2.9).
+- **Deblurring** by software (deconvolution) exists but is fragile with noise; prevention is far more reliable.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Leaving the webcam default exposure (often 10–30 ms) for moving parts.**
+- **Fixing a dark short-exposure image with gain.** Bright, noisy and unstable; add light.
+- **Unit slips:** m/s vs mm/s, ms vs µs. Always convert to mm and seconds before dividing.
+- **Auto exposure in an inspection system.** Changes brightness between parts.
+- **Free-running camera on a conveyor.** Parts appear at random positions; trigger it.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Exposure value
+
+Photographers combine aperture and time into one number, EV = log₂(N² / t): one EV is one stop. Equal EV means equal light on the sensor for the same scene, for example f/4 at 1/250 s and f/5.6 at 1/125 s [1].
+
+### Motion blur as convolution
+
+For constant-speed motion, the blurred image is the sharp image convolved with a line kernel whose length is the travel in pixels (Code example 2). Knowing the kernel, deconvolution (Wiener filtering) can partly reverse it; noise and the zeros of the line kernel's spectrum limit what can be recovered [2].
+
+### LED strobing and overdrive
+
+LEDs can be pulsed at currents well above their continuous rating if the duty cycle is low, giving several times more light during the pulse. Strobe controllers specify maximum pulse width and duty cycle; exceeding them shortens LED life [3].
+
+### Blur and edge accuracy
+
+Symmetric blur widens an edge but does not move its 50 % point; asymmetric effects (non-constant speed, rolling shutter, saturation) do. That is why measurement systems limit blur even when sub-pixel edge methods are used [3].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Speed 3 m/s, exposure 200 µs, scale 0.3 mm/px. Motion blur?",
+      options: ["0.6 px", "2 px", "6 px", "20 px"],
+      answer: 1,
+      explanation: "3000 mm/s × 0.0002 s = 0.6 mm; 0.6 / 0.3 = 2 px.",
+    },
+    {
+      question: "You double the exposure time. What happens to the shot-noise SNR (no saturation)?",
+      options: ["Doubles", "Increases by about 1.4×", "Stays the same", "Halves"],
+      answer: 1,
+      explanation: "Electrons double; SNR goes with √electrons, so √2 ≈ 1.41.",
+    },
+    {
+      question: "With a strobe flash of 10 µs inside a 500 µs exposure (dark surroundings), what sets the motion blur?",
+      options: ["The 500 µs exposure", "The 10 µs flash", "The frame rate", "The gain"],
+      answer: 1,
+      explanation: "Almost all light arrives during the flash, so the object is recorded only during those 10 µs.",
+    },
+    {
+      question: "A part moves horizontally. Which edges blur?",
+      options: ["Horizontal edges", "Vertical edges", "Both equally", "Neither"],
+      answer: 1,
+      explanation: "Blur is along the motion, so edges across it (vertical edges) smear.",
+    },
+    {
+      question: "Why is a fixed exposure preferred in most inspection systems?",
+      options: ["It is faster to compute", "Images stay consistent, so thresholds and measurements stay valid", "It uses less memory", "Auto exposure is not available on industrial cameras"],
+      answer: 1,
+      explanation: "Repeatability: the same part should give the same image.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Slabs move at 0.3 m/s under a camera with 0.8 mm/px. (a) Longest exposure for ≤ 0.5 px blur? (b) The current exposure is 5 ms. How much blur? (c) What would you change?
+
+<Solution>
+
+(a) 0.5 × 0.8 mm ÷ 300 mm/s ≈ **1.33 ms**.
+
+(b) 300 mm/s × 0.005 s = 1.5 mm → **1.9 px**.
+
+(c) Cut the exposure to about 1.3 ms and make up the 4× light loss with lighting (or open the aperture two stops if DOF allows).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Write a function `max_exposure_us(speed_m_s, mm_per_px, max_blur_px)` and print a table for speeds 0.2, 1, 5 and 15 m/s at 0.25 mm/px and 1 px of blur.
+
+<Solution>
+
+```python
+import numpy as np
+
+def max_exposure_us(speed_m_s, mm_per_px, max_blur_px):
+    return max_blur_px * mm_per_px / (speed_m_s * 1000) * 1e6
+
+for v in [0.2, 1, 5, 15]:
+    print(f"{v:4} m/s -> {max_exposure_us(v, 0.25, 1):7.1f} us")
+```
+
+Output:
+
+```text
+ 0.2 m/s ->  1250.0 us
+   1 m/s ->   250.0 us
+   5 m/s ->    50.0 us
+  15 m/s ->    16.7 us
+```
+
+At 15 m/s you need a 17 µs exposure: strobe territory.
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+A camera runs at 50 fps with 8 ms exposure on a slow conveyor. The customer wants 200 fps for a faster line. What is the new maximum exposure, and what happens to the image if you change nothing else?
+
+<Solution>
+
+At 200 fps a frame lasts **5 ms**, so the exposure must be shorter than that (in practice a little less). Going from 8 ms to under 5 ms loses more than a third of the light: the image is darker and noisier unless the lighting is increased.
+
+</Solution>
+
+## References
+
+1. S. F. Ray, *Applied Photographic Optics*, 3rd ed. Focal Press, 2002.
+2. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed. Pearson, 2018. Sec. 5.6 (estimating the degradation function, including uniform linear motion).
+3. C. Steger, M. Ulrich and C. Wiedemann, *Machine Vision Algorithms and Applications*, 2nd ed. Wiley-VCH, 2018. Ch. 2 (illumination, cameras).
+4. European Machine Vision Association, *GenICam Standard Features Naming Convention (SFNC)*.
+5. OpenCV 4.13.0 documentation, *Image Filtering* (`filter2D`, `Sobel`): [docs.opencv.org/4.13.0/d4/d86/group__imgproc__filter.html](https://docs.opencv.org/4.13.0/d4/d86/group__imgproc__filter.html).

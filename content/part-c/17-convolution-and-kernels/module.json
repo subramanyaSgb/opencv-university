@@ -1,0 +1,13 @@
+{
+  "number": 17,
+  "title": "Convolution and kernels",
+  "summary": "Neighbourhood operations: what a kernel is, convolution step by step, borders and padding, separable kernels, integral images and filter2D.",
+  "chapters": [
+    { "number": "17.1", "slug": "17.1-what-a-kernel-is", "title": "What a kernel is" },
+    { "number": "17.2", "slug": "17.2-convolution-step-by-step", "title": "Convolution step by step" },
+    { "number": "17.3", "slug": "17.3-borders-and-padding", "title": "Borders and padding" },
+    { "number": "17.4", "slug": "17.4-separable-kernels", "title": "Separable kernels" },
+    { "number": "17.5", "slug": "17.5-integral-images", "title": "Integral images" },
+    { "number": "17.6", "slug": "17.6-filter2d", "title": "filter2D" }
+  ]
+}

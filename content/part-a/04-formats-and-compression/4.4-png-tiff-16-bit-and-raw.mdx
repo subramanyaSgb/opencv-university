@@ -1,0 +1,498 @@
+export const meta = {
+  number: "4.4",
+  title: "PNG, TIFF, 16-bit and raw",
+  minutes: 40,
+  objectives: [
+    "Choose a lossless format for 8-bit, 16-bit, float and multi-page data",
+    "Read and write 16-bit images without silently losing bits",
+    "Explain what 'raw' means for photo cameras and for machine-vision cameras",
+    "Unpack a packed 12-bit camera buffer and handle row padding (stride)",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 4.4 (Module 4 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+  Pixel-format layouts: GenICam PFNC (Mono12p) and GigE Vision (Mono12Packed); always confirm with the camera's documentation.
+*/}
+
+# 4.4 PNG, TIFF, 16-bit and raw
+
+<Definition term="Lossless image formats">file formats that store the exact pixel numbers: PNG for 8- and 16-bit images, TIFF for almost anything (16-bit, float, many pages), and "raw" for data straight from the sensor.</Definition>
+
+JPEG (4.3) is 8-bit and lossy. Inspection often needs more: **exact** values, **more than 8 bits**, **decimal** numbers (a height map in mm), or **many images in one file**. This chapter covers the formats for that, and the traps when reading them.
+
+## 1. An analogy
+
+Shipping goods. **JPEG** is vacuum-packing clothes: small, but the shape changes. **PNG** is a sturdy box for ordinary items: everything arrives as it was. **TIFF** is a shipping container: any size, any contents, several boxes inside, with a detailed label. **Raw** is the goods straight off the production line, before packaging: complete, but you need to know how to unpack them.
+
+## 2. PNG
+
+<Flow
+  steps={[
+    { label: "Pixels (8- or 16-bit)", tone: "world" },
+    { label: "Per row: predict from neighbours (filter)", tone: "process" },
+    { label: "Deflate (zlib) compression", tone: "process" },
+    { label: ".png: exact pixels back", tone: "result" },
+  ]}
+/>
+
+PNG uses the prediction idea from 4.2: for every row it chooses one of five **filters** (None, Sub = left, Up = above, Average, Paeth) and compresses the differences with **deflate**.
+
+- **Bit depths**: 1, 2, 4, 8, 16 bits per channel. OpenCV writes **8- and 16-bit**.
+- **Channels**: gray, gray + alpha, RGB, RGBA, palette. OpenCV writes 1, 3 or 4 channels (BGR order in memory, stored as RGB in the file).
+- **Integers only**: no float, no negative numbers.
+- Good for masks, label images, 8-bit and 16-bit camera images, screenshots and reports.
+
+## 3. TIFF
+
+TIFF is a **container**: a file with "tags" that describe one or more images.
+
+- **Data types**: 8-, 16-, 32-bit integers and 32-/64-bit **float**.
+- **Compression**: none, LZW (OpenCV's default), Deflate, PackBits, and also lossy JPEG inside TIFF. "TIFF" alone does not guarantee lossless.
+- **Multi-page**: many images in one file (an exposure series, a focus stack, a 3D volume).
+- **Tags**: resolution (dpi), description, camera info; scientific variants add more.
+
+Same 12-bit image, 320 × 200 *(Code example 4)*:
+
+| Format | File size | Exact? |
+| --- | --- | --- |
+| Raw in memory (uint16) | 128 000 B | – |
+| TIFF, no compression | 128 248 B | yes |
+| TIFF, LZW | 108 096 B | yes |
+| TIFF, Deflate | 95 066 B | yes |
+| PNG, 16-bit | 92 438 B | yes |
+
+## 4. 16-bit images: the most common trap
+
+Many industrial cameras deliver **10 or 12 bits** per pixel (3.2). In memory and in files these sit in a **16-bit** container (`uint16`), values 0 … 1023 or 0 … 4095.
+
+`cv2.imread` **converts to 8-bit BGR by default**. It keeps only the top 8 of the 16 bits. For 12-bit data, whose top 4 bits are always 0, that leaves values 0 … 15: an almost black image, and no error *(Code example 1)*:
+
+| How it was read | dtype | shape | max value |
+| --- | --- | --- | --- |
+| As written | uint16 | (200, 320) | 4095 |
+| `cv2.imread(path)` | uint8 | (200, 320, **3**) | **15** |
+| `cv2.imread(path, cv2.IMREAD_UNCHANGED)` | uint16 | (200, 320) | 4095 |
+
+<Callout kind="mistake">
+
+Always pass **`cv2.IMREAD_UNCHANGED`** (or `cv2.IMREAD_ANYDEPTH` for gray) when reading anything that may be 16-bit, and check `img.dtype` and `img.max()` after reading.
+
+</Callout>
+
+For **display** only, convert 12-bit to 8-bit by shifting 4 bits (`img >> 4`, i.e. ÷ 16) or by stretching the used range with `cv2.normalize`. Keep the 16-bit data for measuring.
+
+## 5. Float data
+
+Some results are not integers: a **height map** in mm from a 3D sensor, a calibrated temperature image, an averaged background. PNG and JPEG cannot store them: OpenCV converts to 8-bit and only prints a **warning**. A height map from −0.50 to 2.25 mm becomes the integers 0, 1 and 2 *(Code example 3)*.
+
+<VsTable
+  left="Keeps float32 exactly"
+  right="Destroys float data"
+  rows={[
+    ["TIFF (32-bit float)", "PNG (converted to 8-bit)"],
+    [".npy (np.save / np.load)", "JPEG (converted to 8-bit, then lossy)"],
+    ["OpenEXR (.exr)¹", "BMP"],
+  ]}
+  caption="¹ OpenEXR is disabled by default in OpenCV builds; it must be enabled with the OPENCV_IO_ENABLE_OPENEXR option (environment variable)."
+/>
+
+## 6. What "raw" means
+
+The word is used for two different things:
+
+<Columns>
+<Panel title="Photo camera raw" tone="a">
+
+DNG, CR2/CR3, NEF, ARW … The sensor's **Bayer** data (2.7), usually 12–14 bits, plus metadata (white balance, lens, exposure). Needs a **raw developer** (demosaic, white balance, gamma: the ISP from 2.8 in software). `cv2.imread` is not one: use LibRaw (in Python: `rawpy`).
+
+</Panel>
+<Panel title="Machine-vision raw" tone="b">
+
+A memory **buffer** from the camera SDK in a named **pixel format**: Mono8, Mono12, Mono12p, BayerRG8, BayerRG12p … (GenICam PFNC). You wrap it with `np.frombuffer`, unpack if packed, and reshape using the width, height and **stride** (4.1).
+
+</Panel>
+</Columns>
+
+## 7. Packed pixels
+
+12 bits in a 16-bit container waste 4 bits per pixel. **Packed** formats put **2 pixels in 3 bytes**: 25 % less data over the cable (4.1). The camera's documentation names the exact layout; two common ones:
+
+| Layout | Pixels 0xABC, 0x405 become | Bytes per pixel |
+| --- | --- | --- |
+| 16-bit, LSB-aligned (Mono12, 16-bit PNG) | BC 0A 05 04 | 2 |
+| Mono12p (GenICam PFNC) | BC 5A 40 | 1.5 |
+| Mono12Packed (GigE Vision) | AB 5C 40 | 1.5 |
+
+To process packed data, **unpack** it to `uint16` first *(Code example 2)*.
+
+## 8. Try it
+
+<PackLab caption="Two 12-bit pixels and the bytes they become. Change the values and the layout; each bit shows which pixel bit it holds (A11 = bit 11 of pixel A)." />
+
+## 9. Choosing a format
+
+| Format | Bits per channel | Lossless | Float | Many images | Typical use |
+| --- | --- | --- | --- | --- | --- |
+| PNG | 8, 16 (in OpenCV) | yes | no | no | masks, labels, 8/16-bit images |
+| TIFF | 8, 16, 32, float | yes (unless JPEG inside) | yes | yes | 16-bit and float data, stacks |
+| JPEG | 8 | no | no | no | viewing, large archives |
+| BMP | 8 | yes (uncompressed) | no | no | legacy software |
+| .npy | any NumPy dtype | yes | yes | any shape | Python pipelines |
+| OpenEXR | 16/32 float | yes or lossy | yes | layers | HDR images |
+| Camera raw (DNG …) | 10–14, Bayer | usually | no | no | photography |
+
+<Tree
+  root="What kind of data?"
+  branches={[
+    { title: "Integers", items: ["8-bit image, mask, label → PNG", "10–16-bit camera image → 16-bit PNG or TIFF (LZW/Deflate)"] },
+    { title: "Decimals", items: ["Heights, calibrated values → TIFF float32 or .npy"] },
+    { title: "Many images", items: ["Series, stack → multi-page TIFF"] },
+    { title: "Only for viewing", items: ["JPEG is fine"] },
+  ]}
+/>
+
+## 10. Industrial example
+
+A 3D profile station measures weld seams with a 12-bit camera:
+
+<Flow
+  steps={[
+    { label: "Camera: Mono12p over GigE (25 % less data)", tone: "world" },
+    { label: "Unpack to uint16 (0–4095)", tone: "process" },
+    { label: "Compute height map (float32, mm)", tone: "process" },
+    { label: "Archive: 16-bit PNG + float32 TIFF", tone: "data" },
+    { label: "Operator screen: 8-bit preview (>> 4)", tone: "result" },
+  ]}
+/>
+
+Every step keeps the full data except the preview, which is only for eyes.
+
+## What you should remember from 4.4
+
+<Takeaways>
+<Takeaway n={1} title="PNG">Lossless, 8- or 16-bit integers, 1/3/4 channels. Masks and camera images.</Takeaway>
+<Takeaway n={2} title="TIFF">Container: 16-bit, float, multi-page, many compressions (check it is lossless).</Takeaway>
+<Takeaway n={3} title="16-bit trap">Default imread gives 8-bit BGR; use IMREAD_UNCHANGED and check dtype and max.</Takeaway>
+<Takeaway n={4} title="Float">PNG/JPEG silently convert to 8-bit; use TIFF float32 or .npy.</Takeaway>
+<Takeaway n={5} title="Raw">Photo raw needs a raw developer; machine-vision raw is a buffer: frombuffer, unpack, reshape with stride.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 10-bit image (0 … 1023) saved as 16-bit PNG is read with `cv2.imread(path)`. What is the maximum value you see?
+
+<Solution>
+
+The top 8 of 16 bits: 1023 >> 8 = **3**. The image looks black.
+
+</Solution>
+
+**Q2.** Which format for a stack of 50 focus images at 16 bits?
+
+<Solution>
+
+A **multi-page TIFF** (LZW or Deflate), or 50 separate 16-bit PNGs.
+
+</Solution>
+
+**Q3.** How many bytes does a 2448 × 2048 Mono12p image take?
+
+<Solution>
+
+2448 × 2048 × 1.5 = **7 520 256 bytes** (vs 10 027 008 in 16-bit).
+
+</Solution>
+
+### Next: 4.5 Video codecs and streams
+
+From single images to video: frames, codecs, containers and how cameras stream.
+
+## Code
+
+Five examples: reading 16-bit correctly, unpacking Mono12p, float data, TIFF sizes and multi-page files, and wrapping a raw buffer with stride (Exercise 2). Copy the sample images next to the script.
+
+### 1. OpenCV: 16-bit PNG and the default-read trap
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(seed=1)
+gray = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+img12 = gray.astype(np.uint16) * 16 + rng.integers(0, 16, gray.shape, dtype=np.uint16)   # 12-bit data, 0..4095
+cv2.imwrite("part12.png", img12)                          # PNG keeps 16-bit unsigned data
+
+a = cv2.imread("part12.png")                               # default: 8-bit BGR!
+b = cv2.imread("part12.png", cv2.IMREAD_UNCHANGED)         # as stored
+print(f"written   : {img12.dtype}, shape {img12.shape}, max {img12.max()}")
+print(f"default   : {a.dtype}, shape {a.shape}, max {a.max()}")
+print(f"UNCHANGED : {b.dtype}, shape {b.shape}, max {b.max()}, identical: {np.array_equal(b, img12)}")
+view = (b >> 4).astype(np.uint8)                           # 12 -> 8 bits, only for display
+print(f"for display (>> 4): max {view.max()}, matches the 8-bit source: {np.array_equal(view, gray)}")
+```
+
+Output:
+
+```text
+written   : uint16, shape (200, 320), max 4095
+default   : uint8, shape (200, 320, 3), max 15
+UNCHANGED : uint16, shape (200, 320), max 4095, identical: True
+for display (>> 4): max 255, matches the 8-bit source: True
+```
+
+- We make "12-bit" data from an 8-bit image: × 16 plus random low bits.
+- `cv2.imwrite` chooses 16-bit PNG automatically because the array is `uint16`.
+- `>> 4` shifts right by 4 bits (÷ 16, rounding down).
+
+### 2. From scratch: unpacking Mono12p
+
+```python
+import numpy as np
+
+def pack_mono12p(px):                       # PFNC Mono12p: LSB-first, 2 pixels in 3 bytes
+    p = px.reshape(-1, 2).astype(np.uint16)
+    b0 = p[:, 0] & 0xFF
+    b1 = (p[:, 0] >> 8) | ((p[:, 1] & 0x0F) << 4)
+    b2 = p[:, 1] >> 4
+    return np.stack([b0, b1, b2], axis=1).astype(np.uint8).ravel()
+
+def unpack_mono12p(buf):
+    b = buf.reshape(-1, 3).astype(np.uint16)
+    p0 = b[:, 0] | ((b[:, 1] & 0x0F) << 8)
+    p1 = (b[:, 1] >> 4) | (b[:, 2] << 4)
+    return np.stack([p0, p1], axis=1).ravel()
+
+pixels = np.array([2748, 1029, 4095, 0], np.uint16)     # 12-bit values
+packed = pack_mono12p(pixels)
+print("pixels :", pixels, "->", [f"0x{v:03X}" for v in pixels])
+print("bytes  :", [f"0x{v:02X}" for v in packed], f"({packed.size} bytes instead of {pixels.size * 2})")
+print("unpack :", unpack_mono12p(packed), "| exact:", np.array_equal(unpack_mono12p(packed), pixels))
+```
+
+Output:
+
+```text
+pixels : [2748 1029 4095    0] -> ['0xABC', '0x405', '0xFFF', '0x000']
+bytes  : ['0xBC', '0x5A', '0x40', '0xFF', '0x0F', '0x00'] (6 bytes instead of 8)
+unpack : [2748 1029 4095    0] | exact: True
+```
+
+- `& 0xFF` keeps the low 8 bits, `& 0x0F` the low 4, `>> n` and `<< n` shift bits; `|` combines them.
+- Converting to `uint16` **before** shifting is essential: `uint8 << 8` would overflow.
+- Vectorised NumPy unpacks a 5 MP image in milliseconds; a Python loop would take seconds.
+- For a real camera: `buf = np.frombuffer(sdk_buffer, np.uint8)`, then `unpack_mono12p(buf).reshape(height, width)`. Check the pixel format name in the camera's documentation; Mono12Packed uses a different bit order.
+
+### 3. OpenCV: float data needs TIFF or .npy
+
+```python
+import numpy as np
+import cv2
+
+height = np.linspace(-0.5, 2.25, 320, dtype=np.float32)[None, :].repeat(200, axis=0)   # e.g. a height map in mm
+cv2.imwrite("height.png", height)                         # PNG cannot store float: converted to 8-bit
+cv2.imwrite("height.tiff", height)                        # TIFF can
+np.save("height.npy", height)                             # NumPy's own format, exact
+png = cv2.imread("height.png", cv2.IMREAD_UNCHANGED)
+tif = cv2.imread("height.tiff", cv2.IMREAD_UNCHANGED)
+npy = np.load("height.npy")
+print(f"PNG : {png.dtype}, values {np.unique(png)}")
+print(f"TIFF: {tif.dtype}, range {tif.min():.2f} .. {tif.max():.2f}, identical: {np.array_equal(tif, height)}")
+print(f"NPY : {npy.dtype}, identical: {np.array_equal(npy, height)}")
+```
+
+Output:
+
+```text
+PNG : uint8, values [0 1 2]
+TIFF: float32, range -0.50 .. 2.25, identical: True
+NPY : float32, identical: True
+```
+
+- The PNG write also prints a warning on the console (`Unsupported depth image for selected encoder is fallbacked to CV_8U`) but **returns True**: the program carries on with wrong data.
+- `np.unique` lists the distinct values: the height map collapsed to three levels.
+
+### 4. OpenCV: TIFF compression and multi-page files
+
+```python
+import os
+import numpy as np
+import cv2
+
+img = cv2.imread("part12.png", cv2.IMREAD_UNCHANGED)       # 16-bit, from Code example 1
+print(f"raw in memory      : {img.nbytes:6d} B")
+for name, comp in [("none", cv2.IMWRITE_TIFF_COMPRESSION_NONE), ("LZW", cv2.IMWRITE_TIFF_COMPRESSION_LZW),
+                   ("Deflate", cv2.IMWRITE_TIFF_COMPRESSION_ADOBE_DEFLATE)]:
+    cv2.imwrite("part.tiff", img, [cv2.IMWRITE_TIFF_COMPRESSION, comp])
+    ok = np.array_equal(cv2.imread("part.tiff", cv2.IMREAD_UNCHANGED), img)
+    print(f"TIFF {name:8s}      : {os.path.getsize('part.tiff'):6d} B, identical: {ok}")
+print(f"PNG 16-bit         : {os.path.getsize('part12.png'):6d} B")
+
+pages = [img, img // 2, img // 4]                          # e.g. three exposures of the same part
+cv2.imwritemulti("stack.tiff", pages)
+ok, back = cv2.imreadmulti("stack.tiff", flags=cv2.IMREAD_UNCHANGED)
+print(f"multi-page TIFF    : {len(back)} pages, {back[0].dtype}, identical: {all(np.array_equal(p, q) for p, q in zip(pages, back))}")
+```
+
+Output:
+
+```text
+raw in memory      : 128000 B
+TIFF none          : 128248 B, identical: True
+TIFF LZW           : 108096 B, identical: True
+TIFF Deflate       :  95066 B, identical: True
+PNG 16-bit         :  92438 B
+multi-page TIFF    : 3 pages, uint16, identical: True
+```
+
+- `IMWRITE_TIFF_COMPRESSION` takes one of the `IMWRITE_TIFF_COMPRESSION_*` constants; without it OpenCV uses LZW.
+- `cv2.imwritemulti(path, list)` / `cv2.imreadmulti(path, flags=…)` write and read all pages; `cv2.imcount(path)` counts them.
+- Pass `flags=cv2.IMREAD_UNCHANGED` to `imreadmulti` too, or the pages come back as 8-bit.
+
+## OpenCV API notes
+
+**`cv2.imread(path, flags)`**: `IMREAD_COLOR` (default: 8-bit, 3 channels), `IMREAD_GRAYSCALE` (8-bit, 1 channel), `IMREAD_UNCHANGED` (as stored, including alpha and 16-bit/float), `IMREAD_ANYDEPTH` (keep 16-bit/32-bit, convert to gray unless combined with `IMREAD_ANYCOLOR`). Returns `None` (no exception) if the file cannot be read.
+
+**`cv2.imwrite(path, img, params)`**: the extension picks the format. PNG: `uint8`/`uint16`, 1/3/4 channels. TIFF: also `float32`/`float64`, `IMWRITE_TIFF_COMPRESSION`, `IMWRITE_TIFF_PREDICTOR`, resolution tags. Unsupported depths are converted to 8-bit with a warning.
+
+**`cv2.imwritemulti`, `cv2.imreadmulti`, `cv2.imcount`**: multi-page TIFF.
+
+**`np.frombuffer(buf, dtype)`**: wraps bytes without copying (read-only); `.reshape(h, stride)[:, :w]` removes row padding.
+
+## Where it fails
+
+- **OpenCV is not a raw photo developer**: CR2/NEF/ARW need LibRaw (`rawpy`); DNG support in `imread` is not reliable for raw data.
+- **Exotic TIFFs** (tiles, unusual bit depths, JPEG-compressed, BigTIFF > 4 GB, OME-TIFF metadata) may not read fully; the `tifffile` Python package handles more.
+- **PNG and TIFF are slow to write** at high compression; at high frame rates save raw buffers or .npy and convert later.
+- **16-bit data in 8-bit viewers** looks black or saturated; it is a display problem, not broken data.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Reading 16-bit files with the default flags** and processing the 8-bit, 3-channel result.
+- **Saving float results as PNG** (they become 0, 1, 2 …; only a warning).
+- **Assuming 12-bit data uses 0–65535**: it uses 0–4095 in a 16-bit container (or 0–65520 if MSB-aligned). Check `max()`.
+- **Unpacking with the wrong layout** (Mono12p vs Mono12Packed): the image looks noisy or has a fine stripe pattern.
+- **Ignoring stride** when wrapping SDK buffers: the image appears sheared (each row shifted a bit more).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### PNG filter choice
+
+The PNG specification [1] defines filter types per row; the Paeth predictor chooses whichever of left, above or upper-left is closest to a simple linear estimate. Encoders pick filters heuristically (often trying several per row). Higher zlib levels search longer for repeated strings.
+
+### TIFF and its family
+
+TIFF 6.0 [2] is the base; many formats are TIFF inside: DNG (Adobe's raw format), GeoTIFF, OME-TIFF (microscopy), BigTIFF (64-bit offsets for files over 4 GB). Readers often support only a subset of tags and compressions.
+
+### GenICam pixel formats
+
+The GenICam Pixel Format Naming Convention (PFNC) [3] defines names like Mono12p, BayerRG10p, RGB8 and their exact bit layouts, so software can unpack any compliant camera's data. The legacy GigE Vision formats (Mono12Packed) predate PFNC and use a different order.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "You read a 16-bit PNG with cv2.imread(path). What do you get?",
+      options: ["uint16, 1 channel", "uint8, 3 channels", "float32", "An error"],
+      answer: 1,
+      explanation: "The default flag IMREAD_COLOR converts to 8-bit BGR. Use IMREAD_UNCHANGED.",
+    },
+    {
+      question: "Which format keeps a float32 height map exactly?",
+      options: ["PNG", "JPEG", "TIFF", "BMP"],
+      answer: 2,
+      explanation: "TIFF (or .npy) stores 32-bit float; PNG/JPEG/BMP convert to 8-bit.",
+    },
+    {
+      question: "Mono12p stores 2 pixels in…",
+      options: ["2 bytes", "3 bytes", "4 bytes", "24 bytes"],
+      answer: 1,
+      explanation: "2 × 12 bits = 24 bits = 3 bytes.",
+    },
+    {
+      question: "Is every TIFF file lossless?",
+      options: ["Yes, always", "No: TIFF can contain JPEG-compressed data", "Only 16-bit TIFFs", "Only multi-page TIFFs"],
+      answer: 1,
+      explanation: "TIFF is a container; check the compression tag.",
+    },
+    {
+      question: "A raw camera buffer has width 1000 and stride 1024 bytes (Mono8). How do you get the image?",
+      options: ["reshape(h, 1000)", "reshape(h, 1024)[:, :1000]", "reshape(1000, h)", "Drop the last 24 rows"],
+      answer: 1,
+      explanation: "Each row has 24 padding bytes at the end; reshape with the stride, then cut them off.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Pack the 12-bit pixels 0x123 and 0x456 in Mono12p.
+
+<Solution>
+
+Byte 0 = low 8 bits of 0x123 = **0x23**. Byte 1 = high 4 bits of 0x123 (0x1) in the low nibble, low 4 bits of 0x456 (0x6) in the high nibble = **0x61**. Byte 2 = high 8 bits of 0x456 = **0x45**. Check it in PackLab.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+A camera SDK gives a Mono8 image 6 pixels wide and 4 rows high, but each row is padded to 8 bytes. Wrap the buffer as a NumPy image without the padding.
+
+<Solution>
+
+```python
+import numpy as np
+
+width, height, stride = 6, 4, 8                            # each row padded to 8 bytes by the camera SDK
+buffer = bytes(range(stride * height))                     # stand-in for the SDK's raw buffer
+rows = np.frombuffer(buffer, dtype=np.uint8).reshape(height, stride)
+img = rows[:, :width]                                      # drop the padding bytes
+print(img)
+print("shape:", img.shape, "| contiguous:", img.flags["C_CONTIGUOUS"])
+img = np.ascontiguousarray(img)                            # copy if a function needs contiguous data
+print("after copy, contiguous:", img.flags["C_CONTIGUOUS"])
+```
+
+Output:
+
+```text
+[[ 0  1  2  3  4  5]
+ [ 8  9 10 11 12 13]
+ [16 17 18 19 20 21]
+ [24 25 26 27 28 29]]
+shape: (4, 6) | contiguous: False
+after copy, contiguous: True
+```
+
+Values 6, 7, 14, 15 … are the padding. The slice is a **view** (no copy) whose rows are not back-to-back in memory; `np.ascontiguousarray` makes a compact copy. The buffer from `frombuffer` is read-only; copy it before writing into it.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague's script saves 12-bit images with `cv2.imwrite("x.png", img)` and a second script reads them with `cv2.imread("x.png", 0)`. Results look fine on bright parts but dark parts "disappear". Explain and fix.
+
+<Solution>
+
+The PNG is 16-bit, fine. Reading with flag 0 (`IMREAD_GRAYSCALE`) converts to 8-bit by keeping the top 8 of 16 bits: 12-bit values become 0 … 15, so dark details collapse to 0–1. Read with `cv2.IMREAD_UNCHANGED` and work in `uint16` (or scale explicitly with `>> 4` if 8-bit is really wanted).
+
+</Solution>
+
+## References
+
+1. W3C, *Portable Network Graphics (PNG) Specification*, 2nd ed., 2003 (also ISO/IEC 15948:2004): [www.w3.org/TR/png/](https://www.w3.org/TR/png/).
+2. Adobe Systems, *TIFF Revision 6.0*, 1992.
+3. EMVA, *GenICam Pixel Format Naming Convention (PFNC)*, version 2.x: [www.emva.org](https://www.emva.org/standards-technology/genicam/).
+4. OpenCV 4.13.0 documentation, *Image file reading and writing* (`imread`, `imwrite`, `imreadmulti`, flags): [docs.opencv.org/4.13.0/d4/da8/group__imgcodecs.html](https://docs.opencv.org/4.13.0/d4/da8/group__imgcodecs.html).

@@ -1,0 +1,281 @@
+export const meta = {
+  number: "17.3",
+  title: "Borders and padding",
+  minutes: 20,
+  objectives: [
+    "Explain why filters need values outside the image",
+    "Know OpenCV's border modes: constant, replicate, reflect, reflect-101, wrap",
+    "Measure how much a border choice changes results near the edge",
+    "Choose a border mode, or avoid the problem with ROIs and valid regions",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 17.3 (Module 17 plan).
+  Reuses ConvLab with showBorders.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 17.3 Borders and padding
+
+<Definition term="Border handling (padding)">the rule for inventing pixel values outside the image, so that a kernel centred near the edge has a full neighbourhood. OpenCV calls the rules border types: constant, replicate, reflect, reflect-101 and wrap.</Definition>
+
+A 3 × 3 kernel at the image's corner reaches one pixel past two edges; a 15 × 15 kernel reaches seven. Those pixels do not exist, so every filter has to make them up. The choice is invisible in the middle of the image and decisive at its edges: a black border darkens the edge after a blur and creates false edges for an edge detector.
+
+## 1. An analogy
+
+Finishing a wallpaper pattern at the corner of a room: you can stop with a blank strip (constant), stretch the last strip (replicate), mirror the pattern (reflect), or continue from the other side of the room (wrap). Up close to the corner, each looks different.
+
+## 2. The five rules
+
+<Flow
+  steps={[
+    { label: "Kernel needs pixels at x < 0 or x ≥ width", tone: "data" },
+    { label: "Border rule maps each missing position to a value", tone: "process" },
+    { label: "Filter as usual on the padded image", tone: "result" },
+  ]}
+/>
+
+The row 1, 2, 3, 4, 5, 6 padded by 3 on each side (`cv2.copyMakeBorder`):
+
+| Border type | Left pad · row · right pad | Notation in OpenCV docs |
+| --- | --- | --- |
+| `BORDER_CONSTANT` (value 0) | 0 0 0 · 1 2 3 4 5 6 · 0 0 0 | iiiiii\|abcdefgh\|iiiiiii |
+| `BORDER_REPLICATE` | 1 1 1 · 1 2 3 4 5 6 · 6 6 6 | aaaaaa\|abcdefgh\|hhhhhhh |
+| `BORDER_REFLECT` | 3 2 1 · 1 2 3 4 5 6 · 6 5 4 | fedcba\|abcdefgh\|hgfedcb |
+| `BORDER_REFLECT_101` (default) | 4 3 2 · 1 2 3 4 5 6 · 5 4 3 | gfedcb\|abcdefgh\|gfedcba |
+| `BORDER_WRAP` | 4 5 6 · 1 2 3 4 5 6 · 1 2 3 | cdefgh\|abcdefgh\|abcdefg |
+
+`REFLECT_101` (the default for filters) mirrors without repeating the edge pixel; `REFLECT` repeats it. Both keep the local trend, which is why they are good defaults for smoothing.
+
+<ConvLab showBorders initialKernel="box" caption="The grey ring around the small image is the invented border. Switch the border type and click an edge pixel (column 0 or row 0): the products now include invented values. With BORDER_CONSTANT the edge pixels are pulled towards 0." />
+
+## 3. How much does it matter?
+
+A test: blur a 160 × 100 crop of `sample-scene.png` with a 15 × 15 box, and compare with blurring the full image first and cropping afterwards (the "true" result, where real neighbours exist). Mean absolute error:
+
+| Border | In the 7-pixel band at the edge | Inside |
+| --- | --- | --- |
+| CONSTANT (0) | **32.85** | 0 |
+| REPLICATE | 0.63 | 0 |
+| REFLECT | 0.57 | 0 |
+| REFLECT_101 | 0.75 | 0 |
+| WRAP (via NumPy padding) | 8.06 | 0 |
+
+Only the band within half a kernel of the edge is affected; inside, all modes agree exactly. Black padding is by far the worst for smoothing. Wrap mixes the left and right edges, which are unrelated in a normal photo; it is right only for periodic data (Fourier filtering, 360° images, polar strips from 16.5 along the angle axis).
+
+## 4. Industrial example
+
+A surface inspection measures the mean brightness in a 30-pixel band along the edge of each sheet after a 21 × 21 background filter. With the default border, results were fine; after a refactoring used `BORDER_CONSTANT`, every sheet's edge band read much darker and the "dark edge" alarm fired on all parts. Two fixes were combined: return to `REFLECT_101`, and process a slightly larger ROI (margin = kernel radius) and crop afterwards, so the measured band never depends on invented values at all.
+
+## What you should remember from 17.3
+
+<Takeaways>
+<Takeaway n={1} title="Why">Kernels near the edge need pixels that do not exist.</Takeaway>
+<Takeaway n={2} title="Modes">constant, replicate, reflect, reflect-101 (default), wrap.</Takeaway>
+<Takeaway n={3} title="Effect">Only within half a kernel of the edge; constant 0 darkens, wrap mixes edges.</Takeaway>
+<Takeaway n={4} title="Avoid">Process a ROI with a margin and crop, or use only the valid region.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Pad the row 7, 8, 9 by 2 with `BORDER_REFLECT_101` and with `BORDER_REPLICATE`.
+
+<Solution>
+
+REFLECT_101: **9 8 | 7 8 9 | 8 7**. REPLICATE: **7 7 | 7 8 9 | 9 9**.
+
+</Solution>
+
+**Q2.** A 9 × 9 filter: how wide is the band near each edge that depends on the border mode?
+
+<Solution>
+
+The kernel radius: **4 pixels**.
+
+</Solution>
+
+### Next: 17.4 Separable kernels
+
+Splitting a 2-D kernel into two 1-D passes: same result, far fewer operations.
+
+## Code
+
+Two examples: the five border types on one row, then their effect on a blurred crop.
+
+### 1. copyMakeBorder
+
+```python
+import numpy as np
+import cv2
+
+row = np.array([[1, 2, 3, 4, 5, 6]], np.uint8)
+for name in ["BORDER_CONSTANT", "BORDER_REPLICATE", "BORDER_REFLECT", "BORDER_REFLECT_101", "BORDER_WRAP"]:
+    padded = cv2.copyMakeBorder(row, 0, 0, 3, 3, getattr(cv2, name), value=0)   # top, bottom, left, right
+    print(f"{name:19s}", padded.ravel().tolist())
+print("NumPy equivalents: 'constant', 'edge', 'symmetric', 'reflect', 'wrap' ->", np.pad(row[0], 3, mode="reflect").tolist())
+```
+
+Output:
+
+```text
+BORDER_CONSTANT     [0, 0, 0, 1, 2, 3, 4, 5, 6, 0, 0, 0]
+BORDER_REPLICATE    [1, 1, 1, 1, 2, 3, 4, 5, 6, 6, 6, 6]
+BORDER_REFLECT      [3, 2, 1, 1, 2, 3, 4, 5, 6, 6, 5, 4]
+BORDER_REFLECT_101  [4, 3, 2, 1, 2, 3, 4, 5, 6, 5, 4, 3]
+BORDER_WRAP         [4, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2, 3]
+NumPy equivalents: 'constant', 'edge', 'symmetric', 'reflect', 'wrap' -> [4, 3, 2, 1, 2, 3, 4, 5, 6, 5, 4, 3]
+```
+
+- NumPy's names differ: its `"reflect"` is OpenCV's `REFLECT_101`, its `"symmetric"` is OpenCV's `REFLECT`.
+
+### 2. The effect on a blurred crop
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+truth = cv2.blur(img, (15, 15))[50:150, 80:240]                       # real neighbours available
+crop = img[50:150, 80:240].copy()
+band = np.ones(crop.shape, bool)
+band[7:-7, 7:-7] = False                                               # within 7 px (kernel radius) of the edge
+for name in ["BORDER_CONSTANT", "BORDER_REPLICATE", "BORDER_REFLECT", "BORDER_REFLECT_101"]:
+    err = np.abs(cv2.blur(crop, (15, 15), borderType=getattr(cv2, name)) - truth)
+    print(f"{name:19s} edge band error {err[band].mean():6.2f} | inside {err[~band].mean():.3f}")
+wrapped = cv2.filter2D(np.pad(crop, 7, mode="wrap"), -1, np.ones((15, 15), np.float32) / 225)[7:-7, 7:-7]
+print(f"{'wrap (NumPy pad)':19s} edge band error {np.abs(wrapped - truth)[band].mean():6.2f}")
+try:
+    cv2.blur(crop, (15, 15), borderType=cv2.BORDER_WRAP)
+except cv2.error as e:
+    print("cv2.blur with BORDER_WRAP:", "not supported" if "BORDER_WRAP" in str(e) else "error")
+```
+
+Output:
+
+```text
+BORDER_CONSTANT     edge band error  32.85 | inside 0.000
+BORDER_REPLICATE    edge band error   0.63 | inside 0.000
+BORDER_REFLECT      edge band error   0.57 | inside 0.000
+BORDER_REFLECT_101  edge band error   0.75 | inside 0.000
+wrap (NumPy pad)    edge band error   8.06
+cv2.blur with BORDER_WRAP: not supported
+```
+
+- The filters accept most border types, but not all of them accept `BORDER_WRAP`; pad with `copyMakeBorder` or NumPy first and use the valid part.
+
+## OpenCV API notes
+
+**`borderType`** parameter of `filter2D`, `blur`, `GaussianBlur`, `Sobel`, `Laplacian`, `medianBlur` (median: replicate only), `warpAffine` (with `borderValue`).
+
+**`cv2.copyMakeBorder(src, top, bottom, left, right, borderType, value)`**: explicit padding.
+
+**`BORDER_ISOLATED`**: in C++, a filtered `cv::Mat` ROI uses the real pixels of its parent image outside the ROI unless `BORDER_ISOLATED` is added. From Python, a NumPy slice arrives as a separate image, so filter a region with a margin and crop instead (exercise 2).
+
+## Where it fails
+
+- **No border rule is "correct"**: all of them invent data; results within half a kernel of the edge are estimates.
+- **Large kernels on small images**: most pixels are near an edge.
+- **Measurements near edges**: depend on the rule; keep measurement regions at least a kernel radius from the border.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **`BORDER_CONSTANT` with 0** for smoothing (dark edges, false edge responses).
+- **Confusing NumPy and OpenCV names** (`reflect` ≠ `REFLECT`).
+- **Expecting a NumPy slice to use the pixels around it**: filter with a margin and crop.
+- **Expecting `BORDER_WRAP` to work in every filter.**
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Borders and the Fourier transform
+
+Filtering by multiplication in the frequency domain (Part E) implies circular (wrap-around) convolution, because the DFT treats the image as periodic. To get the same result as spatial filtering with another border rule, pad the image (and the kernel) before the DFT and crop afterwards. The sharp jump between the left and right edges of a non-periodic image also causes the bright cross often seen in image spectra [1].
+
+### Boundary conditions in deblurring
+
+In deconvolution (19.5) the border model matters more: a wrong assumption about pixels outside the image creates strong ringing artefacts that spread inwards. Reflective boundary conditions often give the best results for natural images [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which border type is OpenCV's default for filters?",
+      options: ["BORDER_CONSTANT", "BORDER_REPLICATE", "BORDER_REFLECT_101", "BORDER_WRAP"],
+      answer: 2,
+      explanation: "Mirror without repeating the edge pixel: gfedcb|abcdefgh|gfedcba.",
+    },
+    {
+      question: "Blurring with BORDER_CONSTANT (value 0) makes the image edges…",
+      options: ["Brighter", "Darker", "Unchanged", "Noisier"],
+      answer: 1,
+      explanation: "Zeros are averaged in.",
+    },
+    {
+      question: "Which pixels depend on the border rule for a 7 × 7 kernel?",
+      options: ["All", "Those within 3 pixels of an edge", "Only the corners", "None"],
+      answer: 1,
+      explanation: "The kernel radius.",
+    },
+    {
+      question: "When is BORDER_WRAP the right choice?",
+      options: ["Always", "For periodic data such as 360° images", "For photos", "For masks"],
+      answer: 1,
+      explanation: "Otherwise it mixes unrelated opposite edges.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Pad 10, 20, 30, 40 by 2 on the left only with `BORDER_REFLECT` and with `BORDER_WRAP`.
+
+<Solution>
+
+REFLECT: **20 10 | 10 20 30 40**. WRAP: **30 40 | 10 20 30 40**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Filter the region `img[50:150, 80:240]` with a 15 × 15 box three ways: the NumPy slice directly, a copy of it, and a larger slice with a 7-pixel margin that is cropped after filtering. Compare each with `truth` in the edge band.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+view = img[50:150, 80:240]
+margin = cv2.blur(img[43:157, 73:247], (15, 15))[7:-7, 7:-7]     # filter with real neighbours, then crop
+for name, out in [("slice (view)", cv2.blur(view, (15, 15))), ("copy", cv2.blur(view.copy(), (15, 15))), ("margin, then crop", margin)]:
+    print(f"{name:18s} edge band error {np.abs(out - truth)[band].mean():.2f}")
+```
+
+Output:
+
+```text
+slice (view)       edge band error 0.75
+copy               edge band error 0.75
+margin, then crop  edge band error 0.00
+```
+
+In Python a NumPy slice reaches OpenCV as an independent image: the filter cannot see the pixels around it and applies the border rule, exactly as for a copy. (In C++, a `cv::Mat` ROI does see its parent's pixels unless `BORDER_ISOLATED` is set.) Filtering with a margin of one kernel radius and cropping afterwards gives the exact result.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 3.4 (padding) and Section 4.6 (wraparound error).
+2. M. K. Ng, R. H. Chan, W.-C. Tang, "A fast algorithm for deblurring models with Neumann boundary conditions", *SIAM Journal on Scientific Computing* 21(3), 851–866, 1999.
+3. OpenCV 4.13.0 documentation: `BorderTypes`, `copyMakeBorder`, `borderInterpolate`. https://docs.opencv.org/4.13.0/

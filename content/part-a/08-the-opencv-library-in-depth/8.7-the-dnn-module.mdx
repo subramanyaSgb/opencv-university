@@ -1,0 +1,419 @@
+export const meta = {
+  number: "8.7",
+  title: "The DNN module",
+  minutes: 35,
+  objectives: [
+    "Explain what cv2.dnn does (inference of trained networks) and what it does not (training)",
+    "Prepare input with blobFromImage: size, channel order, mean, scale, NCHW layout",
+    "Load an ONNX model, run forward(), and read the output",
+    "Choose backends and targets (CPU, OpenCL, CUDA, OpenVINO) and know the high-level model classes",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 8.7 (Module 8 plan).
+  Reference tail: examples 1 and 2 are compared automatically. Example 2 builds a tiny ONNX model with the onnx
+  package (pinned in CLAUDE.md) so no download is needed. Example 3 needs a model file from the OpenCV model zoo
+  and starts with "# Needs a model file", so the verifier skips it; no output is claimed.
+*/}
+
+# 8.7 The DNN module
+
+<Definition term="cv2.dnn">OpenCV's deep-learning inference module: it loads a neural network trained elsewhere (usually exported as ONNX), turns images into the input tensor the network expects, and runs the network forward to get scores, boxes or masks. It does not train networks.</Definition>
+
+Deep learning is covered in depth in Part H. This chapter is the practical bridge: how a trained model plugs into an OpenCV program, and the one step where most mistakes happen, preparing the input.
+
+## 1. An analogy
+
+A trained network is like a specialist from another country who learned to judge parts from photographs taken a certain way: always 224 × 224, colours in R, G, B order, brightness rescaled to a fixed range. If you hand them photos prepared differently (B, G, R order, another scale) they still answer, confidently, but wrongly. `blobFromImage` is the step that prepares photos exactly the way the specialist was trained.
+
+## 2. Inference in four steps
+
+<Flow
+  steps={[
+    { label: "Trained model file (.onnx) from PyTorch, TensorFlow …", tone: "world" },
+    { label: "net = cv2.dnn.readNet(...)", tone: "data" },
+    { label: "blob = cv2.dnn.blobFromImage(img, ...); net.setInput(blob)", tone: "process" },
+    { label: "out = net.forward(): scores, boxes, masks → your decision logic", tone: "result" },
+  ]}
+/>
+
+- **Load once**, at start-up. Loading parses the file and allocates memory.
+- **Preprocess every frame** with the exact settings used in training.
+- **forward()** runs all layers and returns the output tensor(s) as NumPy arrays.
+- **Post-process**: argmax for a class, non-maximum suppression (`cv2.dnn.NMSBoxes`) for boxes, threshold for masks.
+
+## 3. The blob: tensor layout
+
+Networks expect a 4-D float tensor in **NCHW** order: N images, C channels, H rows, W columns. An OpenCV image is HWC (rows, columns, channels) and BGR. `blobFromImage` does four things:
+
+| Step | Parameter | Typical values |
+| --- | --- | --- |
+| Resize to the network input | `size=(W, H)` | (224, 224), (320, 320), (640, 640) |
+| Swap B and R | `swapRB=True` | most models trained with RGB images |
+| Subtract a mean | `mean=(m0, m1, m2)` (applied after the swap) | 0, 127.5, or (104, 117, 123) for Caffe models |
+| Multiply by a scale | `scalefactor=s` | 1/255, 1/127.5, 1 |
+
+and then rearranges HWC → CHW and adds the batch axis. The result for one 224 × 224 colour image has shape **(1, 3, 224, 224)**, dtype float32. For per-channel scales (ImageNet mean/std) use `cv2.dnn.blobFromImageWithParams` with `cv2.dnn.Image2BlobParams`.
+
+<BlobLab caption="One pixel through blobFromImage. Pick what the model expects; then flip swapRB to see what the network receives when the channel order is wrong." />
+
+The two most common silent errors are visible here: **swapRB** wrong (red and blue exchanged) and the **wrong scale** (0…255 given to a model trained on 0…1). Neither raises an error; accuracy just drops.
+
+## 4. Formats, backends, targets
+
+**Model formats**: `readNetFromONNX` (recommended: PyTorch, TensorFlow and most training tools can export ONNX), `readNetFromTensorflow`, `readNetFromTFLite`, `readNetFromCaffe`, `readNetFromDarknet`, or `readNet`, which picks by file extension. Not every operator of every framework is supported; unsupported layers fail at load time with a clear error.
+
+**Backend** = which engine runs the layers; **target** = which device:
+
+| Backend | Targets | Needs |
+| --- | --- | --- |
+| `DNN_BACKEND_OPENCV` (default) | `DNN_TARGET_CPU`, `DNN_TARGET_OPENCL`, `DNN_TARGET_OPENCL_FP16` | nothing extra (OpenCL needs a GPU driver, 8.6) |
+| `DNN_BACKEND_CUDA` | `DNN_TARGET_CUDA`, `DNN_TARGET_CUDA_FP16` | CUDA build with cuDNN (8.5) |
+| `DNN_BACKEND_INFERENCE_ENGINE` | CPU, GPU, NPU via OpenVINO | OpenCV built with OpenVINO |
+| `DNN_BACKEND_VKCOM`, `TIMVX`, `CANN`, `WEBNN` | Vulkan GPUs, NPUs | special builds |
+
+```text
+net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA_FP16)
+```
+
+`cv2.dnn.getAvailableTargets(backend)` lists what the current build and machine can use. FP16 targets run in half precision: faster on suitable GPUs, slightly different results.
+
+## 5. High-level model classes
+
+For common tasks, OpenCV wraps the four steps (preprocessing, forward, post-processing) in classes:
+
+| Class | Output |
+| --- | --- |
+| `cv2.dnn_ClassificationModel` | class id and confidence |
+| `cv2.dnn_DetectionModel` | class ids, confidences, boxes (with NMS) |
+| `cv2.dnn_SegmentationModel` | per-pixel class mask |
+| `cv2.dnn_TextDetectionModel_DB` / `_EAST`, `cv2.dnn_TextRecognitionModel` | text boxes, recognised strings |
+| `cv2.dnn_KeypointsModel` | keypoints (pose) |
+| `cv2.FaceDetectorYN`, `cv2.FaceRecognizerSF` | faces with landmarks; face features |
+
+Set the preprocessing once with `model.setInputParams(scale, size, mean, swapRB)`. The OpenCV model zoo (`github.com/opencv/opencv_zoo`) provides tested ONNX models for many of these.
+
+## 6. Industrial example
+
+A packaging line classifies 12 label variants. A small classification network was trained in PyTorch on 224 × 224 RGB crops normalised with ImageNet mean and std, and exported to ONNX. The line PC runs plain `opencv-python-headless` with `DNN_BACKEND_OPENCV` on the CPU: about 8 ms per crop is fast enough at 20 labels per second. Before go-live, the team ran the same 500 validation crops through PyTorch and through `cv2.dnn` and compared the scores: the first attempt disagreed on 30 % of crops, because the crops were passed with `swapRB=False`. With the correct `Image2BlobParams` (swapRB, per-channel mean and std), the two agree to within 1e-4 on every crop. This comparison is now part of every model release. (Timings and percentages here are illustrative.)
+
+## What you should remember from 8.7
+
+<Takeaways>
+<Takeaway n={1} title="Inference only">Train elsewhere, export ONNX, run with cv2.dnn.</Takeaway>
+<Takeaway n={2} title="Blob">Resize, swapRB, mean, scale, NCHW; must match training exactly.</Takeaway>
+<Takeaway n={3} title="Steps">readNet once; per frame blobFromImage → setInput → forward → post-process.</Takeaway>
+<Takeaway n={4} title="Hardware">Backend + target: CPU by default; OpenCL, CUDA, OpenVINO with suitable builds.</Takeaway>
+<Takeaway n={5} title="Validate">Compare outputs with the training framework on the same images.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 640 × 480 BGR frame goes into `blobFromImage(img, 1/255, (320, 320), swapRB=True)`. What is the blob's shape and value range?
+
+<Solution>
+
+**(1, 3, 320, 320)**, float32, values **0…1**, channel 0 = R.
+
+</Solution>
+
+**Q2.** A model was trained with pixels scaled to −1…1. Which `scalefactor` and `mean`?
+
+<Solution>
+
+`mean=(127.5, 127.5, 127.5)`, `scalefactor=1/127.5`: (0 − 127.5)/127.5 = −1, (255 − 127.5)/127.5 = 1.
+
+</Solution>
+
+**Q3.** Your detector finds fewer red parts than in the training tool, but blue parts are fine. First suspect?
+
+<Solution>
+
+The channel order: `swapRB` does not match training, so red appears blue to the network.
+
+</Solution>
+
+### Next: 8.8 G-API
+
+Describing a pipeline as a graph and letting OpenCV run it efficiently.
+
+## Code
+
+Three examples: `blobFromImage` from scratch, a complete ONNX model built and run without downloads, and the typical pattern with a model from the OpenCV zoo.
+
+### 1. From scratch: blobFromImage
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")                          # BGR uint8, 320 x 200
+size, scale, mean = (64, 48), 1 / 127.5, (127.5, 127.5, 127.5)
+
+def blob_numpy(bgr, size, scale, mean, swap_rb):
+    x = cv2.resize(bgr, size).astype(np.float32)              # 1. resize to the network input (w, h)
+    if swap_rb:
+        x = x[:, :, ::-1]                                      # 2. BGR -> RGB
+    x = (x - np.float32(mean)) * np.float32(scale)             # 3. subtract mean, then scale
+    return x.transpose(2, 0, 1)[np.newaxis].copy()             # 4. HWC -> NCHW, add batch axis
+
+ours = blob_numpy(img, size, scale, mean, swap_rb=True)
+cv = cv2.dnn.blobFromImage(img, scalefactor=scale, size=size, mean=mean, swapRB=True, crop=False)
+print("shape ours", ours.shape, "| cv2", cv.shape, cv.dtype)
+print("max difference:", float(np.abs(ours - cv).max()))
+print("value range:", round(float(cv.min()), 3), "to", round(float(cv.max()), 3))
+```
+
+Output:
+
+```text
+shape ours (1, 3, 48, 64) | cv2 (1, 3, 48, 64) float32
+max difference: 0.0
+value range: -1.0 to 1.0
+```
+
+- The NumPy version is identical to OpenCV's: there is nothing hidden in `blobFromImage`.
+- `size` is (width, height) like every OpenCV size; the blob shape is (1, 3, height, width).
+- `crop=True` would resize keeping the aspect ratio and cut the centre; `crop=False` stretches.
+
+### 2. OpenCV: build, load and run an ONNX model
+
+To run without downloads, we build a tiny "texture classifier" with the `onnx` package: two Sobel filters, absolute value, global average, a linear layer and softmax. Real models are the same kind of file, just with millions of weights.
+
+```python
+import numpy as np
+import cv2
+import onnx
+from onnx import helper, numpy_helper, TensorProto
+
+# A tiny "texture classifier": Sobel x/y -> |.| -> global average -> 2 scores -> softmax
+sobel_x = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], np.float32) / 8
+W_conv = np.stack([sobel_x, sobel_x.T])[:, np.newaxis]        # (2 filters, 1 channel, 3, 3)
+W_fc = np.array([[-100.0, -100.0], [100.0, 100.0]], np.float32)   # class 0 "smooth", class 1 "textured"
+b_fc = np.array([7.0, -7.0], np.float32)
+nodes = [
+    helper.make_node("Conv", ["input", "W_conv"], ["edges"], pads=[1, 1, 1, 1]),
+    helper.make_node("Abs", ["edges"], ["mag"]),
+    helper.make_node("GlobalAveragePool", ["mag"], ["pooled"]),
+    helper.make_node("Flatten", ["pooled"], ["features"]),
+    helper.make_node("Gemm", ["features", "W_fc", "b_fc"], ["scores"], transB=1),
+    helper.make_node("Softmax", ["scores"], ["prob"], axis=1),
+]
+graph = helper.make_graph(
+    nodes, "texture",
+    [helper.make_tensor_value_info("input", TensorProto.FLOAT, [1, 1, 64, 64])],
+    [helper.make_tensor_value_info("prob", TensorProto.FLOAT, [1, 2])],
+    [numpy_helper.from_array(W_conv, "W_conv"), numpy_helper.from_array(W_fc, "W_fc"), numpy_helper.from_array(b_fc, "b_fc")],
+)
+model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+onnx.checker.check_model(model)
+onnx.save(model, "texture.onnx")
+
+net = cv2.dnn.readNetFromONNX("texture.onnx")
+print("outputs:", net.getUnconnectedOutLayersNames())
+smooth = cv2.imread("sample-plate-good.png", cv2.IMREAD_GRAYSCALE)
+rough = smooth.copy()
+for y in range(0, rough.shape[0], 4):
+    cv2.line(rough, (0, y), (rough.shape[1] - 1, y + 20), 255, 1)   # add scratches
+for name, im in [("smooth plate", smooth), ("scratched plate", rough)]:
+    blob = cv2.dnn.blobFromImage(im, scalefactor=1 / 255, size=(64, 64))
+    net.setInput(blob)
+    p = net.forward()
+    print(f"{name:15s}: blob {blob.shape} -> P(smooth)={p[0, 0]:.3f} P(textured)={p[0, 1]:.3f}")
+
+def forward_numpy(x):
+    """The same network in NumPy: zero-padded 3x3 correlation, |.|, mean, linear, softmax."""
+    xp = np.pad(x[0, 0], 1)
+    h, w = x.shape[2:]
+    feats = []
+    for k in W_conv[:, 0]:
+        out = sum(k[i, j] * xp[i:i + h, j:j + w] for i in range(3) for j in range(3))
+        feats.append(np.abs(out).mean())
+    s = W_fc @ np.array(feats, np.float32) + b_fc
+    e = np.exp(s - s.max())
+    return np.array(feats), e / e.sum()
+
+for name, im in [("smooth plate", smooth), ("scratched plate", rough)]:
+    blob = cv2.dnn.blobFromImage(im, scalefactor=1 / 255, size=(64, 64))
+    net.setInput(blob)
+    f, p = forward_numpy(blob)
+    print(f"{name:15s}: features {[round(float(v), 3) for v in f]} | numpy P(textured)={p[1]:.3f} | same as cv2.dnn: {np.allclose(p, net.forward()[0], atol=1e-4)}")
+```
+
+Output:
+
+```text
+outputs: ('prob',)
+smooth plate   : blob (1, 1, 64, 64) -> P(smooth)=0.991 P(textured)=0.009
+scratched plate: blob (1, 1, 64, 64) -> P(smooth)=0.006 P(textured)=0.994
+smooth plate   : features [0.02, 0.026] | numpy P(textured)=0.009 | same as cv2.dnn: True
+scratched plate: features [0.032, 0.063] | numpy P(textured)=0.994 | same as cv2.dnn: True
+```
+
+- A gray image gives a 1-channel blob (1, 1, 64, 64), which matches the model's declared input.
+- The NumPy forward pass reproduces `cv2.dnn` exactly: a network is just a fixed sequence of array operations. ("Conv" layers in deep learning compute correlation, without flipping the kernel.)
+- The scratches double the vertical-gradient feature (0.026 → 0.063), which drives the decision.
+
+### 3. A model from the OpenCV zoo
+
+```python
+# Needs a model file: face_detection_yunet_2023mar.onnx from github.com/opencv/opencv_zoo (models/face_detection_yunet)
+import numpy as np
+import cv2
+
+img = cv2.imread("people.jpg")                                  # any photo with faces
+h, w = img.shape[:2]
+det = cv2.FaceDetectorYN.create("face_detection_yunet_2023mar.onnx", "", (w, h), score_threshold=0.8)
+det.setInputSize((w, h))                                         # must match the image passed to detect()
+_, faces = det.detect(img)                                       # N x 15: box (x, y, w, h), 5 landmarks, score
+for f in (faces if faces is not None else []):
+    x, y, bw, bh = f[:4].astype(int)
+    cv2.rectangle(img, (x, y), (x + bw, y + bh), (0, 255, 0), 2)
+    print(f"face at ({x}, {y}) size {bw} x {bh}, score {f[14]:.2f}")
+cv2.imwrite("people-faces.jpg", img)
+```
+
+No output is shown here (it depends on your photo). The same pattern (create once with the model path, set the input size, call per frame) applies to the zoo's other models; check each model's page for its input size and preprocessing.
+
+## OpenCV API notes
+
+**Loading**: `cv2.dnn.readNet(model[, config[, framework]])`, `readNetFromONNX(path)`, `readNetFromTensorflow`, `readNetFromTFLite`, `readNetFromCaffe(prototxt, caffemodel)`, `readNetFromDarknet(cfg, weights)`.
+
+**Input**: `blobFromImage(image, scalefactor=1.0, size, mean, swapRB=False, crop=False, ddepth=CV_32F)`, `blobFromImages(list, …)` for batches, `blobFromImageWithParams(image, Image2BlobParams)`, `imagesFromBlob(blob)`.
+
+**Running**: `net.setInput(blob[, name])`, `net.forward([outputName])`, `net.forward(outNames)` for several outputs, `net.getUnconnectedOutLayersNames()`, `net.getPerfProfile()` (total and per-layer ticks).
+
+**Device**: `net.setPreferableBackend(id)`, `net.setPreferableTarget(id)`, `cv2.dnn.getAvailableTargets(backend)`.
+
+**Post-processing**: `cv2.dnn.NMSBoxes(boxes, scores, score_threshold, nms_threshold)`, `NMSBoxesBatched` (per class), `softNMSBoxes`.
+
+## Where it fails
+
+- **Unsupported operators**: newer or exotic layers may not import; simplify the export (`opset` version, `onnxsim`) or use another runtime (ONNX Runtime, OpenVINO, TensorRT).
+- **Dynamic shapes**: models with variable input size may need a fixed size at export.
+- **Speed**: on strong GPUs, dedicated runtimes (TensorRT) are often faster than `cv2.dnn`.
+- **Preprocessing mismatch**: no error, just poor accuracy; validate against the training framework.
+- **Training**: `cv2.dnn` cannot train or fine-tune.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Wrong swapRB, mean or scale** for the model.
+- **Loading the network inside the frame loop**.
+- **Passing an HWC image instead of a blob** to `setInput`.
+- **Forgetting NMS** for detectors: many overlapping boxes per object.
+- **Mapping boxes back with the wrong scale** when the blob was resized or cropped.
+- **Not warming up** before timing (the first forward allocates and optimises).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### What happens at load time
+
+The importer converts the file's graph into OpenCV layers, then the network is "set up" on the first forward: shapes are inferred, memory is planned and reused between layers, and some layers are fused (convolution + batch normalisation + activation become one layer). This is why the first `forward()` is slower [1].
+
+### FP16 and INT8
+
+Half-precision targets (`*_FP16`) halve memory traffic and use fast GPU units; results differ in the third or fourth decimal. OpenCV can also run some quantised INT8 ONNX models (QuantizeLinear/DequantizeLinear operators); quantisation must be done when exporting the model [1].
+
+### ONNX in one paragraph
+
+An ONNX file is a protobuf with a graph of nodes (operators such as Conv, Relu, Gemm), named tensors between them, initialisers (the trained weights), and an opset version that fixes the meaning of each operator. Example 2 builds exactly this, by hand [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What layout does blobFromImage return for one colour image?",
+      options: ["(H, W, 3)", "(1, 3, H, W)", "(3, H, W, 1)", "(1, H, W, 3)"],
+      answer: 1,
+      explanation: "NCHW with N = 1.",
+    },
+    {
+      question: "With swapRB=True and mean=(m0, m1, m2), the mean m0 is subtracted from…",
+      options: ["the B channel", "the R channel (after the swap)", "all channels", "nothing"],
+      answer: 1,
+      explanation: "The mean is applied after the swap, in the new channel order.",
+    },
+    {
+      question: "Which file format is the recommended way to bring a PyTorch model into OpenCV?",
+      options: [".pth", "ONNX", ".h5", "pickle"],
+      answer: 1,
+      explanation: "Export to ONNX, then cv2.dnn.readNetFromONNX.",
+    },
+    {
+      question: "Can cv2.dnn train a network?",
+      options: ["Yes, with net.fit()", "No, inference only", "Only on GPU", "Only Caffe models"],
+      answer: 1,
+      explanation: "Training happens in another framework.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A model expects RGB input normalised with mean (0.485, 0.456, 0.406) and std (0.229, 0.224, 0.225) on 0…1 values. Compute the blob values for the BGR pixel (10, 20, 30).
+
+<Solution>
+
+RGB = (30, 20, 10) / 255 = (0.1176, 0.0784, 0.0392). (0.1176 − 0.485)/0.229 = **−1.604**; (0.0784 − 0.456)/0.224 = **−1.686**; (0.0392 − 0.406)/0.225 = **−1.630**. (The ImageNet preset in the lab shows these numbers.)
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Reproduce exercise 1 with `cv2.dnn.blobFromImageWithParams` and `Image2BlobParams` on a 2 × 2 image filled with that pixel, and print the three channel values of pixel (0, 0).
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+img = np.zeros((2, 2, 3), np.uint8)
+img[:] = (10, 20, 30)                                             # B, G, R
+p = cv2.dnn.Image2BlobParams()
+p.scalefactor = (1 / (255 * 0.229), 1 / (255 * 0.224), 1 / (255 * 0.225))
+p.mean = (0.485 * 255, 0.456 * 255, 0.406 * 255)
+p.swapRB = True
+p.size = (2, 2)
+blob = cv2.dnn.blobFromImageWithParams(img, p)
+print(blob.shape, [round(float(v), 3) for v in blob[0, :, 0, 0]])
+```
+
+Output:
+
+```text
+(1, 3, 2, 2) [-1.604, -1.686, -1.63]
+```
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A classifier trained on 224 × 224 crops works well offline but poorly on the line, where the program feeds the whole 1280 × 1024 frame resized to 224 × 224. Name two reasons.
+
+<Solution>
+
+(1) **Scale and content**: the training crops showed one label filling the image; the whole frame shows a small label among background, so the network sees different content at a much smaller size. (2) **Aspect ratio**: 1280 × 1024 squashed to a square distorts shapes the network never saw. Fix: crop the label region first (classic detection or a detector), then resize like in training, and validate on line images.
+
+</Solution>
+
+## References
+
+1. OpenCV 4.13.0 documentation, dnn module (Net, blobFromImage, backends and targets, high-level models) and the DNN tutorials. https://docs.opencv.org/4.13.0/
+2. ONNX: Open Neural Network Exchange, specification and operator documentation. https://onnx.ai/
+3. OpenCV model zoo. https://github.com/opencv/opencv_zoo
+4. W. Wu, H. Peng, S. Yu, "YuNet: A Tiny Millisecond-level Face Detector", *Machine Intelligence Research* 20, 2023.
+5. I. Goodfellow, Y. Bengio, A. Courville, *Deep Learning*, MIT Press, 2016: Chapter 9 (convolutional networks).

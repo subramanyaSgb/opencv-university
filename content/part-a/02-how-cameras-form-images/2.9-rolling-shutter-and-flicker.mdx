@@ -1,0 +1,500 @@
+export const meta = {
+  number: "2.9",
+  title: "Rolling shutter and flicker",
+  minutes: 40,
+  objectives: [
+    "Explain how global and rolling shutters expose the rows of a sensor",
+    "Predict rolling-shutter skew from readout time, speed and scale",
+    "Explain why mains-powered lamps flicker at twice the mains frequency",
+    "Choose exposure times and lighting that avoid flicker",
+    "Detect flicker banding in an image with OpenCV",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 2.9 (Module 2 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+  Skew and banding images are simulations.
+*/}
+
+# 2.9 Rolling shutter and flicker
+
+<Definition term="Rolling shutter">a sensor that exposes its rows one after another instead of all at the same time.</Definition>
+
+Two timing effects surprise many engineers the first time they see them: moving objects that **lean** in the image, and **dark bands** across images taken under factory lights. Both come from **time**: when each row is exposed, and how the light changes during that time.
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Rows exposed at different times", tone: "process" },
+    { label: "Object moves / light changes meanwhile", tone: "world" },
+    { label: "Skew and bands", tone: "result" },
+  ]}
+/>
+
+## 1. A sensor is read row by row
+
+After the exposure, a sensor's millions of pixels cannot all be read at once. They are read **row by row**, each row taking a few microseconds (the **line time**). A 1080-row sensor at 15 µs per row needs about **16 ms** to read everything.
+
+## 2. Global shutter
+
+A **global shutter** sensor starts and stops the exposure of **all pixels at the same moment**, stores each pixel's charge, and then reads the rows out at leisure. The image is a true **snapshot**: every pixel shows the same instant.
+
+## 3. Rolling shutter
+
+A **rolling shutter** sensor has no storage per pixel. So each row is exposed **just before it is read**: row 1 first, row 2 a line time later, and so on. The exposure "rolls" down the sensor.
+
+<ShutterRows caption="Each bar is one row's exposure window. Global: all rows look at the same moment. Rolling: each row looks a little later than the row above." />
+
+## 4. Why rolling shutters exist
+
+Rolling-shutter pixels are **simpler**: no in-pixel storage. That makes them **cheaper**, often **lower noise** and with more light-sensitive area. Phones, webcams, many CCTV cameras and many low-cost industrial cameras use them. For **still** scenes they are excellent.
+
+## 5. Effect 1: moving objects lean
+
+If the object moves while the rows are being exposed, each row catches it at a **different position**. Vertical bars moving sideways come out **slanted**:
+
+<ImageCompare
+  before={{ src: "/images/sample-shutter-global.png", label: "Global shutter" }}
+  after={{ src: "/images/sample-shutter-rolling.png", label: "Rolling shutter" }}
+  width={320}
+  height={200}
+  alt="Three vertical bars moving sideways: straight with a global shutter, slanted with a rolling shutter"
+  caption="Simulated: the bars move 0.25 pixel during each row's line time. Each lower row sees them a little further along."
+/>
+
+## 6. How big is the skew?
+
+The bottom row is exposed one **readout time** after the top row. In that time the object travels:
+
+```text
+skew (px) = speed × readout time ÷ mm per pixel
+```
+
+**Example.** 1080 rows × 15 µs = **16.2 ms**. A billet at **2 m/s** moves **32.4 mm** meanwhile. At 0.5 mm/px that is **65 pixels** of skew from top to bottom of the frame.
+
+<Callout kind="mistake">
+
+Skew is **not** blur. Each row can be perfectly sharp (short exposure) and the object still comes out **distorted**. A short exposure does not fix rolling-shutter skew.
+
+</Callout>
+
+## 7. Other rolling-shutter effects
+
+- **Wobble ("jello")**: a vibrating camera makes straight lines wave.
+- **Bent rotating parts**: fan blades, rollers or wheels look curved or broken.
+- **Partial flash**: a short flash lights only the rows that happen to be exposing at that moment; the rest of the frame stays dark.
+
+## 8. Fixes for rolling shutter
+
+<Columns>
+<Panel title="Best" tone="good">
+Use a **global-shutter camera** for anything that moves. Most machine-vision cameras offer global shutter models.
+</Panel>
+<Panel title="Work-arounds" tone="a">
+A faster readout (fewer rows, smaller region of interest), a slower object, or a strobe fired while **all** rows are exposing (a long exposure with the flash in the overlap, in a dark enclosure).
+</Panel>
+</Columns>
+
+## 9. Flicker: lamps are not steady
+
+Most plant lighting runs on **AC mains**. The current rises and falls 50 times a second (50 Hz, as in India and Europe) or 60 times (60 Hz). Light output peaks on **both** halves of each cycle, so lamps flicker at **twice** the mains frequency:
+
+<Equation terms={[{ value: "50 Hz", label: "mains" }, { op: "×", value: "2", label: "both half-cycles" }, { op: "=", value: "100 Hz", label: "flicker", result: true }, { op: "→", value: "10 ms", label: "period", result: true }]} />
+
+Fluorescent tubes, high-intensity discharge lamps (sodium, metal halide, common in high-bay halls) and many cheap LED drivers flicker strongly. Incandescent and well-designed LED drivers flicker much less. Our eyes do not see 100 Hz; cameras do.
+
+## 10. Flicker with a global shutter
+
+With a global shutter, all rows see the same moment, so the image is uniform. But **each frame** may catch the lamp at a different point of its cycle: the **brightness jumps from frame to frame**. Thresholds tuned on one frame fail on the next.
+
+## 11. Flicker with a rolling shutter: bands
+
+With a rolling shutter, rows exposed at the lamp's peak are bright and rows exposed at its dip are dark: **horizontal bands** across the image, often drifting from frame to frame.
+
+<ImageCompare
+  before={{ src: "/images/sample-pinhole-scene.png", label: "Steady light" }}
+  after={{ src: "/images/sample-flicker-bands.png", label: "100 Hz flicker, rolling" }}
+  width={320}
+  height={200}
+  alt="The test chart under steady light, and with horizontal brightness bands from flickering light and a rolling shutter"
+  caption="Simulated: 2.5 ms exposure, light varying ±30 % at 100 Hz. The brightness changes from top to bottom."
+/>
+
+## 12. The exposure rule
+
+Each row (or frame) averages the light over its exposure. If the exposure lasts a **whole number of flicker periods**, every row collects the same total light and the flicker **cancels**:
+
+| Exposure | Row-to-row variation (100 Hz, ±30 % light) |
+| --- | --- |
+| 1 ms | 61 % |
+| 2.5 ms | 57 % |
+| 5 ms | 40 % |
+| 7.5 ms | 18 % |
+| **10 ms** | **0 %** |
+| **20 ms** | **0 %** |
+
+*(From Code example 2.)* So: at 50 Hz mains use **10, 20, 30 … ms**; at 60 Hz use **8.33, 16.67 … ms**.
+
+## 13. But moving parts need short exposures
+
+Chapter 2.6 asked for exposures of tens to hundreds of **micro**seconds for moving parts. Those are far shorter than 10 ms, so the exposure rule cannot help. The real fix is **your own light**:
+
+<Callout kind="key">
+
+Do not rely on plant lighting. Use **DC-driven or high-frequency LED** lights (or strobes) that are far brighter than the room light at the inspection spot, ideally inside a shield or enclosure.
+
+</Callout>
+
+## 14. Try it
+
+<ShutterLab caption="Simulated sensor: 200 rows read 75 µs apart (15 ms from top to bottom), camera at 30 frames per second. The lamp's light varies ±30 %. Press 'Next frame' to see how the image changes between frames." />
+
+## 15. Finding flicker in your images
+
+Flicker is easy to detect: average each **row** of an image of a plain surface and look at the profile. A periodic ripple means flicker; the ripple's period in rows times the line time gives the frequency (Code example 4 finds **100 Hz**). Over several frames, compare the **mean brightness**: jumps mean flicker with a global shutter.
+
+## 16. Industrial example
+
+A camera over a fast roller table in a steel plant hall, lit by high-bay discharge lamps on 50 Hz mains:
+
+<Flow
+  steps={[
+    { label: "Fast product → short exposure (2.6)", tone: "world" },
+    { label: "Short exposure → plant lamps' 100 Hz flicker visible", tone: "process" },
+    { label: "Rolling shutter → skew + bands", tone: "process" },
+    { label: "Fix: global-shutter camera + own bright DC or strobe LED light", tone: "result" },
+  ]}
+/>
+
+## What you should remember from 2.9
+
+<Takeaways>
+<Takeaway n={1} title="Global shutter">All rows exposed together: a true snapshot. Choose it for moving objects.</Takeaway>
+<Takeaway n={2} title="Rolling shutter">Rows exposed one after another: moving objects skew by speed × readout time.</Takeaway>
+<Takeaway n={3} title="Flicker">Mains-powered lamps flicker at twice the mains frequency (100 Hz at 50 Hz mains).</Takeaway>
+<Takeaway n={4} title="Exposure rule">Whole multiples of the flicker period (10 ms at 100 Hz) cancel flicker.</Takeaway>
+<Takeaway n={5} title="Own light">For short exposures, use DC / high-frequency LED or strobe lighting, not plant lighting.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A rolling-shutter camera has 2000 rows at 10 µs per row. A part moves at 1 m/s, scale 0.25 mm/px. How much skew?
+
+<Solution>
+
+Readout 2000 × 10 µs = 20 ms; travel 1000 mm/s × 0.02 s = 20 mm; 20 / 0.25 = **80 px**.
+
+</Solution>
+
+**Q2.** Does a 50 µs exposure remove rolling-shutter skew?
+
+<Solution>
+
+**No.** It removes motion **blur** within each row, but the rows are still exposed at different times, so the object is still skewed.
+
+</Solution>
+
+**Q3.** In a 60 Hz country, at what frequency do fluorescent lamps flicker, and which exposures cancel it?
+
+<Solution>
+
+**120 Hz** (period 8.33 ms); exposures of **8.33, 16.67, 25 ms…** cancel it.
+
+</Solution>
+
+**Q4.** Images from a global-shutter camera under factory lights have the same layout but different brightness every frame. Why?
+
+<Solution>
+
+Mains **flicker**: each short exposure catches the lamps at a different point of their 100 Hz cycle.
+
+</Solution>
+
+**Q5.** Why is "use a 10 ms exposure" not the answer for a fast production line?
+
+<Solution>
+
+At 10 ms a fast part moves too far: heavy motion blur (2.6). Use short exposures with your own bright, steady (DC or strobe) light.
+
+</Solution>
+
+### Next: 2.10 Area-scan vs line-scan cameras
+
+The last chapter of Module 2: cameras that take whole frames, and cameras that take **one line at a time** while the object moves past, building images of any length. Ideal for strip, slabs and webs.
+
+## Code
+
+Four calculations: rolling-shutter skew, flicker banding against exposure time, measuring skew with `cv2.fitLine`, and finding the flicker frequency from an image.
+
+### 1. From scratch: how much skew?
+
+```python
+import numpy as np
+
+rows = 1080
+line_time = 15e-6              # seconds between the start of one row and the next
+speed = 2.0                    # m/s, horizontal
+mm_per_px = 0.5
+
+readout = rows * line_time
+travel_mm = speed * 1000 * readout
+print(f"top-to-bottom delay: {readout * 1000:.1f} ms")
+print(f"object travel meanwhile: {travel_mm:.1f} mm = {travel_mm / mm_per_px:.0f} px of skew")
+print(f"slant angle: {np.degrees(np.arctan((travel_mm / mm_per_px) / rows)):.1f} deg")
+```
+
+Output:
+
+```text
+top-to-bottom delay: 16.2 ms
+object travel meanwhile: 32.4 mm = 65 px of skew
+slant angle: 3.4 deg
+```
+
+- 3.4° looks small, but a measurement of the object's position differs by 65 pixels between its top and bottom rows.
+
+### 2. From scratch: flicker banding against exposure time
+
+```python
+import numpy as np
+
+flicker_hz = 100.0               # lamp on 50 Hz mains flickers at 100 Hz
+depth = 0.3                      # light varies +-30 %
+line_time = 15e-6
+w = 2 * np.pi * flicker_hz
+
+def row_brightness(t0, exposure):
+    # average of 1 + depth*cos(w t) over [t0, t0 + exposure]
+    return 1 + depth * (np.sin(w * (t0 + exposure)) - np.sin(w * t0)) / (w * exposure)
+
+starts = np.arange(1080) * line_time
+for exp_ms in [1.0, 2.5, 5.0, 7.5, 10.0, 20.0]:
+    b = row_brightness(starts, exp_ms / 1000)
+    print(f"exposure {exp_ms:4.1f} ms: rows vary {100 * (b.max() - b.min()) / b.mean():5.1f} %")
+```
+
+Output:
+
+```text
+exposure  1.0 ms: rows vary  61.1 %
+exposure  2.5 ms: rows vary  56.6 %
+exposure  5.0 ms: rows vary  39.5 %
+exposure  7.5 ms: rows vary  18.1 %
+exposure 10.0 ms: rows vary   0.0 %
+exposure 20.0 ms: rows vary   0.0 %
+```
+
+- The average of a cosine over a window is a closed form: (sin at the end − sin at the start) ÷ (ω × window).
+- At exactly one or two periods (10 ms, 20 ms) the sines are equal and the ripple vanishes.
+
+### 3. OpenCV: measure the lean with `cv2.fitLine`
+
+```python
+import numpy as np
+import cv2
+
+h, w = 240, 320
+bar = np.zeros((h, w), np.uint8)
+bar[:, 100:130] = 220                         # a vertical bar, as a global shutter sees it
+
+skew_px_per_row = 0.25                        # the bar moves 0.25 px during each row time
+rolling = np.zeros_like(bar)
+for y in range(h):
+    rolling[y] = np.roll(bar[y], int(round(y * skew_px_per_row)))
+
+for name, img in [("global", bar), ("rolling", rolling)]:
+    pts = []
+    for y in range(h):                        # left edge of the bar in each row
+        xs = np.flatnonzero(img[y] > 110)
+        pts.append((xs[0], y))
+    vx, vy, x0, y0 = cv2.fitLine(np.array(pts, np.float32), cv2.DIST_L2, 0, 0.01, 0.01).ravel()
+    print(f"{name:7s}: edge leans {np.degrees(np.arctan2(vx, vy)):5.1f} deg from vertical")
+```
+
+Output:
+
+```text
+global : edge leans  -0.0 deg from vertical
+rolling: edge leans  14.0 deg from vertical
+```
+
+- `np.roll` shifts each row sideways by the distance the bar moved before that row was exposed.
+- `cv2.fitLine(points, distType, param, reps, aeps)` returns a unit direction (vx, vy) and a point (x0, y0) on the best-fit line.
+- 0.25 px per row is atan(0.25) = 14.0°. Knowing the speed, you could correct for it, but a global shutter avoids the problem.
+
+### 4. OpenCV: find the flicker frequency from the row profile
+
+```python
+import numpy as np
+import cv2
+
+# a plain gray wall under a 100 Hz flickering lamp, rolling shutter, 2.5 ms exposure
+h, w = 1000, 64
+line_time, exposure, f = 30e-6, 2.5e-3, 100.0
+wt = 2 * np.pi * f
+t0 = np.arange(h) * line_time
+row_gain = 1 + 0.3 * (np.sin(wt * (t0 + exposure)) - np.sin(wt * t0)) / (wt * exposure)
+img = np.clip(np.rint(np.outer(row_gain, np.ones(w)) * 120), 0, 255).astype(np.uint8)
+
+profile = cv2.reduce(img, 1, cv2.REDUCE_AVG, dtype=cv2.CV_32F).ravel()   # mean of each row
+spectrum = np.abs(np.fft.rfft(profile - profile.mean()))
+k = int(np.argmax(spectrum))
+period_rows = h / k
+print(f"row means from {profile.min():.0f} to {profile.max():.0f}")
+print(f"bands repeat every {period_rows:.0f} rows -> {1 / (period_rows * line_time):.0f} Hz flicker")
+```
+
+Output:
+
+```text
+row means from 88 to 152
+bands repeat every 333 rows -> 100 Hz flicker
+```
+
+- `cv2.reduce(img, 1, cv2.REDUCE_AVG)` collapses each row to its mean (dim 1 = across columns), giving a one-column profile.
+- The strongest frequency of the profile (FFT, Chapter 20) is 3 cycles over 1000 rows: one band every 333 rows. With 30 µs per row that is 10 ms: **100 Hz**.
+
+## OpenCV API notes
+
+**`cv2.fitLine(points, distType, param, reps, aeps) → [vx, vy, x0, y0]`**: points as an N × 2 float32 array; `cv2.DIST_L2` is ordinary least squares, `cv2.DIST_HUBER` and others resist outliers.
+
+**`cv2.reduce(src, dim, rtype[, dtype])`**: `dim = 0` collapses to one row (per-column statistics), `dim = 1` to one column (per-row). `rtype`: `REDUCE_SUM`, `REDUCE_AVG`, `REDUCE_MAX`, `REDUCE_MIN`. Set `dtype` for sums of 8-bit images to avoid overflow.
+
+**Shutter mode is a camera property.** Datasheets state "global shutter" or "rolling shutter"; some sensors offer both or a "global reset release" mode. OpenCV cannot change it.
+
+## Where it fails
+
+- **Skew correction in software** assumes known, constant motion. Vibration or rotation give non-linear distortions that are hard to undo.
+- **The exposure rule** assumes a stable mains frequency and one dominant flicker; several lamps on different phases mix.
+- **Simulated flicker** here is a pure sine; real lamps have sharper waveforms with harmonics.
+- **LED lights** vary: some are perfectly steady, others flicker with PWM dimming at hundreds of hertz or more, which no simple exposure rule cancels.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Buying a rolling-shutter camera for a moving line** because it has more megapixels for the price.
+- **Shortening the exposure to fix skew.** It fixes blur, not skew.
+- **Tuning an inspection under office lights** and installing it under 100 Hz high-bay lamps.
+- **Dimming LED lights with PWM** in front of a camera.
+- **Ignoring frame-to-frame brightness changes**: they are often flicker, not a camera fault.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Global shutter pixels
+
+Global-shutter CMOS pixels add an in-pixel storage node so that all pixels can end their exposure together and wait to be read. The extra transistors take area from the photodiode and the storage node can leak, which is why global-shutter sensors historically had lower fill factor or more noise; modern designs have narrowed the gap [1].
+
+### Rolling shutter as geometry
+
+For a camera moving at constant velocity, each row has its own pose. Structure-from-motion and visual odometry on phones model this explicitly ("rolling-shutter camera models") instead of treating the frame as one instant [2].
+
+### Flicker and the mains
+
+Light output follows the square of the current (or the discharge's response), so it peaks twice per mains cycle. The flicker depth depends on the lamp type and its ballast or driver; electronic high-frequency ballasts largely remove it [3].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does a global shutter guarantee?",
+      options: ["No motion blur", "All pixels are exposed over the same time window", "No noise", "Higher resolution"],
+      answer: 1,
+      explanation: "Every row sees the same instant, so moving objects are not skewed (they can still blur if the exposure is long).",
+    },
+    {
+      question: "Readout 20 ms, speed 0.5 m/s, scale 0.2 mm/px. Rolling-shutter skew?",
+      options: ["10 px", "20 px", "50 px", "100 px"],
+      answer: 2,
+      explanation: "500 mm/s × 0.02 s = 10 mm; 10 / 0.2 = 50 px.",
+    },
+    {
+      question: "Lamps on 50 Hz mains flicker at…",
+      options: ["25 Hz", "50 Hz", "100 Hz", "200 Hz"],
+      answer: 2,
+      explanation: "Light peaks on both halves of each cycle: twice the mains frequency.",
+    },
+    {
+      question: "Which exposure cancels 100 Hz flicker?",
+      options: ["1 ms", "5 ms", "10 ms", "12 ms"],
+      answer: 2,
+      explanation: "One full flicker period (10 ms); multiples (20 ms, 30 ms…) also work.",
+    },
+    {
+      question: "Horizontal bands appear in a rolling-shutter camera's images under fluorescent light. What is the most robust fix for a fast line?",
+      options: ["Raise the gain", "Use a 10 ms exposure", "Add a bright DC/high-frequency LED or strobe light", "Average more frames"],
+      answer: 2,
+      explanation: "Your own steady light dominates the flicker and still allows short exposures.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 1200-row rolling-shutter camera reads a row every 20 µs. It looks down at bars moving at 3 m/s at 0.4 mm/px. (a) Readout time? (b) Skew in pixels? (c) What camera property would you change?
+
+<Solution>
+
+(a) 1200 × 20 µs = **24 ms**. (b) 3000 mm/s × 0.024 s = 72 mm → 72 / 0.4 = **180 px**. (c) Use a **global-shutter** camera (or at least a much faster readout / smaller region of interest).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the `row_brightness` function from Code example 2, find which exposures between 1 and 20 ms (in 0.5 ms steps) give less than 1 % row variation for **120 Hz** flicker.
+
+<Solution>
+
+```python
+import numpy as np
+
+w = 2 * np.pi * 120.0
+starts = np.arange(1080) * 15e-6
+
+def row_brightness(t0, exposure, depth=0.3):
+    return 1 + depth * (np.sin(w * (t0 + exposure)) - np.sin(w * t0)) / (w * exposure)
+
+good = []
+for e in np.arange(1.0, 20.01, 0.5):
+    b = row_brightness(starts, e / 1000)
+    if (b.max() - b.min()) / b.mean() < 0.01:
+        good.append(float(e))
+print(good)
+```
+
+Output:
+
+```text
+[16.5]
+```
+
+Only 16.5 ms comes close to a whole number of periods (16.67 ms = 2 × 8.33 ms) and gets under 1 %. 8.5 ms, though near one period, is not close enough. Exact multiples of 1/120 s (8.333, 16.667 ms) cancel it completely; that is why cameras for 60 Hz countries offer such exposure presets.
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+A global-shutter camera at 30 fps with 1 ms exposure films a still part under 100 Hz lighting. Does the brightness change from frame to frame? Will it repeat?
+
+<Solution>
+
+Yes: each 1 ms exposure catches a different phase of the 10 ms flicker. Frames are 33.3 ms apart, i.e. 3.33 flicker periods, so the phase steps by one third of a period each frame: the brightness pattern **repeats every 3 frames**.
+
+</Solution>
+
+## References
+
+1. A. El Gamal and H. Eltoukhy, "CMOS image sensors," *IEEE Circuits and Devices Magazine*, vol. 21, no. 3, pp. 6–20, 2005.
+2. C.-K. Liang, L.-W. Chang and H. H. Chen, "Analysis and compensation of rolling shutter effect," *IEEE Transactions on Image Processing*, vol. 17, no. 8, pp. 1323–1330, 2008.
+3. IEEE Std 1789-2015, *IEEE Recommended Practices for Modulating Current in High-Brightness LEDs for Mitigating Health Risks to Viewers*.
+4. OpenCV 4.13.0 documentation, *Structural Analysis and Shape Descriptors* (`fitLine`): [docs.opencv.org/4.13.0/d3/dc0/group__imgproc__shape.html](https://docs.opencv.org/4.13.0/d3/dc0/group__imgproc__shape.html); *Operations on arrays* (`reduce`): [docs.opencv.org/4.13.0/d2/de8/group__core__array.html](https://docs.opencv.org/4.13.0/d2/de8/group__core__array.html).

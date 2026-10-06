@@ -1,0 +1,287 @@
+export const meta = {
+  number: "17.1",
+  title: "What a kernel is",
+  minutes: 20,
+  objectives: [
+    "Explain a kernel as a small grid of weights applied around every pixel",
+    "Compute one output pixel by hand from a 3 × 3 neighbourhood",
+    "Predict a kernel's effect from its weights: sum 1 keeps brightness, sum 0 finds changes",
+    "Recognise the common kernels: box, Gaussian, sharpen, derivative, Laplacian",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 17.1 (first chapter of Module 17).
+  New lab: ConvLab (lib/conv-ops.ts: filter2D and border modes equal cv2 on recorded tests).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 17.1 What a kernel is
+
+<Definition term="Kernel (filter mask)">a small grid of numbers, for example 3 × 3, that is placed over every pixel in turn. Each output pixel is the sum of the neighbouring input pixels multiplied by the kernel's weights. Changing the weights changes the operation: blur, sharpen, find edges.</Definition>
+
+Point operations (Part B) look at one pixel at a time. They cannot tell a pixel on a smooth surface from one on an edge, or a noise spike from a real dark spot, because that needs the neighbours. A kernel brings in the neighbourhood. It is the most important idea in classical image processing, and it is also exactly what the first layer of a convolutional neural network learns (Part J).
+
+## 1. An analogy
+
+A recipe with fixed proportions, applied in every kitchen in a street: "one part from each neighbour, four parts from your own house". Every house cooks the same recipe with its own neighbours' ingredients. A smooth street gives the same dish everywhere; where the houses change, the dish changes.
+
+## 2. One output pixel
+
+<Flow
+  steps={[
+    { label: "Centre the 3 × 3 kernel on pixel (x, y)", tone: "data" },
+    { label: "Multiply each of the 9 neighbours by the weight on top of it", tone: "process" },
+    { label: "Add the 9 products", tone: "process" },
+    { label: "That sum is output(x, y); move to the next pixel", tone: "result" },
+  ]}
+/>
+
+A 7 × 6 test image: a dark region (20) on the left, a bright region (200) on the right, one grey spot (90) and one dark spot (30). The box kernel (all weights 1/9) at pixel (2, 2):
+
+```text
+neighbours  20  20 200      weights  1/9 1/9 1/9
+            20  90 200               1/9 1/9 1/9
+            20  20 200               1/9 1/9 1/9
+sum = (20 + 20 + 200 + 20 + 90 + 200 + 20 + 20 + 200) / 9 = 790 / 9 = 87.8
+```
+
+The output is the neighbourhood's average: the spot is diluted, and the edge between 20 and 200 becomes a ramp (row 2 after the box: 20, 27.8, 87.8, 147.8, 181.1, …).
+
+<ConvLab caption="Pick a kernel and click pixels of the small image: the panel shows every product and the sum. Try the box near the edge, the sharpen kernel on the spots (values beyond 0–255 appear), and Sobel x on the edge (large where brightness changes left to right, zero on flat areas). Then make your own kernel." />
+
+## 3. Reading a kernel
+
+| Kernel | Weights | Sum | Effect |
+| --- | --- | --- | --- |
+| Identity | 1 in the centre, 0 elsewhere | 1 | nothing |
+| Box | all 1/9 | 1 | average: blur, noise reduction |
+| Gaussian | (1 2 1; 2 4 2; 1 2 1) / 16 | 1 | weighted average, smoother blur (18.2) |
+| Sharpen | (0 −1 0; −1 5 −1; 0 −1 0) | 1 | centre minus neighbours, added back: edges stronger (19.1) |
+| Sobel x | (−1 0 1; −2 0 2; −1 0 1) | 0 | brightness change from left to right (22.2) |
+| Laplacian | (0 1 0; 1 −4 1; 0 1 0) | 0 | second derivative: spots and edges (22.3) |
+
+Two rules cover most cases:
+
+- **Weights sum to 1**: flat areas keep their value, the mean brightness is unchanged (on `sample-scene.png`: 120.3 before and after the box and the sharpen kernel).
+- **Weights sum to 0**: flat areas become 0; only changes produce output, positive or negative. Results must be stored in a signed type (Sobel x on the scene ranges from −745 to 803).
+
+## 4. Industrial example
+
+A glass-sheet inspection looks for small bubbles: dark spots of 2–3 pixels on a bright, slightly uneven background. A 7 × 7 kernel with a positive centre region and a negative ring around it (sum 0) gives near zero on the smooth glass, whatever its brightness, and a strong response on a spot of the right size. The kernel is a hand-made "spot detector"; Laplacian-of-Gaussian and DoG filters (22.3, 20.4) are its principled versions.
+
+## What you should remember from 17.1
+
+<Takeaways>
+<Takeaway n={1} title="Kernel">A small grid of weights; output = weighted sum of the neighbourhood.</Takeaway>
+<Takeaway n={2} title="Same everywhere">The same weights at every pixel (shift-invariant).</Takeaway>
+<Takeaway n={3} title="Sum 1 vs 0">Sum 1 keeps brightness (smoothing, sharpening); sum 0 measures change (edges).</Takeaway>
+<Takeaway n={4} title="Range">Results can leave 0–255; use float or int16 outputs for signed kernels.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Apply the sharpen kernel (0 −1 0; −1 5 −1; 0 −1 0) to a flat area of value 100.
+
+<Solution>
+
+5 · 100 − 4 · 100 = **100**: flat areas are unchanged (the weights sum to 1).
+
+</Solution>
+
+**Q2.** What does the Sobel x kernel give on a flat area, and on a vertical edge from 20 (left) to 200 (right)?
+
+<Solution>
+
+Flat: **0**. On the edge (left column 20, right column 200): (−1 −2 −1)·20 + (1 + 2 + 1)·200 = −80 + 800 = **720**.
+
+</Solution>
+
+### Next: 17.2 Convolution step by step
+
+The full sliding computation, and the difference between convolution and correlation.
+
+## Code
+
+Two examples: kernels on the small test image, then mean brightness and value range on a real image.
+
+### 1. Kernels on a 7 × 6 image
+
+```python
+import numpy as np
+import cv2
+
+a = np.array([[20, 20, 20, 200, 200, 200, 200],
+              [20, 20, 20, 200, 200, 200, 200],
+              [20, 20, 90, 200, 200, 200, 200],
+              [20, 20, 20, 200, 200, 30, 200],
+              [20, 20, 20, 200, 200, 200, 200],
+              [20, 20, 20, 200, 200, 200, 200]], np.float32)
+kernels = {
+    "box": np.ones((3, 3), np.float32) / 9,
+    "sharpen": np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], np.float32),
+    "sobel x": np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], np.float32),
+}
+print("by hand, box at (2, 2):", round((20 + 20 + 200 + 20 + 90 + 200 + 20 + 20 + 200) / 9, 1))
+for name, k in kernels.items():
+    r = cv2.filter2D(a, -1, k)                              # -1: same depth as the input (float32 here)
+    print(f"{name:8s} (sum {k.sum():.0f}) row 2: {r[2].astype(float).round(1).tolist()}")
+```
+
+Output:
+
+```text
+by hand, box at (2, 2): 87.8
+box      (sum 1) row 2: [20.0, 27.8, 87.8, 147.8, 181.1, 181.1, 162.2]
+sharpen  (sum 1) row 2: [20.0, -50.0, 190.0, 310.0, 200.0, 370.0, 200.0]
+sobel x  (sum 0) row 2: [0.0, 140.0, 720.0, 580.0, -170.0, 0.0, 0.0]
+```
+
+- The box turns the 20 → 200 step into a ramp; sharpen overshoots on both sides of the edge (−50 and 310) and boosts the spots; Sobel x is zero on flat parts and large at the edge.
+
+### 2. Brightness and range on a real image
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+for name, k in kernels.items():
+    r = cv2.filter2D(img, -1, k)
+    print(f"{name:8s} mean {img.mean():.1f} -> {r.mean():.1f} | range {r.min():.1f} to {r.max():.1f}")
+
+u8 = cv2.filter2D(img.astype(np.uint8), -1, kernels["sobel x"])           # 8-bit output: negatives clipped to 0
+print("Sobel x into uint8: negative values lost:", int((cv2.filter2D(img, -1, kernels["sobel x"]) < 0).sum()), "pixels set to 0")
+```
+
+Output:
+
+```text
+box      mean 120.3 -> 120.3 | range 7.7 to 250.9
+sharpen  mean 120.3 -> 120.3 | range -492.0 to 805.0
+sobel x  mean 120.3 -> 4.0 | range -745.0 to 803.0
+Sobel x into uint8: negative values lost: 27943 pixels set to 0
+```
+
+- Sum-1 kernels keep the mean; the Sobel output is centred near 0 (the 4.0 comes from the image's overall left-to-right brightness gradient).
+- Filtering an 8-bit image into an 8-bit result clips every negative response to 0: half of all edges disappear. Use `ddepth=cv2.CV_16S` or `cv2.CV_32F` for signed kernels.
+
+## OpenCV API notes
+
+**`cv2.filter2D(src, ddepth, kernel, anchor=(-1, -1), delta=0, borderType=BORDER_REFLECT_101)`**: correlation with any kernel (17.2, 17.6); `ddepth=-1` keeps the input depth, `cv2.CV_32F` / `cv2.CV_16S` for signed results.
+
+**Ready-made kernels**: `cv2.blur` (box), `cv2.GaussianBlur`, `cv2.Sobel`, `cv2.Laplacian`, `cv2.getGaussianKernel`, `cv2.getDerivKernels`.
+
+**Kernel dtype**: float32 (or float64) array; integer arrays are converted.
+
+## Where it fails
+
+- **Fixed weights everywhere**: a kernel cannot adapt to edges (it blurs them too); edge-preserving filters (median, bilateral, 18.3–18.4) are non-linear.
+- **Large kernels are slow** done naively (k² multiplications per pixel); separable kernels (17.4), integral images (17.5) or the FFT (Part E) help.
+- **Borders**: near the edge the kernel reaches outside the image (17.3).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Signed kernels into uint8 outputs** (negative values clipped).
+- **Forgetting to normalise** a blur kernel (all ones without /9 brightens the image ninefold).
+- **Integer division** when building kernels (`np.ones((3, 3)) // 9` is all zeros).
+- **Thinking a kernel is applied once**: it is applied at every pixel.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Linear shift-invariant systems
+
+A kernel operation is linear (filtering a sum equals the sum of the filtered images) and shift-invariant (shifting the input shifts the output). Every linear shift-invariant operation on images is a convolution with some kernel, its impulse response: filter an image that is 1 at one pixel and 0 elsewhere, and the output is the (flipped) kernel [1].
+
+### Kernels in neural networks
+
+A convolutional layer applies many kernels at once, each producing one feature map, and learns their weights from data. Early layers typically learn edge- and blob-like kernels that resemble the hand-made ones in this chapter (Part J, 51.3) [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The output of a kernel at a pixel is…",
+      options: ["The maximum of the neighbours", "The weighted sum of the neighbourhood", "The pixel times the kernel's centre", "The kernel's sum"],
+      answer: 1,
+      explanation: "Multiply each neighbour by its weight and add.",
+    },
+    {
+      question: "A kernel whose weights sum to 0 gives what on a flat area?",
+      options: ["The same value", "0", "255", "The mean"],
+      answer: 1,
+      explanation: "It responds only to changes.",
+    },
+    {
+      question: "Why use ddepth=cv2.CV_32F with a Sobel kernel?",
+      options: ["Speed", "To keep negative responses", "To blur more", "It is required"],
+      answer: 1,
+      explanation: "uint8 output clips negatives to 0.",
+    },
+    {
+      question: "Box 3 × 3 on the neighbourhood 0, 0, 0, 0, 90, 0, 0, 0, 0 gives…",
+      options: ["90", "10", "0", "30"],
+      answer: 1,
+      explanation: "90 / 9 = 10: the spot is diluted.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Apply the Laplacian (0 1 0; 1 −4 1; 0 1 0) at the dark spot (5, 3) of the test image (value 30, its four neighbours 200).
+
+<Solution>
+
+4 · 200 − 4 · 30 = 800 − 120 = **680**: a strong positive response at a dark spot (the Laplacian is positive where a pixel is darker than its neighbours).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Make a 5 × 5 "spot detector": +1 in the 3 × 3 centre, and enough negative weight on the outer ring that the sum is 0. Apply it to a flat image (200) that contains a dark 3 × 3 square (30) and a single dark pixel (30), and compare the responses.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+k = np.full((5, 5), -9 / 16, np.float32)               # 16 ring cells share -9
+k[1:4, 1:4] = 1                                         # 9 centre cells
+print("kernel sum:", float(k.sum()))
+b = np.full((9, 11), 200, np.float32)
+b[3:6, 2:5] = 30                                        # 3 x 3 dark square, centre (3, 4)
+b[4, 8] = 30                                            # single dark pixel at (8, 4)
+r = cv2.filter2D(b, -1, k, borderType=cv2.BORDER_REPLICATE)
+y, x = np.unravel_index(np.abs(r).argmax(), r.shape)
+print(f"largest |response| {r[y, x]:.1f} at (x={x}, y={y}) | single pixel: {r[4, 8]:.1f} | flat corner: {r[0, 0]:.1f}")
+```
+
+Output:
+
+```text
+kernel sum: 0.0
+largest |response| -1530.0 at (x=3, y=4) | single pixel: -170.0 | flat corner: 0.0
+```
+
+The response is strongest (negative: centre darker than ring) at the centre of the 3 × 3 square, nine times stronger than for the single pixel, and zero on flat glass. A kernel matched to the defect's size responds most to that size. (On the 7 × 6 test image the large step between 20 and 200 would dominate: real spot detectors also need edge suppression.)
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 3.4 (fundamentals of spatial filtering).
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022: Section 3.2 (linear filtering) and Section 5.3 (convolutional networks).
+3. OpenCV 4.13.0 documentation: `filter2D`, `blur`, `GaussianBlur`, `Sobel`, `Laplacian`. https://docs.opencv.org/4.13.0/

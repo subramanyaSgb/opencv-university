@@ -1,0 +1,338 @@
+export const meta = {
+  number: "10.2",
+  title: "HSV",
+  minutes: 25,
+  objectives: [
+    "Explain hue, saturation and value and how they are computed from RGB",
+    "Use OpenCV's 8-bit HSV convention (H 0–179) and the _FULL variant",
+    "Detect colours with hue ranges, including red, which wraps around",
+    "Know where HSV fails: low saturation, darkness, coloured light",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 10.2 (Module 10 plan).
+  HsvLab uses lib/hsv-ops.ts, tested against cv2.cvtColor values.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 10.2 HSV
+
+<Definition term="HSV">a colour space that describes a colour as **H**ue (which colour: red, yellow, green …, an angle on a colour wheel), **S**aturation (how pure or how grey) and **V**alue (how bright). It separates "which colour" from "how much light", which makes colour rules simpler.</Definition>
+
+10.1 showed that RGB values mix colour and brightness. HSV untangles them in a way that matches how people talk about colour: "a dark, slightly greyish orange" is a hue (orange), a saturation (slightly greyish) and a value (dark). It is the most used space for simple colour detection in OpenCV.
+
+## 1. An analogy
+
+A paint shop mixing machine. First you choose the base colour on a colour wheel (hue). Then how much white or grey to mix in (saturation: pure colour vs washed out). Then how much light falls on the sample (value). Three independent knobs instead of three entangled lamps.
+
+## 2. From RGB to HSV
+
+<Flow
+  steps={[
+    { label: "B, G, R of a pixel", tone: "data" },
+    { label: "V = max(R, G, B)", tone: "process" },
+    { label: "S = (max − min) / max", tone: "process" },
+    { label: "H = angle: which channel is largest, and by how much the others differ", tone: "result" },
+  ]}
+/>
+
+- **V** is the largest channel: a pure, bright colour and white both have V = 255.
+- **S** compares the largest and the smallest channel: S = 0 for greys (R = G = B), S = 1 for pure colours (one channel 0).
+- **H** is an angle on the colour wheel: 0° red, 60° yellow, 120° green, 180° cyan, 240° blue, 300° magenta, back to 360° = red.
+
+**OpenCV's 8-bit convention**: an angle up to 360 does not fit in a byte, so `cv2.COLOR_BGR2HSV` stores **H / 2**, from 0 to 179, and S and V scaled to 0–255. `cv2.COLOR_BGR2HSV_FULL` scales hue to 0–255 instead. For float32 images, H is in degrees (0–360) and S, V in 0–1.
+
+| Colour | BGR | HSV (OpenCV 8-bit) |
+| --- | --- | --- |
+| red | (0, 0, 255) | (0, 255, 255) |
+| yellow | (0, 255, 255) | (30, 255, 255) |
+| green | (0, 255, 0) | (60, 255, 255) |
+| blue | (255, 0, 0) | (120, 255, 255) |
+| orange | (40, 150, 255) | (15, 215, 255) |
+| grey | (128, 128, 128) | (0, 0, 128) |
+
+## 3. Explore HSV
+
+<HsvLab caption="Set H, S and V in OpenCV units. A shadow changes mostly V. The hue noise readout shows how much the hue jumps when each channel is off by ±3: small for vivid colours, large for greyish or dark ones." />
+
+Things to try:
+
+- H = 15, S = 215, V = 230 (orange): move the shadow slider. H and S stay, V drops.
+- Lower S to 30: hue noise grows to many units. Greyish colours have no reliable hue.
+- Lower V to 30: same problem in the dark.
+- Move H to 2 and to 177: both are red.
+
+## 4. Colour detection with hue ranges
+
+The standard recipe (10.7 goes into detail):
+
+1. Convert: `hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)`.
+2. Choose a hue range around the target colour, plus **minimum S and V** to exclude greys and dark pixels.
+3. `mask = cv2.inRange(hsv, (h_lo, s_min, v_min), (h_hi, 255, 255))`.
+4. For red, combine **two ranges**: 0…h₁ and h₂…179, with `cv2.bitwise_or`.
+
+Because shading mostly changes V, a hue range keeps working across a shaded part, as long as S and V stay above the minimums.
+
+## 5. Where HSV is weak
+
+| Problem | Why | What to do |
+| --- | --- | --- |
+| Greys, whites, blacks | hue undefined (S ≈ 0) or noisy | require S above a minimum; treat neutrals separately |
+| Dark pixels | small differences between channels → noisy H | require V above a minimum; better lighting |
+| Coloured light | the light's colour shifts H | white balance first (10.6) |
+| Specular highlights | white reflections: S low, V high | exclude by S, or use diffuse lighting |
+| Perceptual differences | equal steps in H are not equally visible | use Lab and ΔE (10.3) for colour differences |
+| Red wraps around | hue is circular | two ranges, or rotate the hue (add 90 mod 180) |
+
+HSV is a quick, practical space for "which colour is it?" under reasonable lighting. It is not a measurement space: for "how different is this from the reference colour?", use Lab.
+
+## 6. Industrial example
+
+A packaging line verifies that each box carries a coloured quality sticker (red, orange or green). The belt is lit unevenly and box surfaces are sometimes curved, so the stickers vary from bright to dull. In HSV the three stickers occupy distinct hue ranges (red 0–8 and 172–179, orange 10–22, green 50–80), each with S > 120 and V > 60. The brown cardboard has a similar hue to orange but a much lower saturation, so the saturation minimum separates them. Shading changes V by a factor of three across the belt without affecting the classification.
+
+## What you should remember from 10.2
+
+<Takeaways>
+<Takeaway n={1} title="Three knobs">Hue = which colour, saturation = how pure, value = how bright.</Takeaway>
+<Takeaway n={2} title="OpenCV units">8-bit H = degrees/2 (0–179), S and V 0–255; float: degrees and 0–1.</Takeaway>
+<Takeaway n={3} title="Shading">Mostly changes V; hue ranges survive shadows.</Takeaway>
+<Takeaway n={4} title="Red">Wraps around 0/179: use two ranges.</Takeaway>
+<Takeaway n={5} title="Limits">Greys and dark pixels have unreliable hue: set S and V minimums.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A colour has hue 210° (sky blue). What is H in OpenCV's 8-bit HSV? And with `COLOR_BGR2HSV_FULL`?
+
+<Solution>
+
+8-bit: 210 / 2 = **105**. FULL: 210 / 360 · 256 ≈ **149**.
+
+</Solution>
+
+**Q2.** Compute HSV (OpenCV 8-bit) for BGR (0, 128, 255).
+
+<Solution>
+
+V = 255; S = (255 − 0)/255 = 1 → **255**; max is R: H = 60 · (G − B)/(max − min) = 60 · 128/255 ≈ 30.1° → **15**. HSV = (15, 255, 255): orange.
+
+</Solution>
+
+**Q3.** Why does a white highlight on a red part fall outside a red HSV range?
+
+<Solution>
+
+The highlight is nearly white: S is low (all channels high), so it fails the saturation minimum, and its hue may be anything.
+
+</Solution>
+
+### Next: 10.3 LAB and colour difference
+
+A colour space built so that distances match what people see, and ΔE for measuring colour differences.
+
+## Code
+
+Two examples: HSV from scratch compared with OpenCV, and hue ranges under shading, including red.
+
+### 1. From scratch: RGB to HSV
+
+```python
+import numpy as np
+import cv2
+
+def bgr_to_hsv(img):
+    """From scratch, OpenCV's 8-bit convention: H = degrees / 2 (0..179), S and V 0..255."""
+    f = img.astype(np.float32)
+    b, g, r = f[..., 0], f[..., 1], f[..., 2]
+    v = f.max(axis=2)
+    d = v - f.min(axis=2)
+    s = np.where(v > 0, d / np.maximum(v, 1e-6), 0)
+    dd = np.maximum(d, 1e-6)
+    h = np.where(v == r, 60 * (g - b) / dd, np.where(v == g, 120 + 60 * (b - r) / dd, 240 + 60 * (r - g) / dd))
+    h = np.where(d == 0, 0, h) % 360
+    return np.stack([np.round(h / 2) % 180, np.round(255 * s), v], axis=2).astype(np.uint8)
+
+img = cv2.imread("sample-color.png")
+ours, cv = bgr_to_hsv(img).astype(int), cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(int)
+dh = np.abs(ours[..., 0] - cv[..., 0]); dh = np.minimum(dh, 180 - dh)    # hue is circular
+print("max difference H, S, V:", int(dh.max()), int(np.abs(ours[..., 1] - cv[..., 1]).max()), int(np.abs(ours[..., 2] - cv[..., 2]).max()))
+for name, y, x in [("orange bar", 175, 100), ("red circle", 95, 70), ("green", 95, 180), ("blue", 95, 270), ("background", 5, 5)]:
+    print(f"{name:10s} BGR {img[y, x].tolist()} -> HSV {cv[y, x].tolist()}")
+```
+
+Output:
+
+```text
+max difference H, S, V: 0 1 0
+orange bar BGR [40, 150, 255] -> HSV [15, 215, 255]
+red circle BGR [0, 0, 220] -> HSV [0, 255, 220]
+green      BGR [0, 180, 0] -> HSV [60, 255, 180]
+blue       BGR [220, 70, 20] -> HSV [112, 232, 220]
+background BGR [40, 32, 28] -> HSV [110, 77, 40]
+```
+
+- The NumPy version matches OpenCV exactly in H and V, and within 1 in S (OpenCV uses a slightly different rounding).
+- The dark background (40, 32, 28) gets a hue of 110 (blue-ish), but with S = 77 and V = 40 that hue means little: exactly the case the S and V minimums exclude.
+
+### 2. OpenCV: hue ranges, shading and red
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+cv2.rectangle(img, (250, 15), (299, 54), (60, 20, 200), -1)       # add a crimson (bluish red) square
+shade = np.linspace(1.0, 0.3, img.shape[1])[None, :, None]
+lit = np.round(img * shade).astype(np.uint8)                      # uneven light, as in 10.1
+hsv = cv2.cvtColor(lit, cv2.COLOR_BGR2HSV)
+bar = (slice(165, 186), slice(20, 301))
+h, s, v = (hsv[bar][..., i].astype(float) for i in range(3))
+print(f"orange bar under shading: H {h.min():.0f}..{h.max():.0f} | S {s.min():.0f}..{s.max():.0f} | V {v.min():.0f}..{v.max():.0f}")
+
+# red wraps around: two hue ranges
+low = cv2.inRange(hsv, (0, 120, 60), (8, 255, 255))
+high = cv2.inRange(hsv, (172, 120, 60), (179, 255, 255))
+red = cv2.bitwise_or(low, high)
+print("red pixels: low range", cv2.countNonZero(low), "| high range", cv2.countNonZero(high), "| total", cv2.countNonZero(red))
+orange = cv2.inRange(hsv, (10, 120, 60), (22, 255, 255))
+print("orange pixels:", cv2.countNonZero(orange), "| full-range hue (HSV_FULL) of orange:", int(cv2.cvtColor(img[175:176, 100:101], cv2.COLOR_BGR2HSV_FULL)[0, 0, 0]))
+```
+
+Output:
+
+```text
+orange bar under shading: H 15..16 | S 214..216 | V 87..244
+red pixels: low range 5525 | high range 2000 | total 7525
+orange pixels: 5901 | full-range hue (HSV_FULL) of orange: 22
+```
+
+- Under light falling from 100 % to 30 %, V varies from 244 to 87 while H and S hardly change: the orange range finds all 5901 bar pixels.
+- The pure red circle (H = 0) is in the low range, the crimson square (H = 173) in the high range: one range alone would miss one of them.
+- In `HSV_FULL`, orange's hue is 22 instead of 15: always check which convention a tutorial uses.
+
+## OpenCV API notes
+
+**Conversion**: `cv2.cvtColor(img, cv2.COLOR_BGR2HSV)` (8-bit: H 0–179), `COLOR_BGR2HSV_FULL` (H 0–255), `COLOR_HSV2BGR`, `COLOR_HSV2BGR_FULL`; also `COLOR_BGR2HLS` (hue, lightness, saturation). For float32 input in 0–1: H in 0–360, S and V in 0–1.
+
+**Range test**: `cv2.inRange(src, lowerb, upperb)` → 255 where all channels are within [lower, upper] (inclusive), else 0.
+
+**Combining masks**: `cv2.bitwise_or`, `cv2.bitwise_and`, `cv2.bitwise_not` (14.2).
+
+**Hue rotation for red**: `h2 = (hsv[..., 0].astype(np.int16) + 90) % 180` moves red to the middle of the range.
+
+## Where it fails
+
+- **Neutral colours**: hue is undefined for greys; detect them by low S instead.
+- **Dark and noisy images**: hue noise grows as V and S fall.
+- **Illuminant colour**: a warm light shifts every hue; white balance first.
+- **Different cameras**: hue values of the same object differ between cameras and settings; tune ranges on the target camera.
+- **Perceptual uniformity**: HSV distances do not match perceived differences (use Lab).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using hue ranges from 0–360 tutorials** with OpenCV's 0–179 (or the reverse).
+- **One range for red**.
+- **No S and V minimums** (greys, shadows and highlights get random hues).
+- **Converting RGB images with COLOR_BGR2HSV** (red and blue swap: hues shift by 120°).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### HSV is a hexcone
+
+The HSV model (Smith, 1978) maps the RGB cube onto a hexagonal cone: looking down the cube's grey diagonal, the six corners red, yellow, green, cyan, blue, magenta lie on a hexagon; hue is the angle around it, measured piecewise linearly within each of the six sectors, which is why the formula has three cases. It is a fast, intuitive re-parameterisation of RGB, not a perceptual model [1].
+
+### HSV vs HLS
+
+HLS (hue, lightness, saturation) uses the same hue but defines lightness as (max + min)/2 and saturation differently, so that pure colours have lightness 0.5 and white has lightness 1. For detection both work similarly; HSV's V = max is simpler to threshold for "bright enough" [1], [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "In OpenCV 8-bit HSV, pure green has H =",
+      options: ["120", "60", "85", "255"],
+      answer: 1,
+      explanation: "120° / 2 = 60.",
+    },
+    {
+      question: "A part moves into a shadow. Which HSV component changes most?",
+      options: ["H", "S", "V", "All equally"],
+      answer: 2,
+      explanation: "Shading scales all channels: V drops, H and S stay.",
+    },
+    {
+      question: "Why do red detectors use two hue ranges?",
+      options: ["Red is two colours", "Hue is circular; red sits at both 0 and 179", "OpenCV has a bug", "For speed"],
+      answer: 1,
+      explanation: "Combine 0–h₁ and h₂–179.",
+    },
+    {
+      question: "Why add a minimum S to a hue range?",
+      options: ["To speed up inRange", "Greys and highlights have unreliable hue", "To include white", "S is always 255"],
+      answer: 1,
+      explanation: "Low-saturation pixels must be excluded.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Compute the 8-bit HSV of BGR (200, 100, 50).
+
+<Solution>
+
+max = B = 200 → V = **200**; min = 50 → S = 150/200 = 0.75 → **191**; max is B: H = 240 + 60 · (R − G)/(max − min) = 240 + 60 · (50 − 100)/150 = 220° → **110**. HSV = (110, 191, 200).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Use `cv2.cvtColor` to check exercise 1, and print the HSV of the same colour at 40 % brightness, BGR (80, 40, 20).
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+px = np.array([[[200, 100, 50], [80, 40, 20]]], np.uint8)
+print(cv2.cvtColor(px, cv2.COLOR_BGR2HSV)[0].tolist())
+```
+
+Output:
+
+```text
+[[110, 191, 200], [110, 191, 80]]
+```
+
+Same H and S; only V changes (200 → 80).
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Your HSV-based detector for yellow labels starts reporting false detections after the hall lighting is changed to warm-white LEDs. Why, and what do you do?
+
+<Solution>
+
+A warmer illuminant raises R relative to B, which shifts the hue of many surfaces (beige, light wood, white plastic) towards yellow and can push them into the yellow range. Fix the cause: white-balance the camera on a white reference under the new lighting (10.6), or better, shield the station with its own controlled lighting; then re-tune the ranges. Increasing the S minimum also helps, since beige and white are less saturated than labels.
+
+</Solution>
+
+## References
+
+1. A. R. Smith, "Color Gamut Transform Pairs", *SIGGRAPH '78 Proceedings*, ACM, 1978.
+2. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 6.2 (the HSI colour model).
+3. OpenCV 4.13.0 documentation, "Color conversions" (RGB ↔ HSV, HLS) and `inRange`. https://docs.opencv.org/4.13.0/

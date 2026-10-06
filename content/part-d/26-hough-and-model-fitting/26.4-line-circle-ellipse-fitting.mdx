@@ -1,0 +1,376 @@
+export const meta = {
+  number: "26.4",
+  title: "Line, circle, ellipse fitting",
+  minutes: 30,
+  objectives: [
+    "Refine Hough or RANSAC results by least-squares fits on the edge points",
+    "Fit lines with cv2.fitLine and measure distances between parallel edges",
+    "Fit circles algebraically (Kåsa) and geometrically, and know when they differ",
+    "Fit ellipses with fitEllipse, fitEllipseAMS and fitEllipseDirect and understand their bias on short arcs",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 26.4 (Module 26).
+  Lab: HoughLab mode "fit" (Kåsa, geometric circle, direct ellipse = cv2.fitEllipseDirect).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 26.4 Line, circle, ellipse fitting
+
+<Definition term="Model fitting">finding the parameters of a shape (a line, a circle, an ellipse) that pass as closely as possible through a set of points, usually by minimising the sum of squared distances.</Definition>
+
+Hough (26.1, 26.2) and RANSAC (26.3) find **which** points belong to a shape. Fitting then finds the shape's parameters **precisely**, using all those points together. This is the step that turns "there is a hole" into "the hole has diameter 36.1 pixels, centred at (105.0, 125.0)".
+
+## 1. An analogy
+
+Laying a ruler along a row of pencil dots. Hough tells you roughly where the row is. To read the angle accurately you slide and turn the ruler until the dots are, on average, as close to it as possible. Each dot alone is a little off; the ruler through all of them is much better than any two dots.
+
+## 2. What "closest" means
+
+<Flow
+  steps={[
+    { label: "Edge points of one shape (Hough / RANSAC / contour)", tone: "data" },
+    { label: "Choose the error: geometric (true distance) or algebraic", tone: "process" },
+    { label: "Minimise the sum of squared errors", tone: "process" },
+    { label: "Parameters + residual RMS", tone: "result" },
+  ]}
+/>
+
+- **Geometric error**: the true perpendicular distance from each point to the shape. This is what we want, but for circles and ellipses it needs an iterative solution.
+- **Algebraic error**: the value of the shape's equation at the point (zero exactly on the shape). It gives a direct, one-step linear solution, but it weights points unevenly.
+
+For a line both are the same: the perpendicular distance is linear in the parameters, so total least squares (5.6) solves it directly. That is `cv2.fitLine` with `DIST_L2`.
+
+For a circle (x − a)² + (y − b)² = r², write it as x² + y² + D x + E y + F = 0. For each point the algebraic residual is d² − r² = (d − r)(d + r), where d is its distance from the centre: about 2r times the true distance near the circle. This **Kåsa fit** is linear in D, E, F, so one least-squares solve gives the circle (Kåsa 1976 [1]).
+
+## 3. A worked example by hand
+
+Four points (2, 0), (0, 2), (−2, 0), (0, −2). Put each into x² + y² + D x + E y + F = 0:
+
+```text
+(2, 0):   4 + 2D      + F = 0
+(0, 2):   4      + 2E + F = 0
+(−2, 0):  4 − 2D      + F = 0
+(0, −2):  4      − 2E + F = 0
+```
+
+Rows 1 and 3 give D = 0; rows 2 and 4 give E = 0; then F = −4. The centre is (−D/2, −E/2) = **(0, 0)** and r = √(a² + b² − F) = **2**. With noisy points the four equations no longer agree exactly, and least squares picks the D, E, F with the smallest squared residuals.
+
+## 4. Fits on the test image
+
+**Lines.** Taking the Canny edge points within 2 pixels of each Hough line (26.1) and fitting with `cv2.fitLine`:
+
+| Side | Hough (ρ, θ) | Fitted angle | Fitted ρ | True ρ |
+| --- | --- | --- | --- | --- |
+| top | 17, 102° | 11.78° | 17.90 | 17.87 |
+| bottom | 128, 102° | 12.01° | 127.57 | 127.87 |
+| right | 223, 12° | −77.96° | 222.75 | 223.17 |
+| left | 53, 12° | −78.02° | 52.60 | 53.17 |
+
+The plate's width becomes 127.57 − 17.90 = **109.67** pixels (true 110; Hough said 111) and its length 222.75 − 52.60 = **170.15** (true 170). The fits are sub-pixel, but every Canny edge pixel sits on whole-pixel positions on one side of the true edge, which leaves offsets of a few tenths of a pixel. For better accuracy, use sub-pixel edge positions (22.5).
+
+**Circles.** 131 edge points around the largest hole (true radius 18): the Kåsa and the geometric fit both give centre (105.00, 125.01) and radius **18.05**. On a full circle with small noise they agree; `cv2.minEnclosingCircle` on the same points gives 18.6, because it must enclose the outermost noisy point.
+
+**Short arcs.** When only part of a circle is visible (a hole cut by the image border, a partly hidden cap), the two fits differ. On 50 points of a radius-70 circle with 1-pixel noise:
+
+| Visible arc | Kåsa r | Geometric r |
+| --- | --- | --- |
+| 360° | 69.93 | 69.92 |
+| 180° | 70.41 | 70.46 |
+| 90° | 66.47 | 67.69 |
+| 45° | 53.96 | 66.98 |
+
+On short arcs the Kåsa fit is biased towards **smaller** circles; the geometric fit stays much closer. On a 45° arc both are uncertain, because many circles fit a short, noisy arc almost equally well.
+
+<HoughLab mode="fit" caption="Points on an arc (blue) with noise and outliers; dashed: the true shape. Red: Kåsa algebraic circle; green: geometric circle; purple: direct ellipse fit (cv2.fitEllipseDirect). Shrink the arc span: the red circle shrinks first. Add one or two outliers: every least-squares fit is pulled, so remove outliers first (26.3). Switch to the ellipse to see the direct fit shrink on short arcs too."/>
+
+## 5. Ellipses
+
+A circle seen at an angle, an O-ring under a slanted camera, a cell, a drop: these are ellipses (five parameters: centre, two semi-axes, angle). OpenCV has three fits, all algebraic and all needing at least 5 points:
+
+- **`cv2.fitEllipse`**: the classic least-squares conic fit (Fitzgibbon and Fisher 1995 [3]).
+- **`cv2.fitEllipseAMS`**: the approximate mean square method (Taubin 1991 [4]).
+- **`cv2.fitEllipseDirect`**: the direct least-squares fit (Fitzgibbon, Pilu and Fisher 1999 [2]); it always returns an ellipse, never a hyperbola or parabola.
+
+On an ellipse with semi-axes 90 and 50 at 25°, 60 points with 1-pixel noise:
+
+| Arc | fitEllipse | fitEllipseAMS | fitEllipseDirect |
+| --- | --- | --- | --- |
+| 360° | 89.9 × 49.7 | 89.9 × 49.7 | 89.8 × 49.7 |
+| 180° | 89.8 × 49.9 | 89.7 × 49.7 | 89.3 × 48.6 |
+| 120° | 95.4 × 57.6 | 96.5 × 59.2 | 79.7 × 35.0 |
+
+All agree on full and half ellipses. On a 120° arc, `fitEllipse` and AMS grow the ellipse and the direct fit shrinks it. With short arcs, no algebraic fit is reliable; constrain the problem (known axes ratio, known size) or use a geometric fit.
+
+`fitEllipse` returns a rotated rectangle ((cx, cy), (width, height), angle): width and height are the **full** axes and the angle belongs to the width axis. In the example, (width, height) = (99.4, 179.7) with angle 114.8° means the major axis (height) lies at 114.8° − 90° = 24.8°.
+
+## 6. Industrial use
+
+- **Measuring**: edge-to-edge distances from two fitted parallel lines; hole diameters and positions from circle fits; straightness from line-fit residuals.
+- **Angle and alignment**: the angle of a fitted edge, to 0.01°–0.1° depending on edge length and noise.
+- **Round-part inspection**: ovality as the ratio of ellipse axes; concentricity of two fitted circles.
+- **Quality of the fit**: the RMS residual and the maximum residual show dents, burrs and chips (large residuals at one place).
+
+## What you should remember from 26.4
+
+<Takeaways>
+<Takeaway n={1} title="Find, then fit">Hough or RANSAC selects the points; a least-squares fit gives precise parameters.</Takeaway>
+<Takeaway n={2} title="Lines">cv2.fitLine (total least squares, or robust distances).</Takeaway>
+<Takeaway n={3} title="Circles">Kåsa is direct but biased on short arcs; geometric is better there.</Takeaway>
+<Takeaway n={4} title="Ellipses">fitEllipse, AMS, Direct agree on long arcs, disagree on short ones.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Two fitted parallel edges have ρ = 40.2 and ρ = 162.7 with the same θ. The scale is 0.05 mm per pixel. Width?
+
+<Solution>
+
+(162.7 − 40.2) × 0.05 = 122.5 × 0.05 = **6.125 mm**.
+
+</Solution>
+
+**Q2.** A circle fit has RMS residual 0.3 px but one point at 4 px. What could it be?
+
+<Solution>
+
+A local defect (a burr, chip or dent) or a stray edge point. Check the point; if it is an outlier, refit without it (or with RANSAC first).
+
+</Solution>
+
+### Next: 27.1 Region growing
+
+Module 27 segments images into regions: region growing, k-means, mean shift, watershed, GrabCut and superpixels.
+
+## Code
+
+Three examples: refining Hough lines, circle fits, and ellipse fits.
+
+### 1. Refining the plate's sides
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-hough.png", cv2.IMREAD_GRAYSCALE)
+edges = cv2.Canny(img, 50, 150)
+ys, xs = np.nonzero(edges)
+pts = np.stack([xs, ys], 1).astype(np.float32)
+
+rhos = {}
+for name, rho, theta in [("top", 17, 102), ("bottom", 128, 102), ("left", 53, 12), ("right", 223, 12)]:
+    t = np.deg2rad(theta)
+    near = pts[np.abs(xs * np.cos(t) + ys * np.sin(t) - rho) < 2]            # edge points of this side
+    vx, vy, x0, y0 = cv2.fitLine(near, cv2.DIST_L2, 0, 0.01, 0.01).ravel()
+    angle = (np.degrees(np.arctan2(vy, vx)) + 90) % 180 - 90
+    rhos[name] = abs(x0 * -vy + y0 * vx)                                     # distance of the line from (0, 0)
+    print(f"{name:6s} points {len(near)}  angle {angle:7.2f}  rho {rhos[name]:.2f}")
+print("width:", round(float(rhos["bottom"] - rhos["top"]), 2), "| length:", round(float(rhos["right"] - rhos["left"]), 2))
+```
+
+Output:
+
+```text
+top    points 195  angle   11.78  rho 17.90
+bottom points 168  angle   12.01  rho 127.57
+left   points 112  angle  -78.02  rho 52.60
+right  points 111  angle  -77.96  rho 222.75
+width: 109.67 | length: 170.15
+```
+
+- `(−vy, vx)` is the line's unit normal, so x0 · (−vy) + y0 · vx is the signed distance of the line from the origin.
+
+### 2. Circle fits
+
+```python
+def kasa(p):                                                               # x² + y² + D x + E y + F = 0
+    A = np.c_[p[:, 0], p[:, 1], np.ones(len(p))]
+    D, E, F = np.linalg.lstsq(A, -(p[:, 0] ** 2 + p[:, 1] ** 2), rcond=None)[0]
+    cx, cy = -D / 2, -E / 2
+    return cx, cy, np.sqrt(cx * cx + cy * cy - F)
+
+def geometric(p, start, iterations=50):                                   # Gauss–Newton on (distance − r)
+    cx, cy, r = start
+    for _ in range(iterations):
+        dx, dy = p[:, 0] - cx, p[:, 1] - cy
+        d = np.hypot(dx, dy)
+        J = np.c_[-dx / d, -dy / d, -np.ones(len(p))]
+        step = np.linalg.lstsq(J, d - r, rcond=None)[0]
+        cx, cy, r = cx - step[0], cy - step[1], r - step[2]
+    return cx, cy, r
+
+hole = pts[np.abs(np.hypot(xs - 105, ys - 125) - 18) < 3].astype(float)
+k = kasa(hole)
+print("points:", len(hole), "| Kasa:", np.round(k, 2).tolist(), "| geometric:", np.round(geometric(hole, k), 2).tolist())
+print("minEnclosingCircle r:", round(cv2.minEnclosingCircle(hole.astype(np.float32))[1], 2))
+
+rng = np.random.default_rng(264)
+for span in (360, 180, 90, 45):
+    t = np.deg2rad(np.linspace(-90 - span / 2, -90 + span / 2, 50))
+    arc = np.c_[160 + 70 * np.cos(t), 105 + 70 * np.sin(t)] + rng.normal(0, 1.0, (50, 2))
+    k = kasa(arc)
+    print(f"arc {span:3d} deg: Kasa r {k[2]:.2f}  geometric r {geometric(arc, k)[2]:.2f}")
+```
+
+Output:
+
+```text
+points: 131 | Kasa: [105.0, 125.01, 18.05] | geometric: [105.0, 125.01, 18.05]
+minEnclosingCircle r: 18.6
+arc 360 deg: Kasa r 69.93  geometric r 69.92
+arc 180 deg: Kasa r 70.41  geometric r 70.46
+arc  90 deg: Kasa r 66.47  geometric r 67.69
+arc  45 deg: Kasa r 53.96  geometric r 66.98
+```
+
+### 3. Ellipse fits
+
+```python
+rng = np.random.default_rng(2640)
+def ellipse_arc(span, n=60):
+    t = np.deg2rad(np.linspace(-90 - span / 2, -90 + span / 2, n))
+    x, y, a = 90 * np.cos(t), 50 * np.sin(t), np.deg2rad(25)
+    p = np.c_[160 + x * np.cos(a) - y * np.sin(a), 105 + x * np.sin(a) + y * np.cos(a)]
+    return (p + rng.normal(0, 1.0, (n, 2))).astype(np.float32)
+
+for span in (360, 180, 120):
+    p = ellipse_arc(span)
+    row = []
+    for f in (cv2.fitEllipse, cv2.fitEllipseAMS, cv2.fitEllipseDirect):
+        (cx, cy), (w, h), angle = f(p)
+        row.append(f"{max(w, h) / 2:.1f} x {min(w, h) / 2:.1f}")
+    print(f"arc {span}: fitEllipse {row[0]} | AMS {row[1]} | Direct {row[2]}")
+    if span == 360:
+        (cx, cy), (w, h), angle = cv2.fitEllipse(p)
+        print(f"  raw fitEllipse: centre ({cx:.1f}, {cy:.1f}), size ({w:.1f}, {h:.1f}), angle {angle:.1f}")
+```
+
+Output:
+
+```text
+arc 360: fitEllipse 89.9 x 49.7 | AMS 89.9 x 49.7 | Direct 89.8 x 49.7
+  raw fitEllipse: centre (160.2, 105.1), size (99.4, 179.7), angle 114.8
+arc 180: fitEllipse 89.8 x 49.9 | AMS 89.7 x 49.7 | Direct 89.3 x 48.6
+arc 120: fitEllipse 95.4 x 57.6 | AMS 96.5 x 59.2 | Direct 79.7 x 35.0
+```
+
+## OpenCV API notes
+
+- **`cv2.fitLine(points, distType, param, reps, aeps)`** → (vx, vy, x0, y0) (2D) or 6 values (3D). `DIST_L2` is total least squares; robust types: `DIST_L1`, `DIST_L12`, `DIST_FAIR`, `DIST_WELSCH`, `DIST_HUBER`.
+- **`cv2.fitEllipse(points)`**, **`cv2.fitEllipseAMS(points)`**, **`cv2.fitEllipseDirect(points)`** → ((cx, cy), (width, height), angle in degrees). Need at least 5 points; int32 contours or float32 points.
+- **`cv2.minEnclosingCircle(points)`** → ((cx, cy), r): the smallest circle containing all points; not a fit.
+- **No circle fit in OpenCV**: use the Kåsa least-squares (3 lines of NumPy), or a geometric fit (Gauss–Newton as above, or `scipy.optimize.least_squares`).
+- **Points from contours**: `cv2.findContours(..., cv2.CHAIN_APPROX_NONE)` gives every boundary pixel; contour pixels lie on the object, half a pixel inside the true edge.
+
+## Where it fails
+
+- **Outliers**: one far point moves every least-squares fit; remove outliers first (RANSAC) or use robust distances.
+- **Short arcs**: circle and ellipse parameters become poorly determined; constrain the model.
+- **Wrong model**: fitting an ellipse to a rectangle gives an answer, but a meaningless one (fitEllipse on the plate contour returns 126 × 206).
+- **Pixel-level edges**: whole-pixel edge positions limit accuracy to a few tenths of a pixel; use sub-pixel edges (22.5).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Reading `fitEllipse` sizes as semi-axes**: width and height are full axes.
+- **Misreading the angle**: it belongs to the width axis, which may be the minor one.
+- **Fitting y = a x + b to near-vertical edges**: use `fitLine` (perpendicular distances).
+- **Using `minEnclosingCircle` as a measurement**: it follows the worst point, not the average.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Algebraic vs geometric fits
+
+Algebraic fits minimise a quantity that is zero on the curve but is not a distance, so points are weighted by where they lie; this causes the small-circle bias of the Kåsa fit on short arcs. Improved algebraic fits (Pratt, Taubin) normalise the residual and have much less bias at the same low cost; Al-Sharadqah and Chernov [5] analyse their statistical errors. Geometric (orthogonal distance) fits are the maximum-likelihood estimate under Gaussian noise but need iterations and a starting point, usually the algebraic fit.
+
+### Uncertainty
+
+Least squares also gives the covariance of the parameters: σ² (JᵀJ)⁻¹ with J the Jacobian of the residuals. For a line fitted to n points spread over a length L with noise σ, the angle uncertainty is about σ√12 / (L√n) radians: long edges and many points give precise angles.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why is the Kåsa circle fit fast?",
+      options: ["It uses few points", "It is linear in D, E, F: one least-squares solve", "It uses the GPU", "It ignores noise"],
+      answer: 1,
+      explanation: "x² + y² + D x + E y + F = 0 is linear in the unknowns.",
+    },
+    {
+      question: "On a short arc, the Kåsa fit tends to give…",
+      options: ["A larger circle", "A smaller circle", "The exact circle", "No circle"],
+      answer: 1,
+      explanation: "45° arc: 53.96 instead of 70.",
+    },
+    {
+      question: "fitEllipse returns ((cx, cy), (w, h), angle). The semi-axes are…",
+      options: ["w and h", "w / 2 and h / 2", "w² and h²", "√w and √h"],
+      answer: 1,
+      explanation: "w and h are full axes.",
+    },
+    {
+      question: "Which line fit uses perpendicular distances?",
+      options: ["y = a x + b least squares", "cv2.fitLine with DIST_L2", "np.polyfit", "None"],
+      answer: 1,
+      explanation: "Total least squares, valid for any direction.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Points (4, 1), (1, 4), (−2, 1), (1, −2). Find the circle with the method of Section 3.
+
+<Solution>
+
+Rows: 17 + 4D + E + F = 0, 17 + D + 4E + F = 0, 5 − 2D + E + F = 0, 5 + D − 2E + F = 0. Rows 1 − 3: 12 + 6D = 0, D = −2. Rows 2 − 4: 12 + 6E = 0, E = −2. Then F = −17 + 8 + 2 = −7. Centre **(1, 1)**, r = √(1 + 1 + 7) = **3**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Fit circles to the edge points of all four holes (true radii 14, 9, 18, 6 at (85, 75), (150, 85), (105, 125), (160, 128)) with the geometric fit and print the diameters and the RMS residual of each fit.
+
+<Solution>
+
+```python
+for (x, y, r) in [(85, 75, 14), (150, 85, 9), (105, 125, 18), (160, 128, 6)]:
+    p = pts[np.abs(np.hypot(xs - x, ys - y) - r) < 3].astype(float)
+    cx, cy, rr = geometric(p, kasa(p))
+    rms = np.sqrt(np.mean((np.hypot(p[:, 0] - cx, p[:, 1] - cy) - rr) ** 2))
+    print(f"true d {2 * r:2d}: fitted d {2 * rr:.2f} at ({cx:.2f}, {cy:.2f}), {len(p)} points, RMS {rms:.2f} px")
+```
+
+Output:
+
+```text
+true d 28: fitted d 27.91 at (85.01, 75.01), 104 points, RMS 0.34 px
+true d 18: fitted d 17.94 at (150.00, 85.00), 64 points, RMS 0.31 px
+true d 36: fitted d 36.10 at (105.00, 125.01), 131 points, RMS 0.33 px
+true d 12: fitted d 12.05 at (160.08, 128.04), 42 points, RMS 0.32 px
+```
+
+All four diameters are within 0.1 pixel of the truth, and the RMS residual of about 0.3 px matches the whole-pixel quantisation of Canny edges: no hole has a defect. Hough's radii (26.2) were off by up to 0.6 pixels.
+
+</Solution>
+
+## References
+
+1. I. Kåsa, "A circle fitting procedure and its error analysis", *IEEE Trans. Instrumentation and Measurement* IM-25(1), 8–14, 1976.
+2. A. Fitzgibbon, M. Pilu, R. B. Fisher, "Direct least square fitting of ellipses", *IEEE Trans. Pattern Analysis and Machine Intelligence* 21(5), 476–480, 1999.
+3. A. W. Fitzgibbon, R. B. Fisher, "A buyer's guide to conic fitting", *Proc. British Machine Vision Conference*, 513–522, 1995.
+4. G. Taubin, "Estimation of planar curves, surfaces, and nonplanar space curves defined by implicit equations with applications to edge and range image segmentation", *IEEE Trans. Pattern Analysis and Machine Intelligence* 13(11), 1115–1138, 1991.
+5. A. Al-Sharadqah, N. Chernov, "Error analysis for circle fitting algorithms", *Electronic Journal of Statistics* 3, 886–911, 2009.
+6. R. Halíř, J. Flusser, "Numerically stable direct least squares fitting of ellipses", *Proc. WSCG*, 125–132, 1998.
+7. OpenCV 4.13.0 documentation: `fitLine`, `fitEllipse`, `fitEllipseAMS`, `fitEllipseDirect`, `minEnclosingCircle`. https://docs.opencv.org/4.13.0/

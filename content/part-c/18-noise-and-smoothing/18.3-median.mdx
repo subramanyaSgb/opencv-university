@@ -1,0 +1,315 @@
+export const meta = {
+  number: "18.3",
+  title: "Median",
+  minutes: 20,
+  objectives: [
+    "Compute a median filter by hand and with cv2.medianBlur",
+    "Explain why the median removes salt-and-pepper noise and keeps edges sharp",
+    "Recognise what it destroys: thin lines, corners, small text, fine periodic detail",
+    "Know the limits of cv2.medianBlur (odd ksize, data types) and its cost",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 18.3 (Module 18).
+  Lab: DenoiseLab (salt-and-pepper first; Gaussian vs median).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 18.3 Median
+
+<Definition term="Median filter">replaces every pixel by the median (the middle value after sorting) of its k × k neighbourhood. It is non-linear: not a weighted sum, so it is not a convolution. One extreme value in the window cannot move the median, which is why it removes impulse noise without blurring edges.</Definition>
+
+18.1 showed that salt-and-pepper noise leaves most pixels exactly right and ruins a few completely. 18.2 showed that box and Gaussian filters only smear those dots into grey blotches. The median is the standard answer, and it has its own price: it removes anything thin, not just noise.
+
+## 1. An analogy
+
+Five judges score a performance: 7, 8, 8, 9 and 0 (one judge pressed the wrong button). The mean is 6.4, pulled down by one mistake. The median, the middle score after sorting, is 8: the mistake has no effect. The median filter asks the same question of every neighbourhood.
+
+## 2. Sort and take the middle
+
+<Flow
+  steps={[
+    { label: "k × k neighbourhood (k odd)", tone: "data" },
+    { label: "Sort the k² values", tone: "process" },
+    { label: "Take the middle one (position (k² − 1)/2)", tone: "process" },
+    { label: "Output pixel", tone: "result" },
+  ]}
+/>
+
+A worked example: the neighbourhood from 18.2 with two impulses, a salt pixel (255) in the centre and a pepper pixel (0) below it.
+
+<PixelMatrix values={[[52, 47, 60], [44, 255, 49], [55, 0, 46]]} highlight={[[1, 1], [2, 1]]} />
+
+Sorted: 0, 44, 46, 47, 49, 52, 55, 60, 255. The fifth value is **49**. The mean would be 67.6, pulled up by the salt pixel. Both impulses sit at the ends of the sorted list, where the median never looks.
+
+At an edge, the median picks a value from one side of the edge, never something in between. A step from 230 to 105 stays a step; no new grey levels appear. That is the "edge-preserving" property, and a linear filter cannot have it.
+
+## 3. What it removes and what it destroys
+
+Salt-and-pepper noise on 5 % of the pixels of the test image, "large errors" counted as pixels more than 40 grey levels off:
+
+| Image | PSNR | Large errors |
+| --- | --- | --- |
+| Noisy | 18.2 dB | 2 785 |
+| Box 3 × 3 | 22.0 dB | 6 286 |
+| Gaussian σ = 1 | 22.5 dB | 5 474 |
+| **Median 3 × 3** | **25.4 dB** | **614** |
+| Median 5 × 5 | 17.0 dB | 4 866 |
+
+The linear filters raise PSNR a little but more than double the large errors: every impulse becomes a 3 × 3 blotch. The 3 × 3 median leaves **no** pixel at 0 or 255 (3 184 impulses before).
+
+The 614 remaining errors are not noise. Run the same 3 × 3 median on the **clean** image and it already makes 557 large errors: it removes the thin horizontal lines (1 pixel wide) completely, and eats into the text strokes. A 1-pixel line fills only 3 of the 9 window positions, so the median always picks the background. The rule: a median of size k removes any bright or dark structure narrower than about k/2 pixels, whether it is noise or not.
+
+With k = 5 it is worse: the 2-pixel bars of the test pattern come out **inverted** (210, 210, 80, 80 where the clean image has 80, 80, 210, 210), and corners are rounded off. So the smallest median that removes the noise is the right one.
+
+<DenoiseLab initialNoise="saltpepper" initialFilter="median" filters={["none", "gauss", "median"]} caption="Salt-and-pepper noise. With the 3 × 3 median the dots disappear and edges stay sharp, but watch the zoom: the thin lines vanish too. Raise the noise to 20 % or more and the 3 × 3 median starts to leave clusters; a larger median removes them but destroys more detail. Compare with the Gaussian, which only smears the dots. Then switch to Gaussian noise: the median helps, but less than a box of the same size."/>
+
+## 4. Gaussian noise
+
+On Gaussian noise the median is a weaker averager than the box: with σ = 20, a 3 × 3 median leaves 8.1 and a 3 × 3 box 6.6; with 5 × 5, 4.9 against 4.0. The median of many noisy values varies about 1.25 times more than their mean (Go deeper). It is used on Gaussian noise only when edges must stay sharp and some leftover noise is acceptable.
+
+## 5. Industrial example
+
+Dead and hot pixels on a sensor, dust on a line-scan camera's window, bit errors in a transmitted image and the bright speckles from specular reflections on metal all look like impulses. A 3 × 3 median as the first step removes them before thresholding, so they do not become one-pixel "defects". It is also used on masks: a median of a binary image removes isolated mask pixels, similar to an opening (23.2). Inspections that must find scratches one pixel wide cannot use it, because the median removes exactly those; there, known dead pixels are corrected from a defect map instead.
+
+## What you should remember from 18.3
+
+<Takeaways>
+<Takeaway n={1} title="Rule">Sort the neighbourhood, take the middle value.</Takeaway>
+<Takeaway n={2} title="Strength">Impulses never reach the middle: salt and pepper removed, edges stay steps.</Takeaway>
+<Takeaway n={3} title="Price">Structures thinner than about k/2 vanish: thin lines, small text, corners, fine bars.</Takeaway>
+<Takeaway n={4} title="Size">Use the smallest k that removes the noise, usually 3.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** The 1-D values 10, 10, 200, 10, 10. What does a 3-tap median give at the centre? And for 10, 200, 200, 10, 10?
+
+<Solution>
+
+10 (sorted 10, 10, 200). For the 2-pixel spike: at each of the two 200 positions the window holds 200, 200 and 10, so the median is **200**: a 3-tap median keeps a 2-pixel structure and removes a 1-pixel one.
+
+</Solution>
+
+**Q2.** Why does a median filter never create a grey level that is not already in the window?
+
+<Solution>
+
+Its output is one of the input values (the middle one after sorting), not a combination of them.
+
+</Solution>
+
+### Next: 18.4 Bilateral
+
+A weighted average that skips neighbours of a different brightness: smoothing that stops at edges.
+
+## Code
+
+Two examples: a 3 × 3 median from scratch, then median against linear filters on salt-and-pepper noise.
+
+### 1. Median from scratch
+
+```python
+import numpy as np
+import cv2
+
+p = np.array([[52, 47, 60], [44, 255, 49], [55, 0, 46]], np.uint8)
+print("sorted:", sorted(p.ravel().tolist()), "| median:", int(np.median(p)), "| mean:", round(float(p.mean()), 1))
+
+img = cv2.imread("sample-clean.png", cv2.IMREAD_GRAYSCALE)
+h, w = img.shape
+stack = np.stack([img[1 + dy:h - 1 + dy, 1 + dx:w - 1 + dx] for dy in (-1, 0, 1) for dx in (-1, 0, 1)])
+mine = np.median(stack, axis=0).astype(np.uint8)            # one median per pixel over 9 shifted copies
+print("from scratch == cv2.medianBlur:", np.array_equal(mine, cv2.medianBlur(img, 3)[1:-1, 1:-1]))
+print("thin lines, column 260, rows 18-22: clean", img[18:23, 260].tolist(), "| median 3", cv2.medianBlur(img, 3)[18:23, 260].tolist())
+```
+
+Output:
+
+```text
+sorted: [0, 44, 46, 47, 49, 52, 55, 60, 255] | median: 49 | mean: 67.6
+from scratch == cv2.medianBlur: True
+thin lines, column 260, rows 18-22: clean [166, 166, 20, 166, 166] | median 3 [166, 166, 166, 166, 166]
+```
+
+- `np.median` over a stack of shifted views is simple but slow (it sorts every window); OpenCV uses sorting networks for small k and a histogram method for large k on 8-bit images.
+
+### 2. Median against linear filters
+
+```python
+import numpy as np
+import cv2
+
+clean = img.astype(float)
+rng = np.random.default_rng(0)
+sp = img.copy()
+u = rng.random(img.shape)
+sp[u < 0.025] = 0
+sp[(u >= 0.025) & (u < 0.05)] = 255
+
+def report(name, x):
+    psnr = 10 * np.log10(255 ** 2 / np.mean((x.astype(float) - clean) ** 2))
+    print(f"{name:10s} PSNR {psnr:5.2f} dB | large errors {int((np.abs(x.astype(int) - img) > 40).sum()):5d}")
+
+report("noisy", sp)
+report("box 3", cv2.blur(sp, (3, 3)))
+report("gauss 1", cv2.GaussianBlur(sp, (0, 0), 1))
+report("median 3", cv2.medianBlur(sp, 3))
+report("median 5", cv2.medianBlur(sp, 5))
+report("median 3 *", cv2.medianBlur(img, 3))                 # * on the clean image: damage of the filter alone
+print("impulses left:", int(np.isin(cv2.medianBlur(sp, 3), [0, 255]).sum()), "of", int(np.isin(sp, [0, 255]).sum()))
+```
+
+Output:
+
+```text
+noisy      PSNR 18.19 dB | large errors  2785
+box 3      PSNR 22.00 dB | large errors  6286
+gauss 1    PSNR 22.46 dB | large errors  5474
+median 3   PSNR 25.41 dB | large errors   614
+median 5   PSNR 16.99 dB | large errors  4866
+median 3 * PSNR 25.70 dB | large errors   557
+impulses left: 0 of 3184
+```
+
+- The last line before "impulses" is the key: almost all remaining error of the 3 × 3 median comes from the filter itself (thin lines and text), not from leftover noise.
+
+## OpenCV API notes
+
+**`cv2.medianBlur(src, ksize)`**:
+- `ksize`: odd and greater than 1; the window is always square.
+- Types: for ksize 3 and 5, 8-bit, 16-bit and float32 images; for larger ksize, **8-bit only** (other types raise an error).
+- Colour images: each channel is filtered on its own, which can create colours that were not in the window (a median per channel is not a median colour).
+- Borders: replicated (BORDER_REPLICATE); there is no borderType parameter.
+
+**Binary masks**: `cv2.medianBlur(mask, 3)` removes isolated pixels and fills one-pixel holes; compare with opening and closing (23.2).
+
+**Speed**: small kernels use sorting networks (fast, vectorised); large 8-bit kernels use a running histogram, so cost grows only slowly with ksize.
+
+## Where it fails
+
+- **Thin structures**: lines, scratches, text strokes and corners narrower than about k/2 are removed.
+- **Dense impulse noise**: at 20 % or more, impulses cluster and a 3 × 3 window may contain more impulses than good pixels; use an adaptive median (Go deeper) or a larger window at the cost of detail.
+- **Gaussian noise**: weaker than a box of the same size.
+- **Non-8-bit data with large windows**: not supported; convert, or use another filter.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Even or too large ksize**: even values raise an error; 7 × 7 or larger erases most detail.
+- **Using a median to "smooth" fine features** that must be measured (scratch width, line positions).
+- **Float images with ksize ≥ 7**: raises an error; convert to uint8 first.
+- **Filtering colour channels and expecting real colours**: per-channel medians can mix channels from different pixels.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Statistics of the median
+
+For n independent Gaussian values, the variance of the median is about π/2 times that of the mean, so its standard deviation is about 1.25 times larger: the 8.1 against 6.6 in the 3 × 3 example. In exchange, the median has a breakdown point of 50 %: almost half the values can be arbitrarily wrong before it moves far, against 0 % for the mean (a single wrong value can move it anywhere). This is the same robust-statistics idea as median/MAD in 10.
+
+### Fast medians
+
+Huang's running-histogram algorithm (1979) updates a 256-bin histogram as the window slides, adding one column and removing one; Perreault and Hébert (2007) made the cost per pixel independent of the window size by keeping one histogram per column [2]. For small windows, fixed sorting networks are faster.
+
+### Variants
+
+- **Weighted median**: some window positions counted several times (a centre weight keeps more detail).
+- **Adaptive median**: grows the window only where the current one is dominated by impulses, and replaces only pixels that are themselves extreme; handles dense noise with less damage.
+- **Vector median** for colour: picks the colour from the window that is closest in total to all others, so no new colours appear.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The median of 12, 250, 15, 11, 14, 0, 13, 16, 12 is…",
+      options: ["13", "38.1", "14", "12"],
+      answer: 0,
+      explanation: "Sorted: 0, 11, 12, 12, 13, 14, 15, 16, 250; the fifth value is 13.",
+    },
+    {
+      question: "Why does the median keep edges sharp?",
+      options: ["It uses small weights at edges", "Its output is one of the input values from one side of the edge", "It is separable", "It works in the frequency domain"],
+      answer: 1,
+      explanation: "No in-between values are created.",
+    },
+    {
+      question: "What does a 3 × 3 median do to a 1-pixel-wide line?",
+      options: ["Keeps it", "Thickens it", "Removes it", "Blurs it to half contrast"],
+      answer: 2,
+      explanation: "The line fills only 3 of 9 window positions; the median is background.",
+    },
+    {
+      question: "For Gaussian noise, a 3 × 3 median compared with a 3 × 3 box…",
+      options: ["Removes more noise", "Removes less noise but keeps edges", "Is identical", "Adds noise"],
+      answer: 1,
+      explanation: "About 1.25 times more leftover noise, sharp edges.",
+    },
+    {
+      question: "cv2.medianBlur on a float32 image with ksize 7…",
+      options: ["Works", "Raises an error", "Silently converts to uint8", "Uses ksize 5"],
+      answer: 1,
+      explanation: "Large kernels are supported only for 8-bit images.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+The top-left corner pixel of a bright square (200) on a dark background (10) sees this 3 × 3 window: (10 10 10; 10 200 200; 10 200 200). What does a 3 × 3 median output there?
+
+<Solution>
+
+Sorted: five 10s and four 200s; the median is **10**. The corner pixel turns dark: medians round off the corners of shapes, and larger windows round them more (the 5 × 5 example cut two pixels from the square's corner).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Add 20 % salt-and-pepper noise to the clean image and compare a 3 × 3 median, a 5 × 5 median and two 3 × 3 medians in a row, by PSNR and large errors.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+sp2 = img.copy()
+u = rng.random(img.shape)
+sp2[u < 0.1] = 0
+sp2[(u >= 0.1) & (u < 0.2)] = 255
+report("20% noisy", sp2)
+report("median 3", cv2.medianBlur(sp2, 3))
+report("median 5", cv2.medianBlur(sp2, 5))
+report("3 then 3", cv2.medianBlur(cv2.medianBlur(sp2, 3), 3))
+```
+
+Output:
+
+```text
+20% noisy  PSNR 12.11 dB | large errors 11257
+median 3   PSNR 22.63 dB | large errors  1216
+median 5   PSNR 17.09 dB | large errors  4771
+3 then 3   PSNR 22.50 dB | large errors  1298
+```
+
+At 20 % the 3 × 3 median still wins, but leaves twice as many large errors as at 5 %. The 5 × 5 median removes the remaining clusters and destroys the bars and lines. Two 3 × 3 passes do not help here.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 3 (order-statistic filters) and Chapter 5 (adaptive median).
+2. S. Perreault, P. Hébert, "Median filtering in constant time", *IEEE Trans. Image Processing* 16(9), 2389–2394, 2007.
+3. T. S. Huang, G. J. Yang, G. Y. Tang, "A fast two-dimensional median filtering algorithm", *IEEE Trans. Acoustics, Speech, and Signal Processing* 27(1), 13–18, 1979.
+4. OpenCV 4.13.0 documentation: `medianBlur`. https://docs.opencv.org/4.13.0/

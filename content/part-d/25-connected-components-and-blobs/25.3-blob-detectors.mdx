@@ -1,0 +1,286 @@
+export const meta = {
+  number: "25.3",
+  title: "Blob detectors (LoG, MSER)",
+  minutes: 25,
+  objectives: [
+    "Detect blobs in grey images with a scale-space LoG, without a global threshold",
+    "Use cv2.SimpleBlobDetector and understand its threshold sweep and shape filters",
+    "Find maximally stable extremal regions (MSER) and remove their duplicates",
+    "Compare the three detectors on touching particles",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 25.3 (Module 25).
+  Lab: PyramidLab (mode dog, particles source).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 25.3 Blob detectors (LoG, MSER)
+
+<Definition term="Blob detector">a method that finds compact regions that are brighter or darker than their surroundings, directly in a grey image: their centre, size and sometimes shape. Unlike threshold-and-label (25.1), blob detectors look at local contrast and can separate blobs that a single threshold would merge or miss.</Definition>
+
+Labelling needs a good binary mask. On uneven backgrounds, with blobs of different brightness, or with blobs that touch, a single threshold fails. Three families of detectors avoid it: the scale-normalised Laplacian of Gaussian (LoG, 20.4) finds blob centres and sizes from second derivatives; OpenCV's SimpleBlobDetector thresholds at many levels and keeps regions that persist; MSER (Matas et al., 2002 [2]) finds regions whose outline stays stable while the threshold changes.
+
+## 1. An analogy
+
+Finding hills on a map. LoG looks for places where the ground curves down in every direction, and the curvature tells how wide the hill is. SimpleBlobDetector floods the map to many water levels and keeps the islands that appear at several levels. MSER floods slowly and keeps the islands whose coastline barely moves while the water rises: those are the clearly shaped hills.
+
+## 2. Three detectors
+
+<Flow
+  steps={[
+    { label: "Grey image", tone: "data" },
+    { label: "LoG: σ²·∇²G at several σ; local maxima over position and scale", tone: "process" },
+    { label: "SimpleBlobDetector: thresholds from min to max; group stable centres; filter by area, circularity, inertia, convexity", tone: "process" },
+    { label: "MSER: regions whose area changes least over a range of thresholds", tone: "result" },
+  ]}
+/>
+
+On the 40 particles (bright domes, radius 6–13 pixels, several touching), counting detections:
+
+| Method | Count | Notes |
+| --- | --- | --- |
+| Otsu + label (25.1) | 35 | touching pairs merged |
+| SimpleBlobDetector, defaults | **0** | defaults look for **dark** blobs (blobColor = 0) |
+| SimpleBlobDetector, blobColor = 255 | 31 | merged pairs rejected by the convexity and inertia filters |
+| … without shape filters | 35 | merged pairs counted as one |
+| MSER (delta 5, area 80–800) | 472 regions → **39** after merging duplicates | nested regions of the same blob at many thresholds |
+| LoG, σ = 3…8, peaks above 30 | **40** | finds each dome's centre, also in touching pairs |
+| LoG, peaks above 60 | 39 | |
+| LoG, peaks above 90 | 20 | |
+
+The LoG treats each dome as a separate maximum of curvature, so touching particles are counted separately. Its result depends on the peak threshold (here a wide range from about 30 to 60 works) and on the scale range, which must cover the blob sizes. SimpleBlobDetector is convenient but its default settings and filters must be adapted; MSER produces many nested regions per blob that must be merged.
+
+<PyramidLab mode="dog" initialSource="particles" caption="Difference of Gaussians (≈ LoG) on the particle image. Set σ to about the particles' radius divided by √2 (4 to 7): every particle, including touching ones, becomes a separate dark spot (bright blobs give a negative DoG). Smaller σ responds to the noise and the domes' rims; larger σ merges neighbours."/>
+
+## 3. SimpleBlobDetector in detail
+
+`cv2.SimpleBlobDetector` thresholds the image from `minThreshold` to `maxThreshold` in steps of `thresholdStep`, finds contours at each level, groups centres closer than `minDistBetweenBlobs`, keeps groups seen at least `minRepeatability` times, and filters by:
+
+- **colour** (`blobColor` 0 = dark blobs, 255 = bright blobs);
+- **area** (`minArea`, `maxArea`);
+- **circularity** 4πA/P² (24.3), **inertia ratio** (minor/major axis from moments, 24.6), **convexity** (area / hull area, 24.5).
+
+Defaults (OpenCV 4.13): thresholds 50 to 220 in steps of 10, area 25–5 000, inertia ≥ 0.1 and convexity ≥ 0.95 on, circularity off, `blobColor = 0`. The keypoints it returns have `pt` (centre) and `size` (diameter).
+
+## 4. Industrial example
+
+Blob detection finds solder-paste deposits, ball-grid-array balls, holes in perforated plates, bubbles in glass and cells in microscope images. LoG-type detectors are chosen when blobs vary in brightness or touch; SimpleBlobDetector is popular for quick setups (calibration-target dots, LED arrays) because its filters encode "round, convex, of this size" directly; MSER is used for text and markings, whose characters are stable regions under thresholding, and as a feature detector for matching (34).
+
+## What you should remember from 25.3
+
+<Takeaways>
+<Takeaway n={1} title="LoG">Scale-normalised curvature maxima: centre and size; separates touching blobs.</Takeaway>
+<Takeaway n={2} title="SimpleBlobDetector">Many thresholds + shape filters; set blobColor for bright blobs.</Takeaway>
+<Takeaway n={3} title="MSER">Regions stable over thresholds; many nested duplicates to merge.</Takeaway>
+<Takeaway n={4} title="Choose">Uneven background or touching blobs → LoG; quick round-dot finding → SimpleBlobDetector.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** SimpleBlobDetector finds nothing on an image of white dots on black. Most likely reason?
+
+<Solution>
+
+`blobColor` is 0 by default (dark blobs). Set `params.blobColor = 255` (or `filterByColor = False`).
+
+</Solution>
+
+**Q2.** Blobs have radius 4 to 16 pixels. Which σ range for a LoG detector?
+
+<Solution>
+
+σ ≈ r/√2: about **3 to 11**, in steps of a factor of about 1.2–1.4.
+
+</Solution>
+
+### Next: 25.4 Counting objects
+
+Counting touching objects reliably: erosion, distance-transform peaks and markers.
+
+## Code
+
+Two examples: SimpleBlobDetector and MSER, then a LoG scale-space detector.
+
+### 1. SimpleBlobDetector and MSER
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-particles.png", cv2.IMREAD_GRAYSCALE)
+p = cv2.SimpleBlobDetector_Params()
+print("default blobColor:", p.blobColor, "-> blobs:", len(cv2.SimpleBlobDetector_create(p).detect(img)))
+p.blobColor = 255                                                    # bright blobs
+kp = cv2.SimpleBlobDetector_create(p).detect(img)
+print("bright blobs:", len(kp), "| diameters", round(min(k.size for k in kp), 1), "to", round(max(k.size for k in kp), 1))
+p.filterByInertia = p.filterByConvexity = False
+print("without shape filters:", len(cv2.SimpleBlobDetector_create(p).detect(img)))
+
+mser = cv2.MSER_create(delta=5, min_area=80, max_area=800)
+regions, boxes = mser.detectRegions(img)
+centres = []
+for r in regions:                                                    # merge nested regions of the same blob
+    c = r.mean(axis=0)
+    if all(np.hypot(*(c - k)) > 6 for k in centres):
+        centres.append(c)
+print("MSER regions:", len(regions), "| distinct centres:", len(centres))
+```
+
+Output:
+
+```text
+default blobColor: 0 -> blobs: 0
+bright blobs: 31 | diameters 11.0 to 24.1
+without shape filters: 35
+MSER regions: 472 | distinct centres: 39
+```
+
+### 2. LoG scale-space detector
+
+```python
+import numpy as np
+import cv2
+
+f = img.astype(np.float32)
+sigmas = [3, 4, 5, 6, 7, 8]
+stack = np.stack([-cv2.Laplacian(cv2.GaussianBlur(f, (0, 0), s), cv2.CV_32F) * s * s for s in sigmas])  # bright blobs -> positive
+best = stack.max(axis=0)
+scale = np.array(sigmas)[stack.argmax(axis=0)]
+for t in (30, 60, 90):
+    peaks = (best == cv2.dilate(best, np.ones((9, 9), np.uint8))) & (best > t)
+    print(f"threshold {t}: {int(peaks.sum())} blobs")
+peaks = (best == cv2.dilate(best, np.ones((9, 9), np.uint8))) & (best > 30)
+ys, xs = np.nonzero(peaks)
+radii = np.sqrt(2) * scale[ys, xs]
+print("estimated radius range:", round(float(radii.min()), 1), "to", round(float(radii.max()), 1), "px")
+```
+
+Output:
+
+```text
+threshold 30: 40 blobs
+threshold 60: 39 blobs
+threshold 90: 20 blobs
+estimated radius range: 5.7 to 11.3 px
+```
+
+- The radius estimate r ≈ √2 · σ (20.4) recovers the particles' size range (6–13 px) to within the coarse σ steps.
+
+## OpenCV API notes
+
+- **`cv2.SimpleBlobDetector_create(params)`**, **`detector.detect(image, mask=None)`** → list of `cv2.KeyPoint` (`pt`, `size`). Parameters in `cv2.SimpleBlobDetector_Params()`; set `blobColor`, `minArea`/`maxArea`, the `filterBy*` switches and their limits, `minThreshold`/`maxThreshold`/`thresholdStep`, `minDistBetweenBlobs`.
+- **`cv2.MSER_create(delta=5, min_area=60, max_area=14400, max_variation=0.25, min_diversity=0.2, …)`**, **`mser.detectRegions(gray)`** → (list of point arrays, bounding boxes). Detects dark regions on light and light on dark in one call (two passes).
+- **LoG / DoG**: build from `GaussianBlur` and `Laplacian` (20.4); `cv2.SIFT_create` contains a DoG blob detector with sub-pixel and sub-scale refinement (34.1).
+- **Drawing**: `cv2.drawKeypoints(img, kp, None, (0, 0, 255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)` draws circles of the keypoint size.
+
+## Where it fails
+
+- **Non-round objects**: LoG responds to elongated shapes with several maxima or weak ones.
+- **Strongly overlapping blobs**: when centres are closer than about the radius, LoG maxima merge too.
+- **Texture and noise** at the chosen scales: many false blobs; raise the threshold or restrict scales.
+- **MSER on low-contrast or blurred blobs**: regions are not stable enough to be detected.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Forgetting `blobColor = 255`** for bright blobs.
+- **Leaving the default shape filters on** when objects are not round and convex.
+- **Counting raw MSER regions**: each blob yields several nested regions.
+- **LoG without σ² normalisation**: small scales dominate.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Scale-space blob detection
+
+Lindeberg [1] proposed detecting blobs as local maxima of the scale-normalised Laplacian (or the determinant of the Hessian) over space and scale, which gives both position and characteristic size. SIFT (34.1) and SURF use these detectors as keypoints.
+
+### MSER
+
+Matas, Chum, Urban and Pajdla [2] defined maximally stable extremal regions for wide-baseline stereo matching: regions that are connected components of a threshold level set and whose area changes least over a range of thresholds. They can be computed in almost linear time with a component tree (Nistér and Stewénius 2008), and they are invariant to monotonic brightness changes and affine transformations of the region.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why can a LoG detector count touching particles separately?",
+      options: ["It thresholds better", "Each dome is its own maximum of curvature", "It uses colour", "It erodes the mask"],
+      answer: 1,
+      explanation: "No binary mask is involved.",
+    },
+    {
+      question: "SimpleBlobDetector with default parameters on white dots returns…",
+      options: ["All dots", "No dots (it looks for dark blobs)", "Half of them", "An error"],
+      answer: 1,
+      explanation: "blobColor defaults to 0.",
+    },
+    {
+      question: "MSER returns 472 regions for 40 particles because…",
+      options: ["It finds noise", "Each particle yields nested regions at several thresholds", "It splits particles", "It counts pixels"],
+      answer: 1,
+      explanation: "Merge regions with nearby centres.",
+    },
+    {
+      question: "Which LoG σ best matches a blob of radius 8?",
+      options: ["1", "about 5.7", "8", "16"],
+      answer: 1,
+      explanation: "σ ≈ r/√2.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A SimpleBlobDetector with thresholds 50 to 220 in steps of 10 thresholds the image how many times? A blob appears in 5 of those binary images; with `minRepeatability = 2`, is it kept?
+
+<Solution>
+
+(220 − 50) / 10 = 17 steps, i.e. thresholds 50, 60, …, 210: **17** images. Seen 5 times ≥ 2: **kept**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Draw the LoG detections (threshold 30) as circles of radius √2 · σ on a colour copy of the particle image, and check how many detections lie inside the particle mask.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+_, mask = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+vis = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+inside = 0
+for x, y, r in zip(xs, ys, radii):
+    cv2.circle(vis, (int(x), int(y)), int(round(r)), (0, 0, 255), 1)
+    inside += int(mask[y, x] > 0)
+print("detections:", len(xs), "| inside the particle mask:", inside)
+```
+
+Output:
+
+```text
+detections: 40 | inside the particle mask: 40
+```
+
+All 40 detections sit on particles: there are no false detections on the background at this threshold. Comparing detections with the binary mask is a quick sanity check when no ground truth is available.
+
+</Solution>
+
+## References
+
+1. T. Lindeberg, "Feature detection with automatic scale selection", *Int. J. Computer Vision* 30(2), 79–116, 1998.
+2. J. Matas, O. Chum, M. Urban, T. Pajdla, "Robust wide-baseline stereo from maximally stable extremal regions", *Image and Vision Computing* 22(10), 761–767, 2004 (BMVC 2002).
+3. OpenCV 4.13.0 documentation: `SimpleBlobDetector`, `MSER`, `drawKeypoints`. https://docs.opencv.org/4.13.0/

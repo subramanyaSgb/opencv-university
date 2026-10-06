@@ -1,0 +1,418 @@
+export const meta = {
+  number: "7.4",
+  title: "Video and camera capture",
+  minutes: 35,
+  objectives: [
+    "Write a correct capture loop for files, image sequences, network streams and cameras",
+    "Set and verify camera properties, and choose a capture backend",
+    "Explain buffering and latency, and read the newest frame in a separate thread",
+    "Know when to use a camera SDK (GenICam) instead of VideoCapture",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 7.4 (Module 7 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 (headless build) with NumPy 2.5.3.
+  Camera examples need real hardware and are not run by the automatic checks.
+*/}
+
+# 7.4 Video and camera capture
+
+<Definition term="VideoCapture">OpenCV's one interface for frame sources: video files, numbered image sequences, network streams and cameras. You ask it for the next frame; it gives you a BGR NumPy array.</Definition>
+
+Chapter 4.5 explained codecs and streams. This chapter is about the code: the loop that pulls frames, the properties you can (try to) set, and the timing problem that makes many live systems react to the past.
+
+## 1. An analogy
+
+A conveyor bringing boxes to a worker. If the worker is faster than the conveyor, she waits for each box. If she is slower, boxes pile up on the belt: she always works on the oldest box, and the pile grows until boxes fall off the end. A camera is the conveyor, your processing is the worker, and the pile is the **buffer**.
+
+## 2. One interface, many sources
+
+| Source | `cv2.VideoCapture(…)` |
+| --- | --- |
+| Video file | `"line3.mp4"` |
+| Image sequence | `"frames/img_%04d.png"` (printf pattern) |
+| Network stream | `"rtsp://user:pass@192.168.1.20/stream1"`, `"http://…/video.mjpg"` |
+| Local camera (USB, built-in) | `0`, `1`, … (index), optionally with a backend: `(0, cv2.CAP_DSHOW)` |
+| GStreamer pipeline | a pipeline string with `cv2.CAP_GSTREAMER` (if built in, 7.1) |
+
+## 3. The capture loop
+
+<Flow
+  steps={[
+    { label: "cap = cv2.VideoCapture(src); check cap.isOpened()", tone: "process" },
+    { label: "ok, frame = cap.read()", tone: "process" },
+    { label: "if not ok: end of file, or camera/stream lost → break or reconnect", tone: "process" },
+    { label: "process(frame); show with waitKey(1) if there is a window", tone: "process" },
+    { label: "cap.release() when done", tone: "result" },
+  ]}
+/>
+
+A 25-frame MJPG file written at 10 fps reads back 25 frames, with timestamps 0, 100, 200 … 2400 ms (`CAP_PROP_POS_MSEC` after each read) *(Code example 1)*. The same loop works for an image sequence *(Code example 2)*.
+
+- `read()` = `grab()` + `retrieve()`. `grab()` alone moves to the next frame cheaply: useful to skip frames or to grab several cameras at nearly the same instant before retrieving them.
+- `ok == False` means end of file for files, but **connection lost** for streams and cameras: reconnect rather than exit.
+
+## 4. Camera properties
+
+`cap.set(cv2.CAP_PROP_…, value)` **asks** the driver; `cap.get(…)` tells what you got. Always read back:
+
+| Property | Notes |
+| --- | --- |
+| `CAP_PROP_FRAME_WIDTH`, `CAP_PROP_FRAME_HEIGHT` | the driver picks the nearest supported mode |
+| `CAP_PROP_FPS` | often only a request; measure real fps |
+| `CAP_PROP_AUTO_EXPOSURE`, `CAP_PROP_EXPOSURE` | units and values differ by backend and camera |
+| `CAP_PROP_AUTOFOCUS`, `CAP_PROP_FOCUS` | webcams only |
+| `CAP_PROP_FOURCC` | e.g. `MJPG` to get higher resolutions over USB 2 |
+| `CAP_PROP_BUFFERSIZE` | supported by some backends only |
+
+On Windows, `cv2.CAP_DSHOW` (DirectShow) and `cv2.CAP_MSMF` (Media Foundation) differ in startup time and supported properties; on Linux `cv2.CAP_V4L2`. If a property does nothing, try another backend.
+
+## 5. Latency and buffering
+
+Frames are buffered by the driver, the network stack or the decoder. When processing is slower than the camera, a plain `read()` loop gets frames from the **front** of the queue: old ones. The system then reacts to what happened seconds ago.
+
+<CaptureLab caption="Simulated camera and processing loop. Increase the processing time beyond the frame period and compare the two strategies." />
+
+Things to try: 25 fps with 30 ms processing (keeps up: both curves flat); 80 ms processing (the plain loop's latency climbs to buffer × processing time); a buffer of 1.
+
+The fix is a **reader thread** that reads continuously and keeps only the newest frame; the processing loop takes that frame when it is ready (Code example 3). Frames are skipped, but every decision is about the present. Trigger-based acquisition (below) avoids the problem altogether.
+
+## 6. Writing video
+
+`cv2.VideoWriter(path, fourcc, fps, (width, height))`, then `write(frame)` for each frame and `release()` at the end (4.5). Frames must have exactly that size and 3 channels (or `isColor=False` for gray). Check `isOpened()`: an unsupported codec/container combination opens nothing and writes nothing.
+
+## 7. Industrial cameras
+
+GigE Vision and USB3 Vision cameras (2.10, 4.4) are usually **not** opened with `VideoCapture`: their features (hardware trigger, exposure in µs, gain, pixel formats such as Mono12p, line-scan modes, timestamps, packet settings) are reached through the vendor SDK or a **GenICam** library (for example *Harvesters* in Python). The SDK delivers a buffer; you wrap it with `np.frombuffer` (4.4, 6.1) and continue with OpenCV.
+
+<Columns>
+<Panel title="Free-running" tone="a">
+
+The camera captures at its own frame rate; the program picks frames. Simple, but frames and parts are not synchronised.
+
+</Panel>
+<Panel title="Triggered" tone="good">
+
+A sensor (light barrier, encoder) triggers each exposure when a part is in position. One frame per part, no buffering surprises, exposure timed to the strobe (2.6).
+
+</Panel>
+</Columns>
+
+## 8. Industrial example
+
+A monitoring station reads an IP camera over RTSP and must alarm within half a second:
+
+<Flow
+  steps={[
+    { label: "Reader thread: cap.read() in a loop, keep the newest frame", tone: "process" },
+    { label: "If read fails: release, wait 2 s, reopen (log it)", tone: "process" },
+    { label: "Main loop: take newest frame, detect, alarm", tone: "process" },
+    { label: "Log capture time vs decision time: latency under control", tone: "result" },
+  ]}
+/>
+
+## What you should remember from 7.4
+
+<Takeaways>
+<Takeaway n={1} title="Loop">isOpened → read until ok is False → release; ok False on streams means reconnect.</Takeaway>
+<Takeaway n={2} title="Properties">set() is a request: read back with get(); backends differ.</Takeaway>
+<Takeaway n={3} title="Latency">Slow processing + buffers = old frames; read in a thread, process the newest.</Takeaway>
+<Takeaway n={4} title="Writing">VideoWriter: (width, height), matching frames, isOpened, release.</Takeaway>
+<Takeaway n={5} title="Industry">GigE/USB3 Vision via SDK/GenICam; trigger per part when possible.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A camera runs at 30 fps and your processing takes 50 ms per frame. How many frames per second can you process, and what happens to the rest?
+
+<Solution>
+
+1000 / 50 = **20** frames per second. The other 10 per second pile up in the buffer (latency grows) until the buffer is full and frames are dropped, or are skipped deliberately by a newest-frame reader.
+
+</Solution>
+
+**Q2.** You call `cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1000)`. How do you know what you got?
+
+<Solution>
+
+`cap.get(cv2.CAP_PROP_FRAME_WIDTH)` after setting, or simply `frame.shape` of the next frame: the driver picks a supported mode (for example 1280).
+
+</Solution>
+
+**Q3.** Why might `read()` return `ok = False` on an RTSP stream after an hour?
+
+<Solution>
+
+The connection dropped (network, camera reboot, stream timeout). Release and reopen, with a pause and logging, instead of ending the program.
+
+</Solution>
+
+### Next: 7.5 Drawing and text
+
+Marking results on images: lines, boxes, circles, contours and text, with anti-aliasing and sub-pixel precision.
+
+## Code
+
+Three examples: reading a video file, an image sequence and frame skipping, and a newest-frame reader for cameras and streams. Copy the sample images next to the script.
+
+### 1. OpenCV: write and read a video file
+
+```python
+import numpy as np
+import cv2
+
+base = cv2.imread("sample-color.png")
+writer = cv2.VideoWriter("demo.avi", cv2.VideoWriter_fourcc(*"MJPG"), 10, (320, 200))
+for i in range(25):                                            # 25 frames = 2.5 s at 10 fps
+    frame = base.copy()
+    cv2.putText(frame, f"{i:02d}", (250, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    writer.write(frame)
+writer.release()
+
+cap = cv2.VideoCapture("demo.avi")
+if not cap.isOpened():
+    raise IOError("cannot open demo.avi")
+n, stamps = 0, []
+while True:
+    ok, frame = cap.read()                                     # ok is False at the end of the file
+    if not ok:
+        break
+    stamps.append(cap.get(cv2.CAP_PROP_POS_MSEC))              # timestamp of the frame just read
+    n += 1
+cap.release()
+print("frames read:", n, "| fps:", 10, "| first timestamps (ms):", [round(t) for t in stamps[:4]], "| last:", round(stamps[-1]))
+```
+
+Output:
+
+```text
+frames read: 25 | fps: 10 | first timestamps (ms): [0, 100, 200, 300] | last: 2400
+```
+
+- Each frame gets its number drawn in, so you can see which frame you are looking at (7.5).
+- `CAP_PROP_POS_MSEC` comes from the container's timestamps; for live cameras it is the backend's own clock (or 0). Use `time.time()` or the SDK's timestamp for live sources.
+
+### 2. OpenCV: image sequences and skipping frames
+
+```python
+import numpy as np
+import cv2
+
+base = cv2.imread("sample-scene.png")
+for i in range(6):
+    cv2.imwrite(f"frame_{i:03d}.png", np.roll(base, 10 * i, axis=1))   # a numbered image sequence
+cap = cv2.VideoCapture("frame_%03d.png")                                 # printf-style pattern
+frames = []
+while True:
+    ok, f = cap.read()
+    if not ok:
+        break
+    frames.append(f)
+print("sequence frames:", len(frames), "| shape:", frames[0].shape)
+
+cap = cv2.VideoCapture("demo.avi")                         # from Code example 1
+for _ in range(9):
+    cap.grab()                                             # grab(): take the next frame, no image returned (read = grab + retrieve)
+ok, f = cap.read()
+print("after 9 grabs, read() returns frame", int(cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1)
+```
+
+Output:
+
+```text
+sequence frames: 6 | shape: (200, 320, 3)
+after 9 grabs, read() returns frame 9
+```
+
+- `%03d` means "number with 3 digits, zero-padded": frame_000.png, frame_001.png …
+- A sequence of lossless images is a convenient way to record test data for later offline runs of your pipeline.
+
+### 3. OpenCV and threading: always process the newest frame (needs a camera)
+
+```python
+# Needs a desktop or a camera / stream: not run by the automatic checks
+import threading
+import time
+import numpy as np
+import cv2
+
+class NewestFrame:
+    """Reads a source continuously in a thread and keeps only the newest frame."""
+    def __init__(self, source, backend=cv2.CAP_ANY):
+        self.cap = cv2.VideoCapture(source, backend)
+        if not self.cap.isOpened():
+            raise IOError(f"cannot open {source}")
+        self.lock = threading.Lock()
+        self.frame, self.stamp, self.running = None, 0.0, True
+        threading.Thread(target=self._reader, daemon=True).start()
+
+    def _reader(self):
+        while self.running:
+            ok, f = self.cap.read()
+            if ok:
+                with self.lock:
+                    self.frame, self.stamp = f, time.time()
+
+    def latest(self):
+        with self.lock:
+            return (None if self.frame is None else self.frame.copy()), self.stamp
+
+    def close(self):
+        self.running = False
+        self.cap.release()
+
+cam = NewestFrame(0)                                   # or "rtsp://…"
+cam.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+print("got width:", cam.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+for _ in range(100):
+    frame, t_capture = cam.latest()
+    if frame is None:
+        time.sleep(0.01)
+        continue
+    time.sleep(0.08)                                   # stand-in for 80 ms of processing
+    print(f"latency {1000 * (time.time() - t_capture):.0f} ms")
+cam.close()
+```
+
+Typical behaviour: latency stays near the processing time (≈ 80–120 ms here) instead of growing; frames in between are skipped.
+
+- `daemon=True` lets the program exit even if the thread is still reading.
+- The lock prevents reading a frame while the thread replaces it; `.copy()` gives the processing loop its own array.
+- OpenCV releases Python's GIL inside `read()`, so the reader thread runs truly in parallel with processing.
+
+## OpenCV API notes
+
+**`cv2.VideoCapture(source, apiPreference=cv2.CAP_ANY)`**: `isOpened`, `read`, `grab`, `retrieve`, `get`, `set`, `release`; `cv2.VideoCapture.getBackendName()`. Backends: `CAP_DSHOW`, `CAP_MSMF` (Windows), `CAP_V4L2` (Linux), `CAP_AVFOUNDATION` (macOS), `CAP_FFMPEG`, `CAP_GSTREAMER`.
+
+**`cv2.VideoCapture.waitAny(captures, timeoutNs)`** (4.x): wait until one of several captures has a frame ready.
+
+**Image sequences**: printf patterns (`%04d`); `cv2.CAP_IMAGES` backend.
+
+**`cv2.VideoWriter(filename, fourcc, fps, frameSize, isColor=True)`**: `write`, `isOpened`, `release`; `VIDEOWRITER_PROP_*` for quality and hardware acceleration where supported.
+
+## Where it fails
+
+- **Camera properties** are backend- and model-specific; a property that works with one webcam is ignored by another.
+- **Timestamps** of webcams via VideoCapture are not reliable for measurement (motion speed, synchronisation); use hardware timestamps from industrial SDKs.
+- **Several USB cameras** on one controller may not fit the bandwidth (4.1); open fails or frames drop.
+- **Python threads** help for I/O and OpenCV calls that release the GIL; pure-Python processing in the main loop still runs on one core.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Not checking `isOpened()`** and getting `None` frames.
+- **Exiting on `ok == False`** for live streams instead of reconnecting.
+- **Trusting `set()`** without reading back.
+- **Plain `read()` loops with slow processing** on live sources: growing latency.
+- **Forgetting `release()`**: the camera stays locked for other programs.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### GenICam and GigE Vision
+
+GenICam (EMVA) defines a standard feature description (an XML file in every camera) and naming (SFNC: ExposureTime, TriggerMode, PixelFormat …), so the same software can control cameras from different vendors; GigE Vision and USB3 Vision define the transport [1][2]. Python access via the vendor SDKs or Harvesters (a GenICam consumer) [3].
+
+### Synchronising cameras
+
+For multi-camera measurements (stereo, Part E), cameras are triggered by the same hardware signal, or use IEEE 1588 PTP clock synchronisation (GigE Vision 2.0) to timestamp and schedule exposures precisely.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "cap.read() returns ok = False on a USB camera. Most likely meaning?",
+      options: ["End of the video", "The camera was disconnected or failed", "Wrong colour order", "The frame was empty but valid"],
+      answer: 1,
+      explanation: "For live sources there is no 'end': reconnect or report the failure.",
+    },
+    {
+      question: "After cap.set(cv2.CAP_PROP_FPS, 120), the camera…",
+      options: ["Always runs at 120 fps", "Runs at the nearest supported rate, maybe unchanged: check get() and measure", "Crashes", "Doubles its resolution"],
+      answer: 1,
+      explanation: "set() is a request to the driver.",
+    },
+    {
+      question: "Processing takes longer than the frame period. With a plain read() loop, latency…",
+      options: ["Stays at one frame", "Grows until the buffer is full", "Becomes zero", "Is unaffected"],
+      answer: 1,
+      explanation: "You process the oldest frames in the buffer.",
+    },
+    {
+      question: "Best way to capture one image per part on a fast line?",
+      options: ["Free-running camera at max fps", "Hardware trigger from a sensor at the part position", "Increase the buffer", "Use a webcam"],
+      answer: 1,
+      explanation: "A triggered exposure is synchronised with the part.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 30 fps stream has a 10-frame buffer. Processing takes 60 ms. Roughly how old are the frames you process after a few seconds?
+
+<Solution>
+
+Processing handles about 16.7 fps, so the buffer fills; each frame then waits behind ~10 others, each taking 60 ms: about 10 × 60 = **600 ms** plus processing, i.e. roughly 0.6–0.7 s old.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Read `demo.avi` from Code example 1 and keep only every 5th frame, using `grab()` for the frames you skip. Print the numbers of the frames you kept.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+cap = cv2.VideoCapture("demo.avi")
+kept, i = [], 0
+while True:
+    if i % 5 == 0:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        kept.append(i)
+    elif not cap.grab():
+        break
+    i += 1
+cap.release()
+print("kept frames:", kept)
+```
+
+Output:
+
+```text
+kept frames: [0, 5, 10, 15, 20]
+```
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+An inspection system with a free-running 60 fps camera sometimes measures the same part twice and sometimes misses a part. What would you change?
+
+<Solution>
+
+The camera is not synchronised with the parts. Use a **hardware trigger** (light barrier or encoder) so each part produces exactly one exposure at the right position, or, if impossible, track parts across frames (Part G) and decide once per part. Also check exposure time vs speed (2.6).
+
+</Solution>
+
+## References
+
+1. EMVA, *GenICam Standard* and *Standard Features Naming Convention (SFNC)*: [www.emva.org](https://www.emva.org/standards-technology/genicam/).
+2. A3 (Association for Advancing Automation), *GigE Vision* and *USB3 Vision* standards.
+3. Harvesters, a GenICam consumer library for Python: [github.com/genicam/harvesters](https://github.com/genicam/harvesters).
+4. OpenCV 4.13.0 documentation, *Video I/O* (`VideoCapture`, `VideoWriter`, `VideoCaptureAPIs`, `VideoCaptureProperties`): [docs.opencv.org/4.13.0/dd/de7/group__videoio.html](https://docs.opencv.org/4.13.0/dd/de7/group__videoio.html).

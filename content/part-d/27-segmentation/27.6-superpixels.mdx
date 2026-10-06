@@ -1,0 +1,334 @@
+export const meta = {
+  number: "27.6",
+  title: "Superpixels",
+  minutes: 25,
+  objectives: [
+    "Explain what superpixels are and why they are used as a first step",
+    "Compute the SLIC distance by hand and see the role of compactness",
+    "Create SLIC, SEEDS, LSC and graph-based superpixels with opencv-contrib",
+    "Measure superpixel quality: boundary recall and achievable accuracy",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 27.6 (Module 27).
+  Lab: SegmentLab mode "slic" (own SLIC implementation in lib/seg-ops.ts; not bit-exact to cv2.ximgproc).
+  Reference tail: contrib blocks are verified with opencv-contrib-python-headless 4.13.0.92.
+*/}
+
+# 27.6 Superpixels
+
+<Definition term="Superpixels">small, compact groups of neighbouring pixels with similar colour, used in place of single pixels. An image of 38 400 pixels becomes a few hundred superpixels whose borders follow the image's edges.</Definition>
+
+Most segmentation methods get slower with every pixel and noisier with every speck. Superpixels (Ren and Malik 2003 [1]) reduce the problem first: instead of 38 400 pixels, label 100 to 400 superpixels. Each one is small enough to lie inside a single object, so little is lost, and big enough to carry a reliable mean colour or texture. Later steps (clustering, graph cuts, classifiers, labelling tools) work on superpixels instead of pixels.
+
+## 1. An analogy
+
+A mosaic. The artist does not place one dot per point of the picture; they cut tiles of roughly equal size, but shape each tile so that its edge follows the outlines in the picture. Seen from afar, the mosaic keeps every outline with far fewer pieces.
+
+## 2. SLIC
+
+SLIC (simple linear iterative clustering, Achanta et al. 2012 [2]) is k-means (27.2) on (L*, a*, b*, x, y), with two changes that make it fast and local:
+
+<Flow
+  steps={[
+    { label: "Lab image; grid of centres every S pixels", tone: "data" },
+    { label: "Each pixel compares only with centres within 2S × 2S", tone: "process" },
+    { label: "Distance D = √(colour² + (spatial / S)² · m²)", tone: "process" },
+    { label: "Update centres; repeat about 10 times", tone: "process" },
+    { label: "Merge tiny fragments: connected superpixels", tone: "result" },
+  ]}
+/>
+
+- **S (region size)** sets the number of superpixels: about (width × height) / S².
+- **m (compactness)** weighs space against colour. Small m: borders follow colour closely, shapes become irregular. Large m: compact, nearly square cells that may cut across weak edges.
+
+## 3. A worked example by hand
+
+A pixel at (10, 10) with lightness 50 lies between two centres; grid step S = 10:
+
+| Centre | Position | Lightness | Colour distance | Spatial distance |
+| --- | --- | --- | --- | --- |
+| A | (12, 10) | 52 | 2 | 2 |
+| B | (9, 10) | 56 | 6 | 1 |
+
+D² = colour² + (spatial / S)² · m²:
+
+- m = 10: A: 4 + 0.04 · 100 = **8**; B: 36 + 0.01 · 100 = 37 → **A** (the more similar colour wins).
+- m = 40: A: 4 + 0.04 · 1600 = 68; B: 36 + 0.01 · 1600 = **52** → **B** (the nearer centre wins).
+
+Compactness decides whether a pixel joins the closer superpixel or the more similar one.
+
+## 4. Measuring quality
+
+Two common scores against a ground-truth segmentation:
+
+- **Boundary recall**: the fraction of true object borders that lie within 2 pixels of a superpixel border.
+- **Achievable segmentation accuracy (ASA)**: give every superpixel the object that covers most of it; the fraction of pixels then labelled correctly. It is the best any later step could do using these superpixels.
+
+On the test scene (240 × 160):
+
+| Method | Superpixels | Boundary recall | ASA |
+| --- | --- | --- | --- |
+| square grid, 20 px | 96 | 0.52 | 0.898 |
+| SLIC, region 20, ruler 10 | 103 | 1.00 | 0.998 |
+| SLIC, region 10, ruler 10 | 379 | 1.00 | 0.998 |
+| SLICO, region 20 | 92 | 0.97 | 0.984 |
+| SEEDS, 200 requested | 150 | 1.00 | 0.989 |
+| LSC, region 20 | 95 | 1.00 | 0.999 |
+| graph-based (Felzenszwalb), k 300 | 49 | 1.00 | 0.984 |
+
+A plain grid with about as many cells reaches only 0.52 recall: its borders ignore the image. Every superpixel method follows the edges; about 100 SLIC superpixels lose only 0.2 % of the pixels compared with a perfect segmentation, while reducing the number of elements 370-fold.
+
+<SegmentLab mode="slic" caption="SLIC superpixels (this lab's own implementation, close to but not bit-identical with cv2.ximgproc) with borders in white. Change the region size S and the compactness m: small m makes the borders hug the stripes of the green box and the text, large m makes cells square. The achievable accuracy shows how much a later step could still get right."/>
+
+## 5. Using superpixels
+
+A typical pipeline: superpixels → one feature vector per superpixel (mean colour, colour histogram, texture) → cluster, classify or graph-cut the superpixels → paint every pixel with its superpixel's label. Exercise 2 does this with k-means on mean a*, b* colours: 103 superpixels are clustered instead of 38 400 pixels.
+
+## 6. Industrial use
+
+- **Labelling tools**: click superpixels to build masks quickly for training data.
+- **Fast segmentation**: graph cuts and CRFs on superpixels instead of pixels.
+- **Texture and defect classification**: classify each superpixel (good / defect) with features computed over a meaningful region.
+- **Agriculture and remote sensing**: fields, crops and soil from superpixel colour and texture.
+
+## What you should remember from 27.6
+
+<Takeaways>
+<Takeaway n={1} title="Fewer elements">Hundreds of superpixels instead of thousands of pixels.</Takeaway>
+<Takeaway n={2} title="SLIC">Local k-means on Lab + position; S sets size, m sets compactness.</Takeaway>
+<Takeaway n={3} title="Quality">Boundary recall and achievable accuracy against ground truth.</Takeaway>
+<Takeaway n={4} title="Contrib">Superpixels live in cv2.ximgproc (opencv-contrib).</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 1920 × 1080 image with SLIC region size 30. About how many superpixels?
+
+<Solution>
+
+1920 · 1080 / 30² = 2 073 600 / 900 ≈ **2 300**.
+
+</Solution>
+
+**Q2.** Superpixels cut across a faint scratch you need to find. Which parameter do you change?
+
+<Solution>
+
+Lower the compactness (SLIC m / ruler) so borders follow weak colour edges more closely, or use smaller superpixels.
+
+</Solution>
+
+### Next: 28.1 Snakes
+
+Module 28 fits curves that move to edges: active contours.
+
+## Code
+
+Three examples: the SLIC distance, SLIC with quality scores, and other superpixel methods. All superpixel functions are in `opencv-contrib-python` (module `cv2.ximgproc`).
+
+### 1. The SLIC distance
+
+```python
+import numpy as np
+import cv2
+
+S = 10
+pixel = (10, 10, 50)                                                    # x, y, lightness
+centres = {"A": (12, 10, 52), "B": (9, 10, 56)}
+for m in (10, 40):
+    d2 = {k: (pixel[2] - c[2]) ** 2 + ((pixel[0] - c[0]) ** 2 + (pixel[1] - c[1]) ** 2) / S ** 2 * m ** 2 for k, c in centres.items()}
+    print("m", m, {k: round(v, 1) for k, v in d2.items()}, "-> joins", min(d2, key=d2.get))
+```
+
+Output:
+
+```text
+m 10 {'A': 8.0, 'B': 37.0} -> joins A
+m 40 {'A': 68.0, 'B': 52.0} -> joins B
+```
+
+### 2. SLIC and its quality
+
+```python
+# Needs opencv-contrib (cv2.ximgproc)
+scene = cv2.imread("sample-seg.png")
+ids = cv2.imread("sample-seg-ids.png", cv2.IMREAD_GRAYSCALE)
+lab = cv2.cvtColor(scene, cv2.COLOR_BGR2Lab)
+gt_border = cv2.morphologyEx(ids, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8)) > 0
+
+def quality(labels):
+    border = cv2.morphologyEx(labels.astype(np.float32), cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8)) > 0
+    near = cv2.dilate(border.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0          # within 2 px
+    recall = (gt_border & near).sum() / gt_border.sum()
+    asa = sum(np.bincount(ids[labels == s]).max() for s in np.unique(labels)) / labels.size
+    return round(float(recall), 2), round(float(asa), 3)
+
+for size, ruler in [(20, 10), (10, 10)]:
+    slic = cv2.ximgproc.createSuperpixelSLIC(lab, cv2.ximgproc.SLIC, size, ruler)
+    slic.iterate(10)
+    slic.enforceLabelConnectivity(25)                                   # merge fragments smaller than 25 % of a cell
+    labels = slic.getLabels()
+    print(f"SLIC size {size}: {slic.getNumberOfSuperpixels()} superpixels, recall/ASA {quality(labels)}")
+```
+
+Output:
+
+```text
+SLIC size 20: 103 superpixels, recall/ASA (1.0, 0.998)
+SLIC size 10: 379 superpixels, recall/ASA (1.0, 0.998)
+```
+
+### 3. Other methods
+
+```python
+# Needs opencv-contrib (cv2.ximgproc)
+h, w = ids.shape
+seeds = cv2.ximgproc.createSuperpixelSEEDS(w, h, 3, 200, 4, 2, 5)    # width, height, channels, number, levels, prior, histogram bins
+seeds.iterate(scene, 10)
+print("SEEDS:", seeds.getNumberOfSuperpixels(), quality(seeds.getLabels()))
+
+lsc = cv2.ximgproc.createSuperpixelLSC(scene, 20)
+lsc.iterate(10)
+lsc.enforceLabelConnectivity(25)
+print("LSC:", lsc.getNumberOfSuperpixels(), quality(lsc.getLabels()))
+
+gs = cv2.ximgproc.segmentation.createGraphSegmentation(sigma=0.8, k=300, min_size=50)
+g = gs.processImage(scene)
+print("graph-based:", int(g.max()) + 1, quality(g))
+
+grid = (np.arange(h)[:, None] // 20) * 100 + np.arange(w)[None, :] // 20
+print("grid:", len(np.unique(grid)), quality(grid))
+```
+
+Output:
+
+```text
+SEEDS: 150 (1.0, 0.989)
+LSC: 95 (1.0, 0.999)
+graph-based: 49 (1.0, 0.984)
+grid: 96 (0.52, 0.898)
+```
+
+## OpenCV API notes
+
+- **`cv2.ximgproc.createSuperpixelSLIC(image, algorithm=SLICO, region_size=10, ruler=10.0)`**: `algorithm` `SLIC`, `SLICO` (adaptive compactness, `ruler` ignored) or `MSLIC` (manifold SLIC). Then `iterate(n)`, `enforceLabelConnectivity(min_element_size_percent)`, `getLabels()` (int32), `getLabelContourMask(thick_line)`, `getNumberOfSuperpixels()`.
+- **`cv2.ximgproc.createSuperpixelSEEDS(width, height, channels, num_superpixels, num_levels, prior, histogram_bins, double_step)`**: energy-based refinement of a block grid (Van den Bergh et al. 2012); `iterate(img, n)`.
+- **`cv2.ximgproc.createSuperpixelLSC(image, region_size, ratio)`**: linear spectral clustering (Li and Chen 2015).
+- **`cv2.ximgproc.segmentation.createGraphSegmentation(sigma, k, min_size)`**: Felzenszwalb–Huttenlocher graph-based segmentation [3]; larger k gives larger regions.
+- **Not in the main package**: `pip install opencv-contrib-python` (or `-headless`), same version as OpenCV.
+
+## Where it fails
+
+- **Very thin structures** (wires, cracks, hairs) narrower than the superpixels: swallowed by their neighbours.
+- **Low-contrast edges**: compact superpixels cut across them; lower the compactness.
+- **Texture**: colour superpixels split textures into many fragments; use texture features or larger cells.
+- **Real-time video**: SLIC per frame costs milliseconds to tens of milliseconds; reuse centres between frames.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Calling getLabels() without iterate()**: you get the initial grid.
+- **Forgetting enforceLabelConnectivity()**: superpixels with disconnected fragments.
+- **SLIC on BGR**: convert to Lab first; colour distances in BGR do not match perception.
+- **Importing cv2.ximgproc from the main package**: it needs opencv-contrib.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Families of superpixel methods
+
+Graph-based methods merge pixels by edge weights (Felzenszwalb–Huttenlocher [3], normalised cuts in Ren and Malik [1]); clustering methods (SLIC [2], LSC) are local k-means variants; energy methods (SEEDS) move block borders to improve colour homogeneity; watershed-based methods (compact watershed) flood from a grid of markers. Stutz, Hermans and Leibe [4] compare 28 algorithms on recall, under-segmentation error and runtime.
+
+### SLIC's speed
+
+Restricting each centre's search to a 2S × 2S window makes each iteration O(N) instead of O(N · K) for k-means; about 10 iterations suffice.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why use superpixels?",
+      options: ["Higher resolution", "Fewer, meaningful elements whose borders follow edges", "To compress images", "To remove colour"],
+      answer: 1,
+      explanation: "Later steps get faster and more robust.",
+    },
+    {
+      question: "In SLIC, a large compactness m makes superpixels…",
+      options: ["Follow colour edges closely", "More regular and square", "Smaller", "Fewer"],
+      answer: 1,
+      explanation: "The spatial term dominates.",
+    },
+    {
+      question: "A grid of 20 px cells had boundary recall 0.52, SLIC 1.00. Why?",
+      options: ["SLIC has more cells", "SLIC borders follow the image's edges", "The grid is wrong", "Recall is random"],
+      answer: 1,
+      explanation: "With a similar number of cells.",
+    },
+    {
+      question: "Where are the superpixel functions?",
+      options: ["cv2 main", "cv2.ximgproc (opencv-contrib)", "cv2.dnn", "NumPy"],
+      answer: 1,
+      explanation: "Install opencv-contrib-python of the same version.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+With S = 10 and m = 20, a pixel of lightness 40 at (0, 0): centre A has lightness 45 at (3, 0), centre B lightness 60 at (1, 0). Which does it join?
+
+<Solution>
+
+A: 25 + 0.09 · 400 = 61. B: 400 + 0.01 · 400 = 404. **A**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Cluster the SLIC superpixels (size 20, ruler 10): compute each superpixel's mean a*, b*, run k-means with K = 6 on these means, paint each pixel with its superpixel's cluster, and print the best IoU per object.
+
+<Solution>
+
+```python
+# Needs opencv-contrib (cv2.ximgproc)
+slic = cv2.ximgproc.createSuperpixelSLIC(lab, cv2.ximgproc.SLIC, 20, 10)
+slic.iterate(10)
+slic.enforceLabelConnectivity(25)
+sp = slic.getLabels()
+n = slic.getNumberOfSuperpixels()
+means = np.array([lab[sp == s][:, 1:].mean(axis=0) for s in range(n)], np.float32)   # mean a*, b* per superpixel
+cv2.setRNGSeed(27)
+_, cl, _ = cv2.kmeans(means, 6, None, (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 0.5), 5, cv2.KMEANS_PP_CENTERS)
+seg = cl.ravel()[sp]                                                    # superpixel label -> cluster
+best = [round(float(max(((seg == c) & (ids == k)).sum() / ((seg == c) | (ids == k)).sum() for c in range(6))), 2) for k in range(6)]
+print(n, "superpixels clustered | best IoU:", best)
+```
+
+Output:
+
+```text
+103 superpixels clustered | best IoU: [1.0, 1.0, 0.98, 0.99, 1.0, 1.0]
+```
+
+Better than k-means on pixels (27.2: 0.99, 0.96, 0.96, 0.96, 1.0, 0.87) with 370 times fewer samples. The label reaches 1.0 because its text is inside label superpixels and takes their mean colour.
+
+</Solution>
+
+## References
+
+1. X. Ren, J. Malik, "Learning a classification model for segmentation", *Proc. IEEE ICCV*, 10–17, 2003.
+2. R. Achanta, A. Shaji, K. Smith, A. Lucchi, P. Fua, S. Süsstrunk, "SLIC superpixels compared to state-of-the-art superpixel methods", *IEEE Trans. Pattern Analysis and Machine Intelligence* 34(11), 2274–2282, 2012.
+3. P. F. Felzenszwalb, D. P. Huttenlocher, "Efficient graph-based image segmentation", *International Journal of Computer Vision* 59(2), 167–181, 2004.
+4. D. Stutz, A. Hermans, B. Leibe, "Superpixels: an evaluation of the state-of-the-art", *Computer Vision and Image Understanding* 166, 1–27, 2018.
+5. OpenCV 4.13.0 documentation (opencv_contrib): `ximgproc::SuperpixelSLIC`, `SuperpixelSEEDS`, `SuperpixelLSC`, `segmentation::GraphSegmentation`. https://docs.opencv.org/4.13.0/

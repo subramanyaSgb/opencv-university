@@ -1,0 +1,303 @@
+export const meta = {
+  number: "15.1",
+  title: "Why preprocess",
+  minutes: 20,
+  objectives: [
+    "Name the goals of preprocessing: remove nuisances, normalise, reduce data",
+    "Decide when to fix a problem in the set-up instead of in software",
+    "Measure the effect of each preprocessing step against ground truth",
+    "Know what preprocessing costs: time, information and robustness",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 15.1 (first chapter of Module 15, last module of Part B).
+  New lab: PipeLab (lib/pipe-ops.ts), used through Module 15.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 15.1 Why preprocess
+
+<Definition term="Preprocessing">the operations applied to an image before the actual analysis (thresholding, measurement, OCR, a neural network) to remove effects that are not part of what you want to measure, and to make all images look alike in the ways that matter.</Definition>
+
+Part B's point operations, histograms, thresholds, masks and arithmetic are the building blocks. Real images rarely go straight into a threshold: light is uneven, noise is high, contrast varies from part to part. A short preprocessing chain often decides whether a simple method works. But every step also removes information and costs time, so each one has to earn its place.
+
+## 1. An analogy
+
+Washing and cutting vegetables before cooking: necessary, but only as much as the recipe needs. Peeling everything "just in case" wastes time and throws away good parts; skipping the washing ruins the dish.
+
+## 2. What preprocessing is for
+
+<Flow
+  steps={[
+    { label: "Raw image: object + nuisances (light, noise, geometry, scale)", tone: "data" },
+    { label: "Remove nuisances (illumination correction, denoising, alignment)", tone: "process" },
+    { label: "Normalise (contrast, size, colour) so images look alike", tone: "process" },
+    { label: "Reduce data (ROI, grey, scale) to what the analysis needs", tone: "process" },
+    { label: "Analysis: threshold, measure, OCR, network", tone: "result" },
+  ]}
+/>
+
+| Goal | Typical steps | Chapters |
+| --- | --- | --- |
+| Remove uneven light | flat-field / background division, top-hat | 15.3, 16.x |
+| Reduce noise | Gaussian, median, bilateral filters | Part C |
+| Normalise contrast | stretch, equalize, CLAHE | 11.4, 12.2, 12.3 |
+| Normalise colour | white balance, colour space | 10.5, 10.6 |
+| Normalise geometry | crop, rotate, resize, perspective | Part D |
+| Reduce data | ROI, greyscale, downscale | 7.4, 10.4 |
+
+## 3. Real numbers: one step can change everything
+
+Otsu's threshold (13.3) on the two test images, with and without a single preprocessing step (F1 against ground truth):
+
+| Image | Otsu alone | + the right step | Step |
+| --- | --- | --- | --- |
+| Label under uneven light | 0.414 | **0.992** | illumination correction (divide by a strongly blurred copy) |
+| Faint crack in noise | 0.081 | **0.942** | Gaussian blur σ = 1 |
+
+The "right step" is different for the two images, and the wrong step does not help: blurring the label first gives 0.370, worse than nothing, because the problem there is light, not noise.
+
+<PipeLab initial={["otsu"]} caption="Start with Otsu alone on each image, then switch on one step at a time and watch F1. Find the one step each image needs, then check that adding more steps does not improve it further." />
+
+## 4. Fix it at the source first
+
+Preprocessing repairs what the set-up did not get right. Before adding a step, ask whether a change to lighting, optics, exposure or fixture would remove the problem:
+
+| Problem in the image | Fix in the set-up | Fix in software |
+| --- | --- | --- |
+| Uneven light | diffuse dome, better positioning | flat-field division (15.3) |
+| Noise | more light, lower gain, longer exposure (2.x) | smoothing (costs detail) |
+| Glare | polariser, light angle | inpainting, masking (loses data) |
+| Motion blur | shorter exposure, strobe | deconvolution (fragile) |
+
+A set-up fix improves every later step and costs nothing per image; a software fix costs time on every image and removes information. The usual practice: fix what you can in the set-up, then preprocess only what remains, and measure each step.
+
+## 5. Industrial example
+
+A bottle-cap printing check rejected too many good caps. The first idea was a longer chain: equalize, sharpen, CLAHE, denoise. Measured against a labelled set, the chain did not help, because the failures came from glare on the domed caps, which no point operation can undo. A cross-polarised light (a set-up fix) removed the glare; afterwards a small median filter and Sauvola (13.5) were enough, and the shorter chain was also faster.
+
+## What you should remember from 15.1
+
+<Takeaways>
+<Takeaway n={1} title="Purpose">Remove nuisances, normalise, reduce data; nothing else.</Takeaway>
+<Takeaway n={2} title="Measure">Keep a step only if it improves the result on labelled images.</Takeaway>
+<Takeaway n={3} title="Right step">Depends on the problem: light needs correction, noise needs smoothing.</Takeaway>
+<Takeaway n={4} title="Source first">Lighting and optics fixes beat software fixes.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Blurring the label image before Otsu made F1 worse (0.37 vs 0.41). Why does blurring not fix uneven light?
+
+<Solution>
+
+Blurring removes **fine** variation (noise). Uneven light is a **slow** variation across the whole image; blurring leaves it untouched and also softens the thin text strokes.
+
+</Solution>
+
+**Q2.** Name two costs of every preprocessing step.
+
+<Solution>
+
+**Processing time** per image, and **lost information** (detail, exact grey values); also more parameters to maintain.
+
+</Solution>
+
+### Next: 15.2 Step order rules
+
+Why the order of steps matters, and the rules that tell you which comes first.
+
+## Code
+
+Two examples: the effect of single steps on both images, then a helper that scores any pipeline.
+
+### 1. One step at a time
+
+```python
+import numpy as np
+import cv2
+
+def flat(x):                                     # illumination correction (15.3)
+    bg = cv2.GaussianBlur(x, (0, 0), 15)
+    return np.clip(x.astype(np.float32) / np.maximum(bg, 1) * bg.mean(), 0, 255).astype(np.uint8)
+
+def blur(x):
+    return cv2.GaussianBlur(x, (0, 0), 1)
+
+def otsu(x):
+    return cv2.threshold(x, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+
+def f1(final, truth):                            # object = dark = below 128 in the final image
+    m = final < 128
+    return 2 * (m & truth).sum() / (m.sum() + truth.sum())
+
+label = cv2.imread("sample-print-uneven.png", cv2.IMREAD_GRAYSCALE)
+text = cv2.imread("sample-print-uneven-gt.png", cv2.IMREAD_GRAYSCALE) > 0
+crack_img = cv2.imread("sample-crack-faint.png", cv2.IMREAD_GRAYSCALE)
+crack = cv2.imread("sample-plate-crack-mask.png", cv2.IMREAD_GRAYSCALE) > 0
+
+for name, img, truth in [("label", label, text), ("crack", crack_img, crack)]:
+    print(f"{name}: Otsu alone {f1(otsu(img), truth):.3f} | flat + Otsu {f1(otsu(flat(img)), truth):.3f} | blur + Otsu {f1(otsu(blur(img)), truth):.3f}")
+```
+
+Output:
+
+```text
+label: Otsu alone 0.414 | flat + Otsu 0.992 | blur + Otsu 0.370
+crack: Otsu alone 0.081 | flat + Otsu 0.076 | blur + Otsu 0.942
+```
+
+- Each image needs exactly one of the two steps; the other step does nothing useful (crack: the light is already even) or harms (label: blur softens the strokes).
+
+### 2. Scoring any pipeline
+
+```python
+import numpy as np
+import cv2
+
+def run(img, steps):
+    for step in steps:
+        img = step(img)
+    return img
+
+pipelines = {
+    "Otsu": [otsu],
+    "flat, Otsu": [flat, otsu],
+    "flat, blur, Otsu": [flat, blur, otsu],
+    "blur, flat, Otsu": [blur, flat, otsu],
+}
+for name, steps in pipelines.items():
+    print(f"{name:18s} label {f1(run(label, steps), text):.3f} | crack {f1(run(crack_img, steps), crack):.3f}")
+```
+
+Output:
+
+```text
+Otsu               label 0.414 | crack 0.081
+flat, Otsu         label 0.992 | crack 0.076
+flat, blur, Otsu   label 0.939 | crack 0.098
+blur, flat, Otsu   label 0.938 | crack 0.094
+```
+
+- A pipeline as a list of functions makes it easy to compare variants on the same labelled images.
+- There is no "do everything" pipeline here: adding the illumination correction to the crack's blur + Otsu drops it from 0.942 to about 0.1. On the evenly lit crack image the correction has nothing to fix, but the blurred "background" includes the crack itself, so dividing by it lifts the crack slightly (mean 149 → 152). Otsu was only just finding the 2 % crack (13.3); after this small change it splits the plate's hill instead (T 167 → 177). Steps that are harmless on their own can interact; measure combinations, not single steps.
+
+## OpenCV API notes
+
+**Building blocks used here**: `cv2.GaussianBlur(src, (0, 0), sigma)` (kernel size from σ), `cv2.threshold(..., THRESH_OTSU)`, NumPy float arithmetic for division.
+
+**Pipelines**: OpenCV has no generic pipeline object in the main module; a list of functions (as above) or G-API graphs (8.6) are common. Keep each step pure (input image → output image) so steps can be reordered and tested.
+
+**Timing**: `cv2.getTickCount()` / `cv2.getTickFrequency()` or `time.perf_counter()` around each step to know its cost.
+
+## Where it fails
+
+- **Steps tuned on a few images**: they fit those images and fail on others; tune on a representative labelled set.
+- **Hidden coupling**: a later step's parameters (threshold, block size) depend on earlier ones; change one, re-tune the rest.
+- **Preprocessing that hides defects**: smoothing can erase the small defects you are looking for.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Adding steps because they "usually help"** without measuring.
+- **Preprocessing to make images look nicer** to a person instead of easier for the algorithm.
+- **Fixing in software what the lighting should fix.**
+- **Forgetting that measurement must use calibrated grey values** (do not measure on equalized or CLAHE images).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Preprocessing in classical vs learned pipelines
+
+Classical pipelines depend heavily on preprocessing because every later step has fixed rules. Neural networks learn some invariances (to brightness, small shifts) from data, so their preprocessing is mostly normalisation (15.5) and augmentation (15.6); but they still fail on nuisances absent from the training data, which is why consistent capture conditions matter just as much [1].
+
+### Pipeline search
+
+Choosing steps and parameters is a search over a large space. Grid search over a few parameters on labelled data (as in 13.5) works for short pipelines; for longer ones, Bayesian optimisation or evolutionary search have been used, but the risk of overfitting the evaluation set grows with every choice made on it.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The main reason to preprocess is to…",
+      options: ["Make images prettier", "Remove nuisances and normalise so the analysis works reliably", "Increase file size", "Add detail"],
+      answer: 1,
+      explanation: "Preprocessing serves the analysis, not the viewer.",
+    },
+    {
+      question: "Uneven lighting is best handled first by…",
+      options: ["More blur", "A set-up change (lighting), then flat-field correction if needed", "Sharpening", "A higher threshold"],
+      answer: 1,
+      explanation: "Fix at the source, then correct the rest in software.",
+    },
+    {
+      question: "Why keep a step only if it improves results on labelled images?",
+      options: ["Steps are free", "Every step costs time and information and may harm other images", "OpenCV requires it", "To use fewer images"],
+      answer: 1,
+      explanation: "Unmeasured steps often do nothing or do harm.",
+    },
+    {
+      question: "Blur before Otsu helped the noisy crack because…",
+      options: ["It corrects light", "It narrows the grey-value hills so they separate", "It adds contrast", "It removes the crack"],
+      answer: 1,
+      explanation: "Less noise means less overlap between crack and plate values.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+For each problem, say whether the first fix should be in the set-up or in software: (a) a reflection on a shiny part, (b) slow drift of overall brightness during the day, (c) random sensor noise at low light, (d) different part positions in the image.
+
+<Solution>
+
+(a) **Set-up** (light angle, polariser). (b) **Software** is acceptable (normalisation, 11.4, 12.4), though shielding from daylight is better. (c) **Set-up** first (more light, lower gain), then smoothing. (d) **Software** (locate and align, Part D), or a mechanical fixture.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Time each step of "flat, blur, Otsu" on the label image (average of 50 runs) with `time.perf_counter`, and print which step is the most expensive.
+
+<Solution>
+
+```python
+# Timings depend on the computer; the output is not fixed.
+import time
+import numpy as np
+import cv2
+
+for name, step in [("flat", flat), ("blur", blur), ("otsu", otsu)]:
+    t0 = time.perf_counter()
+    for _ in range(50):
+        step(label)
+    print(f"{name}: {(time.perf_counter() - t0) / 50 * 1000:.2f} ms")
+```
+
+Typical output:
+
+```text
+flat: 0.60 ms
+blur: 0.05 ms
+otsu: 0.03 ms
+```
+
+The illumination correction (a Gaussian with σ = 15, plus a float division) dominates. Downscaling before estimating the background, or a box filter, would make it much cheaper (15.3).
+
+</Solution>
+
+## References
+
+1. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022: Chapter 3 (image processing).
+2. C. Steger, M. Ulrich, C. Wiedemann, *Machine Vision Algorithms and Applications*, 2nd ed., Wiley-VCH, 2018: Chapters 2–3 (image acquisition, machine vision algorithms).
+3. OpenCV 4.13.0 documentation: `GaussianBlur`, `threshold`, `getTickCount`. https://docs.opencv.org/4.13.0/

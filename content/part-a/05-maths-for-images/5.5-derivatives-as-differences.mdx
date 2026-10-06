@@ -1,0 +1,419 @@
+export const meta = {
+  number: "5.5",
+  title: "Derivatives as differences",
+  minutes: 40,
+  objectives: [
+    "Compute first and second derivatives of pixel rows with forward, central and second differences",
+    "Locate an edge to a fraction of a pixel from its derivative",
+    "Explain why differences amplify noise and why we smooth first (Sobel)",
+    "Compute the 2-D gradient (magnitude and direction) with OpenCV",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 5.5 (Module 5 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 5.5 Derivatives as differences
+
+<Definition term="Derivative of an image">how fast the brightness changes from one pixel to the next. On a pixel grid it is simply a difference of neighbouring values.</Definition>
+
+Edges, scratches, cracks and the outlines of parts are places where brightness **changes**. A derivative turns "change" into a number: large where the image changes, zero where it is flat. It is the first step of edge detection (Part C), corner detection and much of measurement.
+
+## 1. An analogy
+
+Walking along a hilly road and noting your altitude every metre. The **slope** at any point is "altitude here minus altitude one metre back". The steepest point of the hill is where the slope is largest. On an image row, brightness is the altitude and an edge is the steepest point.
+
+## 2. From slope to difference
+
+In calculus the derivative is a limit; on pixels the smallest step is 1 pixel, so we use **differences**:
+
+| Name | Formula | Notes |
+| --- | --- | --- |
+| Forward difference | f(x+1) − f(x) | belongs half a pixel to the right of x |
+| Central difference | (f(x+1) − f(x−1)) / 2 | centred on x; `np.gradient` |
+| Second difference | f(x+1) − 2 f(x) + f(x−1) | curvature; the 1-D Laplacian |
+
+As kernels (weights that slide along the row): forward [−1, 1], central [−½, 0, ½], second [1, −2, 1].
+
+## 3. A worked example: a blurred edge
+
+A row across an edge whose true centre is at x = 10.3 *(Code example 1)*:
+
+| x | 6 | 7 | 8 | 9 | **10** | 11 | 12 | 13 | 14 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| f(x) | 52 | 55 | 64 | 82 | 114 | 150 | 177 | 191 | 196 |
+| f′(x) | 2 | 6 | 13.5 | 25 | **34** | 31.5 | 20.5 | 9.5 | 4 |
+| f″(x) | 2 | 6 | 9 | 14 | **4** | **−9** | −13 | −9 | −2 |
+
+Check one value by hand: f′(10) = (150 − 82) / 2 = **34**. The edge is where:
+
+- **f′ is largest**: at pixel x = 10.
+- **f″ changes sign** (zero crossing): between 10 and 11.
+
+## 4. Sub-pixel edge position
+
+The derivative peak sits **between** pixels. Fit a parabola through the three values around the maximum (25, 34, 31.5) and take its top:
+
+<Equation terms={[{ value: "offset" }, { op: "=", value: "½ (25 − 31.5) / (25 − 2·34 + 31.5)" }, { op: "=", value: "+0.28", result: true }]} />
+
+So the edge is at **x = 10.28**; the zero crossing of f″ gives **10.31**. The true centre is 10.3. Sub-pixel edges like this are how gauging systems measure to a tenth of a pixel (and with mm/px, 2.4, to micrometres).
+
+## 5. Edges and lines
+
+<Columns>
+<Panel title="Edge (step)" tone="a">
+
+f′ has a **peak**, f″ a **zero crossing**. Used for outlines and dimensions.
+
+</Panel>
+<Panel title="Thin line (ridge, valley)" tone="b">
+
+f′ has a **zero crossing** (up then down), f″ a **peak**. Used for scratches, cracks and wires.
+
+</Panel>
+</Columns>
+
+## 6. Differences amplify noise
+
+A difference subtracts two noisy values, so the noise adds up. On a flat surface with noise σ = 4 *(Code example 2)*:
+
+| Operation | Noise std after | Why |
+| --- | --- | --- |
+| None | 4.00 | |
+| Forward difference | 5.65 | √2 · σ: two independent values |
+| Central difference | 2.83 | √2 · σ / 2 |
+| Sobel (÷ 8) | 1.74 | smooths across 3 rows while differencing |
+
+The **signal** in a difference is only the change between neighbours, often small, while the noise of both pixels remains. Second differences are worse still. The cure: **smooth first, then differentiate**. Because both are linear operations they can be combined into one kernel: that is what the **Sobel** operator does.
+
+## 7. In 2-D: the gradient
+
+An image has two directions, so two **partial derivatives**: ∂I/∂x (change to the right) and ∂I/∂y (change downwards). Together they form the **gradient** vector (5.2):
+
+<Columns>
+<KernelGrid label="Sobel x" cells={[["−1", "0", "+1"], ["−2", "0", "+2"], ["−1", "0", "+1"]]} />
+<KernelGrid label="Sobel y" cells={[["−1", "−2", "−1"], ["0", "0", "0"], ["+1", "+2", "+1"]]} />
+</Columns>
+
+Each Sobel kernel is a central difference in one direction times a [1, 2, 1] smoothing in the other. Its gain is **8**: on a ramp rising 1 level per pixel, Sobel x gives 8 *(Code example 3)*.
+
+<Equation terms={[{ value: "magnitude" }, { op: "=", value: "√(gx² + gy²)", result: true }]} />
+
+<Equation terms={[{ value: "direction" }, { op: "=", value: "atan2(gy, gx)", result: true }]} />
+
+The gradient points **towards brighter** values, across the edge; the edge itself runs perpendicular to it. The strongest edge in our sample scene has gx = 802, gy = 378: magnitude 887, direction 25°.
+
+## 8. Try it
+
+<DerivLab caption="A pixel row, its first and second differences. Add noise, then smooth before differencing. The amber line is the sub-pixel edge from the parabola fit." />
+
+Things to try: noise 8 with no smoothing (f′ becomes jagged, f″ is useless), then smooth σ = 1.5; the soft edge (wider, lower peak in f′); the thin line (f′ crosses zero at the line centre, f″ peaks).
+
+## 9. Industrial example
+
+Measuring the width of a steel strip to ±0.05 mm with a line-scan camera (2.10):
+
+<Flow
+  steps={[
+    { label: "One line of pixels across the strip", tone: "world" },
+    { label: "Smooth (Gaussian σ ≈ 1 px)", tone: "process" },
+    { label: "Central difference: peaks at both edges", tone: "process" },
+    { label: "Parabola fit: edges to ~0.1 px", tone: "process" },
+    { label: "Width = (right − left) × mm/px", tone: "result" },
+  ]}
+/>
+
+At 0.2 mm/px, 0.1 px is 0.02 mm: sub-pixel edges turn a modest camera into a precise gauge.
+
+## What you should remember from 5.5
+
+<Takeaways>
+<Takeaway n={1} title="Differences">Forward f(x+1) − f(x); central (f(x+1) − f(x−1))/2; second f(x+1) − 2f(x) + f(x−1).</Takeaway>
+<Takeaway n={2} title="Edges">Peak of |f′|, zero crossing of f″; lines the other way round.</Takeaway>
+<Takeaway n={3} title="Sub-pixel">Parabola through 3 derivative values around the peak.</Takeaway>
+<Takeaway n={4} title="Noise">Differences amplify noise; smooth first (Sobel = smoothing + difference, gain 8).</Takeaway>
+<Takeaway n={5} title="Gradient">(gx, gy): magnitude = edge strength, direction = across the edge, towards brighter.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Row values 20, 20, 60, 100, 100. Central differences at the three inner pixels?
+
+<Solution>
+
+(60 − 20)/2 = **20**, (100 − 20)/2 = **40**, (100 − 60)/2 = **20**. Peak at the middle pixel.
+
+</Solution>
+
+**Q2.** Second differences of 10, 10, 10, 50, 50 at the three inner pixels?
+
+<Solution>
+
+10 − 20 + 10 = **0**; 50 − 20 + 10 = **40**; 50 − 100 + 10 = **−40**. Zero crossing between pixels 2 and 3, where the step is.
+
+</Solution>
+
+**Q3.** gx = 30, gy = −40. Gradient magnitude and direction?
+
+<Solution>
+
+√(900 + 1600) = **50**; atan2(−40, 30) = **−53°**: pointing right and **up** (y is down), towards the brighter side.
+
+</Solution>
+
+### Next: 5.6 Least squares
+
+Fitting a line or a circle to many noisy edge points: the best answer when every point is a little wrong.
+
+## Code
+
+Three examples: differences and a sub-pixel edge on a row, noise amplification, and the 2-D gradient with Sobel. Copy the sample images next to the script.
+
+### 1. From scratch: differences and a sub-pixel edge
+
+```python
+import numpy as np
+
+x = np.arange(20)
+f = np.round(50 + 150 / (1 + np.exp(-(x - 10.3) / 1.0)))   # a blurred edge whose true centre is x = 10.3
+d1 = np.zeros(20); d1[1:-1] = (f[2:] - f[:-2]) / 2          # central difference  f'(x) = (f(x+1) - f(x-1)) / 2
+d2 = np.zeros(20); d2[1:-1] = f[2:] - 2 * f[1:-1] + f[:-2]  # second difference   f''(x) = f(x+1) - 2 f(x) + f(x-1)
+print("x       :", x[6:15])
+print("f(x)    :", f[6:15].astype(int))
+print("f'(x)   :", d1[6:15])
+print("f''(x)  :", d2[6:15].astype(int))
+i = int(np.argmax(d1))                                       # steepest pixel
+offset = 0.5 * (d1[i - 1] - d1[i + 1]) / (d1[i - 1] - 2 * d1[i] + d1[i + 1])   # vertex of a parabola through 3 values
+print(f"steepest at x = {i}; parabola peak at x = {i + offset:.2f}")
+zc = i + d2[i] / (d2[i] - d2[i + 1])                         # where f'' crosses zero between i and i+1
+print(f"zero crossing of f'' at x = {zc:.2f}")
+```
+
+Output:
+
+```text
+x       : [ 6  7  8  9 10 11 12 13 14]
+f(x)    : [ 52  55  64  82 114 150 177 191 196]
+f'(x)   : [ 2.   6.  13.5 25.  34.  31.5 20.5  9.5  4. ]
+f''(x)  : [  2   6   9  14   4  -9 -13  -9  -2]
+steepest at x = 10; parabola peak at x = 10.28
+zero crossing of f'' at x = 10.31
+```
+
+- Slicing does the shifting: `f[2:]` is f(x+1) and `f[:-2]` is f(x−1) for the inner pixels.
+- The profile is a logistic (S-shaped) curve, a common model of a blurred edge, rounded to integers like a real 8-bit image.
+- The zero crossing is found by linear interpolation between the two values of opposite sign.
+
+### 2. From scratch and OpenCV: differences amplify noise
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(seed=6)
+noise = rng.normal(0, 4, (400, 400))                         # pure noise, sigma 4 (a flat surface)
+fwd = noise[:, 1:] - noise[:, :-1]
+cen = (noise[:, 2:] - noise[:, :-2]) / 2
+sob = cv2.Sobel(noise, cv2.CV_64F, 1, 0, ksize=3) / 8        # Sobel x, divided by 8 to give grey levels per pixel
+print(f"noise std           : {noise.std():.2f}")
+print(f"forward difference  : {fwd.std():.2f}   (sqrt(2) * 4 = {np.sqrt(2) * 4:.2f})")
+print(f"central difference  : {cen.std():.2f}   (4 / sqrt(2) = {4 / np.sqrt(2):.2f})")
+print(f"Sobel / 8           : {sob[1:-1, 1:-1].std():.2f}")
+```
+
+Output:
+
+```text
+noise std           : 4.00
+forward difference  : 5.65   (sqrt(2) * 4 = 5.66)
+central difference  : 2.83   (4 / sqrt(2) = 2.83)
+Sobel / 8           : 1.74
+```
+
+- The variance of a sum or difference of independent values is the sum of their variances: Var(a − b) = 2σ².
+- The central difference looks less noisy only because it divides by 2; its **signal** for a given slope is the same as the forward difference's, so the signal-to-noise ratio improves by √2.
+- `[1:-1, 1:-1]` skips the image border, where `Sobel` uses reflected pixels.
+
+### 3. OpenCV: Sobel gain and the 2-D gradient
+
+```python
+import numpy as np
+import cv2
+
+ramp = np.tile(np.arange(0, 64, dtype=np.float32), (8, 1))    # brightness rises by 1 per pixel to the right
+gx = cv2.Sobel(ramp, cv2.CV_32F, 1, 0, ksize=3)
+print("Sobel x on a slope of 1 per pixel:", gx[4, 10], "(the 3x3 Sobel kernel has gain 8)")
+print("np.gradient on the same row      :", np.gradient(ramp[4])[10])
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+gx = cv2.Sobel(img, cv2.CV_32F, 1, 0, ksize=3)
+gy = cv2.Sobel(img, cv2.CV_32F, 0, 1, ksize=3)
+mag, ang = cv2.cartToPolar(gx, gy, angleInDegrees=True)
+y, x = np.unravel_index(np.argmax(mag), mag.shape)
+print(f"strongest edge at (x={x}, y={y}): gx={gx[y, x]:.0f}, gy={gy[y, x]:.0f}, magnitude {mag[y, x]:.0f}, direction {ang[y, x]:.0f} deg")
+```
+
+Output:
+
+```text
+Sobel x on a slope of 1 per pixel: 8.0 (the 3x3 Sobel kernel has gain 8)
+np.gradient on the same row      : 1.0
+strongest edge at (x=35, y=99): gx=802, gy=378, magnitude 887, direction 25 deg
+```
+
+- `cv2.Sobel(src, ddepth, dx, dy, ksize)`: `ddepth` is the output type. With `uint8` input always ask for a signed float output (`CV_32F`/`CV_64F`) or `CV_16S`: negative slopes would be clipped to 0 in `uint8`.
+- `cv2.cartToPolar(gx, gy)` returns magnitude and angle (0–360°) for every pixel.
+- `np.unravel_index` turns the flat index from `argmax` into (row, column).
+
+## OpenCV API notes
+
+**`cv2.Sobel(src, ddepth, dx, dy, ksize=3, scale=1, delta=0, borderType)`**: derivative of order dx in x and dy in y; `ksize` 1, 3, 5, 7 (larger = more smoothing). `ksize=-1` uses the 3 × 3 **Scharr** kernel, more accurate in direction: also `cv2.Scharr(src, ddepth, dx, dy)`.
+
+**`cv2.Laplacian(src, ddepth, ksize=1)`**: sum of second derivatives ∂²I/∂x² + ∂²I/∂y² (kernel [[0, 1, 0], [1, −4, 1], [0, 1, 0]] for ksize 1).
+
+**`cv2.spatialGradient(src)`**: gx and gy in one call (`uint8` in, `int16` out). **`cv2.cartToPolar`**, **`cv2.magnitude`**, **`cv2.phase`** for magnitude and angle.
+
+**Types**: output depth must hold negative values. With `float32` input, use `CV_32F` output (not every input/output depth combination is supported; `CV_64F` output from `float32` input fails for some functions).
+
+**NumPy**: `np.diff(a, axis=…)` (forward), `np.gradient(a)` (central inside, one-sided at the ends).
+
+## Where it fails
+
+- **Noise**: without smoothing, derivatives of noisy images are mostly noise; too much smoothing merges close edges and shifts corners.
+- **Saturation and blooming**: clipped bright areas (2.5) flatten the profile and move the apparent edge.
+- **Interpolation of the peak** assumes a symmetric edge; asymmetric blur (motion, 2.6) or a shadow biases the sub-pixel position.
+- **Pixel grid direction**: 3 × 3 kernels measure diagonal gradients slightly less accurately; Scharr reduces this error.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **`cv2.Sobel(img, cv2.CV_8U, …)`**: negative derivatives are clipped to 0, half of all edges vanish.
+- **Differentiating `uint8` arrays in NumPy**: `a[1:] - a[:-1]` wraps around for negative changes. Convert to `int16` or float first.
+- **Forgetting the gain** (8 for 3 × 3 Sobel) when converting gradients to grey levels per pixel or setting thresholds.
+- **Taking second derivatives of noisy data** without smoothing.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Taylor series and accuracy
+
+From the Taylor expansion f(x ± 1) = f(x) ± f′(x) + f″(x)/2 ± f‴(x)/6 + …, the forward difference has an error proportional to f″ (first-order accurate), while in the central difference the f″ terms cancel and the error is proportional to f‴ (second-order accurate). That is why central differences are preferred [1].
+
+### Derivative of Gaussian
+
+Smoothing with a Gaussian and then differentiating equals convolving with the **derivative of a Gaussian**. Its σ sets the scale: small σ finds fine edges, large σ finds broad ones and ignores noise. This is the basis of the Canny detector (Part C) and of scale-space theory [2].
+
+### The structure tensor
+
+Averaging the products gx², gy², gx·gy over a window gives a 2 × 2 matrix whose eigenvalues (5.7) say whether the window contains a flat area, an edge or a corner: the basis of the Harris and Shi–Tomasi corner detectors (Part F).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "At the centre of a step edge, the second difference is…",
+      options: ["At its maximum", "Crossing zero", "Always negative", "Equal to the first difference"],
+      answer: 1,
+      explanation: "f″ goes from positive to negative across the edge.",
+    },
+    {
+      question: "Forward differences of independent noise with σ = 3 have std…",
+      options: ["3", "about 4.2", "6", "1.5"],
+      answer: 1,
+      explanation: "√2 × 3 ≈ 4.24.",
+    },
+    {
+      question: "What does Sobel do that a plain central difference does not?",
+      options: ["It is faster", "It also smooths perpendicular to the derivative direction", "It finds corners", "It thresholds the result"],
+      answer: 1,
+      explanation: "Sobel = [1, 2, 1] smoothing × central difference.",
+    },
+    {
+      question: "Why use CV_32F (or CV_16S) as the output depth of Sobel on a uint8 image?",
+      options: ["Speed", "To keep negative derivatives", "To save memory", "It is required for colour images"],
+      answer: 1,
+      explanation: "Dark-to-bright and bright-to-dark edges have opposite signs.",
+    },
+    {
+      question: "The gradient direction at an edge points…",
+      options: ["Along the edge", "Across the edge towards brighter values", "Towards darker values", "Always to the right"],
+      answer: 1,
+      explanation: "The gradient is the direction of steepest increase.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Derivative values around a peak: d(9) = 18, d(10) = 30, d(11) = 26. Where is the sub-pixel edge?
+
+<Solution>
+
+offset = ½ (18 − 26) / (18 − 60 + 26) = ½ · (−8) / (−16) = **+0.25** → edge at **x = 10.25**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Add Gaussian noise (σ = 6, seed 9) to the edge profile from Code example 1 (40 pixels, centre 20.3, values not rounded), and find the sub-pixel edge with and without first smoothing the row with `cv2.GaussianBlur` (σ = 1.5). Repeat for 200 different noise seeds and compare the spread of the results.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+def edge_position(row):
+    d = np.zeros_like(row); d[1:-1] = (row[2:] - row[:-2]) / 2
+    i = int(np.argmax(d[1:-1])) + 1
+    return i + 0.5 * (d[i - 1] - d[i + 1]) / (d[i - 1] - 2 * d[i] + d[i + 1])
+
+x = np.arange(40)
+clean = 50 + 150 / (1 + np.exp(-(x - 20.3) / 1.0))
+raw, smoothed = [], []
+for seed in range(200):
+    row = clean + np.random.default_rng(seed).normal(0, 6, 40)
+    raw.append(edge_position(row))
+    smoothed.append(edge_position(cv2.GaussianBlur(row.reshape(1, -1), (0, 0), 1.5).ravel()))
+print(f"no smoothing : mean {np.mean(raw):.2f}, std {np.std(raw):.3f} px")
+print(f"smoothed     : mean {np.mean(smoothed):.2f}, std {np.std(smoothed):.3f} px")
+```
+
+Output:
+
+```text
+no smoothing : mean 20.31, std 0.351 px
+smoothed     : mean 20.28, std 0.151 px
+```
+
+Both are centred close to the true 20.3, but smoothing first makes the result more than **2× more repeatable** (0.15 px instead of 0.35 px). Smoothing also blurs the edge slightly, so it should be symmetric; a tiny bias (20.28) remains from the discrete fit. (`GaussianBlur` with size (0, 0) computes the kernel size from σ.)
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A gauge measures part edges with `np.diff` on `uint8` rows and occasionally reports edges in the wrong place on dark-to-bright transitions only. What is wrong?
+
+<Solution>
+
+`np.diff` on `uint8` wraps negative differences around (e.g. −20 becomes 236), so bright-to-dark changes look like huge positive steps and the "largest" derivative may be on the wrong side. Convert to `int16` or `float32` before differencing and use the absolute value (or the sign) deliberately.
+
+</Solution>
+
+## References
+
+1. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022, Section 3.2 (Linear filtering) and Section 7.2 (Edges and contours).
+2. T. Lindeberg, "Edge detection and ridge detection with automatic scale selection," *International Journal of Computer Vision*, vol. 30, no. 2, pp. 117–154, 1998.
+3. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Section 3.6 (Sharpening (highpass) spatial filters) and Section 10.2 (Point, line and edge detection).
+4. OpenCV 4.13.0 documentation, *Image filtering* (`Sobel`, `Scharr`, `Laplacian`, `spatialGradient`): [docs.opencv.org/4.13.0/d4/d86/group__imgproc__filter.html](https://docs.opencv.org/4.13.0/d4/d86/group__imgproc__filter.html).

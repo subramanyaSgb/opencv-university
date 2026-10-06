@@ -1,0 +1,286 @@
+export const meta = {
+  number: "16.1",
+  title: "Translate, scale, rotate",
+  minutes: 25,
+  objectives: [
+    "Write translation, scaling and rotation as one 2 × 3 matrix",
+    "Use cv2.warpAffine, cv2.getRotationMatrix2D and cv2.resize correctly",
+    "Explain inverse mapping: why every output pixel looks up its source",
+    "Keep the whole image when rotating, and map points with the same matrix",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 16.1 (first chapter of Part C).
+  New lab: WarpLab (lib/warp-ops.ts; matches cv2.warpAffine within 1 level on a recorded test).
+  Builds on 5.2/5.3 (matrices, homogeneous coordinates).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 16.1 Translate, scale, rotate
+
+<Definition term="Geometric transform">an operation that moves pixels to new positions without (ideally) changing their values: shifting, resizing, rotating, and the more general warps of the next chapters. Each one is a rule that maps a position (x, y) to a new position (x′, y′).</Definition>
+
+Part B changed pixel values and left positions alone. Part C starts with the opposite: keep the values, move the pixels. Parts have to be aligned to a template, images rotated upright, resized for a network (15.5), or straightened for OCR (15.4). In OpenCV all of these are a 2 × 3 matrix and one call to `warpAffine`.
+
+## 1. An analogy
+
+A photo on a table: slide it (translate), use a photocopier's zoom (scale), turn it (rotate). The picture itself does not change, only where each point of it lies on the table.
+
+## 2. One matrix for all three
+
+<Flow
+  steps={[
+    { label: "Point (x, y), written as (x, y, 1)", tone: "data" },
+    { label: "2 × 3 matrix M: x′ = a·x + b·y + tₓ, y′ = c·x + d·y + t_y", tone: "process" },
+    { label: "Translate: a = d = 1; scale: a, d; rotate: cos and sin", tone: "process" },
+    { label: "New position (x′, y′)", tone: "result" },
+  ]}
+/>
+
+| Transform | M |
+| --- | --- |
+| Translate by (tₓ, t_y) | [[1, 0, tₓ], [0, 1, t_y]] |
+| Scale by s about (0, 0) | [[s, 0, 0], [0, s, 0]] |
+| Rotate by θ about centre (cₓ, c_y), scale s (`getRotationMatrix2D`) | [[α, β, (1−α)cₓ − β c_y], [−β, α, β cₓ + (1−α) c_y]], α = s cos θ, β = s sin θ |
+
+Real numbers: `cv2.getRotationMatrix2D((160, 100), 30, 1.0)` for the 320 × 200 image gives
+
+<Equation terms={[{ value: "M" }, { op: "=", value: "[[0.866, 0.5, −28.564], [−0.5, 0.866, 93.397]]", result: true }]} />
+
+The red disc's centre (70, 95) moves to (79.6, 140.7). OpenCV's angle is **counter-clockwise** as seen on screen (y points down), and the third column moves the result so that the centre stays in place.
+
+<WarpLab caption="Rotate, scale and shift the image. Compare pivoting about the centre with pivoting about the top-left corner, and switch the output between 'same size' (corners cut off) and 'enlarge to fit'. The matrix below is exactly what you would pass to cv2.warpAffine." />
+
+## 3. Inverse mapping
+
+A warp is computed **backwards**: for each output pixel, OpenCV applies the inverse matrix to find where it came from in the input, and interpolates a value there (16.4). Going forwards (pushing each input pixel to its new position) would leave holes where the output grid is not hit, and collisions where two pixels land on one.
+
+- `cv2.warpAffine(src, M, (w, h))` takes the **forward** matrix and inverts it internally (unless `WARP_INVERSE_MAP` is set).
+- Output pixels whose source lies outside the input get the border value (black by default, `borderMode` and `borderValue` change it).
+- To move points (detections, landmarks) use the same forward M; to go back, `cv2.invertAffineTransform(M)`.
+
+## 4. Keeping the whole image
+
+Rotating a 320 × 200 image by 30° inside a 320 × 200 output cuts the corners: only 81 % of the output is covered by image, and parts of the image fall outside. To keep everything, enlarge the output to the rotated bounding box, w′ = w·|cos θ| + h·|sin θ|, h′ = w·|sin θ| + h·|cos θ| (378 × 334 here, rounded up), and add the shift (w′ − w)/2, (h′ − h)/2 to the matrix's last column.
+
+**Scaling** an image as a whole is `cv2.resize(img, (new_w, new_h))` or `fx`, `fy`; it is a warp with M = [[sx, 0, 0], [0, sy, 0]] plus a half-pixel correction so that pixel centres line up. A shift by a whole number of pixels is just array slicing (no interpolation needed).
+
+## 5. Industrial example
+
+A tablet-printing inspection locates each tablet's imprint and its angle (Part D), then rotates a 64 × 64 patch around the tablet centre so the imprint is always upright before comparing it with the reference. The matrix comes from `getRotationMatrix2D(centre, angle, 1)`; the patch is cut out with `warpAffine` directly into a 64 × 64 output (adding a translation so the centre lands at (32, 32)), which crops and rotates in one interpolation step instead of two.
+
+## What you should remember from 16.1
+
+<Takeaways>
+<Takeaway n={1} title="Matrix">x′ = M · (x, y, 1); translation, scale and rotation all fit one 2 × 3 M.</Takeaway>
+<Takeaway n={2} title="OpenCV">getRotationMatrix2D(centre, angle°, scale), warpAffine(img, M, (w, h)), resize.</Takeaway>
+<Takeaway n={3} title="Inverse mapping">Every output pixel fetches its value from the input; no holes.</Takeaway>
+<Takeaway n={4} title="Bounds">Enlarge the output and shift M to keep rotated corners; map points with the same M.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Write the matrix that shifts an image 40 pixels right and 20 pixels up.
+
+<Solution>
+
+[[1, 0, **40**], [0, 1, **−20**]] (up is negative y).
+
+</Solution>
+
+**Q2.** A 400 × 300 image is rotated by 90°. What output size keeps all of it?
+
+<Solution>
+
+w′ = 400·0 + 300·1 = **300**, h′ = 400·1 + 300·0 = **400**: 300 × 400 (for exact multiples of 90°, `cv2.rotate` does it without interpolation).
+
+</Solution>
+
+### Next: 16.2 Affine
+
+Shear and the general 2 × 3 transform from three point pairs.
+
+## Code
+
+Two examples: translation and rotation with point mapping, then rotation that keeps the whole image.
+
+### 1. Translate and rotate, map a point
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+h, w = img.shape[:2]
+
+T = np.float32([[1, 0, 40], [0, 1, -20]])                       # 40 right, 20 up
+shifted = cv2.warpAffine(img, T, (w, h))
+print("disc pixel", img[95, 70].tolist(), "-> at (110, 75):", shifted[75, 110].tolist(), "| new corner:", shifted[0, 0].tolist())
+print("integer shift equals slicing:", np.array_equal(shifted[0:180, 40:], img[20:200, 0:280]))
+
+M = cv2.getRotationMatrix2D((w / 2, h / 2), 30, 1.0)            # centre, angle (counter-clockwise), scale
+print("M =", np.round(M, 3).tolist())
+p = np.array([70, 95, 1.0])                                     # disc centre, homogeneous
+q = M @ p
+print("disc centre ->", q.round(1).tolist(), "| back:", (cv2.invertAffineTransform(M) @ np.append(q, 1)).round(1).tolist())
+```
+
+Output:
+
+```text
+disc pixel [0, 0, 220] -> at (110, 75): [0, 0, 220] | new corner: [0, 0, 0]
+integer shift equals slicing: True
+M = [[0.866, 0.5, -28.564], [-0.5, 0.866, 93.397]]
+disc centre -> [79.6, 140.7] | back: [70.0, 95.0]
+```
+
+- Uncovered pixels (the new top-left corner) get the border value, black by default.
+- `invertAffineTransform` returns the 2 × 3 inverse; append 1 to a point before multiplying.
+
+### 2. Rotate without losing the corners
+
+```python
+import numpy as np
+import cv2
+
+ones = np.full((h, w), 255, np.uint8)
+covered = cv2.warpAffine(ones, M, (w, h), flags=cv2.INTER_NEAREST)
+print(f"same-size output covered by image: {(covered > 0).mean():.1%}")
+
+c, s = abs(M[0, 0]), abs(M[0, 1])
+nw, nh = int(np.ceil(w * c + h * s)), int(np.ceil(w * s + h * c))
+M2 = M.copy()
+M2[0, 2] += nw / 2 - w / 2                                      # move the centre to the new centre
+M2[1, 2] += nh / 2 - h / 2
+full = cv2.warpAffine(img, M2, (nw, nh))
+corners = cv2.transform(np.float32([[[0, 0], [w, 0], [0, h], [w, h]]]), M2)[0]
+print("enlarged output:", full.shape, "| input corners land at", corners.astype(float).round(1).tolist())
+print("resize x0.5 and x2:", cv2.resize(img, None, fx=0.5, fy=0.5).shape, cv2.resize(img, None, fx=2, fy=2).shape)
+```
+
+Output:
+
+```text
+same-size output covered by image: 81.0%
+enlarged output: (334, 378, 3) | input corners land at [[0.4, 160.4], [277.6, 0.4], [100.4, 333.6], [377.6, 173.6]]
+resize x0.5 and x2: (100, 160, 3) (400, 640, 3)
+```
+
+- The counting trick (warp an all-white image) shows exactly which output pixels have a source; the same warp of the image tells you where the image went.
+- `cv2.resize` takes the output size as (width, height), the reverse of `shape`.
+
+## OpenCV API notes
+
+**`cv2.warpAffine(src, M, dsize, flags=INTER_LINEAR, borderMode=BORDER_CONSTANT, borderValue=0)`**: `M` 2 × 3 float; `dsize` = (width, height); add `cv2.WARP_INVERSE_MAP` to `flags` if M already maps output to input.
+
+**`cv2.getRotationMatrix2D(center, angle, scale)`**: angle in degrees, positive = counter-clockwise on screen. **`cv2.invertAffineTransform(M)`**. **`cv2.transform(points[None], M)`** maps many points at once.
+
+**`cv2.resize(src, dsize, fx, fy, interpolation)`**; **`cv2.rotate(src, cv2.ROTATE_90_CLOCKWISE / ROTATE_180 / ROTATE_90_COUNTERCLOCKWISE)`** and `cv2.flip` for exact, interpolation-free right angles and mirrors.
+
+## Where it fails
+
+- **Repeated warps** blur the image (each interpolates); combine matrices and warp once (16.4).
+- **Large downscaling with `warpAffine`** aliases (it does not average); use `resize` with `INTER_AREA` or blur first (3.5).
+- **Angle sign confusion** between OpenCV (counter-clockwise on screen) and maths conventions (y up).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Passing `(h, w)` as `dsize`** (it is (width, height)).
+- **Rotating about (0, 0)** when you meant the centre.
+- **Moving the image but not its annotations** (or using the inverse matrix for points).
+- **Using `warpAffine` for 90° rotations** (`cv2.rotate` is exact and faster).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why homogeneous coordinates
+
+Translation is not a linear map of (x, y), so it cannot be a 2 × 2 matrix. Writing points as (x, y, 1) makes it one: the 2 × 3 matrix is the top of a 3 × 3 matrix with last row (0, 0, 1), and chains of transforms become matrix products (5.3). Rotation about a centre c is T(c) · R · T(−c), which is exactly what `getRotationMatrix2D` returns [1].
+
+### Fixed-point coordinates in OpenCV
+
+For bilinear and bicubic warps, OpenCV computes source coordinates in fixed point with 1/32-pixel resolution (`INTER_BITS = 5`) and uses precomputed interpolation tables. Results can differ from a floating-point implementation by one grey level, which matters only when comparing images bit-exactly.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which matrix shifts an image 10 px right and 5 px down?",
+      options: ["[[1, 0, 5], [0, 1, 10]]", "[[1, 0, 10], [0, 1, 5]]", "[[10, 0, 0], [0, 5, 0]]", "[[1, 10, 0], [5, 1, 0]]"],
+      answer: 1,
+      explanation: "The last column holds tₓ and t_y.",
+    },
+    {
+      question: "Why does warpAffine use inverse mapping?",
+      options: ["It is faster to write", "Every output pixel gets exactly one value, with no holes", "It avoids colour shifts", "OpenCV cannot invert matrices"],
+      answer: 1,
+      explanation: "Forward mapping leaves gaps and overlaps on the output grid.",
+    },
+    {
+      question: "Rotating a 320 × 200 image by 30° in a same-size output…",
+      options: ["Keeps everything", "Cuts off the corners", "Doubles the size", "Flips the image"],
+      answer: 1,
+      explanation: "Enlarge the output and shift the matrix to keep the corners.",
+    },
+    {
+      question: "The angle in cv2.getRotationMatrix2D is…",
+      options: ["Radians, clockwise", "Degrees, counter-clockwise on screen", "Degrees, clockwise", "Gradians"],
+      answer: 1,
+      explanation: "Positive values rotate counter-clockwise as displayed.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Rotate the point (10, 0) by 90° about (0, 0) using M = [[cos θ, sin θ, 0], [−sin θ, cos θ, 0]] (OpenCV's convention). Where does it go, and where does that appear on screen?
+
+<Solution>
+
+cos 90° = 0, sin 90° = 1: x′ = 0·10 + 1·0 = **0**, y′ = −1·10 + 0 = **−10**: (0, −10), which is 10 pixels **above** the origin on screen. A point on the right moved to the top: a counter-clockwise turn as seen on screen.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Rotate `sample-color.png` by 30° about its centre with `INTER_LINEAR`, then rotate the result back by −30°. Compare with the original inside the central 150 × 100 region (mean absolute difference) and explain the result.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+R1 = cv2.getRotationMatrix2D((w / 2, h / 2), 30, 1.0)
+R2 = cv2.getRotationMatrix2D((w / 2, h / 2), -30, 1.0)
+back = cv2.warpAffine(cv2.warpAffine(img, R1, (w, h)), R2, (w, h))
+c = np.s_[50:150, 85:235]
+print(f"mean abs difference in the centre: {np.abs(back[c].astype(int) - img[c]).mean():.2f} | pixels changed: {(back[c] != img[c]).any(axis=2).mean():.1%}")
+```
+
+Output:
+
+```text
+mean abs difference in the centre: 0.71 | pixels changed: 5.7%
+```
+
+The geometry returns exactly, but the values do not: each warp interpolates, which smooths the sharp edges of the shapes (the flat insides are unchanged). Chain transforms into one matrix and warp once.
+
+</Solution>
+
+## References
+
+1. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022: Section 2.1 (geometric primitives and transformations) and Section 3.6 (geometric transformations).
+2. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 2.6 (geometric transformations).
+3. OpenCV 4.13.0 documentation: `warpAffine`, `getRotationMatrix2D`, `invertAffineTransform`, `resize`, `rotate`; tutorial "Geometric Transformations of Images". https://docs.opencv.org/4.13.0/

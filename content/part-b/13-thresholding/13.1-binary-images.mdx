@@ -1,0 +1,292 @@
+export const meta = {
+  number: "13.1",
+  title: "Binary images",
+  minutes: 20,
+  objectives: [
+    "Explain what a binary image is and why so much of machine vision runs on them",
+    "Store binary images as bool, 0/1 or 0/255 and convert between them safely",
+    "Create a binary image with a threshold and choose the polarity (dark or bright objects)",
+    "Know the five cv2.threshold types and what each one outputs",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 13.1 (first chapter of Module 13).
+  New lab: ThreshLab (lib/thresh-ops.ts; Otsu/triangle/adaptive mean tested against cv2), used through Module 13.
+  New samples: sample-print-uneven.png + ground truth.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 13.1 Binary images
+
+<Definition term="Binary image">an image with only two values per pixel: object or background (yes or no). In OpenCV it is usually an 8-bit image holding 0 and 255; in NumPy often a boolean array.</Definition>
+
+A grey image says "how bright"; a binary image says "is it there". That second question is what most inspection tasks ask: is there a label, how big is the hole, where is the crack. Counting, measuring, finding contours and morphology (Module 16) all work on binary images. This module is about the step that creates them: **thresholding**.
+
+## 1. An analogy
+
+A stencil: every point of the sheet is either cut out or not. There is no "half cut". Once the stencil exists, you can measure the holes, count them, trace their outlines, without looking at the original picture again.
+
+## 2. From grey to binary
+
+<Flow
+  steps={[
+    { label: "Grey image (0–255)", tone: "data" },
+    { label: "Rule per pixel: v > T ? (or v ≤ T for dark objects)", tone: "process" },
+    { label: "Binary image: 255 = object, 0 = background", tone: "result" },
+  ]}
+/>
+
+<Equation terms={[{ value: "dst(x, y)" }, { op: "=", value: "255 if src(x, y) > T, else 0", result: true }]} />
+
+Real numbers on a 3 × 3 patch with T = 128:
+
+<MatrixTransform
+  before={[[30, 90, 120], [128, 129, 200], [250, 60, 140]]}
+  rule="v > 128 ? 255 : 0"
+  after={[[0, 0, 0], [0, 255, 255], [255, 0, 255]]}
+/>
+
+Note that 128 itself becomes 0: the rule is **strictly greater** than T.
+
+**Polarity.** Dark text on light paper, a dark crack on a bright plate: the objects are the *dark* pixels. Use the inverse rule (v ≤ T → 255, OpenCV's `THRESH_BINARY_INV`) so the object is always 255. Every later step (counting, contours) treats non-zero as "object".
+
+<ThreshLab methods={["manual"]} caption="Move the threshold on the printed label. Low T misses the text in the bright top right (its ink is lighter than the ink in the shadow), high T turns the dark corner into 'text'. In the error view, red pixels are false alarms and blue pixels are missed text, measured against the true text mask." />
+
+On this label, no single T is right everywhere: the light falls off towards the bottom left. With T = 60 every detected pixel is text, but a quarter of the text is missed; with T = 140 all text is found, but three quarters of the "text" pixels are dark paper. 13.5 (adaptive thresholds) solves this.
+
+## 3. How binary images are stored
+
+| Form | dtype | Values | Size of 320 × 200 | Typical use |
+| --- | --- | --- | --- | --- |
+| OpenCV mask | uint8 | 0, 255 | 64 000 bytes | `threshold`, `inRange`, masks, contours, display |
+| NumPy boolean | bool | False, True | 64 000 bytes | indexing (`img[mask]`), logic (`&`, `\|`, `~`) |
+| 0/1 labels | uint8 | 0, 1 | 64 000 bytes | arithmetic (sums, products), some libraries |
+| Packed bits | uint8 | 8 pixels per byte | 8 000 bytes | storage, transmission (`np.packbits`) |
+
+Convert explicitly: `mask > 0` gives bool; `b.astype(np.uint8) * 255` gives an OpenCV mask. Displaying a 0/1 image directly looks black (1 out of 255).
+
+## 4. What binary images are used for
+
+- **Area**: count object pixels (`cv2.countNonZero`); with mm per pixel (2.4) it becomes a physical area.
+- **Shape**: contours, bounding boxes, circularity (Module 18).
+- **Cleaning**: morphology removes specks and fills holes (Module 16).
+- **Masks**: restrict other operations to a region (14.1).
+
+## 5. Industrial example
+
+A label printer checks that every label carries its lot number. A camera image is thresholded (dark ink → 255), and the ink area in the lot-number field is compared with the area on a good label. A missing or half-printed number has clearly less ink. The check is three lines of code and runs in well under a millisecond; its reliability depends entirely on choosing T well, which is what the rest of this module is about.
+
+## What you should remember from 13.1
+
+<Takeaways>
+<Takeaway n={1} title="Binary">Two values per pixel: object (255 or True) and background (0).</Takeaway>
+<Takeaway n={2} title="Rule">v > T → 255; strictly greater. For dark objects use the inverse.</Takeaway>
+<Takeaway n={3} title="Storage">uint8 0/255 for OpenCV, bool for NumPy; packbits for storage.</Takeaway>
+<Takeaway n={4} title="Limits">One global T fails under uneven light.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** With `THRESH_BINARY` and T = 100, what do the pixels 99, 100 and 101 become?
+
+<Solution>
+
+**0, 0, 255** (only values strictly greater than 100 become 255).
+
+</Solution>
+
+**Q2.** A boolean mask `b` has 9 912 True pixels. What is `b.astype(np.uint8).sum()`, and what is `(b.astype(np.uint8) * 255).sum()`?
+
+<Solution>
+
+**9 912** and **2 527 560** (9 912 · 255). For counting, use `np.count_nonzero` or `cv2.countNonZero`, which do not depend on the value used for "object".
+
+</Solution>
+
+### Next: 13.2 Global threshold
+
+How to choose T for a whole image, and what the histogram tells you about it.
+
+## Code
+
+Two examples: the five threshold types, then binary representations and pixel counts.
+
+### 1. The five cv2.threshold types
+
+```python
+import numpy as np
+import cv2
+
+a = np.array([[30, 90, 120], [128, 129, 200], [250, 60, 140]], np.uint8)
+for name in ["THRESH_BINARY", "THRESH_BINARY_INV", "THRESH_TRUNC", "THRESH_TOZERO", "THRESH_TOZERO_INV"]:
+    t, out = cv2.threshold(a, 128, 255, getattr(cv2, name))       # returns (threshold used, result)
+    print(f"{name:18s}", out.ravel().tolist())
+
+mine = np.where(a > 128, 255, 0).astype(np.uint8)                   # THRESH_BINARY from scratch
+print("from scratch == THRESH_BINARY:", np.array_equal(mine, cv2.threshold(a, 128, 255, cv2.THRESH_BINARY)[1]))
+```
+
+Output:
+
+```text
+THRESH_BINARY      [0, 0, 0, 0, 255, 255, 255, 0, 255]
+THRESH_BINARY_INV  [255, 255, 255, 255, 0, 0, 0, 255, 0]
+THRESH_TRUNC       [30, 90, 120, 128, 128, 128, 128, 60, 128]
+THRESH_TOZERO      [0, 0, 0, 0, 129, 200, 250, 0, 140]
+THRESH_TOZERO_INV  [30, 90, 120, 128, 0, 0, 0, 60, 0]
+from scratch == THRESH_BINARY: True
+```
+
+- Only `BINARY` and `BINARY_INV` produce binary images. `TRUNC` clips values above T to T; `TOZERO` keeps values above T and zeroes the rest; `TOZERO_INV` the opposite.
+- The third argument (`maxval`, 255) is the value written for "object"; it is used only by the two binary types.
+
+### 2. Representations and counting
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-print-uneven.png", cv2.IMREAD_GRAYSCALE)
+gt = cv2.imread("sample-print-uneven-gt.png", cv2.IMREAD_GRAYSCALE) > 0      # true text pixels
+_, m = cv2.threshold(img, 100, 255, cv2.THRESH_BINARY_INV)                   # dark text -> 255
+b = m > 0
+print(f"uint8 mask: {m.nbytes} bytes | bool: {b.nbytes} bytes | packed: {np.packbits(b).nbytes} bytes")
+print(f"object pixels: countNonZero {cv2.countNonZero(m)}, bool sum {int(b.sum())}, {b.mean():.1%} of the image")
+
+for T in (60, 100, 140, 170):
+    mm = cv2.threshold(img, T, 255, cv2.THRESH_BINARY_INV)[1] > 0
+    tp = (mm & gt).sum()
+    print(f"T = {T:3d}: {mm.mean():5.1%} marked | text found {tp / gt.sum():6.1%} | marked pixels that are text {tp / mm.sum():6.1%}")
+```
+
+Output:
+
+```text
+uint8 mask: 64000 bytes | bool: 64000 bytes | packed: 8000 bytes
+object pixels: countNonZero 9912, bool sum 9912, 15.5% of the image
+T =  60:  8.9% marked | text found  76.8% | marked pixels that are text 100.0%
+T = 100: 15.5% marked | text found  96.6% | marked pixels that are text  72.4%
+T = 140: 47.2% marked | text found 100.0% | marked pixels that are text  24.6%
+T = 170: 69.1% marked | text found 100.0% | marked pixels that are text  16.8%
+```
+
+- NumPy stores each bool in one byte; only `packbits` reaches 1 bit per pixel.
+- The two percentages trade off against each other as T moves: these are recall and precision, measured properly in 13.7.
+
+## OpenCV API notes
+
+**`retval, dst = cv2.threshold(src, thresh, maxval, type)`**: `src` 8-bit, 16-bit, 32-bit or 64-bit float, any number of channels (each channel separately). `retval` is the threshold actually used (important for Otsu and triangle, 13.3, 13.4).
+
+**Types**: `THRESH_BINARY`, `THRESH_BINARY_INV`, `THRESH_TRUNC`, `THRESH_TOZERO`, `THRESH_TOZERO_INV`; add `THRESH_OTSU` or `THRESH_TRIANGLE` (8-bit single-channel only) for an automatic T.
+
+**Counting**: `cv2.countNonZero(mask)` (single channel), `np.count_nonzero(mask)`.
+
+**Range masks**: `cv2.inRange(src, low, high)` gives 255 for low ≤ v ≤ high (two thresholds, inclusive; 10.7, 11.5).
+
+## Where it fails
+
+- **Uneven lighting**: one T cannot fit all regions (adaptive thresholds, 13.5, or illumination correction, 15.3).
+- **Overlapping grey ranges**: object and background share values; no T separates them (use colour, texture or edges).
+- **Noise near T**: pixels flicker between object and background (hysteresis, 13.6; smoothing first).
+- **Anti-aliased or blurred edges**: the measured size depends on T.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Forgetting that `cv2.threshold` returns two values** (`_, mask = ...`).
+- **Wrong polarity**: dark objects need `THRESH_BINARY_INV` so the object is 255.
+- **Displaying 0/1 masks** without scaling (they look black).
+- **Summing a 0/255 mask** to count pixels (gives 255 × the count).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Thresholding as classification
+
+A threshold is the simplest classifier: one feature (the grey value), one decision boundary (T). Everything in this module is a way of choosing that boundary: from the histogram (13.2–13.4), from the neighbourhood (13.5), with two boundaries and connectivity (13.6). With more features (colour channels, texture, depth) the same idea becomes a multi-dimensional decision boundary, which is where machine learning classifiers take over [1].
+
+### Binary images and mathematical morphology
+
+Binary images can be treated as sets of pixel coordinates. Union, intersection and complement are then `|`, `&` and `~`, and shape operations (erosion, dilation) are defined with set translations. This set view, developed by Matheron and Serra, is the basis of Module 16 [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "With THRESH_BINARY and T = 128, a pixel of value 128 becomes…",
+      options: ["255", "0", "128", "1"],
+      answer: 1,
+      explanation: "The rule is strictly greater than T.",
+    },
+    {
+      question: "Dark text on light paper: which type makes the text 255?",
+      options: ["THRESH_BINARY", "THRESH_BINARY_INV", "THRESH_TRUNC", "THRESH_TOZERO"],
+      answer: 1,
+      explanation: "The inverse type marks values ≤ T.",
+    },
+    {
+      question: "What does THRESH_TRUNC do?",
+      options: ["Sets values above T to 0", "Clips values above T to T", "Inverts the image", "Makes a binary image"],
+      answer: 1,
+      explanation: "Values ≤ T stay; values above T become T.",
+    },
+    {
+      question: "How many bytes does a 320 × 200 boolean NumPy mask use?",
+      options: ["8 000", "64 000", "128 000", "256 000"],
+      answer: 1,
+      explanation: "One byte per bool; np.packbits reduces it to 8 000.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Apply `THRESH_TOZERO` with T = 100 to the row [50, 100, 101, 180].
+
+<Solution>
+
+Values > 100 are kept, the rest become 0: **[0, 0, 101, 180]**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Threshold `sample-print-uneven.png` with T = 100 (`THRESH_BINARY_INV`) separately in the left and right halves of the image. Print the fraction of marked pixels in each half and the fraction of true text pixels in each half (from the ground truth).
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+mm = cv2.threshold(img, 100, 255, cv2.THRESH_BINARY_INV)[1] > 0
+for name, sl in [("left", np.s_[:, :160]), ("right", np.s_[:, 160:])]:
+    print(f"{name}: marked {mm[sl].mean():.1%}, true text {gt[sl].mean():.1%}")
+```
+
+Output:
+
+```text
+left: marked 21.2%, true text 12.8%
+right: marked 9.7%, true text 10.4%
+```
+
+The same T marks far too much in the dark left half (paper counted as text) and too little in the bright right half: the global threshold is wrong in both places for opposite reasons.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 10.3 (thresholding).
+2. J. Serra, *Image Analysis and Mathematical Morphology*, Academic Press, 1982.
+3. OpenCV 4.13.0 documentation: `threshold`, `ThresholdTypes`, `countNonZero`; tutorial "Basic Thresholding Operations". https://docs.opencv.org/4.13.0/

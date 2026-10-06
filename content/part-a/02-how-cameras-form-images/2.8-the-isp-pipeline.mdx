@@ -1,0 +1,521 @@
+export const meta = {
+  number: "2.8",
+  title: "The ISP pipeline",
+  minutes: 45,
+  objectives: [
+    "List the main steps between raw sensor data and the image you receive",
+    "Apply black level, white balance and lens-shading correction",
+    "Explain gamma encoding and why measurements may need linear data",
+    "Recognize sharpening halos, denoising and compression as changes to the data",
+    "Choose camera processing settings for inspection and measurement",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 2.8 (Module 2 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+  Raw-looking images are simulations from sample-color (linear, colour cast, shading, black level).
+*/}
+
+# 2.8 The ISP pipeline
+
+<Definition term="ISP (image signal processor)">the chain of processing that turns raw sensor numbers into the image you receive.</Definition>
+
+The sensor delivers raw counts (2.5), one colour per pixel (2.7). What arrives in your program has gone through **many more steps**: some in the camera, some in the driver. Each step changes the numbers. To trust the numbers, you must know the steps.
+
+<CameraChain
+  direction="right"
+  steps={[
+    { icon: "sensor", label: "Raw sensor data" },
+    { icon: "isp", label: "ISP", note: "10+ processing steps" },
+    { icon: "image", label: "Image file / stream" },
+    { icon: "code", label: "Your program" },
+  ]}
+/>
+
+## 1. Raw data does not look like a photo
+
+If you look at raw sensor data directly, it looks **wrong**: too dark, with a colour cast, with darker corners and some noise.
+
+<ImageCompare
+  before={{ src: "/images/sample-isp-raw.png", label: "Raw (simulated)" }}
+  after={{ src: "/images/sample-isp-final.png", label: "After the ISP" }}
+  width={320}
+  height={200}
+  alt="A simulated raw image, dark, green-tinted and darker in the corners, and the same image after black level, shading, white balance and gamma correction"
+  caption="Simulated. Raw data is linear, offset by a black level, colour-cast by the sensor's filters and darker towards the corners."
+/>
+
+## 2. The pipeline at a glance
+
+A typical order (cameras differ):
+
+<Flow
+  steps={[
+    { label: "1. Black level subtraction", tone: "process" },
+    { label: "2. Defect pixel correction", tone: "process" },
+    { label: "3. Lens shading correction", tone: "process" },
+    { label: "4. White balance", tone: "process" },
+    { label: "5. Demosaicing (2.7)", tone: "process" },
+    { label: "6. Colour correction matrix", tone: "process" },
+    { label: "7. Gamma / tone curve", tone: "process" },
+    { label: "8. Noise reduction", tone: "process" },
+    { label: "9. Sharpening", tone: "process" },
+    { label: "10. Colour space + compression", tone: "result" },
+  ]}
+/>
+
+## 3. Black level
+
+Even in total darkness, a pixel does not read 0. The electronics add a small **offset** so that noise around zero is not clipped: the **black level**, for example 64 on a 10-bit sensor. Step one is to **subtract it**.
+
+<Equation terms={[{ value: "244", label: "raw value" }, { op: "−", value: "64", label: "black level" }, { op: "=", value: "180", label: "real signal", result: true }]} />
+
+Forgetting it makes every ratio and every colour wrong, especially in dark areas.
+
+## 4. Defect pixel correction
+
+A few pixels on every sensor are **hot** (always bright) or **dead** (always dark). The ISP keeps a list and replaces them with the average of their neighbours. On an industrial camera you can usually view and extend this list.
+
+## 5. Lens shading correction
+
+Lenses deliver **less light to the corners** than to the centre (vignetting), and sensors respond a little less to light arriving at steep angles. The result: darker corners.
+
+The fix is a **flat field**: image an evenly lit white target, and divide every image by it (normalized). In Code example 3, the corners go from **55 %** of the centre to **100 %**.
+
+## 6. White balance
+
+The sensor's red, green and blue pixels have **different sensitivities**, and lights have different colours (warm halogen, cool daylight, LED). A gray object therefore comes out tinted. **White balance** multiplies each channel by a **gain** so that gray looks gray.
+
+<Equation terms={[{ value: "R × 2.22" }, { op: ",", value: "G × 1" }, { op: ",", value: "B × 1.60" }, { op: "→", value: "R = G = B on gray", result: true }]} />
+
+Gains can come from a **preset** (daylight, tungsten), from a **white target** (best for inspection), or be estimated automatically, for example by assuming the scene averages to gray (**gray-world**, Code example 1). Chapter 10.6 covers colour constancy in depth.
+
+## 7. Colour correction matrix
+
+Even after white balance, the sensor's "red" is not exactly the standard sRGB red. A **3 × 3 colour correction matrix** mixes the channels to map sensor colours to a standard colour space:
+
+```text
+[R']   [ 1.6  -0.4  -0.2 ] [R]
+[G'] = [-0.3   1.5  -0.2 ] [G]      (example values)
+[B']   [ 0.0  -0.5   1.5 ] [B]
+```
+
+The matrix is calibrated with a colour chart. It makes colours look right, but also **amplifies noise** a little (the negative terms).
+
+## 8. Gamma: the big one
+
+Raw data is **linear**: twice the light gives twice the number. Screens and human eyes are not linear: we notice small changes in dark tones much more than in bright ones. So the ISP applies a **gamma curve** (usually sRGB) that spends more of the 256 levels on the dark tones.
+
+| Light (linear) | 8-bit linear | 8-bit sRGB |
+| --- | --- | --- |
+| 1 % | 3 | 25 |
+| 18 % (mid-gray) | 46 | 118 |
+| 50 % | 128 | 188 |
+| 100 % | 255 | 255 |
+
+*(Values from Code example 2.)*
+
+<Callout kind="key">
+
+After gamma, **pixel values are no longer proportional to light**. Value 188 is not "twice" value 94 in light. For photometric measurements (brightness ratios, flat-field correction, thermal or reflectance work), use **linear** data: gamma off, or undo it.
+
+</Callout>
+
+## 9. Noise reduction
+
+The ISP may smooth the image to hide noise (2.5). That looks nicer, but it also **blurs fine detail**: small cracks, thin lines, and the steepness of edges. It cannot add information; it only trades noise for blur.
+
+## 10. Sharpening
+
+Then the ISP may **sharpen**: boost the difference between each pixel and its blurred neighbourhood (unsharp masking). Edges look crisper, but **halos** appear: a dark rim on the dark side and a bright rim on the bright side.
+
+<PixelMatrix values={[[50, 50, 50, 50, 200, 200, 200, 200], [49, 44, 27, 0, 255, 223, 206, 201]]} caption="Top: a clean edge. Bottom: the same edge after sharpening (Code example 4): it undershoots to 0 and overshoots to 255." />
+
+Halos can shift edge positions and create false defects. For measurement, **turn sharpening off**.
+
+## 11. Colour space and compression
+
+Finally the image is often converted to **YUV / YCbCr** and **compressed** (JPEG for still images, H.264/H.265 for video streams). Lossy compression throws away detail and adds **block artefacts** (Module 4). Industrial machine-vision interfaces (GigE Vision, USB3 Vision) usually send **uncompressed** data.
+
+## 12. Try it
+
+Switch the processing steps on and off.
+
+<IspLab caption="Simulation on the sample scene: the 'raw' input has a black level of 16, channel sensitivities R 0.55, G 1.0, B 0.7, lens shading falling to 55 % at the corners and a little noise." />
+
+## 13. Phone cameras vs industrial cameras
+
+<VsTable
+  left="Phone / consumer / CCTV camera"
+  right="Machine-vision camera"
+  rows={[
+    ["Heavy processing: HDR merging, AI enhancement, strong sharpening", "Minimal processing; most steps can be switched off"],
+    ["Auto exposure, auto white balance, always on", "Fixed settings you control"],
+    ["Compressed (JPEG / H.264)", "Raw or uncompressed (Mono8, Mono12, BayerRG12 …)"],
+    ["Goal: a pleasing picture", "Goal: repeatable, faithful measurements"],
+  ]}
+/>
+
+## 14. Which steps hurt measurement?
+
+<Columns>
+<Panel title="Usually keep" tone="good">
+Black level, defect pixel correction, lens shading (flat field), **fixed** white balance, demosaicing for colour cameras.
+</Panel>
+<Panel title="Usually turn off" tone="warn">
+Sharpening, strong noise reduction, auto exposure / auto white balance, lossy compression. Gamma **off** for photometric work.
+</Panel>
+</Columns>
+
+## 15. Where processing happens
+
+On machine-vision cameras, these steps are **features** you set through the camera's interface (GenICam names such as `BlackLevel`, `BalanceRatio`, `Gamma`, `PixelFormat`). Some run in the camera, some in the vendor's software on the PC. If you receive **raw** data, you do them yourself (in OpenCV or the vendor SDK).
+
+## 16. Industrial example: IP cameras in a plant
+
+Plant-wide safety systems often use **IP / CCTV cameras**: cheap, robust, long cables, H.264 streams. Their ISP does auto exposure, auto white balance, wide dynamic range, sharpening and heavy compression. That is **fine for detecting a person** or a missing helmet. It is **poor for measuring** a billet to the millimetre: edges are sharpened, compressed and change with the lighting. Use the right camera for the task.
+
+## 17. A checklist before trusting pixel values
+
+<Flow
+  steps={[
+    "Which pixel format? (Mono8 / Mono12 / Bayer / RGB / compressed)",
+    "Black level subtracted?",
+    "Gamma on or off?",
+    "Auto exposure / white balance off?",
+    "Sharpening / noise reduction off?",
+    { label: "Then the numbers mean what you think", tone: "result" },
+  ]}
+/>
+
+## What you should remember from 2.8
+
+<Takeaways>
+<Takeaway n={1} title="The ISP">A chain of steps between raw sensor data and the image you receive.</Takeaway>
+<Takeaway n={2} title="Corrections">Black level, defect pixels, lens shading and white balance fix the sensor's raw quirks.</Takeaway>
+<Takeaway n={3} title="Gamma">Makes images look right but values non-linear; use linear data to measure light.</Takeaway>
+<Takeaway n={4} title="Cosmetics">Noise reduction, sharpening and compression change the data; turn them off for measurement.</Takeaway>
+<Takeaway n={5} title="Control">Machine-vision cameras let you choose; consumer and CCTV cameras mostly do not.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A raw pixel reads 300, the black level is 64. A neighbour reads 182. What is the ratio of their real signals?
+
+<Solution>
+
+(300 − 64) / (182 − 64) = 236 / 118 = **2.0**. Without subtracting the black level you would get 300 / 182 ≈ 1.65: wrong.
+
+</Solution>
+
+**Q2.** Why does a gray card look greenish in raw sensor data?
+
+<Solution>
+
+The green pixels are more sensitive (and there are two per Bayer block), so green reads higher until **white balance** gains equalize the channels.
+
+</Solution>
+
+**Q3.** An sRGB image has values 60 and 120. Is the second area twice as bright?
+
+<Solution>
+
+**No.** Decode to linear: 60 → about 0.045, 120 → about 0.19: roughly **4.2×** the light.
+
+</Solution>
+
+**Q4.** Edge measurements jump by a pixel between two otherwise identical cameras. One has sharpening on. Why can that matter?
+
+<Solution>
+
+Sharpening adds overshoot and undershoot (halos) beside edges, which moves where a threshold or edge detector finds the edge.
+
+</Solution>
+
+**Q5.** Name two ISP features you would switch off for a billet measurement system.
+
+<Solution>
+
+Any two of: sharpening, strong noise reduction, auto exposure, auto white balance, lossy compression.
+
+</Solution>
+
+### Next: 2.9 Rolling shutter and flicker
+
+Two timing effects that surprise many engineers: sensors that expose rows **one after another**, and lights that **flicker** with the mains frequency. Both create strange stripes and shapes in images of moving or lit scenes.
+
+## Code
+
+Four steps of the ISP done by hand: black level and white balance, gamma with a LUT, lens-shading correction, and the halo created by sharpening.
+
+### 1. From scratch: black level and gray-world white balance
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=8)
+# a gray card as the raw sensor sees it: black level 64 (of 1023, 10-bit), green more sensitive than red/blue
+black = 64
+raw = np.stack([rng.normal(black + 180, 3, (50, 50)),     # R
+                rng.normal(black + 400, 3, (50, 50)),     # G
+                rng.normal(black + 250, 3, (50, 50))],    # B
+               axis=-1)
+print("raw means (R, G, B):", raw.reshape(-1, 3).mean(axis=0).round(1))
+lin = raw - black                                          # 1. black level
+gains = lin.reshape(-1, 3).mean(axis=0)
+gains = gains[1] / gains                                   # 2. gray-world white balance: scale R and B to match G
+wb = lin * gains
+print("white-balance gains:", gains.round(3))
+print("after black level + WB:", wb.reshape(-1, 3).mean(axis=0).round(1))
+```
+
+Output:
+
+```text
+raw means (R, G, B): [243.9 464.1 313.9]
+white-balance gains: [2.224 1.    1.601]
+after black level + WB: [400.1 400.1 400.1]
+```
+
+- Subtract the black level **first**; the gains must be computed on the real signal.
+- Gray-world works here because the card is gray. On a scene that is mostly red, it would wrongly remove the red; a white reference target is safer.
+
+### 2. Gamma: linear vs sRGB, applied with a lookup table
+
+```python
+import numpy as np
+import cv2
+
+def srgb_encode(x):                       # x: linear light 0..1
+    return np.where(x <= 0.0031308, 12.92 * x, 1.055 * np.power(x, 1 / 2.4) - 0.055)
+
+for lin in [0.0, 0.01, 0.18, 0.5, 1.0]:
+    print(f"linear {lin:4.2f} -> 8-bit linear {round(lin * 255):3d}, sRGB {round(float(srgb_encode(lin)) * 255):3d}")
+
+lut = np.clip(np.rint(srgb_encode(np.arange(256) / 255.0) * 255), 0, 255).astype(np.uint8)
+dark = np.array([[2, 10, 46, 128]], np.uint8)      # linear 8-bit values
+print("cv2.LUT:", cv2.LUT(dark, lut))
+```
+
+Output:
+
+```text
+linear 0.00 -> 8-bit linear   0, sRGB   0
+linear 0.01 -> 8-bit linear   3, sRGB  25
+linear 0.18 -> 8-bit linear  46, sRGB 118
+linear 0.50 -> 8-bit linear 128, sRGB 188
+linear 1.00 -> 8-bit linear 255, sRGB 255
+cv2.LUT: [[ 22  56 118 188]]
+```
+
+- The sRGB curve is linear near black and a 1/2.4 power above; overall it behaves like a gamma of about 2.2.
+- `cv2.LUT(src, lut)` replaces every pixel value v by `lut[v]`: the fastest way to apply any curve to 8-bit images (Chapter 11.1).
+- Linear 1 % of full light becomes 25 in sRGB: dark tones get many more levels.
+
+### 3. Lens-shading correction with a flat field
+
+```python
+import numpy as np
+import cv2
+
+h, w = 200, 320
+yy, xx = np.mgrid[0:h, 0:w]
+r2 = ((xx - w / 2) ** 2 + (yy - h / 2) ** 2) / ((w / 2) ** 2 + (h / 2) ** 2)
+shading = 1 - 0.45 * r2                            # lens shading: corners get 55 % of the centre light
+flat_scene = np.full((h, w), 200.0)                # an evenly lit gray card
+raw = flat_scene * shading
+
+print(f"corner / centre before: {raw[0, 0] / raw[h // 2, w // 2]:.2f}")
+flat_field = raw / raw.max()                       # calibration: image of a flat target, normalized
+corrected = cv2.divide(raw, flat_field)            # per-pixel division
+print(f"corner / centre after:  {corrected[0, 0] / corrected[h // 2, w // 2]:.2f}")
+```
+
+Output:
+
+```text
+corner / centre before: 0.55
+corner / centre after:  1.00
+```
+
+- The flat field records how much light each pixel gets from an even scene. Dividing by it undoes the falloff.
+- Make the flat field with the **same lens, aperture and focus** as production; it changes with all three.
+- `cv2.divide(a, b)` divides element-wise; on floats it gives exact ratios.
+
+### 4. Sharpening creates halos
+
+```python
+import numpy as np
+import cv2
+
+row = np.array([[50] * 8 + [200] * 8], np.uint8)          # a clean dark-to-bright edge
+img = np.repeat(row, 9, axis=0)
+blur = cv2.GaussianBlur(img, (0, 0), 1.5)
+sharp = cv2.addWeighted(img, 2.0, blur, -1.0, 0)            # unsharp mask, amount 1.0
+print("before:", img[4, 4:12])
+print("after: ", sharp[4, 4:12])
+```
+
+Output:
+
+```text
+before: [ 50  50  50  50 200 200 200 200]
+after:  [ 49  44  27   0 255 223 206 201]
+```
+
+- Unsharp masking: `sharp = img + amount × (img − blur)`, written with `cv2.addWeighted(img, 1 + amount, blur, −amount, 0)`.
+- Near the edge the dark side drops to 0 and the bright side rises to 255 (both clipped): that is the halo.
+- A threshold at 40 or at 220 would now find edges in different places than on the original.
+
+## OpenCV API notes
+
+**`cv2.LUT(src, lut)`**: `src` 8-bit, `lut` 256 entries (one channel, or three for per-channel curves). Output has the LUT's depth.
+
+**`cv2.divide(src1, src2[, scale])`** and **`cv2.multiply`**: element-wise; use float images for corrections, then convert back with `np.clip(...).astype(np.uint8)`.
+
+**`cv2.addWeighted(src1, alpha, src2, beta, gamma)`** computes `src1·alpha + src2·beta + gamma` with saturation. The `gamma` argument here is just an added constant, not the display gamma of this chapter.
+
+**`cv2.xphoto`** (contrib, Chapter 8.4) contains white-balance algorithms (`createSimpleWB`, `createGrayworldWB`, `createLearningBasedWB`).
+
+**Reading what the camera sent**: `cv2.imread` returns 8-bit gamma-encoded images for normal JPEG/PNG files. For 16-bit raw data use `cv2.imread(path, cv2.IMREAD_UNCHANGED)` and check `img.dtype`.
+
+## Where it fails
+
+- **Automatic estimates** (gray-world white balance, auto exposure) fail on unusual scenes: a scene full of red slabs is "corrected" towards gray.
+- **Flat fields** go stale when the lens, aperture, focus or lighting changes.
+- **Undoing the camera's processing** is often impossible: sharpening and compression lose information, and vendors rarely document their exact curves.
+- **Colour correction matrices** are calibrated for one light; under a different light the colours drift.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Measuring brightness ratios on gamma-encoded images.**
+- **Forgetting the black level** when working with raw data.
+- **Leaving auto white balance on** in a colour-inspection system.
+- **Tuning thresholds on JPEG snapshots** and running on uncompressed production images (or the reverse).
+- **Assuming "raw" from a phone or CCTV camera is untouched.** Check the documentation.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why gamma exists
+
+Perceived lightness is roughly a power (about 1/3) or logarithmic function of luminance. Encoding with a gamma curve spends the limited code values evenly across perceived lightness, so 8 bits look smooth. The sRGB standard (IEC 61966-2-1) defines the curve used in this chapter [1][2].
+
+### Scene-referred vs display-referred
+
+Raw, linear data is *scene-referred*: proportional to the light in the scene. Gamma-encoded, tone-mapped images are *display-referred*: made to look right on a screen. Measurement wants scene-referred data [2].
+
+### A pipeline in software
+
+Open-source raw converters implement the whole pipeline (black level, white balance, demosaicing, colour matrices, curves). Reading their stages is a good way to see real implementations. Ramanath et al. describe the classical colour camera processing chain step by step [3].
+
+### Camera control standards
+
+GenICam's Standard Features Naming Convention defines common names (`BlackLevel`, `BalanceRatioSelector`, `BalanceRatio`, `Gamma`, `PixelFormat`) so the same feature can be found on cameras from different vendors [4].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is the first correction applied to raw sensor values?",
+      options: ["Gamma", "Black level subtraction", "Sharpening", "JPEG compression"],
+      answer: 1,
+      explanation: "Every later step assumes zero light reads zero, so the offset is removed first.",
+    },
+    {
+      question: "Linear mid-gray (18 %) is 46 in 8-bit linear. What is it in sRGB?",
+      options: ["46", "92", "118", "128"],
+      answer: 2,
+      explanation: "The sRGB curve lifts dark and mid tones: 0.18 → 118.",
+    },
+    {
+      question: "Which ISP step creates bright and dark rims along edges?",
+      options: ["White balance", "Sharpening", "Black level", "Lens shading"],
+      answer: 1,
+      explanation: "Unsharp masking overshoots on both sides of an edge.",
+    },
+    {
+      question: "Why use a flat field?",
+      options: ["To remove the colour cast", "To correct darker corners (lens shading) and pixel sensitivity differences", "To reduce motion blur", "To compress the image"],
+      answer: 1,
+      explanation: "Dividing by an image of an even target cancels the falloff towards the corners.",
+    },
+    {
+      question: "Which setting is usually wrong for a measurement camera?",
+      options: ["Fixed exposure", "Black level correction on", "Auto white balance on", "Uncompressed pixel format"],
+      answer: 2,
+      explanation: "Auto white balance changes colours from image to image.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Raw means on a white target (after black level) are R = 310, G = 620, B = 410. (a) Compute white-balance gains that make the target neutral with G unchanged. (b) A pixel reads (155, 300, 205) after black level. What is it after white balance?
+
+<Solution>
+
+(a) R gain 620 / 310 = **2.0**; G **1.0**; B gain 620 / 410 ≈ **1.512**.
+
+(b) (155 × 2.0, 300, 205 × 1.512) ≈ **(310, 300, 310)**: nearly neutral, slightly less green.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Write `srgb_decode(v)` (the inverse of `srgb_encode`, v in 0..1) and use it to find the true light ratio between sRGB values 60 and 120.
+
+<Solution>
+
+```python
+import numpy as np
+
+def srgb_decode(v):
+    return np.where(v <= 0.04045, v / 12.92, ((v + 0.055) / 1.055) ** 2.4)
+
+a, b = srgb_decode(60 / 255), srgb_decode(120 / 255)
+print(f"linear: {a:.4f}, {b:.4f}, ratio {b / a:.2f}")
+```
+
+Output:
+
+```text
+linear: 0.0452, 0.1878, ratio 4.16
+```
+
+The second area receives about **4.2×** the light, not 2×.
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+A team uses a CCTV camera (H.264, auto exposure, auto white balance, sharpening) to measure rod diameters and sees readings drift during the day. List three causes from this chapter and a fix for each.
+
+<Solution>
+
+1. **Auto exposure** changes brightness with daylight → edges found at different thresholds. Fix: fixed exposure and controlled lighting.
+2. **Sharpening** halos shift edges and change with contrast. Fix: turn sharpening off (or use a machine-vision camera).
+3. **Compression** artefacts vary with scene content and motion. Fix: uncompressed pixel format (GigE Vision / USB3 Vision camera).
+
+(Auto white balance also changes colours, which matters if colour is used.)
+
+</Solution>
+
+## References
+
+1. International Electrotechnical Commission, *IEC 61966-2-1: Multimedia systems and equipment — Colour measurement and management — Part 2-1: Default RGB colour space — sRGB*, 1999.
+2. C. Poynton, *Digital Video and HD: Algorithms and Interfaces*, 2nd ed. Morgan Kaufmann, 2012.
+3. R. Ramanath, W. E. Snyder, Y. Yoo and M. S. Drew, "Color image processing pipeline," *IEEE Signal Processing Magazine*, vol. 22, no. 1, pp. 34–43, 2005.
+4. European Machine Vision Association, *GenICam Standard Features Naming Convention (SFNC)*.
+5. OpenCV 4.13.0 documentation, *Operations on arrays* (`LUT`, `divide`, `addWeighted`): [docs.opencv.org/4.13.0/d2/de8/group__core__array.html](https://docs.opencv.org/4.13.0/d2/de8/group__core__array.html).

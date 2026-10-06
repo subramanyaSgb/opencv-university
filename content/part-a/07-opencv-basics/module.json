@@ -1,0 +1,14 @@
+{
+  "number": 7,
+  "title": "OpenCV basics",
+  "summary": "Hands-on OpenCV: installing the right package, reading, showing and saving images, colour order, video and cameras, drawing, mouse and trackbars, and measuring speed.",
+  "chapters": [
+    { "number": "7.1", "slug": "7.1-installing-and-versions", "title": "Installing and versions" },
+    { "number": "7.2", "slug": "7.2-read-show-save", "title": "Read, show, save" },
+    { "number": "7.3", "slug": "7.3-bgr-vs-rgb", "title": "BGR vs RGB" },
+    { "number": "7.4", "slug": "7.4-video-and-camera-capture", "title": "Video and camera capture" },
+    { "number": "7.5", "slug": "7.5-drawing-and-text", "title": "Drawing and text" },
+    { "number": "7.6", "slug": "7.6-mouse-and-trackbars", "title": "Mouse and trackbars" },
+    { "number": "7.7", "slug": "7.7-measuring-speed", "title": "Measuring speed" }
+  ]
+}

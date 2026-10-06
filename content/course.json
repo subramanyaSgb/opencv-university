@@ -1,6 +1,29 @@
 {
   "title": "OpenCV University",
   "parts": [
-    { "id": "part-a", "letter": "A", "title": "Foundations", "modules": ["01-introduction", "02-how-cameras-form-images"] }
+    {
+      "id": "part-a",
+      "letter": "A",
+      "title": "Foundations",
+      "modules": ["01-introduction", "02-how-cameras-form-images", "03-digital-images", "04-formats-and-compression", "05-maths-for-images", "06-python-and-numpy-for-images", "07-opencv-basics", "08-the-opencv-library-in-depth", "09-human-vision-and-perception"]
+    },
+    {
+      "id": "part-b",
+      "letter": "B",
+      "title": "Colour and point operations",
+      "modules": ["10-colour-spaces", "11-intensity-transforms", "12-histograms", "13-thresholding", "14-masks-and-arithmetic", "15-preprocessing-pipelines"]
+    },
+    {
+      "id": "part-c",
+      "letter": "C",
+      "title": "Spatial processing",
+      "modules": ["16-geometric-transforms", "17-convolution-and-kernels", "18-noise-and-smoothing", "19-sharpening-and-restoration", "20-pyramids-and-scale-space", "21-image-registration"]
+    },
+    {
+      "id": "part-d",
+      "letter": "D",
+      "title": "Edges, shapes and segmentation",
+      "modules": ["22-edge-detection", "23-morphology", "24-contours-and-shape-analysis", "25-connected-components-and-blobs", "26-hough-and-model-fitting", "27-segmentation", "28-active-contours"]
+    }
   ]
 }

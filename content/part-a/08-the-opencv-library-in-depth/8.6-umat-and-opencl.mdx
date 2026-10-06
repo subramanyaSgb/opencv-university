@@ -1,0 +1,373 @@
+export const meta = {
+  number: "8.6",
+  title: "UMat and OpenCL",
+  minutes: 25,
+  objectives: [
+    "Explain OpenCV's transparent API: the same function runs on CPU or an OpenCL device depending on the argument type",
+    "Use cv2.UMat: create, process, get() the result, and check whether OpenCL is in use",
+    "Predict when OpenCL helps (integrated and discrete GPUs, long chains) and when it does not",
+    "Select or disable the OpenCL device with cv2.ocl and OPENCV_OPENCL_DEVICE",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 8.6 (Module 8 plan).
+  Reference tail: examples 1 and 2 give the same output with and without an OpenCL device and are compared
+  automatically. Example 3 shows a typical result from our test machine, whose only OpenCL device is the PoCL
+  CPU implementation (enabled with OPENCV_OPENCL_DEVICE=":CPU:").
+*/}
+
+# 8.6 UMat and OpenCL
+
+<Definition term="UMat">a "unified" image container: pass a cv2.UMat instead of a NumPy array and OpenCV may run the function on an OpenCL device (usually a GPU, from any vendor); if no device is available, the same call runs on the CPU.</Definition>
+
+8.5 needed a special CUDA build and an NVIDIA card. OpenCL is the other GPU path in OpenCV: it is compiled into the normal pip wheels, works with Intel, AMD and NVIDIA GPUs, and needs only one change in your code: the argument type.
+
+## 1. An analogy
+
+A taxi app. You say where you want to go; the app decides which car takes you. If an electric car (GPU) is nearby, you get it; if not, a normal car (CPU) comes. You do not change how you order. That is the "transparent API": you call `cv2.GaussianBlur` the same way, and the type of what you pass (NumPy array or UMat) lets OpenCV choose.
+
+## 2. The transparent API
+
+<Flow
+  steps={[
+    { label: "cv2.UMat(img): data may live on the OpenCL device", tone: "data" },
+    { label: "cv2.GaussianBlur(umat, …): OpenCL kernel if possible, else CPU code", tone: "process" },
+    { label: "Result is a UMat: chain more calls without copying back", tone: "process" },
+    { label: "umat.get(): wait for the device and return a NumPy array", tone: "result" },
+  ]}
+/>
+
+- **NumPy in → NumPy out**, always on the CPU.
+- **UMat in → UMat out**; OpenCV uses an OpenCL kernel for that function if OpenCL is available, enabled, and the function has an OpenCL implementation for this type. Otherwise it silently runs the CPU code.
+- Calls on UMat can be **asynchronous**: the call returns before the device has finished. `get()` (or any CPU access) waits.
+
+The same function definition therefore works for both: `def pipeline(x): return cv2.threshold(cv2.absdiff(x, ref), 40, 255, 0)[1]`.
+
+## 3. OpenCL vs CUDA in OpenCV
+
+| | OpenCL (UMat) | CUDA (cv2.cuda, 8.5) |
+| --- | --- | --- |
+| In the pip wheels | yes | no (source build) |
+| GPUs | Intel, AMD, NVIDIA, some ARM | NVIDIA only |
+| Code change | pass `cv2.UMat` | separate `cv2.cuda` API, filter objects |
+| Fallback | automatic CPU fallback | you write it |
+| Control | little (device, on/off) | streams, memory, many options |
+| Function coverage | many imgproc/core functions; DNN target `DNN_TARGET_OPENCL` | many functions in contrib cuda* modules |
+| Typical gain | moderate; best on integrated GPUs and long chains | often larger on strong NVIDIA GPUs |
+
+On **integrated GPUs** (Intel and AMD processors with graphics) the GPU shares the main memory, so "transfers" can be avoided: this is where OpenCL in OpenCV is most attractive for small industrial PCs without a discrete card.
+
+## 4. Transfers still matter
+
+On a discrete GPU, a UMat made from a NumPy array is copied over PCIe when first needed, and `get()` copies back. The lab from 8.5, with one more bus choice:
+
+<GpuLab integrated caption="CPU vs GPU including transfers. Choose 'integrated GPU (shared memory)' to see why OpenCL on processors with built-in graphics can pay off even for one operation." />
+
+Things to try: the default (one operation, discrete card): CPU wins. Switch the bus to **integrated GPU**: no transfer time, the GPU kernel's speed decides.
+
+## 5. Controlling OpenCL
+
+| Call or setting | Effect |
+| --- | --- |
+| `cv2.ocl.haveOpenCL()` | an OpenCL runtime and at least one platform were found |
+| `cv2.ocl.useOpenCL()` | OpenCV will actually use OpenCL for UMat calls |
+| `cv2.ocl.setUseOpenCL(False)` | switch it off (UMat calls then run on the CPU) |
+| `cv2.ocl.Device.getDefault().name()` | the selected device; empty if none is selected |
+| `OPENCV_OPENCL_DEVICE=":GPU:"` (environment) | choose a device type (`GPU`, `CPU`, `dGPU`, `iGPU`) or a vendor/name; `disabled` turns OpenCL off |
+| `OPENCV_OPENCL_RUNTIME` (environment) | path to the OpenCL library to load |
+
+On our Linux test machine the only OpenCL device is **PoCL**, an OpenCL implementation that runs on the CPU. `haveOpenCL()` is True but `useOpenCL()` is False: OpenCV did not select the CPU device by default. With `OPENCV_OPENCL_DEVICE=":CPU:"` it does, and example 3 shows that this is **much slower** than OpenCV's own CPU code: OpenCL only pays off on a real GPU.
+
+The first OpenCL call of each kernel also **compiles** it for the device (tens to hundreds of milliseconds); OpenCV caches compiled kernels on disk (`OPENCV_OPENCL_CACHE_DIR`), so later program starts are faster. Always warm up before timing (7.7).
+
+## 6. Industrial example
+
+A small fanless PC with an Intel processor and integrated graphics runs a label-reading station: resize, colour conversion, adaptive threshold and morphology on 5 MP images, then OCR. The developer wraps the input as `cv2.UMat` and keeps the preprocessing chain on UMat. On the target PC, `useOpenCL()` is True and the preprocessing time drops noticeably, while on the developer's laptop without GPU drivers the same code runs on the CPU. The start-up log prints `useOpenCL()` and the device name, and a configuration flag can disable OpenCL (`cv2.ocl.setUseOpenCL(False)`) if a driver update ever causes problems. The defect threshold was re-validated with OpenCL on, because a few pixels can differ by one grey level (example 3).
+
+## What you should remember from 8.6
+
+<Takeaways>
+<Takeaway n={1} title="Transparent">UMat in → UMat out; OpenCL if available, CPU otherwise. Same function code.</Takeaway>
+<Takeaway n={2} title="Available">In every pip wheel; needs a GPU and its OpenCL driver at run time.</Takeaway>
+<Takeaway n={3} title="Check">haveOpenCL() vs useOpenCL() vs the default device name; log them at start-up.</Takeaway>
+<Takeaway n={4} title="When">Integrated GPUs and chains of per-pixel work; not tiny images, not CPU OpenCL devices.</Takeaway>
+<Takeaway n={5} title="Results">Can differ slightly from the CPU; warm up before timing (kernel compilation).</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** `cv2.ocl.haveOpenCL()` is True, `useOpenCL()` is False. Will `cv2.GaussianBlur(cv2.UMat(img), (5, 5), 0)` run on a GPU?
+
+<Solution>
+
+No. OpenCL is found but not in use (no suitable device selected, or switched off), so the call runs on the CPU and still returns a UMat.
+
+</Solution>
+
+**Q2.** Why is `x = cv2.UMat(img); y = cv2.blur(x, (5, 5)).get(); z = cv2.Canny(cv2.UMat(y), 50, 150).get()` a poor pattern?
+
+<Solution>
+
+It goes back to NumPy (`get()`) between the two calls and creates a new UMat, so data may cross the bus twice for nothing. Keep the chain on UMat: `z = cv2.Canny(cv2.blur(x, (5, 5)), 50, 150).get()`.
+
+</Solution>
+
+### Next: 8.7 The DNN module
+
+Running trained neural networks (ONNX and others) inside OpenCV, on the CPU or with OpenCL/CUDA.
+
+## Code
+
+Three examples: one function for NumPy and UMat (checked against a NumPy reference), the UMat API, and OpenCL status and timing.
+
+### 1. From scratch, and the same code on UMat
+
+A defect check by image difference: once in NumPy, once with OpenCV functions that accept both NumPy arrays and UMat.
+
+```python
+import numpy as np
+import cv2
+
+ref = cv2.imread("sample-plate-good.png", cv2.IMREAD_GRAYSCALE)
+test = ref.copy()
+cv2.circle(test, (120, 80), 6, 0, -1)                         # a dark "defect"
+
+def defects_numpy(a, b, t=40):
+    d = np.abs(a.astype(np.int16) - b.astype(np.int16))         # from scratch: no overflow
+    return (d > t).astype(np.uint8) * 255
+
+def defects_cv(a, b, t=40):                                     # works for NumPy arrays and UMat alike
+    d = cv2.absdiff(a, b)
+    return cv2.threshold(d, t, 255, cv2.THRESH_BINARY)[1]
+
+m_np = defects_numpy(ref, test)
+m_cpu = defects_cv(ref, test)
+m_umat = defects_cv(cv2.UMat(ref), cv2.UMat(test))
+print("types:", type(m_cpu).__name__, type(m_umat).__name__)
+print("defect pixels: numpy", int(np.count_nonzero(m_np)), "| cv2", cv2.countNonZero(m_cpu), "| UMat", cv2.countNonZero(m_umat))
+print("UMat result equals NumPy result:", np.array_equal(m_umat.get(), m_np))
+```
+
+Output:
+
+```text
+types: ndarray UMat
+defect pixels: numpy 113 | cv2 113 | UMat 113
+UMat result equals NumPy result: True
+```
+
+- The output is the same with and without OpenCL: integer operations like `absdiff` and `threshold` are exact on every device.
+- `cv2.countNonZero` accepts a UMat directly and returns a Python int.
+
+### 2. OpenCV: working with UMat
+
+```python
+import numpy as np
+import cv2
+
+img = np.arange(48, dtype=np.uint8).reshape(6, 8)
+u = cv2.UMat(img)
+print("UMat size", u.get().shape, "| ROI rows 1-2, cols 2-4:", cv2.UMat(u, [1, 3], [2, 5]).get().tolist())
+try:
+    u + 1
+except TypeError as e:
+    print("u + 1 ->", type(e).__name__)
+v = cv2.add(u, 1)
+print("cv2.add(u, 1) ->", type(v).__name__, v.get()[0, :4].tolist())
+```
+
+Output:
+
+```text
+UMat size (6, 8) | ROI rows 1-2, cols 2-4: [[10, 11, 12], [18, 19, 20]]
+u + 1 -> TypeError
+cv2.add(u, 1) -> UMat [1, 2, 3, 4]
+```
+
+- A UMat is not a NumPy array: no `shape`, no indexing, no `+`. Use OpenCV functions, or `get()` to come back to NumPy.
+- `cv2.UMat(u, rowRange, colRange)` makes an ROI that shares data, like `A(Rect)` in C++.
+
+### 3. OpenCV: status and timing
+
+```python
+import time
+import numpy as np
+import cv2
+
+print("OpenCL available:", cv2.ocl.haveOpenCL(), "| in use:", cv2.ocl.useOpenCL())
+if cv2.ocl.haveOpenCL():
+    d = cv2.ocl.Device.getDefault()
+    print("device:", d.name(), "|", d.vendorName(), "|", d.OpenCLVersion())
+
+img = cv2.resize(cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE), (3264, 2448))
+u = cv2.UMat(img)
+
+def chain(x):
+    x = cv2.GaussianBlur(x, (9, 9), 0)
+    x = cv2.Sobel(x, cv2.CV_16S, 1, 0)
+    x = cv2.convertScaleAbs(x)
+    return cv2.threshold(x, 40, 255, cv2.THRESH_BINARY)[1]
+
+def best(fn, n=10):
+    fn()                                                         # warm-up: OpenCL kernels compile here
+    ts = []
+    for _ in range(n):
+        t0 = time.perf_counter(); r = fn(); ts.append(time.perf_counter() - t0)
+    return 1000 * min(ts), r
+
+t_cpu, r_cpu = best(lambda: chain(img))
+t_ocl, r_ocl = best(lambda: chain(u).get())                      # .get() waits for the result and downloads it
+print(f"numpy in: {t_cpu:.1f} ms | UMat in: {t_ocl:.1f} ms | results differ in {int(np.count_nonzero(r_cpu != r_ocl))} pixels")
+```
+
+Typical output on our 2-core test machine, default settings (OpenCL found but not used):
+
+```text
+OpenCL available: True | in use: False
+device:  |  | 
+numpy in: 12.0 ms | UMat in: 12.5 ms | results differ in 0 pixels
+```
+
+The same machine with `OPENCV_OPENCL_DEVICE=":CPU:"` (OpenCL on the PoCL CPU device):
+
+```text
+OpenCL available: True | in use: True
+device: cpu-skylake-avx512-Intel(R) Xeon(R) Processor @ 2.80GHz | GenuineIntel | OpenCL 3.0 PoCL HSTR: cpu-x86_64-pc-linux-gnu-skylake-avx512
+numpy in: 10.4 ms | UMat in: 139.5 ms | results differ in 1 pixels
+```
+
+- Without a selected device the UMat path is the CPU path plus a little overhead.
+- OpenCL on a CPU device is more than 10× slower than OpenCV's native, vectorised CPU code. On a PC with a real GPU, run the script and compare; this is the measurement that decides.
+- One pixel differs: GPU/OpenCL kernels may round intermediate values differently (here in the blur), which can move a pixel across the threshold.
+
+## OpenCV API notes
+
+**UMat**: `cv2.UMat(ndarray)`, `cv2.UMat(rows, cols, type)`, `cv2.UMat(umat, rowRange, colRange)` (ROI), `u.get()` → NumPy, `u.isContinuous()`, `u.isSubmatrix()`, `u.handle(access)` (the OpenCL buffer, for interop).
+
+**Status and control** (`cv2.ocl`): `haveOpenCL()`, `useOpenCL()`, `setUseOpenCL(bool)`, `Device.getDefault()` (`name()`, `vendorName()`, `OpenCLVersion()`, `type()`, `hostUnifiedMemory()`), `finish()` (wait for all queued work).
+
+**Environment variables**: `OPENCV_OPENCL_DEVICE` (`:GPU:`, `:dGPU:`, `:iGPU:`, `:CPU:`, `disabled`), `OPENCV_OPENCL_RUNTIME`, `OPENCV_OPENCL_CACHE_DIR`.
+
+**DNN**: `net.setPreferableTarget(cv2.dnn.DNN_TARGET_OPENCL)` or `DNN_TARGET_OPENCL_FP16` (8.7).
+
+## Where it fails
+
+- **No GPU driver**: without the vendor's OpenCL driver (ICD), there is no device; the code runs on the CPU (correct but not faster).
+- **CPU OpenCL devices** (PoCL, some vendor CPU runtimes) are slower than OpenCV's CPU code.
+- **Functions without an OpenCL kernel** run on the CPU and may force data back from the device in the middle of a chain.
+- **Small images**: kernel launch and synchronisation overhead dominate.
+- **Driver bugs**: OpenCL quality varies by driver version; keep a switch to disable it.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming UMat means GPU**: check `useOpenCL()` and the device name.
+- **Calling `get()` after every step**.
+- **Timing the first call** (kernel compilation) or timing without `get()` (asynchronous calls return before the work is done).
+- **Using NumPy operations on a UMat** (`u + 1`, `u[0, 0]`, `u.shape`).
+- **Comparing CPU and OpenCL results bit-for-bit** after float operations.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### How the dispatch works
+
+Inside functions that support the transparent API there is a macro `CV_OCL_RUN(condition, ocl_function(...))`. If OpenCL is in use, the output is a UMat (or the input is), and the condition holds (supported type, size, flags), the OpenCL version runs; if it returns false or the condition fails, the CPU code below it runs. That is why coverage is per function and per type, and why falling back is silent [1].
+
+### Memory: device, host, shared
+
+A UMat has a usage flag: memory can be allocated on the device, or on the host with the device accessing it (`USAGE_ALLOCATE_SHARED_MEMORY`, useful on integrated GPUs where `hostUnifiedMemory()` is true). `get()` maps or copies the buffer to a NumPy array. Between OpenCL calls the data stays on the device, so a chain of UMat calls costs one upload and one download [1], [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does cv2.GaussianBlur return when given a UMat?",
+      options: ["A NumPy array", "A UMat", "None", "A GpuMat"],
+      answer: 1,
+      explanation: "UMat in, UMat out.",
+    },
+    {
+      question: "If no OpenCL device is available, a UMat call…",
+      options: ["raises an error", "runs on the CPU", "returns an empty UMat", "uses CUDA instead"],
+      answer: 1,
+      explanation: "The transparent API falls back to the CPU implementation.",
+    },
+    {
+      question: "Which hardware benefits most from OpenCL in OpenCV?",
+      options: ["A CPU-only OpenCL runtime", "Integrated GPUs sharing main memory, and discrete GPUs for long chains", "A PLC", "Any hardware equally"],
+      answer: 1,
+      explanation: "Shared memory removes transfers; long chains amortise them.",
+    },
+    {
+      question: "Why call get() inside the timed region?",
+      options: ["It converts to float", "UMat calls can be asynchronous; get() waits for completion", "It is required to free memory", "It compiles the kernels"],
+      answer: 1,
+      explanation: "Otherwise you time only the queuing of the work.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+An integrated GPU shares memory with the CPU. One colour conversion takes 3 ms on the CPU and 0.8 ms as an OpenCL kernel, plus 0.05 ms launch cost. With zero-copy shared memory, what is the speed-up? With a discrete card at 12 GB/s and a 6 MB frame each way?
+
+<Solution>
+
+Integrated: 3 / 0.85 ≈ **3.5×**. Discrete: transfers 2 × 0.5 = 1 ms, total 1.85 ms → 3 / 1.85 ≈ **1.6×**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Write `info()` that returns a one-line OpenCL status string for a start-up log: available, in use, device name (or "none") and whether the device shares host memory. Print it, then switch OpenCL off with `cv2.ocl.setUseOpenCL(False)` and print it again.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+def info():
+    have, use = cv2.ocl.haveOpenCL(), cv2.ocl.useOpenCL()
+    name, shared = "none", False
+    if use:
+        d = cv2.ocl.Device.getDefault()
+        name, shared = d.name() or "none", bool(d.hostUnifiedMemory())
+    return f"OpenCL available={have} in_use={use} device={name} shared_memory={shared}"
+
+print(info())
+cv2.ocl.setUseOpenCL(False)
+print(info())
+```
+
+Typical output on a PC with an Intel integrated GPU (yours will differ): first line `OpenCL available=True in_use=True device=<your GPU name> shared_memory=True`; after switching off, `in_use=False device=none`. On our test machine with default settings both lines show `in_use=False device=none`.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+After enabling UMat in production, a colleague reports that the defect count on the reference test set changed from 128 to 130. Is OpenCL broken? What do you do?
+
+<Solution>
+
+Not necessarily: OpenCL kernels can round intermediate float results differently, moving a few borderline pixels or objects across a threshold. Check that the two extra defects are borderline cases (values near the threshold), re-validate the thresholds on the reference set with OpenCL on, and keep the OpenCL setting fixed in production (log it). If differences are large or systematic, compare per stage to find the function and report or disable it.
+
+</Solution>
+
+## References
+
+1. OpenCV 4.13.0 documentation, core module: "OpenCL support" (`cv::ocl`), `cv::UMat`, and the transparent API. https://docs.opencv.org/4.13.0/
+2. Khronos Group, *The OpenCL Specification* (memory model, devices, command queues). https://www.khronos.org/opencl/
+3. OpenCV wiki, "OpenCL optimizations" and environment variables (`OPENCV_OPENCL_DEVICE`). https://github.com/opencv/opencv/wiki
+4. PoCL (Portable Computing Language) project. https://portablecl.org/

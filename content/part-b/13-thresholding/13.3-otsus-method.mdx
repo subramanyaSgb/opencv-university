@@ -1,0 +1,304 @@
+export const meta = {
+  number: "13.3",
+  title: "Otsu's method",
+  minutes: 25,
+  objectives: [
+    "Explain Otsu's criterion: maximise the between-class variance",
+    "Compute an Otsu threshold by hand on a tiny histogram and with NumPy",
+    "Use THRESH_OTSU in OpenCV and read the returned threshold",
+    "Predict when Otsu fails: very small classes, overlap, uneven light",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 13.3 (Module 13 plan).
+  Reuses ThreshLab (lib/thresh-ops.ts: otsu() is tested equal to cv2 THRESH_OTSU).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 13.3 Otsu's method
+
+<Definition term="Otsu's method">an automatic global threshold: try every T, split the pixels into two classes, and choose the T for which the two classes are most clearly separated, measured by the between-class variance. Published by Nobuyuki Otsu in 1979.</Definition>
+
+13.2 chose T by hand, from physics or by iteration. Otsu's method needs nothing but the histogram and has no parameters. It is the default automatic threshold in OpenCV (`THRESH_OTSU`) and in most image tools. It works very well when the histogram has two clear hills, and it fails in predictable ways when it does not.
+
+## 1. An analogy
+
+Splitting a class into two teams so that the teams are as different as possible: you try every possible cut by height and keep the one where the average heights of the two teams are furthest apart, weighted by how many pupils are in each team. A cut that puts one pupil alone in a team scores poorly even if that pupil is very different.
+
+## 2. The criterion
+
+<Flow
+  steps={[
+    { label: "Histogram of the image", tone: "data" },
+    { label: "For every T: class weights ω₀, ω₁ and means μ₀, μ₁", tone: "process" },
+    { label: "Between-class variance σ²_B(T) = ω₀ · ω₁ · (μ₀ − μ₁)²", tone: "process" },
+    { label: "T* = the T with the largest σ²_B", tone: "result" },
+  ]}
+/>
+
+- ω₀ = fraction of pixels ≤ T, ω₁ = 1 − ω₀; μ₀, μ₁ = mean grey value of each side.
+- (μ₀ − μ₁)² rewards classes whose means are far apart; ω₀ · ω₁ rewards balanced classes (it is largest at 50/50).
+- The total variance of the image is fixed, so maximising the **between**-class variance is the same as minimising the **within**-class variance: both classes as compact as possible.
+
+**Worked example.** Ten pixels: 10, 10, 10, 20, 20, 50, 60, 60, 60, 60.
+
+| T | ω₀ | μ₀ | μ₁ | σ²_B = ω₀ω₁(μ₀ − μ₁)² |
+| --- | --- | --- | --- | --- |
+| 10 | 0.3 | 10 | 47.1 | 0.3 · 0.7 · 37.1² = 289.7 |
+| 20 | 0.5 | 14 | 58 | 0.5 · 0.5 · 44² = **484** |
+| 50 | 0.6 | 20 | 60 | 0.6 · 0.4 · 40² = 384 |
+
+Otsu chooses **T = 20**: pixels ≤ 20 form one class (OpenCV's `cv2.threshold` returns 20.0 for this data).
+
+<ThreshLab methods={["manual", "otsu"]} initial="otsu" initialSource={1} caption="Otsu on the two plates and the label. On the well-lit plate it lands at the edge of the empty valley and is perfect; on the badly lit plate and the unevenly lit label it is the 'best' split of one big hill, which is not the split you want." />
+
+The separability ratio σ²_B / σ²_total (between 0 and 1) tells how bimodal the image is: 0.97 for the well-lit plate, 0.67 for the badly lit one, 0.65 for the label. A low value is a warning that the automatic T means little.
+
+## 3. Where Otsu goes wrong: small objects
+
+Otsu's ω₀ · ω₁ factor favours balanced classes. When the object is a small fraction of the image, the criterion can prefer to split the **background** into two halves. A simulation with dark objects (mean 70, std 10) on a background with mean 170 and std 20:
+
+| Object area | Otsu T | F1 with Otsu | Best possible F1 |
+| --- | --- | --- | --- |
+| 50 % | 120 | 0.998 | 1.000 |
+| 20 % | 120 | 0.986 | 0.999 |
+| 5 % | 124 | 0.902 | 0.996 |
+| 1 % | **167** | **0.043** | 0.990 |
+
+At 1 % the Otsu threshold jumps into the middle of the background hill. Remedies: compute Otsu on a region around the expected object; use the triangle method (13.4), which is designed for one dominant peak; or set T from physics.
+
+## 4. Industrial example
+
+A coin-sorting machine images coins on a dark tray with ring light. Coin and tray form two clear hills, but the tray darkens slowly with wear and the camera's auto-exposure varies. Otsu recomputes T on every image, so the segmentation follows these changes without retuning. The machine also logs the separability ratio; when it drops below 0.8 (dirty tray, failing light), the operator is warned before coins are missed.
+
+## What you should remember from 13.3
+
+<Takeaways>
+<Takeaway n={1} title="Criterion">Maximise ω₀ω₁(μ₀ − μ₁)² over all T.</Takeaway>
+<Takeaway n={2} title="OpenCV">cv2.threshold(img, 0, 255, THRESH_BINARY + THRESH_OTSU); the first return value is T.</Takeaway>
+<Takeaway n={3} title="Works">Two clear hills, objects not tiny, even lighting.</Takeaway>
+<Takeaway n={4} title="Fails">Tiny objects (splits the background), overlap, uneven light; check σ²_B / σ².</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** For T = 20 in the worked example, check ω₁, μ₁ and σ²_B.
+
+<Solution>
+
+Pixels > 20: 50, 60, 60, 60, 60 → ω₁ = **0.5**, μ₁ = 290 / 5 = **58**; σ²_B = 0.5 · 0.5 · (14 − 58)² = **484**.
+
+</Solution>
+
+**Q2.** Why does `cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)` pass 0 as the threshold?
+
+<Solution>
+
+The value is **ignored** when `THRESH_OTSU` is set; Otsu computes T and returns it as the first result.
+
+</Solution>
+
+### Next: 13.4 Triangle and entropy methods
+
+Two automatic thresholds built on different ideas: the shape of a dominant peak, and information content.
+
+## Code
+
+Two examples: Otsu from scratch vs OpenCV, then Otsu's behaviour with small objects and noise.
+
+### 1. Otsu from scratch
+
+```python
+import numpy as np
+import cv2
+
+def otsu(img):
+    p = np.bincount(img.ravel(), minlength=256) / img.size
+    w0 = np.cumsum(p)                                # ω₀(T)
+    m = np.cumsum(p * np.arange(256))                # ω₀(T) · μ₀(T)
+    mT = m[-1]                                       # mean of the whole image
+    with np.errstate(divide="ignore", invalid="ignore"):
+        sb = (mT * w0 - m) ** 2 / (w0 * (1 - w0))    # = ω₀ω₁(μ₀ − μ₁)², rewritten with cumulative sums
+    sb[~np.isfinite(sb)] = 0
+    return int(np.argmax(sb)), sb.max()
+
+for name in ["sample-plate-good.png", "sample-plate-poor.png", "sample-print-uneven.png"]:
+    img = cv2.imread(name, cv2.IMREAD_GRAYSCALE)
+    t_cv, _ = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    t, sb = otsu(img)
+    print(f"{name}: OpenCV T = {t_cv:.0f}, mine T = {t}, separability {sb / img.var():.2f}")
+```
+
+Output:
+
+```text
+sample-plate-good.png: OpenCV T = 64, mine T = 64, separability 0.97
+sample-plate-poor.png: OpenCV T = 129, mine T = 129, separability 0.67
+sample-print-uneven.png: OpenCV T = 137, mine T = 137, separability 0.65
+```
+
+- The cumulative-sum form computes σ²_B for all 256 thresholds in a few vector operations.
+- On the well-lit plate T = 64 is the crack's brightest value: Otsu finds the edge of the valley, not its middle. It is still correct (pixels ≤ 64 are crack), but the margin towards the crack is zero; a slightly brighter crack pixel next time would be missed.
+
+### 2. Small objects and noise
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(1)
+for frac in (0.5, 0.2, 0.05, 0.01):
+    n, k = 20000, int(20000 * frac)
+    x = np.concatenate([rng.normal(70, 10, k), rng.normal(170, 20, n - k)])        # objects first, then background
+    x = np.clip(np.rint(x), 0, 255).astype(np.uint8).reshape(100, 200)
+    truth = (np.arange(n) < k).reshape(100, 200)
+    t, _ = cv2.threshold(x, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    m = x <= t
+    print(f"objects {frac:4.0%}: Otsu T = {t:.0f}, F1 {2 * (m & truth).sum() / (m.sum() + truth.sum()):.3f}")
+
+noisy = np.clip(cv2.imread("sample-plate-good.png", cv2.IMREAD_GRAYSCALE) + rng.normal(0, 25, (200, 320)), 0, 255).astype(np.uint8)
+gt = cv2.imread("sample-plate-crack-mask.png", cv2.IMREAD_GRAYSCALE) > 0
+for name, im in [("noisy", noisy), ("blurred 5x5 first", cv2.GaussianBlur(noisy, (5, 5), 0))]:
+    t, _ = cv2.threshold(im, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    m = im <= t
+    print(f"{name}: T = {t:.0f}, F1 {2 * (m & gt).sum() / (m.sum() + gt.sum()):.3f}")
+```
+
+Output:
+
+```text
+objects  50%: Otsu T = 120, F1 0.998
+objects  20%: Otsu T = 120, F1 0.986
+objects   5%: Otsu T = 124, F1 0.902
+objects   1%: Otsu T = 167, F1 0.043
+noisy: T = 189, F1 0.105
+blurred 5x5 first: T = 137, F1 0.968
+```
+
+- With 1 % objects, Otsu splits the background (T = 167) and almost every "object" pixel is background.
+- With noise of σ = 25 the crack's hill (2 % of the pixels) merges into the plate's, and Otsu again splits the plate (T = 189). Smoothing first (as in the OpenCV tutorial) narrows both hills and brings T back into the gap.
+
+## OpenCV API notes
+
+**`T, dst = cv2.threshold(src, 0, maxval, cv2.THRESH_BINARY + cv2.THRESH_OTSU)`** (or `THRESH_BINARY_INV + THRESH_OTSU`): `src` must be 8-bit or 16-bit single-channel; the `thresh` argument is ignored; `T` is the computed threshold.
+
+**On a region**: compute T on `img[y0:y1, x0:x1]` (or with a mask: compute the histogram of the masked pixels and apply the criterion yourself), then threshold the whole image with that T.
+
+**scikit-image**: `skimage.filters.threshold_otsu` and `threshold_multiotsu` (several classes; 13.6).
+
+## Where it fails
+
+- **Small objects** (about 5 % of the image or less): T moves into the background.
+- **Overlapping classes**: Otsu still returns a T; check the separability ratio.
+- **Uneven lighting**: one T for the whole image (13.5).
+- **More than two classes**: it splits into two anyway; use multi-level Otsu (13.6).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Ignoring the returned T** (`_, mask = ...`): log it; it tells you when the image changes.
+- **Passing a colour image**: `THRESH_OTSU` needs one channel.
+- **Assuming Otsu is "optimal"** in every sense: it is optimal for its own criterion, not for your defect.
+- **Using Otsu for presence checks**: an empty image (no object) still gets a T that splits the background.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Equivalence of the criteria
+
+With total variance σ²_T = σ²_W(T) + σ²_B(T), where σ²_W = ω₀σ₀² + ω₁σ₁² is the within-class variance, maximising σ²_B is the same as minimising σ²_W. Otsu also showed that σ²_B(T) can be written with the cumulative sums ω(T) and μ(T) only: σ²_B = (μ_T ω − μ)² / (ω(1 − ω)), so one pass over the histogram is enough [2].
+
+### Relation to k-means
+
+Otsu's threshold is the optimal 2-cluster k-means on the grey values (the partition with the minimum within-cluster sum of squares), found exactly by trying all splits. Iterative intermeans (13.2) is Lloyd's algorithm for the same problem and can stop in a local optimum; Otsu cannot.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Otsu's method chooses the T that maximises…",
+      options: ["The number of object pixels", "The between-class variance ω₀ω₁(μ₀ − μ₁)²", "The image contrast", "The histogram valley depth"],
+      answer: 1,
+      explanation: "Equivalently, it minimises the within-class variance.",
+    },
+    {
+      question: "What does cv2.threshold return as its first value with THRESH_OTSU?",
+      options: ["Always 0", "The threshold Otsu computed", "The number of object pixels", "The separability"],
+      answer: 1,
+      explanation: "The thresh argument is ignored; the computed T is returned.",
+    },
+    {
+      question: "Objects cover 1 % of a noisy image. A likely problem with Otsu?",
+      options: ["None", "T falls inside the background hill and splits the background", "It returns 0", "It inverts the image"],
+      answer: 1,
+      explanation: "The ω₀ω₁ factor favours balanced splits.",
+    },
+    {
+      question: "Which preprocessing step often improves Otsu on noisy images?",
+      options: ["Sharpening", "Gaussian smoothing", "Equalization", "Inversion"],
+      answer: 1,
+      explanation: "Smoothing narrows the two hills so the valley becomes clearer.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Pixels: 0, 0, 0, 0, 100, 100. Compute σ²_B for T = 0 and T = 50 and say which Otsu prefers.
+
+<Solution>
+
+T = 0: ω₀ = 4/6, μ₀ = 0, μ₁ = 100 → σ²_B = (4/6)(2/6) · 100² = **2222**. T = 50: the same split (no values between 1 and 99), so the same **2222**. Every T from 0 to 99 gives the same split; OpenCV returns the first one, **T = 0**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Compute the Otsu threshold of `sample-print-uneven.png` separately on the left and the right half and threshold each half with its own T. Compare the F1 with the single global Otsu threshold.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-print-uneven.png", cv2.IMREAD_GRAYSCALE)
+gt = cv2.imread("sample-print-uneven-gt.png", cv2.IMREAD_GRAYSCALE) > 0
+f1 = lambda m: 2 * (m & gt).sum() / (m.sum() + gt.sum())
+
+tg, _ = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+halves = np.zeros_like(gt)
+for sl in (np.s_[:, :160], np.s_[:, 160:]):
+    t, _ = cv2.threshold(img[sl], 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    halves[sl] = img[sl] <= t
+    print(f"half T = {t:.0f}")
+print(f"global T = {tg:.0f}: F1 {f1(img <= tg):.3f} | two halves: F1 {f1(halves):.3f}")
+```
+
+Output:
+
+```text
+half T = 88
+half T = 120
+global T = 137: F1 0.414 | two halves: F1 0.954
+```
+
+Two regions are already far better than one (the left half gets a much lower T), but the light still changes inside each half. Taking this idea to the limit (one T per pixel, from its neighbourhood) is adaptive thresholding (13.5).
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 10.3 (optimum global thresholding using Otsu's method).
+2. N. Otsu, "A threshold selection method from gray-level histograms", *IEEE Transactions on Systems, Man, and Cybernetics* 9(1), 62–66, 1979.
+3. OpenCV 4.13.0 documentation: `threshold`, `THRESH_OTSU`; tutorial "Image Thresholding". https://docs.opencv.org/4.13.0/

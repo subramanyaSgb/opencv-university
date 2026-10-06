@@ -1,0 +1,11 @@
+{
+  "number": 21,
+  "title": "Image registration",
+  "summary": "Bringing two images of the same scene into the same coordinate frame: why alignment matters, phase correlation, ECC, and aligning cameras of different kinds such as thermal and visible.",
+  "chapters": [
+    { "number": "21.1", "slug": "21.1-why-align-images", "title": "Why align images" },
+    { "number": "21.2", "slug": "21.2-phase-correlation", "title": "Phase correlation" },
+    { "number": "21.3", "slug": "21.3-ecc", "title": "ECC" },
+    { "number": "21.4", "slug": "21.4-multi-camera-and-thermal-visible-fusion", "title": "Multi-camera and thermal-visible fusion" }
+  ]
+}

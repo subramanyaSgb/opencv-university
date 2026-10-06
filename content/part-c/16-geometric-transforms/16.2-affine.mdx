@@ -1,0 +1,278 @@
+export const meta = {
+  number: "16.2",
+  title: "Affine",
+  minutes: 20,
+  objectives: [
+    "Describe the general affine transform and its 6 degrees of freedom",
+    "Know what affine maps keep (parallel lines, ratios along a line) and what they change",
+    "Compute an affine matrix from three point pairs, or robustly from many",
+    "Choose between full affine and the 4-parameter similarity transform",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 16.2 (Module 16 plan).
+  Reuses WarpLab in mode="affine" (adds shear).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 16.2 Affine
+
+<Definition term="Affine transform">any map of the form x′ = a·x + b·y + tₓ, y′ = c·x + d·y + t_y: translation, rotation, scaling (also different in x and y) and shear, in any combination. Straight lines stay straight and parallel lines stay parallel.</Definition>
+
+16.1 used three special cases. The general 2 × 3 matrix has six free numbers, so it can also stretch an image more in one direction than another and slant it (shear). This is the model for a flat object seen by a camera far away (little perspective), for scanner skew, and for small misalignments between two cameras.
+
+## 1. An analogy
+
+A picture printed on a rubber sheet held in a frame. You can slide the frame, turn it, pull it longer in one direction, or push the top edge sideways while the bottom stays (shear). The grid lines on the sheet bend into a new grid, but each line stays straight and parallel lines stay parallel.
+
+## 2. Six numbers, three points
+
+<Flow
+  steps={[
+    { label: "Three points in the source, three matching points in the target", tone: "data" },
+    { label: "6 equations (x′ and y′ for each pair), 6 unknowns a, b, c, d, tₓ, t_y", tone: "process" },
+    { label: "cv2.getAffineTransform(src3, dst3) → M (2 × 3)", tone: "process" },
+    { label: "cv2.warpAffine(img, M, size)", tone: "result" },
+  ]}
+/>
+
+Real numbers: the corners (25, 50), (115, 50), (25, 140) of the disc's box sent to (40, 60), (120, 80), (20, 150) give
+
+<Equation terms={[{ value: "M" }, { op: "=", value: "[[0.8889, −0.2222, 28.8889], [0.2222, 1.0, 4.4444]]", result: true }]} />
+
+Three points fix the transform exactly; the fourth corner of the box is then determined (parallelograms stay parallelograms).
+
+| Keeps | Changes |
+| --- | --- |
+| straight lines | angles (except under rotation + uniform scale) |
+| parallel lines | lengths and areas (area scales by det of the 2 × 2 part everywhere) |
+| ratios of lengths along one line, midpoints | circles become ellipses |
+
+<WarpLab mode="affine" caption="Add shear to rotation, scale and translation. Watch the rectangle become a parallelogram while its sides stay parallel, and the circle become an ellipse." />
+
+## 3. From many points: robust estimation
+
+Real point matches (from features, Part F, or from a calibration target) are noisy and include wrong matches. With more than three pairs, OpenCV fits the best matrix:
+
+- **`cv2.estimateAffine2D(src, dst)`**: full affine (6 parameters), RANSAC by default, returns M and an inlier mask.
+- **`cv2.estimateAffinePartial2D(src, dst)`**: similarity transform (rotation, uniform scale, translation: 4 parameters). Use it when you know there is no shear or anisotropic scaling: fewer parameters, more robust.
+
+Test: 30 points, true transform a 12° rotation with scale 1.1 and shift, noise σ = 0.3 px, and 5 wrong matches. Plain least squares over all 30 points is pulled off by the outliers (scale terms 1.083 and 1.099 instead of 1.076); `estimateAffinePartial2D` recovers scale 1.100 and angle 11.98° with 25 inliers.
+
+## 4. Industrial example
+
+A PCB inspection compares each board with a golden image. The board sits on a conveyor with slightly varying position and angle, and the camera is far enough away that perspective is negligible. Three fiducial marks on the board are located with template matching (Part E); `getAffineTransform` from the three found marks to their CAD positions gives the matrix, and `warpAffine` brings the image into CAD coordinates. With more fiducials, `estimateAffine2D` also catches a mark that was found in the wrong place (it becomes an outlier).
+
+## What you should remember from 16.2
+
+<Takeaways>
+<Takeaway n={1} title="Model">6 parameters: rotation, scale (x and y), shear, translation.</Takeaway>
+<Takeaway n={2} title="Keeps">Straight lines, parallelism, ratios along a line.</Takeaway>
+<Takeaway n={3} title="Three points">getAffineTransform; many points: estimateAffine2D (RANSAC).</Takeaway>
+<Takeaway n={4} title="Fewer parameters">estimateAffinePartial2D when only rotation, uniform scale and shift occur.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Why does an affine transform need exactly three point pairs?
+
+<Solution>
+
+Each pair gives two equations; six unknowns need **three** pairs (not on one line).
+
+</Solution>
+
+**Q2.** A square becomes a rectangle twice as wide as tall. Is that affine? Similarity?
+
+<Solution>
+
+**Affine yes** (different scale in x and y); **similarity no** (it only allows uniform scale).
+
+</Solution>
+
+### Next: 16.3 Perspective
+
+When parallel lines are allowed to meet: homographies and rectification.
+
+## Code
+
+Two examples: an affine from three points, then robust estimation from noisy matches.
+
+### 1. Three point pairs
+
+```python
+import numpy as np
+import cv2
+
+src = np.float32([[25, 50], [115, 50], [25, 140]])               # three corners of the disc's box
+dst = np.float32([[40, 60], [120, 80], [20, 150]])
+A = cv2.getAffineTransform(src, dst)
+print("A =", np.round(A, 4).tolist())
+print("src mapped:", cv2.transform(src[None], A)[0].round(3).tolist())
+fourth = cv2.transform(np.float32([[[115, 140]]]), A)[0, 0]
+print("fourth corner (115, 140) ->", fourth.round(2).tolist(), "= dst1 + dst2 - dst0:", (dst[1] + dst[2] - dst[0]).tolist())
+print("area factor (det):", round(float(np.linalg.det(A[:, :2])), 4))
+```
+
+Output:
+
+```text
+A = [[0.8889, -0.2222, 28.8889], [0.2222, 1.0, 4.4444]]
+src mapped: [[40.0, 60.0], [120.0, 80.0], [20.0, 150.0]]
+fourth corner (115, 140) -> [100.0, 170.0] = dst1 + dst2 - dst0: [100.0, 170.0]
+area factor (det): 0.9383
+```
+
+- The fourth corner follows from the parallelogram rule: an affine map cannot move it independently.
+- det(A[:, :2]) is the area scale everywhere in the image.
+
+### 2. Robust fitting with outliers
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(0)
+P = rng.uniform(0, 300, (30, 2)).astype(np.float32)
+true = cv2.getRotationMatrix2D((150, 100), 12, 1.1)
+true[0, 2] += 5
+Q = cv2.transform(P[None], true)[0] + rng.normal(0, 0.3, (30, 2)).astype(np.float32)
+Q[:5] += rng.uniform(20, 60, (5, 2)).astype(np.float32)          # five wrong matches
+
+X = np.hstack([P, np.ones((30, 1))])
+ls, *_ = np.linalg.lstsq(X, Q, rcond=None)                        # plain least squares, all points
+print("least squares:", np.round(ls.T, 3).tolist())
+Mp, inl = cv2.estimateAffinePartial2D(P, Q)                       # similarity, RANSAC
+scale = np.hypot(Mp[0, 0], Mp[1, 0])
+angle = np.degrees(np.arctan2(-Mp[1, 0], Mp[0, 0]))
+print("partial (similarity):", np.round(Mp, 3).tolist(), f"| scale {scale:.3f}, angle {angle:.2f}, inliers {int(inl.sum())}")
+print("true:", np.round(true, 3).tolist())
+```
+
+Output:
+
+```text
+least squares: [[1.083, 0.26, -27.672], [-0.232, 1.099, 29.948]]
+partial (similarity): [[1.076, 0.228, -29.253], [-0.228, 1.076, 26.674]] | scale 1.100, angle 11.98, inliers 25
+true: [[1.076, 0.229, -29.265], [-0.229, 1.076, 26.709]]
+```
+
+- Five bad matches pull least squares off by several pixels; RANSAC ignores them and finds all 25 good points.
+- For a similarity matrix, scale = √(a² + c²) and angle = atan2(−c, a) (OpenCV's sign convention).
+
+## OpenCV API notes
+
+**`cv2.getAffineTransform(src, dst)`**: exactly 3 float32 points each.
+
+**`cv2.estimateAffine2D(from, to, method=RANSAC, ransacReprojThreshold=3, maxIters, confidence, refineIters)`** → (M, inliers); `method=cv2.LMEDS` also available. **`cv2.estimateAffinePartial2D`**: same, 4-parameter similarity.
+
+**Apply**: `cv2.warpAffine(img, M, (w, h))`; points `cv2.transform(pts[None], M)`.
+
+## Where it fails
+
+- **Perspective**: a tilted plane close to the camera changes parallel lines into converging ones; affine leaves residual errors at the edges (16.3).
+- **Collinear points**: three points on one line do not determine the transform.
+- **Non-rigid deformation** (bent sheets, lens distortion): needs remap (16.5) or calibration (Part H).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Points as float64 or int arrays** for `getAffineTransform` (it wants float32, shape (3, 2)).
+- **Swapping src and dst** (the matrix then goes the other way).
+- **Fitting a full affine** when a similarity would do (more noise-sensitive).
+- **Ignoring the inlier mask** returned by the robust estimators.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Decomposing an affine matrix
+
+The 2 × 2 part A of any affine map can be written as A = R(θ) · S · H, with R a rotation, S a diagonal scale and H a shear, or via the singular value decomposition A = U Σ Vᵀ (5.7): rotate, scale along two perpendicular axes, rotate again. The singular values are the two scale factors; their ratio is the anisotropy [1].
+
+### RANSAC
+
+Fischler and Bolles (1981) introduced RANdom SAmple Consensus: repeatedly fit the model to a minimal random sample (3 pairs for affine, 2 for similarity), count the points that agree within a threshold, keep the best, and refit on its inliers [2]. It tolerates a large fraction of outliers when the minimal sample is small (Part D, 26.3).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "How many degrees of freedom does a 2D affine transform have?",
+      options: ["3", "4", "6", "8"],
+      answer: 2,
+      explanation: "a, b, c, d, tₓ, t_y.",
+    },
+    {
+      question: "What does an affine transform always keep?",
+      options: ["Angles", "Lengths", "Parallel lines", "Circles"],
+      answer: 2,
+      explanation: "Parallel lines stay parallel; angles and lengths can change.",
+    },
+    {
+      question: "You have 40 noisy matches with some wrong ones. Which call?",
+      options: ["getAffineTransform", "estimateAffine2D (RANSAC)", "warpAffine", "resize"],
+      answer: 1,
+      explanation: "It fits robustly and returns the inliers.",
+    },
+    {
+      question: "estimateAffinePartial2D estimates…",
+      options: ["A perspective transform", "Rotation, uniform scale and translation", "Only translation", "Shear only"],
+      answer: 1,
+      explanation: "A 4-parameter similarity transform.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+M = [[1, 0.5, 0], [0, 1, 0]]. Where do (0, 0), (10, 0), (0, 10) and (10, 10) go? Name the transform.
+
+<Solution>
+
+(0, 0), (10, 0), (5, 10), (15, 10): a **horizontal shear**; the square becomes a parallelogram leaning right.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the same 30 points, compare the residuals (mean distance between transformed P and Q over the 25 true matches) of plain least squares, `estimateAffine2D` and `estimateAffinePartial2D`.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+good = np.arange(5, 30)
+def residual(M):
+    return float(np.linalg.norm(cv2.transform(P[None], M)[0][good] - Q[good], axis=1).mean())
+
+Ma, _ = cv2.estimateAffine2D(P, Q)
+print(f"least squares {residual(ls.T.astype(np.float64)):.2f} px | affine RANSAC {residual(Ma):.2f} px | similarity RANSAC {residual(Mp):.2f} px")
+```
+
+Output:
+
+```text
+least squares 8.97 px | affine RANSAC 0.38 px | similarity RANSAC 0.37 px
+```
+
+Both robust fits reach the noise level (σ = 0.3 px per coordinate gives a mean distance of about 0.4 px); least squares is more than twenty times worse because of the five outliers.
+
+</Solution>
+
+## References
+
+1. R. Hartley, A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004: Section 2.4 (affine transformations).
+2. M. A. Fischler, R. C. Bolles, "Random sample consensus: a paradigm for model fitting with applications to image analysis and automated cartography", *Communications of the ACM* 24(6), 381–395, 1981.
+3. OpenCV 4.13.0 documentation: `getAffineTransform`, `estimateAffine2D`, `estimateAffinePartial2D`, `warpAffine`. https://docs.opencv.org/4.13.0/

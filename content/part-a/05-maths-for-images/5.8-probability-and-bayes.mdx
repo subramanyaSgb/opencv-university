@@ -1,0 +1,413 @@
+export const meta = {
+  number: "5.8",
+  title: "Probability and Bayes",
+  minutes: 35,
+  objectives: [
+    "Use conditional probability and Bayes' rule to judge what an alarm means",
+    "Read a confusion matrix: detection rate, false-alarm rate, precision, recall",
+    "Explain why rare defects make most alarms false, and what to do about it",
+    "Choose a classification threshold using priors (and costs)",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 5.8 (Module 5 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 5.8 Probability and Bayes
+
+<Definition term="Bayes' rule">how to update a belief with evidence: the probability that a part is defective **given** an alarm depends on how good the detector is **and** on how common defects are in the first place.</Definition>
+
+Every inspection system makes decisions under uncertainty: noise (5.4) overlaps good and bad parts. Probability gives the language to say how often it will be wrong, and Bayes' rule shows a trap that surprises almost everyone the first time.
+
+## 1. An analogy
+
+A smoke alarm in a kitchen. It beeps almost every time there is a fire, but also sometimes when you make toast. Fires are rare and toast is daily, so when it beeps, it is **almost always toast**, even though the alarm is "99 % reliable". Whether an alarm is believable depends on how rare the real event is.
+
+## 2. Conditional probability
+
+**P(A | B)** is "the probability of A, given that B is true". The two directions are different:
+
+<VsTable
+  left="P(alarm | defect)"
+  right="P(defect | alarm)"
+  rows={[
+    ["How often the system finds a defect that is there", "How often an alarm is a real defect"],
+    ["Detection rate, sensitivity, recall", "Precision, positive predictive value"],
+    ["Measured on known defective parts", "What the operator at the reject bin cares about"],
+  ]}
+/>
+
+Confusing these two is the most common error in judging detectors.
+
+## 3. Bayes' rule
+
+<Equation terms={[{ value: "P(defect | alarm)" }, { op: "=", value: "P(alarm | defect) · P(defect) / P(alarm)", result: true }]} />
+
+with P(alarm) = P(alarm | defect) P(defect) + P(alarm | good) P(good). **P(defect)** is the **prior**: the defect rate before looking.
+
+## 4. The rare-defect trap
+
+A detector finds 99 % of defects, with 2 % false alarms on good parts. Defects occur in 0.1 % of parts *(Code example 1)*:
+
+<Flow
+  steps={[
+    { label: "100 000 parts", tone: "world" },
+    { label: "100 defective → 99 alarms, 1 missed", tone: "data" },
+    { label: "99 900 good → 1 998 false alarms", tone: "data" },
+    { label: "2 097 alarms, only 99 real: P(defect | alarm) = 4.7 %", tone: "result" },
+  ]}
+/>
+
+A "99 % accurate" detector, and **95 % of its alarms are false**. The many good parts produce more false alarms than the few defects produce true ones. Counting with **natural frequencies** (numbers of parts, as above) makes this obvious; percentages hide it.
+
+## 5. The confusion matrix
+
+| | Alarm | No alarm |
+| --- | --- | --- |
+| **Defective** | true positive (TP): caught | false negative (FN): missed, **escape** |
+| **Good** | false positive (FP): false alarm, **scrap/re-check** | true negative (TN): passed |
+
+- **Recall** (detection rate) = TP / (TP + FN); **false-alarm rate** = FP / (FP + TN).
+- **Precision** = TP / (TP + FP) = P(defect | alarm).
+- **Accuracy** = (TP + TN) / all: nearly useless for rare defects (a system that never alarms is 99.9 % "accurate" here).
+
+## 6. Try it
+
+<BayesLab caption="Set the defect rate, the detection rate and the false-alarm rate. The bar shows how many alarms on a shift are real." />
+
+Things to try: false alarms 2 % → 0.2 % (precision jumps); defect rate 0.01 % (almost every alarm is false); a second independent check on alarmed parts.
+
+## 7. Choosing a threshold
+
+Good and defective patches have overlapping grey-value distributions (5.4). Wherever you put the threshold, some errors remain. With 1 % defects, good patches N(150, 8) and defect patches N(120, 10) *(Code example 2)*:
+
+| Threshold | Caught | Missed | False alarms | Precision | Recall |
+| --- | --- | --- | --- | --- | --- |
+| Midpoint 135 | 931 | 69 | 3 103 | 0.23 | 0.93 |
+| Bayes 124.9 | 694 | 306 | 72 | 0.91 | 0.69 |
+
+The **Bayes threshold** is where P(defect) · p(x | defect) = P(good) · p(x | good): it minimises the **total** number of errors (378 vs 3 172). Because defects are rare, it moves towards the defect side.
+
+But errors do not cost the same: a missed crack in a safety part may cost far more than re-checking a good part. Then weight each error by its cost; the threshold moves back to catch more defects. The best threshold is a business decision expressed in probabilities.
+
+## 8. Combining evidence
+
+Two **independent** checks multiply the evidence. In odds form, each alarm multiplies the odds by the **likelihood ratio** P(alarm | defect) / P(alarm | good) = 0.99 / 0.02 = 49.5 *(Code example 3)*:
+
+| Evidence | P(defect) |
+| --- | --- |
+| Prior | 0.1 % |
+| Camera A alarms | 4.7 % |
+| Camera A and B alarm | 71.0 % |
+
+This is why industrial systems often use a fast first check with many false alarms, followed by a slower second check (another camera angle, a different method, or a human) only on alarmed parts. Warning: two cameras looking at the same scratch with the same lighting are **not** independent.
+
+## 9. Industrial example
+
+A steel-billet line with 0.2 % surface defects:
+
+<Flow
+  steps={[
+    { label: "Stage 1: fast detector, recall 99 %, false alarms 3 %", tone: "process" },
+    { label: "≈ 3.2 % of billets flagged; most are good", tone: "data" },
+    { label: "Stage 2: second camera / slower model on flagged billets only", tone: "process" },
+    { label: "Operator sees few, mostly real alarms; escapes stay low", tone: "result" },
+  ]}
+/>
+
+Measure the system with recall and precision on realistic defect rates, not with accuracy on a balanced test set.
+
+## What you should remember from 5.8
+
+<Takeaways>
+<Takeaway n={1} title="Direction">P(alarm | defect) ≠ P(defect | alarm).</Takeaway>
+<Takeaway n={2} title="Bayes">P(D | A) = P(A | D) P(D) / P(A); the prior P(D) matters.</Takeaway>
+<Takeaway n={3} title="Rare defects">Most alarms are false unless the false-alarm rate is far below the defect rate.</Takeaway>
+<Takeaway n={4} title="Metrics">Use recall and precision (and costs), not accuracy.</Takeaway>
+<Takeaway n={5} title="Combine">Independent checks multiply odds by their likelihood ratios.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** 1000 parts, 10 defective. The detector catches 9 of them and raises 50 false alarms. Precision and recall?
+
+<Solution>
+
+Recall = 9 / 10 = **90 %**; precision = 9 / (9 + 50) ≈ **15 %**.
+
+</Solution>
+
+**Q2.** A system never raises an alarm. Defect rate 0.5 %. Its accuracy?
+
+<Solution>
+
+**99.5 %**, while catching nothing (recall 0). Accuracy is misleading for rare events.
+
+</Solution>
+
+**Q3.** Defect rate 1 %, detection 95 %, false alarms 1 %. P(defect | alarm)?
+
+<Solution>
+
+0.95 · 0.01 / (0.95 · 0.01 + 0.01 · 0.99) = 0.0095 / 0.0194 ≈ **49 %**.
+
+</Solution>
+
+### Next: 6.1 Arrays, shape, dtype
+
+Module 6 turns to the tools: NumPy arrays, the data structure behind every image in Python.
+
+## Code
+
+Four examples: Bayes' rule with natural frequencies, the Bayes threshold for two classes, combining two checks, and what OpenCV's automatic (Otsu) threshold does with rare defects. No images needed.
+
+### 1. From scratch: what does an alarm mean?
+
+```python
+p_d = 0.001                 # prior: 1 part in 1000 has the defect
+sens = 0.99                 # P(alarm | defect): the detector finds 99 % of defects
+fa = 0.02                   # P(alarm | good): 2 % false alarms
+p_alarm = sens * p_d + fa * (1 - p_d)               # total probability of an alarm
+post = sens * p_d / p_alarm                         # Bayes: P(defect | alarm)
+print(f"P(alarm) = {p_alarm:.5f}, P(defect | alarm) = {post:.3f}")
+n = 100_000
+d = n * p_d
+print(f"of {n:,} parts: {d:.0f} defective -> {d * sens:.0f} caught, {d * (1 - sens):.0f} missed; "
+      f"{n - d:,.0f} good -> {(n - d) * fa:,.0f} false alarms")
+print(f"so only {d * sens:.0f} of {d * sens + (n - d) * fa:,.0f} alarms are real defects")
+```
+
+Output:
+
+```text
+P(alarm) = 0.02097, P(defect | alarm) = 0.047
+of 100,000 parts: 100 defective -> 99 caught, 1 missed; 99,900 good -> 1,998 false alarms
+so only 99 of 2,097 alarms are real defects
+```
+
+- The denominator P(alarm) is the "law of total probability": alarms from defects plus alarms from good parts.
+- The second half recomputes the same result as counts (natural frequencies), which is easier to explain to colleagues.
+
+### 2. From scratch: midpoint vs Bayes threshold
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=14)
+n_good, n_bad = 99_000, 1_000                        # prior 1 % defects
+good = rng.normal(150, 8, n_good)                    # grey value of good surface patches
+bad = rng.normal(120, 10, n_bad)                     # defect patches are darker
+def gauss(x, m, s):
+    return np.exp(-0.5 * ((x - m) / s) ** 2) / (s * np.sqrt(2 * np.pi))
+xs = np.arange(100, 160, 0.01)
+bayes_t = xs[np.argmin(np.abs(gauss(xs, 120, 10) * 0.01 - gauss(xs, 150, 8) * 0.99))]   # where the two posteriors are equal
+for name, t in [("midpoint 135", 135.0), (f"Bayes {bayes_t:.1f}", bayes_t)]:
+    tp, fp = np.sum(bad < t), np.sum(good < t)
+    fn = n_bad - tp
+    print(f"threshold {name:12s}: caught {tp:4d}, missed {fn:3d}, false alarms {fp:5d}, "
+          f"precision {tp / (tp + fp):.2f}, recall {tp / n_bad:.2f}, total errors {fp + fn}")
+```
+
+Output:
+
+```text
+threshold midpoint 135: caught  931, missed  69, false alarms  3103, precision 0.23, recall 0.93, total errors 3172
+threshold Bayes 124.9 : caught  694, missed 306, false alarms    72, precision 0.91, recall 0.69, total errors 378
+```
+
+- `gauss` is the Gaussian density from 5.4; prior × density is proportional to the posterior of each class.
+- The Bayes threshold is found numerically: the x where the two weighted densities cross.
+- To weight costs, multiply each side by its error cost (e.g. a miss costs 20 × a false alarm) and find the new crossing (Exercise 2).
+
+### 3. From scratch: two independent alarms
+
+```python
+prior_odds = 0.001 / 0.999
+lr = 0.99 / 0.02                                     # likelihood ratio of one alarm: P(alarm|defect) / P(alarm|good)
+for k, name in [(1, "camera A alarms"), (2, "camera A and B alarm (independent)")]:
+    odds = prior_odds * lr ** k
+    print(f"{name:36s}: P(defect) = {odds / (1 + odds):.3f}")
+```
+
+Output:
+
+```text
+camera A alarms                     : P(defect) = 0.047
+camera A and B alarm (independent)  : P(defect) = 0.710
+```
+
+- **Odds** = P / (1 − P). Bayes' rule in odds form: posterior odds = prior odds × likelihood ratio.
+- Independence is an assumption; correlated checks give much less than this.
+
+### 4. OpenCV: an automatic threshold ignores the prior
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(seed=14)
+good = rng.normal(150, 8, 99_000)
+bad = rng.normal(120, 10, 1_000)
+values = np.clip(np.concatenate([good, bad]), 0, 255).astype(np.uint8).reshape(1, -1)   # all patches as one "image" row
+t, _ = cv2.threshold(values, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+tp, fp = np.sum(bad < t), np.sum(good < t)
+print(f"Otsu threshold {t:.0f}: caught {tp}, missed {1000 - tp}, false alarms {fp}")
+balanced = np.clip(np.concatenate([good[:1000], bad]), 0, 255).astype(np.uint8).reshape(1, -1)   # 50 % defects
+t2, _ = cv2.threshold(balanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+print(f"Otsu on a balanced sample: threshold {t2:.0f}")
+```
+
+Output:
+
+```text
+Otsu threshold 148: caught 1000, missed 0, false alarms 39731
+Otsu on a balanced sample: threshold 133
+```
+
+- `cv2.threshold(src, 0, 255, THRESH_BINARY + THRESH_OTSU)` ignores the given threshold and returns the one chosen by Otsu's method (Part C) as the first value.
+- Otsu assumes two classes of comparable size. With 1 % defects it splits the **good** class in half: 40 % of good patches become "defects". With balanced data it lands near the midpoint (133).
+- Automatic thresholds are useful when both classes are large (dark parts on a bright belt), not for finding rare defects.
+
+## OpenCV API notes
+
+Probability is mostly NumPy and plain Python, but OpenCV has probabilistic tools used later in the course:
+
+- **`cv2.ml.NormalBayesClassifier`**: a Bayes classifier with Gaussian class models (Part H).
+- **`cv2.calcBackProject`**: turns a colour histogram into a per-pixel likelihood map (Part B, colour detection).
+- **`cv2.createBackgroundSubtractorMOG2`**: models each pixel as a mixture of Gaussians and classifies foreground vs background (Part G).
+- **`cv2.threshold(…, cv2.THRESH_OTSU)`**: picks a threshold that best separates two classes in a histogram (Part C); unlike the Bayes threshold it ignores priors and costs.
+
+## Where it fails
+
+- **Unknown or changing priors**: the defect rate changes with material batches, tool wear and season; precision changes with it.
+- **Non-independent evidence**: two checks on the same feature, or a model and its retrained copy, are correlated.
+- **Wrong class models**: real distributions are rarely perfect Gaussians; estimate them from data (histograms, Part B).
+- **Test sets with 50 % defects** give far too optimistic precision; evaluate at the real defect rate.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Reading "99 % detection" as "99 % of alarms are real"**.
+- **Reporting accuracy** for a rare-defect detector.
+- **Tuning thresholds on a balanced test set** and deploying on a line with 0.1 % defects.
+- **Treating two views of the same defect as independent evidence**.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Bayes decision theory
+
+Choosing the class with the highest posterior minimises the probability of error; weighting by costs minimises the expected cost (the "Bayes risk"). Every classifier, from a single threshold to a neural network, can be judged against this ideal [1].
+
+### ROC and precision–recall curves
+
+Sweeping the threshold traces a **ROC curve** (detection rate vs false-alarm rate) or a **precision–recall curve**. ROC curves do not depend on the defect rate; precision–recall curves do and are more honest for rare defects [2].
+
+### Likelihoods from images
+
+Histograms of good and defective examples (Part B) are empirical p(x | class). Combining them with priors gives pixel-wise posteriors: the basis of colour-based segmentation, background subtraction and naive Bayes classifiers.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A detector catches 99 % of defects. This is…",
+      options: ["P(defect | alarm)", "P(alarm | defect)", "The accuracy", "The precision"],
+      answer: 1,
+      explanation: "Detection rate (recall, sensitivity) = P(alarm | defect).",
+    },
+    {
+      question: "Why are most alarms false when defects are rare?",
+      options: ["The detector is broken", "Many good parts × a small false-alarm rate outnumber the few defects", "Bayes' rule is approximate", "Noise is Gaussian"],
+      answer: 1,
+      explanation: "The prior is small; false alarms come from the huge number of good parts.",
+    },
+    {
+      question: "Which metric is least useful for a 0.1 % defect rate?",
+      options: ["Recall", "Precision", "Accuracy", "False-alarm rate"],
+      answer: 2,
+      explanation: "A detector that never alarms has 99.9 % accuracy.",
+    },
+    {
+      question: "The Bayes threshold minimises…",
+      options: ["Misses only", "False alarms only", "The total number (or cost) of errors", "The computing time"],
+      answer: 2,
+      explanation: "It picks the class with the higher posterior (or lower expected cost).",
+    },
+    {
+      question: "Two independent checks, each with likelihood ratio 50. Prior odds 1 : 999. Posterior odds?",
+      options: ["50 : 999", "2500 : 999", "100 : 999", "1 : 999"],
+      answer: 1,
+      explanation: "Multiply by 50 twice: 2500 : 999, about 71 %.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+0.5 % of welds are bad. An inspection finds 90 % of bad welds and wrongly flags 5 % of good ones. Of 10 000 welds, how many alarms, how many real, and what is P(bad | alarm)?
+
+<Solution>
+
+Bad: 50 → 45 alarms. Good: 9950 → 497.5 ≈ 498 false alarms. Alarms ≈ **543**, real **45**: P(bad | alarm) = 45 / 542.5 ≈ **8.3 %**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+In Code example 2, a missed defect costs 20 times as much as a false alarm. Find the cost-weighted threshold (where 20 · P(defect) · p(x | defect) = P(good) · p(x | good)) and print caught, missed and false alarms.
+
+<Solution>
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=14)
+good = rng.normal(150, 8, 99_000)
+bad = rng.normal(120, 10, 1_000)
+def gauss(x, m, s):
+    return np.exp(-0.5 * ((x - m) / s) ** 2) / (s * np.sqrt(2 * np.pi))
+xs = np.arange(100, 160, 0.01)
+t = xs[np.argmin(np.abs(20 * gauss(xs, 120, 10) * 0.01 - gauss(xs, 150, 8) * 0.99))]
+tp, fp = np.sum(bad < t), np.sum(good < t)
+print(f"cost-weighted threshold {t:.1f}: caught {tp}, missed {1000 - tp}, false alarms {fp}, cost {20 * (1000 - tp) + fp}")
+```
+
+Output:
+
+```text
+cost-weighted threshold 132.0: caught 893, missed 107, false alarms 1212, cost 3352
+```
+
+With expensive misses the threshold moves up from 124.9 to 132.0: more false alarms, far fewer escapes. (With the plain Bayes threshold the cost would be 20 · 306 + 72 = 6192.)
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A supplier shows a defect detector with "98 % accuracy" measured on 500 good and 500 defective images. Your line has 0.2 % defects. What do you ask for before buying?
+
+<Solution>
+
+Ask for the detection rate (recall) and the false-alarm rate separately, and compute the precision at **your** defect rate: with, say, 98 % recall and 2 % false alarms, P(defect | alarm) = 0.98·0.002 / (0.98·0.002 + 0.02·0.998) ≈ **9 %**. Ask for a test on your own parts at a realistic defect rate, and for how the threshold can be tuned (costs of misses vs false alarms).
+
+</Solution>
+
+## References
+
+1. R. O. Duda, P. E. Hart and D. G. Stork, *Pattern Classification*, 2nd ed., Wiley, 2001, Chapter 2 (Bayesian decision theory).
+2. T. Fawcett, "An introduction to ROC analysis," *Pattern Recognition Letters*, vol. 27, no. 8, pp. 861–874, 2006.
+3. G. Gigerenzer and U. Hoffrage, "How to improve Bayesian reasoning without instruction: frequency formats," *Psychological Review*, vol. 102, no. 4, pp. 684–704, 1995.
+4. C. M. Bishop, *Pattern Recognition and Machine Learning*, Springer, 2006, Chapter 1 (Probability theory, decision theory).
+5. OpenCV 4.13.0 documentation, *Miscellaneous image transformations* (`threshold`, `THRESH_OTSU`): [docs.opencv.org/4.13.0/d7/d1b/group__imgproc__misc.html](https://docs.opencv.org/4.13.0/d7/d1b/group__imgproc__misc.html).

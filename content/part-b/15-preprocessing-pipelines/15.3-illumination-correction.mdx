@@ -1,0 +1,297 @@
+export const meta = {
+  number: "15.3",
+  title: "Illumination correction",
+  minutes: 25,
+  objectives: [
+    "Model uneven lighting as a slowly varying gain (and offset)",
+    "Correct it with a white reference (flat-field) image",
+    "Estimate the background from the image itself: blur, closing, surface fit",
+    "Choose division or subtraction, and know the side effects",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 15.3 (Module 15 plan).
+  New lab: IllumLab (lib/illum-ops.ts). New sample: sample-print-white.png (flat-field reference).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 15.3 Illumination correction
+
+<Definition term="Illumination correction (shading correction)">removing the slow brightness variation that comes from the lighting and the optics, not from the object, so that equal surfaces get equal grey values everywhere in the image. Also called flat-field correction when a reference image of a uniform target is used.</Definition>
+
+Every lens is darker at the corners (vignetting), every light is brighter near its centre, and every part reflects light differently at its edges. The camera records object × light. To measure the object, divide the light out. This chapter shows how to get the light: from a reference image when you can take one, or from the image itself when you cannot.
+
+## 1. An analogy
+
+Reading a page under a desk lamp: the far corner is dim. You do not think the paper there is grey; your visual system discounts the light (9.3). Illumination correction gives the computer the same ability by estimating the light and removing it.
+
+## 2. The model and the reference
+
+<Flow
+  steps={[
+    { label: "Image = reflectance × light (+ dark offset)", tone: "data" },
+    { label: "Estimate the light L(x, y): white reference, or background of the image", tone: "process" },
+    { label: "Divide: corrected = image / L × mean(L)", tone: "process" },
+    { label: "Equal surfaces → equal grey values", tone: "result" },
+  ]}
+/>
+
+<Equation terms={[{ value: "corrected(x, y)" }, { op: "=", value: "(raw − dark) / (white − dark) · mean(white − dark)", result: true }]} />
+
+- **white**: an image of a uniform white target under the same light, same lens, same exposure.
+- **dark**: an image with the lens capped (the sensor's offset, 2.x); often negligible for 8-bit images.
+- Division is right because light acts as a **gain**: a surface twice as bright under the same light reflects twice as much.
+
+On `sample-print-uneven.png`, the paper varies from 78 to 223: a non-uniformity (std / mean of paper pixels) of **22 %**. Divided by the matching white reference (`sample-print-white.png`, smoothed with σ = 2 to suppress its own noise), it drops to **2.9 %**, close to the sensor noise alone, and Otsu reaches F1 0.992.
+
+## 3. When there is no reference: estimate the background
+
+| Method | Idea | On the label (paper non-uniformity, Otsu F1) |
+| --- | --- | --- |
+| None | | 22.2 %, 0.414 |
+| Large Gaussian blur, σ = 15 | the light varies slowly; blur away the details | 5.3 %, 0.992 |
+| Closing 15 × 15 + blur | remove dark details (text) first, then smooth | **3.2 %**, 0.992 |
+| Degree-2 polynomial surface | fit a smooth surface to the brighter pixels | 11.0 %, 0.986 |
+| White reference (σ = 2) | measured light | **2.9 %**, 0.992 |
+
+- **Blur** works when objects are small and sparse; dark objects pull the estimate down around them, so the paper next to text ends up slightly bright after division.
+- **Closing** (a maximum filter, then a minimum filter; Module 16) first removes dark features smaller than the window, so only the paper is left to estimate the light. For bright objects on a dark background use **opening** instead. The window must be larger than the objects (here the strokes and letters).
+- **Polynomial surfaces** are smooth by construction, but only follow lighting shapes a low-degree polynomial can represent; the lamp here falls off like a Gaussian, so the fit leaves 11 %.
+
+<IllumLab caption="Try each background estimate and watch the orange curve: a good estimate follows the paper level and ignores the letters. The blue corrected profile should be flat between the dips. Switch to subtraction to see why division fits a gain." />
+
+## 4. Divide or subtract?
+
+| Effect | Behaves like | Correct with |
+| --- | --- | --- |
+| Uneven light, vignetting, sensor gain differences | gain (multiplies) | **division** |
+| Stray light, glare veil, dark current, fixed offset | offset (adds) | **subtraction** |
+
+On the label, subtraction of the closing estimate gives F1 0.976 instead of 0.992: in the dark corner the text's contrast is also smaller (gain), and subtraction cannot restore it. When both effects exist, subtract the offset first (dark frame), then divide by the gain (white minus dark), as in the equation above.
+
+## 5. Industrial example
+
+A line-scan system inspects steel strip 1.5 m wide with an LED bar. Every morning, the strip carrier runs a white calibration tile under the camera; 200 lines are averaged into a white reference and a capped-lens dark reference is taken. All images of the shift are corrected with (raw − dark) / (white − dark). Averaging 200 lines makes the reference's own noise negligible, and the daily update follows the LEDs' ageing. Without the correction, the darker strip edges produced false "dark spot" alarms.
+
+## What you should remember from 15.3
+
+<Takeaways>
+<Takeaway n={1} title="Model">Image = reflectance × light; divide the light out.</Takeaway>
+<Takeaway n={2} title="Best">A white reference (and dark frame) under the same conditions; average it to reduce its noise.</Takeaway>
+<Takeaway n={3} title="Without reference">Blur, closing/opening (larger than the objects), or a smooth surface fit.</Takeaway>
+<Takeaway n={4} title="Divide vs subtract">Gains are divided, offsets are subtracted; dark first, then divide.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Paper reads 200 in the centre and 100 in a corner; the white reference reads 210 and 105 there, with mean 160. What are the corrected paper values?
+
+<Solution>
+
+Centre: 200 / 210 · 160 = **152.4**; corner: 100 / 105 · 160 = **152.4**. Equal, as they should be.
+
+</Solution>
+
+**Q2.** Bright particles lie on a dark belt with uneven light. Closing or opening to estimate the background?
+
+<Solution>
+
+**Opening** (minimum filter, then maximum): it removes **bright** features smaller than the window and keeps the dark belt level. Closing would remove dark features.
+
+</Solution>
+
+### Next: 15.4 Preprocessing for OCR
+
+What text recognition needs: binarisation, size, deskew, and margins.
+
+## Code
+
+Two examples: flat-field correction with a white reference, then background estimation from the image.
+
+### 1. Flat-field correction
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-print-uneven.png", cv2.IMREAD_GRAYSCALE)
+white = cv2.imread("sample-print-white.png", cv2.IMREAD_GRAYSCALE)
+text = cv2.imread("sample-print-uneven-gt.png", cv2.IMREAD_GRAYSCALE) > 0
+paper = ~cv2.dilate(text.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)   # at least 2 px from any letter
+
+def report(name, out):
+    p = out[paper].astype(np.float64)
+    m = out <= cv2.threshold(out, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[0]
+    print(f"{name:26s} paper non-uniformity {p.std() / p.mean():5.1%} | Otsu F1 {2 * (m & text).sum() / (m.sum() + text.sum()):.3f}")
+
+def divide(raw, light):
+    light = light.astype(np.float32)
+    return np.clip(raw / np.maximum(light, 1) * light.mean(), 0, 255).astype(np.uint8)
+
+report("raw", img)
+report("white reference", divide(img, white))
+report("white reference, sigma 2", divide(img, cv2.GaussianBlur(white, (0, 0), 2)))
+```
+
+Output:
+
+```text
+raw                        paper non-uniformity 22.2% | Otsu F1 0.414
+white reference            paper non-uniformity  4.0% | Otsu F1 0.991
+white reference, sigma 2   paper non-uniformity  2.9% | Otsu F1 0.992
+```
+
+- The raw white reference carries its own noise into every corrected image (4.0 %); smoothing it (or averaging several reference frames) removes most of that.
+
+### 2. Estimating the background from the image
+
+```python
+import numpy as np
+import cv2
+
+report("blur sigma 15", divide(img, cv2.GaussianBlur(img, (0, 0), 15)))
+k = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+closed = cv2.GaussianBlur(cv2.morphologyEx(img, cv2.MORPH_CLOSE, k), (0, 0), 5)    # remove dark text, then smooth
+report("closing 15 + blur", divide(img, closed))
+
+f = img.astype(np.float32)
+sub = np.clip(f - closed + closed.mean(), 0, 255).astype(np.uint8)
+report("closing 15, subtract", sub)
+
+yy, xx = np.mgrid[0:200, 0:320]
+x, y = xx / 319, yy / 199
+A = np.stack([np.ones_like(x), x, y, x * x, x * y, y * y], -1).reshape(-1, 6)    # degree-2 surface
+use = (img > np.percentile(img, 30)).ravel()                                      # brighter pixels: mostly paper
+coef, *_ = np.linalg.lstsq(A[use], f.ravel()[use], rcond=None)
+report("polynomial surface", divide(img, (A @ coef).reshape(200, 320)))
+```
+
+Output:
+
+```text
+blur sigma 15              paper non-uniformity  5.3% | Otsu F1 0.992
+closing 15 + blur          paper non-uniformity  3.2% | Otsu F1 0.992
+closing 15, subtract       paper non-uniformity  2.7% | Otsu F1 0.976
+polynomial surface         paper non-uniformity 11.0% | Otsu F1 0.986
+```
+
+- Subtraction makes the paper just as flat, but the text in the dark corner keeps its reduced contrast, so the threshold result is worse: flat paper alone is not the goal.
+- The closing size (15) must exceed the letter strokes; a closing smaller than the strokes leaves text in the estimate.
+
+## OpenCV API notes
+
+**Reference correction**: NumPy float arithmetic as above; `cv2.divide(raw, white, scale=mean)` works on uint8 but rounds and saturates (14.3).
+
+**Background**: `cv2.GaussianBlur(img, (0, 0), sigma)`; `cv2.morphologyEx(img, cv2.MORPH_CLOSE or MORPH_OPEN, kernel)` with `cv2.getStructuringElement`; for speed, estimate on a downscaled image (`cv2.resize(..., INTER_AREA)`) and scale the estimate back up (`INTER_LINEAR`).
+
+**Top-hat**: `cv2.morphologyEx(img, cv2.MORPH_TOPHAT, k)` = image − opening (bright details on a varying background); `MORPH_BLACKHAT` = closing − image (dark details). These are the subtraction form of the same idea (Module 16).
+
+## Where it fails
+
+- **Objects larger than the window**: they become part of the background estimate and vanish after division.
+- **Changing light**: a reference taken in the morning is wrong after the lamp warms up or ages; update it regularly.
+- **Saturated pixels**: clipped highlights cannot be corrected (the true value is unknown).
+- **Different exposure or gain** between reference and image: the corrected image is scaled; fix the camera settings.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Subtracting a multiplicative shading.**
+- **Dividing in uint8** (rounding, saturation, division by 0).
+- **A noisy single-frame white reference** (adds its noise to every image).
+- **Background window smaller than the objects.**
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Rolling-ball background subtraction
+
+Sternberg (1983) proposed estimating the background by rolling a ball under the intensity surface (a grey-level morphological opening with a ball-shaped element); ImageJ's "Subtract Background" is the best-known implementation. It is the morphological approach of this chapter with a curved structuring element [2].
+
+### Retinex and homomorphic filtering
+
+Land's Retinex theory treats perception of reflectance under varying light; homomorphic filtering takes the logarithm (turning reflectance × light into a sum), suppresses low frequencies (the light) and exponentiates. Both are general forms of "divide by a smooth estimate of the light" [1].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Uneven illumination acts on the image mainly as…",
+      options: ["An offset to subtract", "A gain to divide out", "Noise to blur", "A colour shift"],
+      answer: 1,
+      explanation: "Image = reflectance × light.",
+    },
+    {
+      question: "Dark text on paper: which morphological operation removes the text to estimate the light?",
+      options: ["Opening", "Closing", "Erosion only", "Gradient"],
+      answer: 1,
+      explanation: "Closing removes dark details smaller than the window.",
+    },
+    {
+      question: "Why smooth or average a white reference image?",
+      options: ["To brighten it", "So its own noise is not copied into every corrected image", "To change its size", "OpenCV requires it"],
+      answer: 1,
+      explanation: "Each corrected pixel is divided by the reference's noisy value otherwise.",
+    },
+    {
+      question: "When is subtraction the right correction?",
+      options: ["For vignetting", "For an additive offset like stray light or dark current", "Always", "Never"],
+      answer: 1,
+      explanation: "Offsets add; gains multiply.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A dark frame reads 10 everywhere. At two pixels: raw 110 and 60, white 210 and 110. The mean of (white − dark) is 150. Compute the corrected values.
+
+<Solution>
+
+(110 − 10) / (210 − 10) · 150 = 100 / 200 · 150 = **75**; (60 − 10) / (110 − 10) · 150 = 50 / 100 · 150 = **75**. Equal reflectance, equal result.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Speed up the closing estimate: compute it on the image downscaled by 4 (`INTER_AREA`) with a 5 × 5 closing, upscale the estimate back (`INTER_LINEAR`) and report the result. Is the quality similar?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+small = cv2.resize(img, None, fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA)
+k5 = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+bg_small = cv2.GaussianBlur(cv2.morphologyEx(small, cv2.MORPH_CLOSE, k5), (0, 0), 1.5)
+bg = cv2.resize(bg_small, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_LINEAR)
+report("closing at 1/4 size", divide(img, bg))
+```
+
+Output:
+
+```text
+closing at 1/4 size        paper non-uniformity  3.0% | Otsu F1 0.993
+```
+
+The same quality (even slightly better) with 1/16 of the pixels in the expensive steps: the light varies slowly, so a coarse estimate is enough. (Note that downscaling by 4 also averages the thin strokes into the paper, so a 5 × 5 closing at 1/4 size covers about as much as 20 × 20 at full size.)
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 4.9 (homomorphic filtering) and Section 10.3 (illumination and thresholding).
+2. S. R. Sternberg, "Biomedical image processing", *IEEE Computer* 16(1), 22–34, 1983.
+3. EMVA Standard 1288, Release 4.0, 2021: flat-field and dark-signal non-uniformity.
+4. OpenCV 4.13.0 documentation: `GaussianBlur`, `morphologyEx`, `getStructuringElement`, `resize`. https://docs.opencv.org/4.13.0/

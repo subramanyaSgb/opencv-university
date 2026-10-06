@@ -1,0 +1,316 @@
+export const meta = {
+  number: "9.3",
+  title: "Illusions and contrast",
+  minutes: 25,
+  objectives: [
+    "Explain simultaneous contrast and Mach bands with lateral inhibition",
+    "Model edge overshoot in perception as centre minus surround (the same maths as unsharp masking)",
+    "Know why people must not judge grey values or sizes by eye, and how to show measurements instead",
+    "Use difference-of-Gaussians and unsharp masking in OpenCV",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 9.3 (Module 9 plan).
+  The lateral-inhibition model (perceived = I + a·(I − Gσ*I)) is a teaching model, not a physiological fit.
+  All figures are drawn by the course; no published illusion images are reproduced.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 9.3 Illusions and contrast
+
+<Definition term="Simultaneous contrast">the effect that the perceived brightness (or colour) of an area depends on its surroundings: the same grey looks lighter on a dark background and darker on a light one.</Definition>
+
+9.2 showed that we perceive ratios. This chapter shows something stronger: we perceive **relative to the neighbourhood**. That makes the eye excellent at seeing edges and changes, and unreliable at judging absolute values. For inspection, that is a warning: never trust your eye for "how grey is this?", trust the pixel values.
+
+## 1. An analogy
+
+A quiet room makes a whisper loud; a factory hall makes a shout quiet. The sound did not change, the background did. The visual system works like an automatic volume control applied separately in every small region of the image.
+
+## 2. Same grey, different surround
+
+<ContrastLab caption="Part 1: two squares with the same code on different surrounds; connect them to check. Part 2: a staircase of flat steps and the overshoots your visual system adds at every edge." />
+
+Things to try in part 1: move both surrounds to the same value: the squares look equal. Click **Connect the squares**: a bridge of the same grey links them, and the illusion weakens because the eye can follow one continuous region.
+
+## 3. Lateral inhibition: why it happens
+
+Neighbouring cells in the retina inhibit each other: a cell's output is roughly its own input **minus** a fraction of the average of its surroundings. Such a **centre-surround** receptive field responds strongly to edges and weakly to uniform areas [1], [2].
+
+<Flow
+  steps={[
+    { label: "Light on a small spot (centre)", tone: "world" },
+    { label: "minus a share of the light around it (surround)", tone: "process" },
+    { label: "= response: high at edges, low on flat areas", tone: "result" },
+  ]}
+/>
+
+A simple model of the perceived brightness profile is
+
+<Equation terms={[{ value: "perceived" }, { op: "=", value: "I + a · (I − Gσ * I)", result: true }]} />
+
+where Gσ \* I is the image blurred with a Gaussian (the surround) and `a` is the inhibition strength. In a flat area I = Gσ \* I and nothing changes; at an edge the bright side is pushed up and the dark side down. These are the **Mach bands** in part 2 of the lab.
+
+The same formula is **unsharp masking**, the most common image-sharpening method (Part C): image processing borrowed the trick from the eye.
+
+## 4. A gallery of effects, and what they mean for inspection
+
+| Effect | What you see | Inspection lesson |
+| --- | --- | --- |
+| Simultaneous contrast | the same grey looks lighter on dark | do not compare grey values between regions by eye; read pixel values |
+| Mach bands | light/dark bands at edges that are not in the image | do not report a "halo defect" at an edge without checking the profile |
+| Brightness constancy | a white paper in shadow still looks white | the eye compensates lighting; the camera does not, so uneven light shows up in images but not to the operator |
+| Size and context illusions | equal lines look different with different arrow heads or surroundings | measure sizes with tools, not by eye |
+| Change blindness | a slow or interrupted change goes unnoticed | do not rely on operators to notice slow drift; trend the measurements |
+
+## 5. Turning illusions into tools
+
+- **Show numbers, not just pictures**: HMI overlays with measured values and tolerance bands.
+- **Show differences**: for "is this the same as the golden part?", display |test − reference| (`cv2.absdiff`), not two images side by side.
+- **Use a consistent surround**: show image tiles on a neutral mid-grey background, the same for every part.
+- **Use false colour carefully** (9.5): colour maps can make subtle differences visible, but they bring their own illusions.
+
+## 6. Industrial example
+
+A paint shop compares the grey level of a body panel with a reference tile held next to it, by eye, under the line lights. Panels with a dark trim around the area look lighter than they are, and some are wrongly accepted. A colour camera with a fixed reference patch in the field of view replaces the visual check: both regions are measured with `cv2.mean` in the same image under the same light, and the HMI shows the difference as a number with green/red tolerance limits. Operators still look at the panel for flaws, which the eye's edge sensitivity is good at, but no longer judge the shade.
+
+## What you should remember from 9.3
+
+<Takeaways>
+<Takeaway n={1} title="Relative">Perceived brightness depends on the surroundings (simultaneous contrast).</Takeaway>
+<Takeaway n={2} title="Edges">Lateral inhibition (centre minus surround) exaggerates edges: Mach bands.</Takeaway>
+<Takeaway n={3} title="Same maths">Perceived ≈ I + a·(I − blur): that is unsharp masking.</Takeaway>
+<Takeaway n={4} title="Do not judge by eye">Grey values, sizes and slow changes: measure them.</Takeaway>
+<Takeaway n={5} title="Design">Show numbers, differences and neutral surrounds on HMIs.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A grey square of code 128 sits on a background of code 20. Does it look lighter or darker than the same square on code 230?
+
+<Solution>
+
+**Lighter**: on a dark surround the centre-surround response is positive.
+
+</Solution>
+
+**Q2.** An operator reports a "bright halo" along the edge of a dark part on a light conveyor. How do you check whether it is real?
+
+<Solution>
+
+Plot the pixel profile across the edge (6.5). If the values go straight from dark to light without an overshoot, the halo is a Mach band in the operator's perception (or caused by sharpening in the display pipeline, which you can check too).
+
+</Solution>
+
+### Next: 9.4 Colour perception and colour blindness
+
+Three cone types, opponent colours, and the 1 in 12 men who see colours differently.
+
+## Code
+
+Three examples: Mach bands from the lateral-inhibition model in NumPy, simultaneous contrast measured and modelled with OpenCV, and unsharp masking.
+
+### 1. From scratch: Mach bands
+
+```python
+import numpy as np
+import cv2
+
+steps = np.repeat([60.0, 100.0, 140.0, 180.0], 20)               # a 4-step grey staircase, 20 px per step
+x = np.arange(-15, 16)
+g = np.exp(-x**2 / (2 * 4.0**2)); g /= g.sum()                    # surround: Gaussian, sigma 4 px
+surround = np.convolve(np.pad(steps, 15, mode="edge"), g, mode="valid")
+perceived = steps + 0.6 * (steps - surround)                      # centre minus part of the surround (lateral inhibition)
+print("physical  around edge 1:", steps[16:24].astype(int).tolist())
+print("perceived around edge 1:", np.round(perceived[16:24]).astype(int).tolist())
+print("inside step 2 (flat):   ", np.round(perceived[28:32]).astype(int).tolist())
+```
+
+Output:
+
+```text
+physical  around edge 1: [60, 60, 60, 60, 100, 100, 100, 100]
+perceived around edge 1: [55, 54, 52, 49, 111, 108, 106, 105]
+inside step 2 (flat):    [100, 100, 100, 100]
+```
+
+- At the edge the model pushes the dark side down (60 → 49) and the bright side up (100 → 111); in the middle of a step it changes nothing. That is exactly the pattern of Mach bands.
+- `np.pad(..., mode="edge")` repeats the end values so the borders do not create false edges.
+
+### 2. OpenCV: equal greys, unequal responses
+
+```python
+import numpy as np
+import cv2
+
+img = np.zeros((120, 240), np.uint8)
+img[:, :120], img[:, 120:] = 40, 210                              # dark and bright surround
+img[40:80, 40:80] = 128                                           # two identical grey centre squares
+img[40:80, 160:200] = 128
+print("mean of left centre:", cv2.mean(img[40:80, 40:80])[0], "| right centre:", cv2.mean(img[40:80, 160:200])[0])
+
+f = img.astype(np.float32)
+dog = cv2.GaussianBlur(f, (0, 0), 3) - cv2.GaussianBlur(f, (0, 0), 30)   # centre-surround response
+print(f"centre-surround response: left square {dog[60, 60]:+.1f} (looks lighter) | right square {dog[60, 180]:+.1f} (looks darker)")
+```
+
+Output:
+
+```text
+mean of left centre: 128.0 | right centre: 128.0
+centre-surround response: left square +62.4 (looks lighter) | right square -58.2 (looks darker)
+```
+
+- The measurement says "equal"; the centre-surround model (a **difference of Gaussians**, DoG) says the left square stands out positively and the right one negatively, which matches what we see.
+- DoG filters are used in machine vision too: blob detection and SIFT (Part E) look for strong DoG responses.
+
+### 3. OpenCV: unsharp masking is the same formula
+
+```python
+import numpy as np
+import cv2
+
+stair = np.repeat(np.array([[60, 100, 140, 180]], np.uint8), 20, axis=1).repeat(10, axis=0)   # 10 x 80 staircase image
+blur = cv2.GaussianBlur(stair, (0, 0), 4)
+sharp = cv2.addWeighted(stair, 1.6, blur, -0.6, 0)             # unsharp mask: I + 0.6 (I - blur)
+print("row 5 around edge 1, original:", stair[5, 16:24].tolist())
+print("row 5 around edge 1, sharpened:", sharp[5, 16:24].tolist())
+```
+
+Output:
+
+```text
+row 5 around edge 1, original: [60, 60, 60, 60, 100, 100, 100, 100]
+row 5 around edge 1, sharpened: [55, 53, 52, 49, 111, 108, 107, 105]
+```
+
+- Almost the same numbers as the perception model in example 1 (OpenCV uses a slightly different kernel size and border handling). `addWeighted` computes 1.6·I − 0.6·blur with rounding and saturation.
+- Sharpening makes images look crisper to people because it adds the overshoot the eye adds anyway. For measurement it adds false edges: sharpen for display, not before measuring.
+
+## OpenCV API notes
+
+**Blur and difference of Gaussians**: `cv2.GaussianBlur(src, (0, 0), sigma)`; DoG = blur(σ₁) − blur(σ₂) in float32.
+
+**Unsharp masking**: `cv2.addWeighted(src, 1 + a, cv2.GaussianBlur(src, (0, 0), s), -a, 0)`; for 8-bit images the result is saturated to 0–255.
+
+**Measuring instead of looking**: `cv2.mean(img[roi])` or `cv2.mean(img, mask)`, `cv2.absdiff(test, ref)` for difference images.
+
+## Where it fails
+
+- **The model is a cartoon**: real perception involves many scales, orientation, attention and learned knowledge (shadows, transparency); simple centre-surround models do not explain every illusion.
+- **Individual variation**: illusion strength differs between people and viewing conditions.
+- **Display pipelines**: monitors and video streams often add their own sharpening; check the display chain before blaming the eye.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Comparing shades by eye** between areas with different surroundings.
+- **Reporting halos** at edges without a profile measurement.
+- **Sharpening before measuring** (edge positions and widths change).
+- **Showing a reference and a test image side by side** instead of their difference.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Receptive fields
+
+Kuffler (1953) recorded retinal ganglion cells in the cat and found circular receptive fields with an excitatory centre and an inhibitory surround (or the reverse). The difference-of-Gaussians model of such fields was proposed by Rodieck (1965); Marr and Hildreth (1980) used the closely related Laplacian of Gaussian as the basis of edge detection [3].
+
+### Brightness vs lightness
+
+Illusions such as checkerboards in shadow show that the visual system estimates the **lightness** (reflectance) of surfaces, discounting the illumination, rather than reporting **brightness** (luminance). This is useful in daily life and is the reason operators do not notice uneven lighting that is obvious to an algorithm [1].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The same grey square looks lighter on…",
+      options: ["a light surround", "a dark surround", "a coloured surround only", "it never changes"],
+      answer: 1,
+      explanation: "Simultaneous contrast: relative to a dark surround it appears lighter.",
+    },
+    {
+      question: "Mach bands are…",
+      options: ["Real intensity overshoots in the image", "Perceived light and dark bands at edges that are not in the image", "Compression artefacts", "Sensor defects"],
+      answer: 1,
+      explanation: "Lateral inhibition adds them in perception.",
+    },
+    {
+      question: "Which image operation uses the same formula as the lateral-inhibition model?",
+      options: ["Thresholding", "Unsharp masking", "Histogram equalization", "Resizing"],
+      answer: 1,
+      explanation: "I + a·(I − blur(I)).",
+    },
+    {
+      question: "Best way to compare a part's shade with a reference?",
+      options: ["Look at them side by side", "Measure both in the same image and show the difference as a number", "Ask two operators", "Use a darker room"],
+      answer: 1,
+      explanation: "Perception is relative; measurement is not.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+With the model perceived = I + 0.5·(I − surround), a flat area has I = 120 and surround 120; a pixel next to an edge has I = 120 and surround 100. What are the perceived values?
+
+<Solution>
+
+Flat: 120 + 0.5·0 = **120**. Next to the edge: 120 + 0.5·20 = **130**: brighter than the flat part of the same grey.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using example 2's image, change the surrounds to 100 and 156 (closer together) and print the DoG responses of the two squares. What happens to the illusion?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+img2 = np.zeros((120, 240), np.uint8)
+img2[:, :120], img2[:, 120:] = 100, 156
+img2[40:80, 40:80] = 128
+img2[40:80, 160:200] = 128
+f2 = img2.astype(np.float32)
+dog2 = cv2.GaussianBlur(f2, (0, 0), 3) - cv2.GaussianBlur(f2, (0, 0), 30)
+print(f"left {dog2[60, 60]:+.1f} | right {dog2[60, 180]:+.1f}")
+```
+
+Output:
+
+```text
+left +19.8 | right -19.9
+```
+
+The responses shrink to about a third: with surrounds closer to the squares' grey, the illusion is much weaker.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Why does an operator not notice that one side of a conveyor is 30 % darker in the camera image when the lamp ages, while the defect-detection algorithm starts to fail?
+
+<Solution>
+
+The visual system discounts slow, smooth changes in illumination (lightness constancy, adaptation, change blindness), so the scene still "looks normal". The algorithm uses absolute grey values and fixed thresholds, so the darker side crosses them. Remedies: monitor the mean grey of a reference area over time, alarm on drift, use flat-field correction or adaptive thresholds.
+
+</Solution>
+
+## References
+
+1. E. H. Adelson, "Lightness Perception and Lightness Illusions", in M. Gazzaniga (ed.), *The New Cognitive Neurosciences*, 2nd ed., MIT Press, 2000.
+2. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 2.1 (Mach bands, simultaneous contrast).
+3. D. Marr, E. Hildreth, "Theory of edge detection", *Proceedings of the Royal Society of London B* 207, 1980; R. W. Rodieck, "Quantitative analysis of cat retinal ganglion cell response to visual stimuli", *Vision Research* 5, 1965.
+4. S. W. Kuffler, "Discharge patterns and functional organization of mammalian retina", *Journal of Neurophysiology* 16, 1953.

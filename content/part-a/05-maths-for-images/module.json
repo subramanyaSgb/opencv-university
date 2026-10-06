@@ -1,0 +1,15 @@
+{
+  "number": 5,
+  "title": "Maths for images",
+  "summary": "The maths behind image processing, with images as the examples: matrices, vectors and transforms, homogeneous coordinates, statistics, derivatives, least squares, eigenvectors and SVD, probability.",
+  "chapters": [
+    { "number": "5.1", "slug": "5.1-images-as-matrices", "title": "Images as matrices" },
+    { "number": "5.2", "slug": "5.2-vectors-and-transforms", "title": "Vectors and transforms" },
+    { "number": "5.3", "slug": "5.3-homogeneous-coordinates", "title": "Homogeneous coordinates" },
+    { "number": "5.4", "slug": "5.4-statistics-mean-variance-gaussian", "title": "Statistics (mean, variance, Gaussian)" },
+    { "number": "5.5", "slug": "5.5-derivatives-as-differences", "title": "Derivatives as differences" },
+    { "number": "5.6", "slug": "5.6-least-squares", "title": "Least squares" },
+    { "number": "5.7", "slug": "5.7-eigenvectors-and-svd", "title": "Eigenvectors and SVD" },
+    { "number": "5.8", "slug": "5.8-probability-and-bayes", "title": "Probability and Bayes" }
+  ]
+}

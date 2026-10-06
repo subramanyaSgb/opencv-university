@@ -1,0 +1,270 @@
+export const meta = {
+  number: "11.3",
+  title: "Gamma",
+  minutes: 20,
+  objectives: [
+    "Apply the power-law (gamma) transform and predict its effect for γ < 1 and γ > 1",
+    "Tell gamma encoding, gamma correction and gamma as a contrast tool apart",
+    "Choose γ automatically from image statistics",
+    "Know what gamma cannot do: create information that 8-bit quantisation lost",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 11.3 (Module 11 plan).
+  Builds on 9.2 (sRGB encoding). Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 11.3 Gamma
+
+<Definition term="Gamma transform">the power-law point operation s = 255 · (r / 255)^γ. With γ < 1 dark values are spread out and the image gets brighter; with γ > 1 bright values are spread out and the image gets darker. Black (0) and white (255) stay where they are.</Definition>
+
+9.2 introduced gamma as the encoding that matches 8-bit codes to perception. The same curve is also the everyday tool for making dark details visible or calming down bright areas, and the right way to convert between linear camera data and display data.
+
+## 1. An analogy
+
+Adjusting the mid-tones of a photograph without touching the deepest shadows or the brightest highlights. Gamma bends the middle of the tone curve while pinning both ends, like pushing on the middle of a ruler held at both ends.
+
+## 2. The curve family
+
+<Flow
+  steps={[
+    { label: "Normalise: r / 255 (0…1)", tone: "data" },
+    { label: "Raise to the power γ", tone: "process" },
+    { label: "Scale back: × 255", tone: "result" },
+  ]}
+/>
+
+| γ | 32 → | 128 → | 224 → | Effect |
+| --- | --- | --- | --- | --- |
+| 0.5 | 90 | 181 | 239 | brighter; dark values spread, bright values squeezed |
+| 1.0 | 32 | 128 | 224 | unchanged |
+| 2.2 | 3 | 56 | 192 | darker; dark values squeezed, bright values spread |
+
+<CurveLab kinds={["identity", "gamma"]} initial="gamma" caption="Gamma between 0.1 and 3. Watch the curve bend and the histogram shift: γ < 1 pulls the histogram to the right and stretches its dark part, γ > 1 the opposite." />
+
+## 3. Three meanings of "gamma"
+
+| Context | What it means | Typical value |
+| --- | --- | --- |
+| **Encoding** (sRGB, cameras with gamma on) | store linear light as codes with γ ≈ 1/2.2 so that codes match perception (9.2) | 1/2.2 ≈ 0.45 |
+| **Display decoding** | the screen turns codes back into light with γ ≈ 2.2 | 2.2 |
+| **Enhancement** | a free parameter to brighten shadows or darken highlights | 0.3 … 3 |
+
+A linear camera image (gamma off) looks too dark on a screen: apply γ = 1/2.2 for display. An sRGB image must be decoded with γ ≈ 2.2 (precisely, the sRGB curve) before linear operations such as averaging light, flat-field correction or white balance (10.6).
+
+## 4. Choosing γ automatically
+
+A simple rule maps the image mean (or median) to the middle grey:
+
+<Equation terms={[{ value: "γ" }, { op: "=", value: "log(0.5) / log(mean / 255)", result: true }]} />
+
+An underexposed image with mean 42 gets γ ≈ 0.38 and a mean of about 120 afterwards. Use the median or a region of interest when a few very bright or dark areas would distort the mean. For production, a **fixed** γ chosen once is usually better than a per-image automatic one: the same defect should look the same on every part.
+
+## 5. Industrial example
+
+A wood-sorting line inspects boards whose knots are dark and whose cracks are even darker. With a linear camera, knots and cracks both fall into the bottom 15 % of the grey range, separated by only a handful of grey levels. The classifier uses the linear data, but the operator display applies γ = 0.5 from a LUT: the dark range is stretched over about 40 % of the screen's levels, and cracks inside knots become visible to the operator. A γ = 2 setting on the same LUT is used on a second display tab to check for faint discolourations in the bright sapwood.
+
+## What you should remember from 11.3
+
+<Takeaways>
+<Takeaway n={1} title="Formula">s = 255 · (r/255)^γ; 0 and 255 stay fixed.</Takeaway>
+<Takeaway n={2} title="Direction">γ < 1 brightens and spreads the darks; γ > 1 darkens and spreads the brights.</Takeaway>
+<Takeaway n={3} title="Encoding vs enhancement">≈ 0.45 / 2.2 for encoding and display; any value for enhancement.</Takeaway>
+<Takeaway n={4} title="Auto">γ = log 0.5 / log(mean/255) maps the mean to mid-grey.</Takeaway>
+<Takeaway n={5} title="Limits">Gamma spreads existing levels; it cannot recover levels lost by quantisation or clipping.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Apply γ = 0.5 to the value 64.
+
+<Solution>
+
+255 · (64/255)^0.5 = 255 · 0.501 ≈ **128**.
+
+</Solution>
+
+**Q2.** The image mean is 200. Which γ maps it to 128?
+
+<Solution>
+
+γ = log 0.5 / log(200/255) = −0.693 / −0.243 ≈ **2.85**: a darkening curve.
+
+</Solution>
+
+### Next: 11.4 Contrast stretching
+
+Linear and piecewise curves that use the full grey range, and how to choose their limits.
+
+## Code
+
+Two examples: what gamma does to the distribution of levels, and automatic gamma with OpenCV.
+
+### 1. From scratch: where the levels go
+
+```python
+import numpy as np
+import cv2
+
+x = np.arange(256, dtype=np.float64)
+for g in [0.5, 1.0, 2.2]:
+    t = np.clip(np.round(255 * (x / 255) ** g), 0, 255).astype(int)
+    dark = len(np.unique(t[:64]))                     # output levels used by the darkest quarter of inputs
+    bright = len(np.unique(t[192:]))                  # ... and by the brightest quarter
+    print(f"gamma {g:3.1f}: 32 -> {t[32]:3d}, 128 -> {t[128]:3d}, 224 -> {t[224]:3d} | distinct outputs: dark quarter {dark:2d}, bright quarter {bright:2d}")
+```
+
+Output:
+
+```text
+gamma 0.5: 32 ->  90, 128 -> 181, 224 -> 239 | distinct outputs: dark quarter 64, bright quarter 35
+gamma 1.0: 32 ->  32, 128 -> 128, 224 -> 224 | distinct outputs: dark quarter 64, bright quarter 64
+gamma 2.2: 32 ->   3, 128 ->  56, 224 -> 192 | distinct outputs: dark quarter 13, bright quarter 64
+```
+
+- With γ = 0.5 the 64 darkest inputs still give 64 different outputs (spread over 0–127), while the 64 brightest are squeezed into 35 levels: information in the brights is merged.
+- With γ = 2.2 the darkest quarter collapses into only 13 levels.
+
+### 2. OpenCV: automatic gamma for an underexposed image
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+dark = (img * 0.35).astype(np.uint8)                               # an underexposed version
+m = dark.mean() / 255
+g = np.log(0.5) / np.log(m)                                         # gamma that maps the mean to the middle
+table = np.clip(np.round(255 * (np.arange(256) / 255) ** g), 0, 255).astype(np.uint8)
+out = cv2.LUT(dark, table)
+print(f"underexposed mean {dark.mean():.1f} -> gamma {g:.2f} -> mean {out.mean():.1f} | distinct grey levels {len(np.unique(dark))} -> {len(np.unique(out))}")
+
+lin = dark.astype(np.float32) / 255
+pw = cv2.pow(lin, g)                                                # the same on float data, no table
+print("cv2.pow vs LUT, max difference:", int(np.abs(np.round(pw * 255) - out).max()))
+```
+
+Output:
+
+```text
+underexposed mean 41.6 -> gamma 0.38 -> mean 120.3 | distinct grey levels 90 -> 84
+cv2.pow vs LUT, max difference: 0
+```
+
+- The mean returns to about 120, but the number of distinct grey levels does not grow (90 → 84): underexposure already threw away levels, and gamma only spreads the remaining ones (some brights even merge). Expose correctly in the camera instead of fixing it afterwards.
+- `cv2.pow` works on float images; on 8-bit data, a LUT gives the same result faster.
+
+## OpenCV API notes
+
+**8-bit**: build the table with NumPy, apply with `cv2.LUT(img, table)`.
+
+**Float**: `cv2.pow(src, power)` on float32/float64 in 0…1; `np.power`.
+
+**Colour**: apply the same table to all channels for brightness; for colour-preserving gamma, apply it to Y of YCrCb or L of Lab (10.4).
+
+**Camera**: GenICam `Gamma` (and `GammaEnable` / `GammaSelector`); `cv2.CAP_PROP_GAMMA` on some capture backends.
+
+## Where it fails
+
+- **Lost levels**: gamma cannot restore detail lost by under- or overexposure.
+- **Noise**: γ < 1 amplifies noise in dark areas as much as the signal.
+- **Colour shifts**: applying gamma to R, G, B separately changes saturation; use luminance channels for strong corrections.
+- **Measurement**: gamma-transformed intensities are not proportional to light.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Confusing γ and 1/γ** (some tools define gamma as the inverse exponent).
+- **Gamma on top of gamma**: camera gamma on and software gamma again.
+- **Linear operations on gamma-encoded data** (averaging, blending, flat field).
+- **Per-image automatic gamma** in production displays (inconsistent appearance).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why CRTs had a gamma of about 2.5
+
+The brightness of a CRT's phosphor grew roughly with the 2.5th power of the drive voltage. Video signals were therefore gamma-encoded at the camera with about 1/2.2 (leaving an overall system gamma slightly above 1, which looks better in dim viewing conditions). By a lucky coincidence this encoding also matches lightness perception (9.2), so it survived into the digital era: sRGB is defined to mimic it [1].
+
+### Gamma and noise
+
+For a γ transform, small changes propagate as ds = γ · (r/255)^(γ−1) · dr. With γ = 0.5 near r = 10, the slope is about 2.5: noise of ±2 levels in the dark becomes ±5. Applying gamma to images that will be thresholded or measured changes the noise statistics, which is one more reason to process linear data and gamma-encode only for display [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "With γ < 1 the image becomes…",
+      options: ["darker", "brighter", "inverted", "binary"],
+      answer: 1,
+      explanation: "Values below 255 are raised towards 255.",
+    },
+    {
+      question: "Which values does gamma leave unchanged?",
+      options: ["None", "0 and 255", "128 only", "All odd values"],
+      answer: 1,
+      explanation: "0^γ = 0 and 1^γ = 1.",
+    },
+    {
+      question: "Can gamma recover detail lost by underexposure?",
+      options: ["Yes, always", "No, it only redistributes the levels that remain", "Only with γ = 2.2", "Only on colour images"],
+      answer: 1,
+      explanation: "Quantisation losses are permanent.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A display shows the code 186 from a linear camera that was gamma-encoded with γ = 1/2.2. What fraction of the maximum light did the camera measure?
+
+<Solution>
+
+Decode: (186/255)^2.2 ≈ 0.729^2.2 ≈ **0.50**: half the light.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Write `auto_gamma(img, target=128)` that maps the **median** to `target`, and apply it to the underexposed image `dark` from example 2. Print γ and the new median.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+def auto_gamma(img, target=128):
+    med = max(float(np.median(img)), 1.0)
+    g = np.log(target / 255) / np.log(med / 255)
+    table = np.clip(np.round(255 * (np.arange(256) / 255) ** g), 0, 255).astype(np.uint8)
+    return cv2.LUT(img, table), g
+
+out2, g2 = auto_gamma(dark)
+print(f"median {np.median(dark):.0f} -> gamma {g2:.2f} -> median {np.median(out2):.0f}")
+```
+
+Output:
+
+```text
+median 40 -> gamma 0.37 -> median 128
+```
+
+</Solution>
+
+## References
+
+1. C. Poynton, *Digital Video and HD: Algorithms and Interfaces*, 2nd ed., Morgan Kaufmann, 2012: chapters on gamma.
+2. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 3.2 (power-law (gamma) transformations).
+3. IEC 61966-2-1:1999, sRGB.
+4. OpenCV 4.13.0 documentation: `LUT`, `pow`. https://docs.opencv.org/4.13.0/

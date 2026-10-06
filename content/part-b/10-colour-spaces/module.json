@@ -1,0 +1,14 @@
+{
+  "number": 10,
+  "title": "Colour spaces",
+  "summary": "RGB and BGR, HSV, Lab and colour difference, YCrCb, grey conversion, white balance and colour constancy, and colour detection with inRange.",
+  "chapters": [
+    { "number": "10.1", "slug": "10.1-rgb-and-bgr", "title": "RGB and BGR" },
+    { "number": "10.2", "slug": "10.2-hsv", "title": "HSV" },
+    { "number": "10.3", "slug": "10.3-lab-and-colour-difference", "title": "LAB and colour difference" },
+    { "number": "10.4", "slug": "10.4-ycrcb", "title": "YCrCb" },
+    { "number": "10.5", "slug": "10.5-grayscale-conversion", "title": "Grayscale conversion" },
+    { "number": "10.6", "slug": "10.6-white-balance-and-colour-constancy", "title": "White balance and colour constancy" },
+    { "number": "10.7", "slug": "10.7-colour-detection-with-inrange", "title": "Colour detection with inRange" }
+  ]
+}

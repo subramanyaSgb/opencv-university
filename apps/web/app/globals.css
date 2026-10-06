@@ -856,3 +856,1004 @@ button.nl-cell { cursor: pointer; }
 .aplab .ctl-full { grid-column: 1 / -1; flex-wrap: wrap; }
 .aplab .seg { flex-wrap: wrap; }
 .op-onsteel { fill: #1c1f24; font: 600 12px var(--font); }
+
+/* ===================== Chapter 2.4+ visuals ===================== */
+.m2-fovrect { fill: var(--accent); fill-opacity: 0.16; stroke: var(--accent); stroke-width: 2; }
+.m2-obj { stroke: #7d8791; stroke-width: 8; stroke-linecap: round; }
+.fovplan .sc-ctl { grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 0.6rem 1.5rem; }
+.fovplan .ctl-full, .ctl-full { grid-column: 1 / -1; flex-wrap: wrap; }
+.fovplan .seg { flex-wrap: wrap; }
+.fp-bad { border-color: var(--bad) !important; background: var(--bad-soft) !important; color: var(--bad); }
+.fp-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin: 0.6rem 0; }
+.fp-table th { text-align: left; font-weight: 600; color: var(--fg-soft); border-bottom: 1px solid var(--line); padding: 0.3rem 0.4rem; }
+.fp-table td { padding: 0.3rem 0.4rem; border-bottom: 1px solid var(--line); font-family: var(--mono); }
+.fp-table tr.is-ok td { color: var(--ok); }
+.fp-table tr.is-best td { background: var(--ok-soft); color: var(--ok); font-weight: 700; }
+.fp-wrap { overflow-x: auto; } .fp-table td { white-space: nowrap; } @media (max-width: 560px) { .fp-table { font-size: 0.78rem; } }
+.m2-drop { stroke: #4d8fd6; stroke-width: 2.5; stroke-linecap: round; }
+.m2-bucket { fill: none; stroke: var(--fg-soft); stroke-width: 3; stroke-linejoin: round; }
+.m2-water { fill: #4d8fd6; fill-opacity: 0.55; }
+.m2-spill { fill: none; stroke: #4d8fd6; stroke-width: 4; stroke-linecap: round; }
+.sl-canvas { display: block; width: 100%; max-width: 480px; height: auto; image-rendering: pixelated; border-radius: 6px; margin: 0.4rem 0 0.8rem; background: #000; }
+.m2-shutter { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+.m2-light { fill: #f2b531; }
+/* Chapter 2.7 */
+.bayerlab .sc-ctl { display: grid; gap: 0.5rem; }
+.bayerlab .seg { flex-wrap: wrap; }
+.bl-row { display: flex; flex-wrap: wrap; gap: 1rem 1.6rem; align-items: flex-start; margin-top: 0.6rem; }
+.bl-grid { --cell: min(2.4rem, calc((100vw - 4rem) / 8)); display: grid; grid-template-columns: repeat(8, var(--cell)); grid-auto-rows: var(--cell); gap: 2px; padding: 2px; background: var(--line); border-radius: 6px; }
+.bl-cell { border: 0; padding: 0; border-radius: 2px; font: 700 0.7rem var(--mono); color: rgba(255,255,255,0.85); cursor: pointer; }
+.bl-cell.is-sel { outline: 3px solid var(--fg); outline-offset: -3px; }
+.bl-info { flex: 1 1 14rem; font-size: 0.9rem; }
+.bl-info p { margin: 0 0 0.4rem; }
+.bl-guess { font-style: italic; color: var(--fg-soft); }
+.bp-grid { display: grid; grid-template-columns: repeat(var(--cols), 3rem); grid-auto-rows: 3rem; gap: 3px; width: max-content; }
+.bp-cell { display: flex; align-items: center; justify-content: center; border-radius: 4px; color: #fff; font: 700 1rem var(--mono); }
+/* Chapter 2.8 */
+.isp-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.4rem; margin-bottom: 0.6rem; }
+.isp-step { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.3rem 0.6rem; border: 1px solid var(--line); border-radius: 999px; font-size: 0.85rem; cursor: pointer; background: var(--bg); }
+.isp-step.is-on { border-color: var(--accent); background: var(--accent-soft); }
+.isp-step input { accent-color: var(--accent); }
+.isp-raw { font-size: 0.78rem; font-weight: 700; color: var(--fg-soft); text-transform: uppercase; letter-spacing: 0.05em; }
+.isp-step + .isp-step::before, .isp-raw + .isp-step::before { content: ""; }
+/* Chapter 2.9 */
+.shutterlab .sc-ctl { display: grid; gap: 0.5rem; }
+.shutterlab .seg { flex-wrap: wrap; }
+.shutterlab .btn { justify-self: start; padding: 0.35rem 0.9rem; border-radius: 8px; cursor: pointer; font: inherit; font-size: 0.9rem; }
+/* Chapter 2.10 */
+.m2-scanline { stroke: #e0473b; stroke-width: 4; stroke-linecap: round; }
+.m2-oldline { fill: #9aa4ae; }
+.m2-newline { fill: #e0473b; }
+.linescanlab .sc-ctl { display: grid; gap: 0.5rem; }
+.linescanlab .ctl input[type="checkbox"] { accent-color: var(--accent); }
+.samplinglab .sc-ctl { display: grid; gap: 0.5rem; } .samplinglab .ctl input[type="checkbox"] { accent-color: var(--accent); }
+.quantlab .sc-ctl { display: grid; gap: 0.5rem; } .quantlab .ctl input[type="checkbox"] { accent-color: var(--accent); }
+.channellab .sc-ctl { display: grid; gap: 0.5rem; } .channellab .ctl-full { gap: 0.4rem; } .cl-canvas { cursor: crosshair; }
+/* Chapter 3.4 */
+.cdl-row { display: flex; flex-wrap: wrap; gap: 1rem 1.6rem; align-items: flex-start; }
+.cdl-wrap { --cell: min(2.4rem, calc((100vw - 5rem) / 9)); display: flex; flex-direction: column; gap: 0.2rem; }
+.cdl-xlab { display: grid; grid-template-columns: repeat(8, var(--cell)); gap: 2px; margin-left: calc(var(--cell) * 0.6 + 4px); font: 600 0.72rem var(--mono); color: var(--accent); text-align: center; }
+.cdl-body { display: flex; gap: 4px; }
+.cdl-ylab { display: grid; grid-auto-rows: var(--cell); gap: 2px; width: calc(var(--cell) * 0.6); font: 600 0.72rem var(--mono); color: var(--accent); align-items: center; text-align: right; padding-top: 2px; }
+.cdl-grid { display: grid; grid-template-columns: repeat(8, var(--cell)); grid-auto-rows: var(--cell); gap: 2px; padding: 2px; background: var(--line); border-radius: 6px; }
+.cdl-cell { border: 0; border-radius: 3px; background: var(--bg-soft); font: 0.68rem var(--mono); color: var(--fg-faint); cursor: pointer; padding: 0; }
+.cdl-cell.in-roi { background: var(--accent-soft); color: var(--accent); }
+.cdl-cell.is-pick { background: var(--accent); color: var(--accent-fg); font-weight: 700; }
+.cdl-tab { flex: 1 1 15rem; width: auto; }
+.cdl-tab td:first-child { font-family: var(--font); color: var(--fg-soft); }
+/* Chapter 3.5 */
+.al-px { fill: var(--bg-sunk); }
+.al-true { fill: none; stroke: var(--fg); stroke-width: 2; }
+.al-alias { fill: none; stroke: #e0473b; stroke-width: 2.5; stroke-dasharray: 7 5; }
+.al-lg-alias { background: #e0473b; height: 3px; }
+.al-lg-dot { border-color: var(--accent); }
+/* Chapter 3.6 */
+.connlab .sc-ctl { display: grid; gap: 0.5rem; }
+.connlab .seg { flex-wrap: wrap; }
+.cn-grid { --cell: min(2.5rem, calc((100vw - 4rem) / 10)); display: grid; grid-template-columns: repeat(10, var(--cell)); grid-auto-rows: var(--cell); gap: 2px; padding: 2px; background: var(--line); border-radius: 6px; width: max-content; margin: 0.6rem 0; }
+.cn-cell { border: 0; border-radius: 3px; background: var(--bg-soft); color: #fff; font: 700 0.75rem var(--mono); cursor: pointer; padding: 0; }
+.cn-cell[style*="hsl(210 70%"] { color: #16202b; }
+.cn-from { background: var(--fg); color: var(--bg); }
+/* Chapter 4.1 */
+.sizecalc .sc-ctl { display: grid; gap: 0.5rem; }
+.sizecalc .seg { flex-wrap: wrap; }
+.sz-bar { height: 0.8rem; border-radius: 6px; background: var(--bg-sunk); border: 1px solid var(--line); overflow: hidden; margin: 0.4rem 0 0.6rem; }
+.sz-bar span { display: block; height: 100%; background: var(--ok); }
+.sz-bar span.is-high { background: var(--warn); }
+.sz-bar span.is-over { background: var(--bad); }
+.sz-over { color: var(--bad); }
+.compresslab .sc-ctl { display: grid; gap: 0.5rem; } .compresslab .seg { flex-wrap: wrap; } .compresslab .ctl input[type="checkbox"] { accent-color: var(--accent); }
+/* Chapter 4.3 */
+.dctlab .sc-ctl { display: grid; gap: 0.5rem; } .dctlab .seg { flex-wrap: wrap; }
+.dl-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 0.8rem 1.2rem; margin: 0.8rem 0; }
+.dl-grid { --cell: min(2.05rem, calc((100vw - 4.5rem) / 8)); display: grid; grid-template-columns: repeat(8, var(--cell)); grid-auto-rows: var(--cell); gap: 1px; padding: 1px; background: var(--line); border-radius: 4px; width: max-content; }
+.dl-cell { display: flex; align-items: center; justify-content: center; background: var(--bg); color: var(--fg); font: 600 0.66rem var(--mono); }
+.dl-zero { color: var(--fg-faint); font-weight: 400; }
+.dctlab code { word-break: break-all; }
+.dctbasis .db-wrap { position: relative; padding: 1.5rem 0 0 1.8rem; width: max-content; max-width: 100%; }
+.dctbasis canvas { display: block; width: min(420px, calc(100vw - 4rem)); height: auto; image-rendering: pixelated; border-radius: 4px; }
+.db-axis { position: absolute; font: 600 0.72rem var(--sans, inherit); color: var(--fg-soft); }
+.db-x { top: 0.1rem; left: 1.8rem; }
+.db-y { left: 0.1rem; top: 1.5rem; writing-mode: vertical-rl; }
+.zigzag svg { width: min(260px, 100%); height: auto; display: block; }
+.zz-cell { fill: var(--bg-soft); stroke: var(--line); }
+.zz-low { fill: var(--accent-soft); stroke: var(--line); }
+.zz-num { font: 600 8px var(--mono); fill: var(--fg-faint); }
+.zz-path { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linejoin: round; }
+/* Chapter 4.4 */
+.packlab .sc-ctl { display: grid; gap: 0.5rem; } .packlab .seg { flex-wrap: wrap; }
+.pk-a { color: #1f6feb; } .pk-b { color: #8250df; }
+.pk-bytes { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; margin: 0.8rem 0; }
+.pk-head { font: 600 0.72rem var(--mono); color: var(--fg-soft); margin-bottom: 0.2rem; }
+.pk-head strong { color: var(--fg); margin-left: 0.3rem; }
+.pk-bits { display: grid; grid-template-columns: repeat(8, min(2rem, calc((100vw - 4rem) / 8))); gap: 1px; background: var(--line); padding: 1px; border-radius: 4px; }
+.pk-bit { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0.15rem 0; font-family: var(--mono); }
+.pk-bit b { font-size: 0.8rem; } .pk-bit small { font-size: 0.55rem; opacity: 0.85; }
+.pk-ba { background: #dbe8fd; color: #0b3d91; } .pk-bb { background: #ebe1fb; color: #4b2190; } .pk-pad { background: var(--bg-sunk); color: var(--fg-faint); }
+/* Chapter 4.5 */
+.goplab .sc-ctl { display: grid; gap: 0.5rem; } .goplab .seg { flex-wrap: wrap; }
+.gl-strip { display: grid; grid-template-columns: repeat(36, 1fr); gap: 2px; height: 5.5rem; margin: 0.8rem 0 0.3rem; }
+.gl-frame { position: relative; border: 0; padding: 0; background: var(--bg-sunk); border-radius: 2px; cursor: pointer; display: flex; align-items: flex-end; min-width: 0; }
+.gl-bar { display: block; width: 100%; border-radius: 2px 2px 0 0; margin-bottom: 1.1rem; }
+.gl-t { position: absolute; bottom: 0.1rem; left: 0; right: 0; text-align: center; font: 600 0.6rem var(--mono); color: var(--fg-soft); }
+.gl-I .gl-bar, .gl-key.gl-I { background: #1f6feb; } .gl-P .gl-bar, .gl-key.gl-P { background: #2da44e; } .gl-B .gl-bar, .gl-key.gl-B { background: #bf8700; }
+.gl-bad { background: #ffd7d5; } .gl-bad .gl-bar { background: #cf222e; }
+.gl-need { background: #cfe3ff; outline: 2px solid var(--accent); outline-offset: -2px; }
+.gl-pick { box-shadow: 0 0 0 2px var(--fg); }
+.gl-legend { font-size: 0.8rem; color: var(--fg-soft); display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; align-items: center; }
+.gl-key { display: inline-block; min-width: 1.2rem; text-align: center; color: #fff; border-radius: 3px; font: 700 0.7rem var(--mono); padding: 0.05rem 0.25rem; }
+@media (max-width: 600px) { .gl-strip { grid-template-columns: repeat(18, 1fr); height: 10.5rem; } }
+/* Chapter 4.6 */
+.bitplanelab .sc-ctl { display: grid; gap: 0.5rem; } .bitplanelab .seg { flex-wrap: wrap; } .bitplanelab .ctl input[type="checkbox"] { accent-color: var(--accent); }
+.bp-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.8rem; margin: 0.8rem 0; }
+.bp-pair canvas { width: 100%; height: auto; image-rendering: pixelated; }
+.bitplanelab .sc-ctl { grid-template-columns: minmax(0, 1fr); } .bitplanelab .seg { min-width: 0; }
+/* Chapter 5.1 */
+.matrixlab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); } .matrixlab .seg { flex-wrap: wrap; min-width: 0; }
+.ml-panels { display: flex; flex-wrap: wrap; gap: 0.8rem 1.4rem; margin: 0.8rem 0; }
+.ml-grid { --cell: 2.6rem; display: grid; grid-template-columns: repeat(var(--cols), var(--cell)); grid-auto-rows: 2rem; gap: 1px; padding: 1px; background: var(--line); border-radius: 4px; width: max-content; max-width: 100%; overflow-x: auto; }
+.ml-cell, .ml-sum { display: flex; align-items: center; justify-content: center; font: 600 0.66rem var(--mono); }
+.ml-out { outline: 2px solid #cf222e; outline-offset: -2px; }
+.ml-sum { background: var(--bg-soft); color: var(--fg-soft); font-weight: 500; }
+/* Chapter 5.2 */
+.transformlab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); } .transformlab .seg { flex-wrap: wrap; min-width: 0; }
+.tl-row { display: flex; flex-wrap: wrap; gap: 1rem 1.5rem; align-items: flex-start; margin: 0.8rem 0; }
+.tl-svg { width: min(320px, 100%); height: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+.tl-grid { stroke: var(--line); stroke-width: 1; } .tl-axis { stroke: var(--fg-faint); stroke-width: 1.2; }
+.tl-lab { font: 600 10px var(--mono); fill: var(--fg-soft); }
+.tl-before { fill: none; stroke: var(--fg-faint); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.tl-after { fill: rgba(31, 111, 235, 0.25); stroke: #1f6feb; stroke-width: 2; } .tl-mirror { fill: rgba(191, 135, 0, 0.3); stroke: #bf8700; }
+.tl-e1 { stroke: #cf222e; stroke-width: 2.5; } .tl-e2 { stroke: #2da44e; stroke-width: 2.5; }
+.tl-info { flex: 1 1 14rem; min-width: 0; }
+.tl-mat { display: grid; grid-template-columns: repeat(2, 5.5rem); gap: 0.3rem 0.8rem; padding: 0.5rem 0.9rem; border-left: 2px solid var(--fg); border-right: 2px solid var(--fg); width: max-content; font: 600 0.9rem var(--mono); }
+.tl-mat span:nth-child(odd) { color: #cf222e; } .tl-mat span:nth-child(even) { color: #2da44e; }
+.tl-cols { font-size: 0.85rem; color: var(--fg-soft); } .tl-c1 { color: #cf222e; } .tl-c2 { color: #2da44e; }
+/* Chapter 5.3 */
+.homographylab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); } .homographylab .seg { flex-wrap: wrap; min-width: 0; }
+.hl-reset { justify-self: start; font: inherit; font-size: 0.8rem; padding: 0.25rem 0.7rem; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); cursor: pointer; }
+.hl-svg { width: 100%; max-width: 560px; height: auto; display: block; margin: 0.8rem 0; touch-action: none; border-radius: 6px; }
+.hl-bg { fill: #5a5a5a; }
+.hl-gridline { fill: none; stroke: #aab4be; stroke-width: 1; } .hl-edge { fill: none; stroke: #f5f7fa; stroke-width: 2.5; }
+.hl-handle { fill: #1f6feb; stroke: #fff; stroke-width: 2; cursor: grab; } .hl-fixed { fill: #bf8700; cursor: default; }
+.hl-lab { font: 600 9px var(--mono); fill: #fff; paint-order: stroke; stroke: #000; stroke-width: 2px; }
+.hl-info { display: flex; flex-wrap: wrap; gap: 0.8rem 1.6rem; align-items: flex-start; }
+.hl-mat { display: grid; grid-template-columns: repeat(3, auto); gap: 0.25rem 1rem; padding: 0.45rem 0.8rem; border-left: 2px solid var(--fg); border-right: 2px solid var(--fg); width: max-content; max-width: 100%; font: 600 0.78rem var(--mono); }
+.hl-last { color: #bf8700; }
+/* Chapter 5.4 */
+.gausslab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); } .gausslab .seg { flex-wrap: wrap; min-width: 0; }
+.gl2-svg { width: 100%; height: auto; display: block; margin: 0.8rem 0; }
+.gl2-band { fill: var(--accent-soft); }
+.gl2-bar { fill: #7a8794; } .gl2-out { fill: #cf222e; }
+.gl2-curve { fill: none; stroke: var(--accent); stroke-width: 2; }
+.gl2-tick { font: 600 10px var(--mono); fill: var(--fg-soft); }
+/* Chapter 5.5 */
+.derivlab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); } .derivlab .seg { flex-wrap: wrap; min-width: 0; }
+.dv-plot { margin: 0.5rem 0; } .dv-plot svg { width: 100%; height: auto; display: block; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; }
+.dv-zero { stroke: var(--fg-faint); stroke-dasharray: 3 3; } .dv-mark { stroke: #bf8700; stroke-width: 1.5; }
+/* Chapter 5.6 */
+.fitlab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); } .fitlab .seg { flex-wrap: wrap; min-width: 0; }
+.fl-svg { width: 100%; max-width: 560px; height: auto; display: block; margin: 0.8rem 0; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+.fl-res { stroke: var(--fg-faint); stroke-width: 1.2; }
+.fl-ols { stroke: #bf8700; stroke-width: 2; stroke-dasharray: 6 4; } .fl-tls { stroke: #1f6feb; stroke-width: 2; } .fl-huber { stroke: #2da44e; stroke-width: 2.5; stroke-dasharray: 2 3; }
+.fl-pt { fill: var(--fg); } .fl-bad { fill: #cf222e; }
+.fl-k { font-weight: 700; } .fl-k-ols { color: #bf8700; } .fl-k-tls { color: #1f6feb; } .fl-k-huber { color: #2da44e; }
+/* Chapter 5.7 */
+.pcalab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); }
+.pc-row { display: flex; flex-wrap: wrap; gap: 1rem 1.5rem; align-items: flex-start; margin: 0.8rem 0; }
+.pc-svg { flex: 1 1 18rem; max-width: 480px; height: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+.pc-info { flex: 1 1 13rem; min-width: 0; }
+.pc-pt { fill: var(--fg-soft); } .pc-stray { fill: #bf8700; }
+.pc-ell { fill: rgba(31, 111, 235, 0.08); stroke: #1f6feb; stroke-width: 1.5; }
+.pc-v1 { stroke: #cf222e; stroke-width: 3; } .pc-v2 { stroke: #2da44e; stroke-width: 3; } .pc-c { fill: var(--fg); }
+.pc-info .tl-mat span { color: var(--fg); }
+/* Chapter 5.8 */
+.bayeslab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); }
+.by-bar { display: flex; height: 1.4rem; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); margin: 0.9rem 0 0.3rem; }
+.by-real { background: #2da44e; } .by-false { background: #cf222e; }
+.by-legend { font-size: 0.82rem; color: var(--fg-soft); display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; align-items: center; }
+.by-k { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 2px; }
+.by-table { margin: 0.8rem 0; font-size: 0.85rem; min-width: 0; width: 100%; }
+.by-table th, .by-table td { padding: 0.35rem 0.5rem; border: 1px solid var(--line); text-align: left; }
+.by-tp { color: #2da44e; font-weight: 700; } .by-fn { color: #bf8700; font-weight: 700; } .by-fp { color: #cf222e; font-weight: 700; }
+/* Chapter 6.1 */
+.arraylab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); } .arraylab .seg { flex-wrap: wrap; min-width: 0; }
+.al-grid { display: grid; gap: 4px; width: max-content; max-width: 100%; margin: 0.4rem 0 0.9rem; }
+.al-px { display: flex; gap: 1px; padding: 2px; background: var(--line); border-radius: 4px; }
+.al-v { border: 0; min-width: 1.9rem; height: 1.9rem; font: 600 0.7rem var(--mono); cursor: pointer; border-radius: 2px; }
+.al-mem { display: flex; flex-wrap: wrap; gap: 1px; margin: 0.4rem 0 0.8rem; }
+.al-cell { height: 1.6rem; display: flex; align-items: center; justify-content: center; font: 500 0.6rem var(--mono); border-radius: 2px; }
+.al-c0 { background: #cfe0fb; color: #0b3d91; } .al-c1 { background: #cdeed6; color: #0f5223; } .al-c2 { background: #f9d0d3; color: #82071e; } .al-cg { background: #e2e6ea; color: #24292f; }
+.al-on { outline: 2.5px solid var(--fg); outline-offset: -2px; font-weight: 800; }
+/* Chapter 6.2 */
+.slicelab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); margin-top: 0.6rem; }
+.sl2-ctls { display: flex; flex-wrap: wrap; gap: 0.6rem 1.4rem; }
+.sl2-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.7rem; font-size: 0.85rem; }
+.sl2-ctl strong { min-width: 2.6rem; font-family: var(--mono); }
+.sl2-f { display: inline-flex; gap: 0.3rem; align-items: center; color: var(--fg-soft); }
+.sl2-f select { font: inherit; font-family: var(--mono); padding: 0.15rem 0.3rem; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); }
+.sl2-wrap { overflow-x: auto; margin: 0.8rem 0; }
+.sl2-grid { display: grid; grid-auto-rows: 2.1rem; gap: 1px; padding: 1px; background: var(--line); border-radius: 4px; width: max-content; }
+.sl2-cell { display: flex; align-items: center; justify-content: center; background: var(--bg); font: 600 0.75rem var(--mono); color: var(--fg-soft); }
+.sl2-sel { background: #cfe0fb; color: #0b3d91; } .sl2-zero { background: #f9d0d3; color: #82071e; }
+/* Chapter 6.3 */
+.overflowlab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); } .overflowlab .seg { flex-wrap: wrap; min-width: 0; }
+.ov-cards { display: flex; flex-wrap: wrap; gap: 0.7rem; margin: 0.9rem 0; }
+.ov-card { flex: 1 1 9rem; border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem 0.6rem; background: var(--bg); }
+.ov-card em { font-size: 0.75rem; color: var(--fg-soft); } .ov-bad { border-color: #cf222e; } .ov-bad em { color: #cf222e; font-weight: 700; }
+.ov-sw { height: 2.6rem; border-radius: 4px; display: flex; align-items: center; justify-content: center; font: 700 1rem var(--mono); border: 1px solid var(--line); margin: 0.3rem 0; }
+.ov-svg { width: 100%; max-width: 520px; height: auto; display: block; }
+.ov-lim { stroke: var(--line); stroke-dasharray: 3 3; } .ov-t { font: 600 9px var(--mono); fill: var(--fg-soft); }
+.ov-exact { fill: none; stroke: #9aa4ae; stroke-width: 3; } .ov-cv { fill: none; stroke: #1f6feb; stroke-width: 2; } .ov-np { fill: none; stroke: #cf222e; stroke-width: 1.5; }
+.ov-a { stroke: var(--fg); stroke-width: 1; stroke-dasharray: 2 2; }
+/* Chapter 6.4 */
+.broadcastlab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); } .broadcastlab .seg { flex-wrap: wrap; min-width: 0; }
+.bc-in { font: 600 0.85rem var(--mono); padding: 0.25rem 0.5rem; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); width: 10rem; }
+.bc-table { display: grid; gap: 4px; margin: 0.9rem 0; width: max-content; max-width: 100%; overflow-x: auto; }
+.bc-lab { font: 600 0.8rem var(--mono); color: var(--fg-soft); align-self: center; }
+.bc-cell { display: flex; align-items: center; justify-content: center; height: 2rem; border-radius: 4px; background: var(--bg-soft); border: 1px solid var(--line); font: 700 0.85rem var(--mono); }
+.bc-none { color: var(--fg-faint); border-style: dashed; } .bc-stretch { background: #fff1c2; color: #6b4a00; } .bc-bad { background: #f9d0d3; color: #82071e; border-color: #cf222e; }
+.bc-res { background: var(--accent-soft); }
+/* Chapter 6.5 */
+.imshowlab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); } .imshowlab .seg { flex-wrap: wrap; min-width: 0; } .imshowlab .ctl input[type="checkbox"] { accent-color: var(--accent); }
+/* Chapter 7.1 */
+.installpicker .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); } .installpicker .seg { flex-wrap: wrap; min-width: 0; }
+.ip-result { margin: 0.9rem 0 0.4rem; }
+.ip-cmd { display: block; padding: 0.6rem 0.8rem; border-radius: 6px; background: var(--bg-sunk); border: 1px solid var(--line); font: 600 0.9rem var(--mono); word-break: break-all; }
+.ip-notes { font-size: 0.86rem; color: var(--fg-soft); margin: 0.4rem 0 0; padding-left: 1.2rem; }
+.installpicker .ctl > span { white-space: normal; min-width: 0; }
+/* Chapter 7.2 */
+.imreadlab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); margin-bottom: 0.8rem; } .imreadlab .seg { flex-wrap: wrap; min-width: 0; }
+/* Chapter 7.3 */
+.co-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 0.8rem 1.2rem; }
+.co-list { display: grid; gap: 4px; margin-top: 0.3rem; }
+.co-item { display: flex; justify-content: space-between; gap: 0.6rem; align-items: center; text-align: left; padding: 0.45rem 0.6rem; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; font-size: 0.82rem; cursor: pointer; }
+.co-item b { font: 700 0.75rem var(--mono); color: var(--fg-soft); } .co-item.is-on { border-color: var(--accent); background: var(--accent-soft); }
+.co-result { display: flex; gap: 1rem; align-items: center; margin: 1rem 0 0.4rem; }
+.co-sw { width: 4.5rem; height: 4.5rem; border-radius: 50%; flex: none; border: 1px solid var(--line); }
+.co-result p { margin: 0.2rem 0 0; font: 600 0.82rem var(--mono); color: var(--fg-soft); word-break: break-word; }
+/* Chapter 7.4 */
+.capturelab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); }
+.cl-svg { width: 100%; max-width: 560px; height: auto; display: block; margin: 0.8rem 0 0.3rem; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+.cl-buf { fill: none; stroke: #cf222e; stroke-width: 2; } .cl-new { fill: none; stroke: #2da44e; stroke-width: 2; }
+/* Chapter 7.5 */
+.drawlab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); } .drawlab .seg { flex-wrap: wrap; min-width: 0; } .drawlab .ctl input[type="checkbox"] { accent-color: var(--accent); }
+.dr-wrap { margin: 0.8rem 0 0.5rem; } .dr-canvas { width: 100%; max-width: 448px; height: auto; display: block; image-rendering: pixelated; border-radius: 4px; }
+/* Chapter 7.6 */
+.tunerlab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); } .tunerlab .ctl input[type="checkbox"] { accent-color: var(--accent); }
+.tu-canvas { cursor: crosshair; touch-action: none; }
+/* Chapter 7.7 */
+.budgetlab .sc-ctl { display: grid; gap: 0.45rem; grid-template-columns: minmax(0, 1fr); }
+.bu-dot { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 2px; vertical-align: -0.05rem; }
+.bu-bar { position: relative; display: flex; height: 1.6rem; margin: 1rem 0 0.3rem; background: var(--bg-sunk); border-radius: 4px; border: 1px solid var(--line); }
+.bu-bar span { display: block; height: 100%; } .bu-bar span:first-child { border-radius: 4px 0 0 4px; }
+.bu-limit { position: absolute; top: -6px; bottom: -6px; width: 2px; background: var(--fg); }
+
+/* Chapter 8.2 */
+.matlab .ml-nav { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.matlab .ml-count { font-size: 0.85rem; color: var(--fg-faint); }
+.matlab .ml-code { list-style: none; margin: 0.6rem 0; padding: 0; counter-reset: ml; }
+.matlab .ml-code li { counter-increment: ml; }
+.matlab .ml-code button { display: flex; gap: 0.5rem; width: 100%; text-align: left; background: none; border: 0; border-left: 3px solid transparent; padding: 0.15rem 0.5rem; cursor: pointer; color: inherit; min-width: 0; }
+.matlab .ml-code button::before { content: counter(ml); color: var(--fg-faint); font-size: 0.75rem; min-width: 1.2rem; }
+.matlab .ml-code code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.82rem; background: none; }
+.matlab .ml-code li.is-cur button { border-left-color: var(--accent); background: var(--accent-soft); }
+.matlab .ml-code li.is-later code { opacity: 0.45; }
+.matlab .ml-mem { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; margin-top: 0.75rem; }
+@media (max-width: 720px) { .matlab .ml-mem { grid-template-columns: minmax(0, 1fr); } }
+.matlab .ml-hdrs { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.4rem; }
+.matlab .ml-hdrs li { border: 1px solid var(--line); border-left-width: 5px; border-radius: 6px; padding: 0.35rem 0.55rem; font-size: 0.85rem; display: flex; gap: 0.5rem; align-items: baseline; }
+.matlab .ml-hdrs li em { font-style: normal; color: var(--fg-faint); overflow-wrap: anywhere; min-width: 0; }
+.matlab .ml-hdrs li.is-empty { opacity: 0.55; border-style: dashed; }
+.matlab .ml-a { border-left-color: var(--t-data) !important; }
+.matlab .ml-b { border-left-color: var(--t-proc) !important; }
+.matlab .ml-c { border-left-color: var(--t-res) !important; }
+.matlab .ml-r { border-left-color: var(--t-world) !important; }
+.matlab .ml-buf { border: 1px solid var(--line); border-radius: 8px; padding: 0.5rem; margin-bottom: 0.6rem; }
+.matlab .ml-buf.is-freed { opacity: 0.45; border-style: dashed; }
+.matlab .ml-buf-h, .matlab .ml-users { font-size: 0.8rem; color: var(--fg-faint); }
+.matlab .ml-grid { display: grid; gap: 2px; margin: 0.4rem 0; max-width: 100%; overflow-x: auto; }
+.matlab .ml-cell { height: 1.8rem; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 0.82rem; background: var(--bg-sunk); border: 1px solid var(--line); border-radius: 3px; }
+.matlab .ml-cell.in-roi { background: var(--t-world-bg); border-color: var(--t-world); }
+
+/* Chapter 8.3 */
+.bindinglab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.bindinglab .seg { flex-wrap: wrap; }
+.bindinglab .bl-call { margin: 0.6rem 0; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font-size: 0.82rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bindinglab .bl-ok { color: var(--ok); }
+.bindinglab .bl-bad { color: var(--bad); }
+.bindinglab .bl-err { border: 1px solid var(--bad); background: var(--bad-soft); border-radius: 8px; padding: 0.55rem 0.7rem; margin-top: 0.5rem; }
+.bindinglab .bl-err code { display: block; font-size: 0.8rem; white-space: pre-wrap; overflow-wrap: anywhere; background: none; }
+.bindinglab .bl-err p { margin: 0.4rem 0 0; font-size: 0.9rem; }
+
+/* Chapter 8.5 */
+.gpulab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.gpulab .seg { flex-wrap: wrap; }
+.gpulab .gp-bars { display: grid; gap: 0.45rem; margin: 0.8rem 0 0.3rem; }
+.gpulab .gp-row { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr) 5.2rem; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+.gpulab .gp-row b { font-family: var(--mono); font-weight: 600; text-align: right; }
+.gpulab .gp-track { display: flex; height: 1.3rem; background: var(--bg-sunk); border-radius: 4px; overflow: hidden; }
+.gpulab .gp-track i { display: block; height: 100%; }
+.gpulab .gp-cpu { background: var(--t-data); }
+.gpulab .gp-up { background: var(--t-world); }
+.gpulab .gp-k { background: var(--t-res); }
+.gpulab .gp-down { background: var(--t-proc); }
+.gpulab .gp-legend i { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 2px; vertical-align: -1px; margin-right: 0.25rem; }
+.gpulab .gp-legend { display: flex; flex-wrap: wrap; gap: 0.8rem; font-size: 0.8rem; color: var(--fg-soft); }
+.gpulab .gp-win { color: var(--ok); }
+.gpulab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.gpulab .ctl-wide span { white-space: normal; }
+.gpulab .ctl-wide input[type="range"] { flex: 1 1 10rem; }
+
+/* Chapter 8.7 */
+.bloblab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.bloblab .seg { flex-wrap: wrap; }
+.bloblab .bb-sw { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 2px; margin-right: 0.35rem; vertical-align: -1px; border: 1px solid var(--line); }
+.bloblab .bb-wrap { overflow-x: auto; margin: 0.6rem 0; }
+.bloblab .bb-table { border-collapse: collapse; font-size: 0.85rem; width: 100%; }
+.bloblab .bb-table th, .bloblab .bb-table td { border: 1px solid var(--line); padding: 0.3rem 0.5rem; text-align: right; font-family: var(--mono); }
+.bloblab .bb-table td:first-child, .bloblab .bb-table th:first-child { text-align: left; font-family: var(--font); }
+.bloblab .bl-ok { color: var(--ok); }
+.bloblab .bl-bad { color: var(--bad); }
+
+/* Chapter 8.8 */
+.graphlab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.graphlab .seg { flex-wrap: wrap; }
+.graphlab .gr-stages { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.graphlab .gr-chip { border: 1px solid var(--line); border-radius: 999px; padding: 0.2rem 0.6rem; font-size: 0.82rem; cursor: pointer; white-space: nowrap; }
+.graphlab .gr-chip.is-on { background: var(--accent-soft); border-color: var(--accent); }
+.graphlab .gr-chip input { margin: 0 0.25rem 0 0; vertical-align: -1px; }
+.graphlab .gr-graph { list-style: none; padding: 0; margin: 0.8rem 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+.graphlab .gr-node { border: 1px solid var(--t-proc-line); background: var(--t-proc-bg); border-radius: 6px; padding: 0.3rem 0.55rem; font-size: 0.82rem; display: flex; flex-direction: column; }
+.graphlab .gr-node em { font-style: normal; color: var(--fg-faint); font-size: 0.72rem; }
+.graphlab .gr-node { position: relative; }
+.graphlab .gr-node + .gr-node { margin-left: 0.9rem; }
+.graphlab .gr-node + .gr-node::before { content: "→"; position: absolute; left: -1.05rem; top: 50%; transform: translateY(-50%); color: var(--fg-faint); }
+.graphlab .gr-in { background: var(--t-world-bg); border-color: var(--t-world-line); }
+.graphlab .gr-red { background: var(--t-res-bg); border-color: var(--t-res-line); }
+.graphlab .gp-bars { display: grid; gap: 0.45rem; margin: 0.6rem 0 0.3rem; }
+.graphlab .gp-row { display: grid; grid-template-columns: 3.2rem minmax(0, 1fr) 5.2rem; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+.graphlab .gp-row b { font-family: var(--mono); font-weight: 600; text-align: right; }
+.graphlab .gp-track { display: flex; height: 1.2rem; background: var(--bg-sunk); border-radius: 4px; overflow: hidden; }
+.graphlab .gp-track i { display: block; height: 100%; }
+.graphlab .gr-e { background: var(--t-world); }
+.graphlab .gr-f { background: var(--t-res); }
+.graphlab .bl-call { margin: 0.6rem 0; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font-size: 0.78rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Chapter 8.9 */
+.jsmemlab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.jsmemlab .seg { flex-wrap: wrap; }
+.jsmemlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.jsmemlab .ctl-wide span { white-space: normal; }
+.jsmemlab .jm-heap { height: 1.4rem; background: var(--bg-sunk); border-radius: 5px; overflow: hidden; margin-top: 0.8rem; border: 1px solid var(--line); }
+.jsmemlab .jm-heap i { display: block; height: 100%; background: var(--t-data); transition: width 0.2s; }
+.jsmemlab .jm-heap i.is-over { background: var(--bad); }
+.jsmemlab .jm-scale { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--fg-faint); margin-bottom: 0.4rem; }
+.jsmemlab .bl-bad { color: var(--bad); }
+
+/* Chapter 8.10 */
+.versionlab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.versionlab .vs-pkg code { display: block; margin: 0.6rem 0; padding: 0.45rem 0.7rem; background: var(--code-bg); border-radius: 6px; font-size: 0.82rem; overflow-wrap: anywhere; }
+.versionlab .vs-list { list-style: none; padding: 0; margin: 0.4rem 0; display: grid; gap: 0.3rem; }
+.versionlab .vs-list li { border: 1px solid var(--line); border-radius: 6px; padding: 0.35rem 0.55rem; font-size: 0.86rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.6rem; }
+.versionlab .vs-list li:not(.is-used) { opacity: 0.7; }
+.versionlab .vs-list label { cursor: pointer; flex: 1 1 14rem; min-width: 0; }
+.versionlab .vs-list em { flex-basis: 100%; font-style: normal; color: var(--fg-soft); font-size: 0.8rem; }
+.versionlab .vs-st { font-size: 0.75rem; font-weight: 650; border-radius: 999px; padding: 0.1rem 0.5rem; }
+.versionlab .vs-ok { background: var(--ok-soft); color: var(--ok); }
+.versionlab .vs-contrib { background: var(--bad-soft); color: var(--bad); }
+.versionlab .vs-check { background: var(--warn-soft); color: var(--warn); }
+.versionlab .vs-missing { background: var(--bad-soft); color: var(--bad); }
+.versionlab .bl-bad { color: var(--bad); }
+
+/* Chapter 9.1 */
+.acuitylab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.acuitylab .seg { flex-wrap: wrap; }
+.acuitylab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.acuitylab .ctl-wide span { white-space: normal; }
+.acuitylab .ac-scale { position: relative; margin: 1rem 0.4rem 1.6rem; }
+.acuitylab .ac-zones { display: flex; height: 0.9rem; border-radius: 4px; overflow: hidden; }
+.acuitylab .ac-zones i { display: block; height: 100%; }
+.acuitylab .ac-zones .z0 { background: var(--bad-soft); }
+.acuitylab .ac-zones .z1 { background: var(--warn-soft); }
+.acuitylab .ac-zones .z2 { background: var(--ok-soft); flex: 1; }
+.acuitylab .ac-scale b { position: absolute; top: -0.3rem; width: 3px; height: 1.5rem; margin-left: -1.5px; background: var(--fg); border-radius: 2px; }
+.acuitylab .ac-ticks { position: relative; height: 1rem; font-size: 0.72rem; color: var(--fg-faint); }
+.acuitylab .ac-ticks span { position: absolute; transform: translateX(-50%); top: 0.2rem; }
+.acuitylab .ac-ticks span:first-child { transform: none; }
+.acuitylab .ac-ticks span:last-child { transform: translateX(-100%); }
+.acuitylab .ac-invisible { color: var(--bad) !important; }
+.acuitylab .ac-limit { color: var(--warn) !important; }
+.acuitylab .ac-visible { color: var(--ok) !important; }
+
+/* Chapter 9.2 */
+.weberlab .wb-patch { height: 9rem; border-radius: 8px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); margin-bottom: 0.7rem; }
+.weberlab .wb-patch i { display: block; width: 3rem; height: 3rem; border-radius: 4px; }
+.weberlab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.weberlab .seg { flex-wrap: wrap; }
+.weberlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.weberlab .ctl-wide span { white-space: normal; }
+.weberlab .wb-ok { color: var(--ok); }
+.weberlab .wb-bad { color: var(--bad); }
+.weberlab .wb-ramp { display: flex; height: 2rem; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); margin: 0.3rem 0 0.8rem; }
+.weberlab .wb-ramp i { flex: 1; display: block; }
+.weberlab .wb-warn { color: var(--warn); }
+
+/* Chapter 9.3 */
+.contrastlab .cl-sim { position: relative; display: grid; grid-template-columns: 1fr 1fr; height: 9rem; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); margin: 0.4rem 0 0.7rem; }
+.contrastlab .cl-sim > div { display: flex; align-items: center; justify-content: center; }
+.contrastlab .cl-sim i { display: block; width: 3.2rem; height: 3.2rem; }
+.contrastlab .cl-sim b { position: absolute; top: calc(50% - 0.35rem); left: 25%; width: 50%; height: 0.7rem; }
+.contrastlab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.contrastlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.contrastlab .cl-stair { display: flex; height: 4rem; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); margin-top: 0.4rem; }
+.contrastlab .cl-stair i { flex: 1; display: block; }
+.contrastlab .cl-plot { width: 100%; height: auto; display: block; margin: 0.3rem 0; background: var(--bg-soft); border-radius: 6px; }
+.contrastlab .cl-phys { fill: none; stroke: var(--fg-faint); stroke-width: 1.5; }
+.contrastlab .cl-perc { fill: none; stroke: var(--accent); stroke-width: 1.8; }
+.contrastlab .cl-legend { display: flex; flex-wrap: wrap; gap: 0.8rem; font-size: 0.8rem; color: var(--fg-soft); }
+.contrastlab .cl-legend i { display: inline-block; width: 1rem; height: 0.2rem; vertical-align: middle; margin-right: 0.3rem; }
+.contrastlab .cl-k1 { background: var(--fg-faint); }
+.contrastlab .cl-k2 { background: var(--accent); }
+
+/* Chapter 9.4 */
+.cvdlab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.cvdlab .seg { flex-wrap: wrap; }
+.cvdlab .cv-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 0.45rem; padding: 0.8rem; background: #6b6f73; border-radius: 8px; margin: 0.7rem 0; }
+.cvdlab .cv-part { aspect-ratio: 1; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 1.1rem; text-shadow: 0 0 3px #000; }
+.cvdlab .cv-s0 { border-radius: 3px; }
+.cvdlab .cv-s2 { clip-path: polygon(50% 0, 100% 100%, 0 100%); border-radius: 0; align-items: flex-end; padding-bottom: 12%; }
+.cvdlab .cv-sw { display: inline-block; width: 0.9rem; height: 0.9rem; border-radius: 2px; vertical-align: -1px; margin-right: 0.3rem; border: 1px solid var(--line); }
+.cvdlab .cv-ok { color: var(--ok); }
+.cvdlab .cv-warn { color: var(--warn); }
+.cvdlab .cv-bad { color: var(--bad); }
+@media (max-width: 520px) { .cvdlab .cv-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+/* Chapter 9.5 */
+.colormaplab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.colormaplab .seg { flex-wrap: wrap; }
+.colormaplab .cm-canvas { display: block; width: 100%; height: auto; image-rendering: auto; border-radius: 6px; margin-top: 0.7rem; border: 1px solid var(--line); }
+.colormaplab .cm-bar { display: flex; height: 0.9rem; border-radius: 4px; overflow: hidden; margin: 0.4rem 0; }
+.colormaplab .cm-bar i { flex: 1; display: block; }
+.colormaplab .cm-plot { width: 100%; height: auto; display: block; background: var(--bg-soft); border-radius: 6px; }
+.colormaplab .cm-ideal { stroke: var(--fg-faint); stroke-dasharray: 4 4; stroke-width: 1; }
+.colormaplab .cm-L { fill: none; stroke: var(--accent); stroke-width: 2; }
+.colormaplab .cm-legend { display: flex; flex-wrap: wrap; gap: 0.8rem; font-size: 0.8rem; color: var(--fg-soft); }
+.colormaplab .cm-legend i { display: inline-block; width: 1rem; height: 0.2rem; vertical-align: middle; margin-right: 0.3rem; }
+.colormaplab .cm-legend .k1 { background: var(--accent); }
+.colormaplab .cm-legend .k2 { background: var(--fg-faint); }
+.colormaplab .cm-ok { color: var(--ok); }
+.colormaplab .cm-bad { color: var(--bad); }
+
+/* Chapter 10.1 */
+.chromalab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.chromalab .seg { flex-wrap: wrap; }
+.chromalab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.chromalab .ch-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin: 0.7rem 0; }
+.chromalab .ch-sw { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; color: var(--fg-soft); }
+.chromalab .ch-sw i { display: block; height: 4rem; border-radius: 6px; border: 1px solid var(--line); }
+.chromalab .ch-ok { color: var(--ok); }
+.chromalab .ch-bad { color: var(--bad); }
+
+/* Chapter 10.2 */
+.hsvlab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.hsvlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.hsvlab .hv-strip { position: relative; display: flex; height: 1.4rem; border-radius: 5px; overflow: visible; }
+.hsvlab .hv-strip i { flex: 1; display: block; }
+.hsvlab .hv-strip b { position: absolute; top: -0.25rem; width: 3px; height: 1.9rem; margin-left: -1.5px; background: var(--fg); border-radius: 2px; }
+.hsvlab .hv-scale { display: flex; justify-content: space-between; font-size: 0.68rem; color: var(--fg-faint); margin: 0.2rem 0 0.6rem; flex-wrap: wrap; gap: 0 0.3rem; }
+.hsvlab .ch-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin: 0.7rem 0; }
+.hsvlab .ch-sw { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; color: var(--fg-soft); }
+.hsvlab .ch-sw i { display: block; height: 4rem; border-radius: 6px; border: 1px solid var(--line); }
+.hsvlab .hv-ok { color: var(--ok); }
+.hsvlab .hv-bad { color: var(--bad); }
+
+/* Chapter 10.3 */
+.deltaelab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.deltaelab .seg { flex-wrap: wrap; }
+.deltaelab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.deltaelab .de-sw { display: grid; grid-template-columns: 1fr 1fr; height: 7rem; border-radius: 8px; overflow: hidden; margin: 0.7rem 0; border: 1px solid var(--line); }
+.deltaelab .de-sw div { display: flex; align-items: flex-end; padding: 0.4rem; }
+.deltaelab .de-sw span { font-size: 0.72rem; background: rgba(0, 0, 0, 0.55); color: #fff; padding: 0.1rem 0.35rem; border-radius: 3px; }
+.deltaelab .de-ok { color: var(--ok); }
+.deltaelab .de-bad { color: var(--bad); }
+
+/* Chapter 10.4 */
+.ycclab .yc-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 15rem); gap: 1rem; align-items: center; }
+@media (max-width: 640px) { .ycclab .yc-top { grid-template-columns: minmax(0, 1fr); } }
+.ycclab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.ycclab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.ycclab .yc-plot { width: 100%; max-width: 15rem; height: auto; justify-self: center; }
+.ycclab .yc-frame { fill: var(--bg-soft); stroke: var(--line); }
+.ycclab .yc-axis { stroke: var(--fg-faint); stroke-dasharray: 3 3; }
+.ycclab .yc-ray { stroke: var(--fg-soft); stroke-width: 1.5; }
+.ycclab .yc-pt { stroke: var(--fg); stroke-width: 1.5; }
+.ycclab .yc-lab { font-size: 11px; fill: var(--fg-soft); }
+.ycclab .yc-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.5rem; margin: 0.7rem 0; }
+@media (max-width: 520px) { .ycclab .yc-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ycclab .yc-tiles div { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.75rem; color: var(--fg-soft); }
+.ycclab .yc-tiles i { display: block; height: 3rem; border-radius: 6px; border: 1px solid var(--line); }
+
+/* Chapter 10.5 */
+.graylab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.graylab .seg { flex-wrap: wrap; }
+.graylab .gy-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin: 0.7rem 0; }
+.graylab .gy-tile { height: 6rem; border-radius: 8px; display: flex; align-items: center; justify-content: center; font: 800 clamp(1.1rem, 4vw, 1.8rem) var(--mono); letter-spacing: 0.05em; border: 1px solid var(--line); }
+.graylab .gy-ok { color: var(--ok); }
+.graylab .gy-bad { color: var(--bad); }
+
+/* Chapter 10.6 */
+.wblab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.wblab .seg { flex-wrap: wrap; }
+.wblab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.wblab .wb-scene { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.5rem; padding: 0.8rem; border-radius: 8px; margin: 0.7rem 0; background: #2a2a2a; }
+@media (max-width: 520px) { .wblab .wb-scene { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.wblab .wb-patch { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.7rem; color: #fff; text-shadow: 0 0 3px #000; }
+.wblab .wb-patch i { display: block; height: 3.2rem; border-radius: 5px; }
+.wblab .wb-ok { color: var(--ok); }
+.wblab .wb-warn { color: var(--warn); }
+.wblab .wb-bad { color: var(--bad); }
+
+/* Chapter 10.7 */
+.inrangelab .ir-canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; border-radius: 6px; border: 1px solid var(--line); }
+.inrangelab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-top: 0.6rem; }
+.inrangelab .seg { flex-wrap: wrap; }
+.inrangelab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.inrangelab .ir-hits { list-style: none; padding: 0; margin: 0.6rem 0; display: grid; gap: 0.3rem; }
+.inrangelab .ir-hits li { display: grid; grid-template-columns: 0.9rem 8.5rem minmax(0, 1fr) 2.8rem; align-items: center; gap: 0.4rem; font-size: 0.8rem; }
+.inrangelab .ir-hits i { width: 0.9rem; height: 0.9rem; border-radius: 2px; border: 1px solid var(--line); }
+.inrangelab .ir-hits b { display: block; height: 0.6rem; background: #c03fc0; border-radius: 3px; min-width: 1px; }
+.inrangelab .ir-hits em { font-style: normal; text-align: right; font-family: var(--mono); }
+
+/* Chapter 11.1 (CurveLab, used through Module 11) */
+.curvelab .seg { flex-wrap: wrap; }
+.curvelab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin: 0.4rem 0; }
+.curvelab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.curvelab .cv-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 13rem) minmax(0, 1fr); gap: 0.8rem; align-items: center; margin-top: 0.5rem; }
+@media (max-width: 640px) { .curvelab .cv-grid { grid-template-columns: minmax(0, 1fr); } }
+.curvelab .cv-img { display: block; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); }
+.curvelab .cv-curve { width: 100%; max-width: 13rem; justify-self: center; }
+.curvelab .cv-frame { fill: var(--bg-soft); stroke: var(--line); }
+.curvelab .cv-diag { stroke: var(--fg-faint); stroke-dasharray: 4 4; }
+.curvelab .cv-line { fill: none; stroke: var(--accent); stroke-width: 3; }
+.curvelab .cv-lab { font-size: 13px; fill: var(--fg-soft); }
+.curvelab .cv-hist { margin: 0.3rem 0 0; }
+.curvelab .cv-hist svg { display: block; width: 100%; height: 2.6rem; background: var(--bg-soft); border-radius: 4px; }
+.curvelab .cv-hist path { stroke: var(--fg-soft); stroke-width: 1; }
+.curvelab .cv-hist figcaption { font-size: 0.72rem; color: var(--fg-faint); }
+
+/* Chapter 12.1 (HistLab, used through Module 12) */
+.histlab .seg { flex-wrap: wrap; }
+.histlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin: 0.4rem 0; }
+.histlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.histlab .hl-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.8rem; margin-top: 0.5rem; }
+@media (max-width: 560px) { .histlab .hl-grid { grid-template-columns: minmax(0, 1fr); } }
+.histlab .hl-img { display: block; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); }
+.histlab .hl-plot { margin: 0.3rem 0 0; }
+.histlab .hl-plot svg { display: block; width: 100%; height: 4rem; background: var(--bg-soft); border-radius: 4px; }
+.histlab .hl-bars { stroke: var(--fg-faint); stroke-width: 1; }
+.histlab .hl-cdf { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.histlab .hl-plot figcaption { font-size: 0.74rem; color: var(--fg-soft); }
+.histlab .hl-grid.is-single { grid-template-columns: minmax(0, 1fr); max-width: 30rem; }
+.histlab .hl-grid.is-single .hl-out { display: none; }
+
+/* Chapter 12.5 (BackProjLab, also 12.6) */
+.backprojlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.backprojlab .seg { flex-wrap: wrap; }
+.backprojlab .seg button { white-space: normal; }
+.backprojlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.backprojlab .bj-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: 0.8rem; align-items: start; }
+.backprojlab .bj-img { display: block; width: 100%; height: auto; image-rendering: pixelated; border-radius: 6px; border: 1px solid var(--line); }
+.backprojlab .bj-hist { display: block; width: 100%; height: auto; }
+.backprojlab .bj-hframe { fill: var(--bg-sunk); stroke: var(--line); }
+.backprojlab .bj-sel { stroke: var(--fg); stroke-width: 2; }
+.backprojlab .bj-cap { margin: 0.3rem 0 0; font-size: 0.78rem; color: var(--fg-soft); }
+.backprojlab .ir-hits { list-style: none; padding: 0; margin: 0.6rem 0; display: grid; gap: 0.3rem; }
+.backprojlab .ir-hits li { display: grid; grid-template-columns: 0.9rem 8.5rem minmax(0, 1fr) 2.8rem; align-items: center; gap: 0.4rem; font-size: 0.8rem; }
+.backprojlab .ir-hits i { width: 0.9rem; height: 0.9rem; border-radius: 2px; border: 1px solid var(--line); }
+.backprojlab .ir-hits b { display: block; height: 0.6rem; background: #c03fc0; border-radius: 3px; min-width: 1px; }
+.backprojlab .ir-hits em { font-style: normal; text-align: right; font-family: var(--mono); }
+
+/* Chapter 13.1 (ThreshLab, used through Module 13) */
+.threshlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.threshlab .seg { flex-wrap: wrap; }
+.threshlab .seg button { white-space: normal; }
+.threshlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.threshlab .th-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 0.8rem; }
+.threshlab .th-img { display: block; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); }
+.threshlab .th-cap { margin: 0.3rem 0 0; font-size: 0.78rem; color: var(--fg-soft); }
+.threshlab .th-fp { color: #d03030; }
+.threshlab .th-fn { color: #2f6ee0; }
+.threshlab .th-hist { margin: 0.6rem 0 0; }
+.threshlab .th-hist svg { display: block; width: 100%; height: 3.4rem; background: var(--bg-soft); border-radius: 4px; }
+.threshlab .th-bars { stroke: var(--fg-soft); stroke-width: 1; }
+.threshlab .th-t { stroke: var(--accent); stroke-width: 2; }
+.threshlab .th-t2 { stroke: var(--warn); stroke-width: 2; stroke-dasharray: 3 2; }
+.threshlab .th-hist figcaption { font-size: 0.78rem; color: var(--fg-soft); margin-top: 0.2rem; }
+.threshlab .th-stats { margin-top: 0.6rem; font-size: 0.85rem; }
+.threshlab .th-stats b { font-family: var(--mono); }
+
+/* Chapter 14.1 (MaskLab, also 14.2) */
+.masklab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.masklab .seg { flex-wrap: wrap; }
+.masklab .seg button { white-space: normal; }
+.masklab .mk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 0.8rem; }
+.masklab .mk-img { display: block; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); image-rendering: pixelated; }
+.masklab .mk-cap { margin: 0.3rem 0 0; font-size: 0.78rem; color: var(--fg-soft); }
+.masklab .mk-stats { margin-top: 0.6rem; font-size: 0.85rem; }
+.masklab .mk-stats b { font-family: var(--mono); }
+.masklab .mk-code { margin: 0.6rem 0 0; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font: 0.78rem/1.4 var(--mono); white-space: pre-wrap; word-break: break-word; }
+
+/* Chapter 14.3 (ArithLab) */
+.arithlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.arithlab .seg { flex-wrap: wrap; }
+.arithlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.arithlab .ar-check { font-size: 0.85rem; display: flex; gap: 0.4rem; align-items: center; }
+.arithlab .ar-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 0.8rem; }
+.arithlab .ar-img { display: block; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); }
+.arithlab .ar-cap { margin: 0.3rem 0 0; font-size: 0.78rem; color: var(--fg-soft); overflow-wrap: anywhere; }
+.arithlab .ar-stats { margin-top: 0.6rem; font-size: 0.85rem; }
+.arithlab .ar-stats b { font-family: var(--mono); }
+
+/* Chapter 14.4 (BlendLab) */
+.blendlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.blendlab .seg { flex-wrap: wrap; }
+.blendlab .seg button { white-space: normal; }
+.blendlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.blendlab .bd-check { font-size: 0.85rem; display: flex; gap: 0.4rem; align-items: center; }
+.blendlab .bd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 0.8rem; }
+.blendlab .bd-img { display: block; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); }
+.blendlab .bd-cap { margin: 0.3rem 0 0; font-size: 0.78rem; color: var(--fg-soft); }
+.blendlab .bd-code { margin: 0.6rem 0 0; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font: 0.78rem/1.4 var(--mono); white-space: pre-wrap; word-break: break-word; }
+
+/* Chapter 14.5 (DiffLab) */
+.difflab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.difflab .seg { flex-wrap: wrap; }
+.difflab .seg button { white-space: normal; }
+.difflab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.difflab .hl-reset { justify-self: start; }
+.difflab .fd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 0.8rem; }
+.difflab .fd-img { display: block; width: 100%; height: auto; image-rendering: pixelated; border-radius: 6px; border: 1px solid var(--line); }
+.difflab .fd-cap { margin: 0.3rem 0 0; font-size: 0.78rem; color: var(--fg-soft); }
+.difflab .fd-fp { color: #d03030; }
+.difflab .fd-fn { color: #2f6ee0; }
+.difflab .fd-stats { margin-top: 0.6rem; font-size: 0.85rem; }
+.difflab .fd-stats b { font-family: var(--mono); }
+
+/* Chapter 15.1 (PipeLab, used through Module 15) */
+.pipelab .seg { flex-wrap: wrap; }
+.pipelab .seg button { white-space: normal; }
+.pipelab .pq-steps { list-style: decimal; margin: 0.6rem 0; padding-left: 1.6rem; display: grid; gap: 0.3rem; }
+.pipelab .pq-steps li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.4rem; padding: 0.25rem 0.5rem; border: 1px solid var(--line); border-radius: 6px; font-size: 0.85rem; color: var(--fg-faint); }
+.pipelab .pq-steps li.is-on { color: var(--fg); background: var(--accent-soft); }
+.pipelab .pq-steps label { display: flex; gap: 0.4rem; align-items: center; }
+.pipelab .pq-move button { font: inherit; padding: 0 0.45rem; margin-left: 0.2rem; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); cursor: pointer; }
+.pipelab .pq-move button:disabled { opacity: 0.35; cursor: default; }
+.pipelab .pq-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 11rem), 1fr)); gap: 0.6rem; }
+.pipelab .pq-stage { margin: 0; }
+.pipelab .pq-img { display: block; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); }
+.pipelab .pq-stage figcaption { font-size: 0.75rem; color: var(--fg-soft); margin-top: 0.2rem; }
+.pipelab .pq-stats { margin-top: 0.6rem; font-size: 0.85rem; }
+.pipelab .pq-stats b { font-family: var(--mono); }
+.pipelab .pq-code { margin: 0.6rem 0 0; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font: 0.78rem/1.4 var(--mono); white-space: pre-wrap; word-break: break-word; }
+
+/* Chapter 15.3 (IllumLab) */
+.illumlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.illumlab .seg { flex-wrap: wrap; }
+.illumlab .seg button { white-space: normal; }
+.illumlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.illumlab .ic-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 0.6rem; }
+.illumlab .ic-stage { margin: 0; }
+.illumlab .ic-img { display: block; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); }
+.illumlab .ic-stage figcaption { font-size: 0.75rem; color: var(--fg-soft); margin-top: 0.2rem; }
+.illumlab .ic-prof { margin: 0.6rem 0 0; }
+.illumlab .ic-prof svg { display: block; width: 100%; height: 6rem; background: var(--bg-soft); border-radius: 4px; }
+.illumlab .ic-prof path { fill: none; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.illumlab .ic-raw { stroke: var(--fg-faint); }
+.illumlab .ic-bg { stroke: var(--warn); stroke-width: 2; }
+.illumlab .ic-out { stroke: var(--accent); }
+.illumlab .ic-k-raw { color: var(--fg-faint); } .illumlab .ic-k-bg { color: var(--warn); } .illumlab .ic-k-out { color: var(--accent); }
+.illumlab .ic-prof figcaption { font-size: 0.78rem; color: var(--fg-soft); margin-top: 0.2rem; }
+.illumlab .ic-stats { margin-top: 0.6rem; font-size: 0.85rem; }
+.illumlab .ic-stats b { font-family: var(--mono); }
+
+/* Chapter 15.4 (OcrLab) */
+.ocrlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.ocrlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.ocrlab .hl-reset { justify-self: start; }
+.ocrlab .oc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 0.8rem; }
+.ocrlab .oc-pair { display: grid; grid-template-columns: minmax(0, 1fr) 4rem; gap: 0.4rem; align-items: start; }
+.ocrlab .oc-stage { margin: 0; }
+.ocrlab .oc-img { display: block; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); }
+.ocrlab .oc-stage figcaption, .ocrlab .oc-prof figcaption { font-size: 0.72rem; color: var(--fg-soft); margin-top: 0.2rem; }
+.ocrlab .oc-prof { margin: 0; }
+.ocrlab .oc-prof svg { display: block; width: 100%; aspect-ratio: 64 / 200; background: var(--bg-soft); border-radius: 4px; }
+.ocrlab .oc-prof path { stroke: var(--accent); stroke-width: 1; vector-effect: non-scaling-stroke; }
+
+/* Chapter 15.5 (LetterboxLab) */
+.letterboxlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.letterboxlab .seg { flex-wrap: wrap; }
+.letterboxlab .seg button { white-space: normal; }
+.letterboxlab .lx-grid { display: grid; grid-template-columns: minmax(0, 16rem) minmax(0, 1fr); gap: 1rem; align-items: start; }
+@media (max-width: 640px) { .letterboxlab .lx-grid { grid-template-columns: minmax(0, 1fr); } }
+.letterboxlab .lx-img { display: block; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); }
+.letterboxlab .lx-info { font-size: 0.85rem; min-width: 0; }
+.letterboxlab .lx-info p { margin: 0 0 0.4rem; overflow-wrap: anywhere; }
+.letterboxlab .lx-bad { color: var(--bad); }
+.letterboxlab .lx-code { margin: 0.4rem 0 0; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font: 0.75rem/1.4 var(--mono); white-space: pre-wrap; word-break: break-word; }
+
+/* Chapter 15.6 (AugLab) */
+.auglab .ag-toggles { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; font-size: 0.85rem; margin-bottom: 0.4rem; }
+.auglab .ag-toggles label { display: flex; gap: 0.3rem; align-items: center; }
+.auglab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.auglab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.auglab .hl-reset { justify-self: start; }
+.auglab .ag-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 9rem), 1fr)); gap: 0.5rem; }
+.auglab .ag-img { display: block; width: 100%; height: auto; border-radius: 4px; border: 1px solid var(--line); }
+.auglab .ag-note { font-size: 0.78rem; color: var(--fg-soft); margin: 0.5rem 0 0; }
+
+/* Chapter 16.1 (WarpLab, also 16.2) */
+.warplab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.warplab .seg { flex-wrap: wrap; }
+.warplab .seg button { white-space: normal; }
+.warplab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.warplab .wp-out { overflow: auto; max-width: 100%; background: var(--bg-sunk); border-radius: 6px; padding: 0.4rem; }
+.warplab .wp-img { display: block; max-width: 100%; height: auto; margin: 0 auto; image-rendering: pixelated; }
+.warplab .wp-mat { margin: 0.6rem 0 0; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font: 0.78rem/1.4 var(--mono); white-space: pre-wrap; word-break: break-word; }
+
+/* Chapter 16.3 (RectifyLab) */
+.rectifylab .seg { flex-wrap: wrap; }
+.rectifylab .seg button { white-space: normal; }
+.rectifylab .rf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 0.8rem; margin-top: 0.6rem; }
+.rectifylab .rf-img { display: block; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); touch-action: none; cursor: crosshair; }
+.rectifylab .rf-out { display: block; width: 100%; max-width: 24rem; height: auto; border-radius: 6px; border: 1px solid var(--line); }
+.rectifylab .rf-cap { margin: 0.3rem 0; font-size: 0.78rem; color: var(--fg-soft); }
+.rectifylab .rf-mat { margin: 0.4rem 0 0; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font: 0.75rem/1.4 var(--mono); white-space: pre-wrap; word-break: break-word; }
+
+/* Chapter 16.4 (InterpLab) */
+.interplab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.interplab .seg { flex-wrap: wrap; }
+.interplab .seg button { white-space: normal; }
+.interplab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.interplab .it-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: 0.6rem; }
+.interplab .it-panel { margin: 0; }
+.interplab .it-img { display: block; width: 100%; height: auto; image-rendering: pixelated; border-radius: 4px; border: 1px solid var(--line); }
+.interplab .it-prof { display: block; width: 100%; height: 3.2rem; margin-top: 0.3rem; background: var(--bg-soft); border-radius: 4px; }
+.interplab .it-prof path { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.interplab .it-prof line { stroke: var(--line); stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.interplab .it-panel figcaption { font-size: 0.75rem; color: var(--fg-soft); margin-top: 0.2rem; }
+.interplab .it-note { font-size: 0.78rem; color: var(--fg-soft); margin: 0.5rem 0 0; }
+
+/* Chapter 16.5 (PolarLab) */
+.polarlab .pz-grid { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); gap: 1rem; align-items: start; }
+@media (max-width: 640px) { .polarlab .pz-grid { grid-template-columns: minmax(0, 1fr); } }
+.polarlab .pz-in { display: block; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--line); }
+.polarlab .sc-ctl { grid-template-columns: minmax(0, 1fr); }
+.polarlab .seg { flex-wrap: wrap; }
+.polarlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.polarlab .pz-code { margin: 0.3rem 0 0; padding: 0.5rem 0.7rem; background: var(--code-bg); border-radius: 6px; font: 0.75rem/1.4 var(--mono); white-space: pre-wrap; word-break: break-word; }
+.polarlab .pz-strip { margin-top: 0.6rem; overflow-x: auto; }
+.polarlab .pz-out { display: block; width: 100%; height: auto; border-radius: 4px; border: 1px solid var(--line); }
+.polarlab .pz-cap { font-size: 0.78rem; color: var(--fg-soft); margin: 0.3rem 0 0; }
+
+/* Chapter 17.1 (ConvLab, used through Module 17) */
+.convlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.convlab .seg { flex-wrap: wrap; }
+.convlab .seg button { white-space: normal; }
+.convlab .kc-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
+@media (max-width: 640px) { .convlab .kc-grid { grid-template-columns: minmax(0, 1fr); } }
+.convlab .kc-mat, .convlab .kc-res { display: grid; gap: 2px; }
+.convlab .kc-cell, .convlab .kc-res span { aspect-ratio: 1; border: 0; padding: 0; border-radius: 3px; font: 600 0.62rem var(--mono); display: flex; align-items: center; justify-content: center; min-width: 0; overflow: hidden; }
+.convlab .kc-cell { cursor: pointer; }
+.convlab .kc-pad { opacity: 0.45; cursor: default; }
+.convlab .kc-win { outline: 2px solid var(--accent); outline-offset: -2px; }
+.convlab .kc-sel { outline: 3px solid #ff00ff; outline-offset: -3px; }
+.convlab .kc-k { display: grid; grid-template-columns: repeat(3, minmax(0, 4rem)); gap: 3px; }
+.convlab .kc-k span, .convlab .kc-k input { font: 600 0.85rem var(--mono); text-align: center; padding: 0.35rem 0; border: 1px solid var(--line); border-radius: 4px; background: var(--bg-soft); color: var(--fg); min-width: 0; width: 100%; }
+.convlab .kc-sum { font: 0.78rem/1.5 var(--mono); overflow-wrap: anywhere; margin: 0.6rem 0 0; }
+.convlab .kc-out { margin-top: 0.8rem; max-width: 22rem; }
+.convlab .kc-cap { font-size: 0.75rem; color: var(--fg-soft); margin: 0.3rem 0 0; }
+.convlab .kc-real { margin-top: 0.8rem; }
+.convlab .kc-img { display: block; width: 100%; max-width: 30rem; height: auto; border-radius: 6px; border: 1px solid var(--line); }
+.convlab .kc-check { font-size: 0.8rem; display: flex; gap: 0.4rem; align-items: center; margin-top: 0.3rem; }
+
+/* Chapter 17.4 (SepLab) */
+.seplab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.seplab .seg { flex-wrap: wrap; }
+.seplab .seg button { white-space: normal; }
+.seplab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.seplab .sp-grid { display: grid; grid-template-columns: minmax(0, 18rem) minmax(0, 1fr); gap: 1rem; align-items: start; }
+@media (max-width: 640px) { .seplab .sp-grid { grid-template-columns: minmax(0, 1fr); } }
+.seplab .sp-mat { display: grid; gap: 2px; }
+.seplab .sp-mat span { aspect-ratio: 1; border-radius: 2px; font: 600 0.55rem var(--mono); display: flex; align-items: center; justify-content: center; overflow: hidden; color: var(--fg); min-width: 0; }
+.seplab .sp-info { font-size: 0.85rem; min-width: 0; }
+.seplab .sp-info p { margin: 0 0 0.4rem; }
+.seplab .sp-bars { display: grid; gap: 2px; margin-bottom: 0.5rem; }
+.seplab .sp-bars div { display: grid; grid-template-columns: minmax(0, 1fr) 4rem; align-items: center; gap: 0.4rem; }
+.seplab .sp-bars b { display: block; height: 0.5rem; background: var(--accent); border-radius: 2px; min-width: 1px; }
+.seplab .sp-bars em { font: normal 0.72rem var(--mono); text-align: right; }
+.seplab .sp-ok { color: var(--ok); } .seplab .sp-bad { color: var(--bad); }
+.seplab .sp-vec { font: 0.75rem/1.4 var(--mono); overflow-wrap: anywhere; }
+.seplab .sp-cost { color: var(--fg-soft); }
+
+/* Chapter 17.5 (IntegralLab) */
+.integrallab .sc-ctl { grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); margin-bottom: 0.6rem; }
+.integrallab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.integrallab .sa-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 1rem; }
+.integrallab .sa-mat { display: grid; gap: 2px; max-width: 20rem; }
+.integrallab .sa-mat span { position: relative; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; border-radius: 3px; background: var(--bg-soft); border: 1px solid var(--line); font: 600 0.75rem var(--mono); min-width: 0; }
+.integrallab .sa-mat span.is-in { background: var(--accent-soft); border-color: var(--accent); }
+.integrallab .sa-mat span.is-zero { color: var(--fg-faint); }
+.integrallab .sa-mat span.is-D { background: #16a34a; color: #fff; }
+.integrallab .sa-mat span.is-A { background: #16a34a; color: #fff; opacity: 0.8; }
+.integrallab .sa-mat span.is-B, .integrallab .sa-mat span.is-C { background: #dc2626; color: #fff; }
+.integrallab .sa-mat i { position: absolute; top: 1px; left: 3px; font-size: 0.55rem; font-style: normal; }
+.integrallab .sa-cap { font-size: 0.75rem; color: var(--fg-soft); margin: 0.3rem 0 0; }
+.integrallab .sa-eq { font: 0.8rem/1.5 var(--mono); overflow-wrap: anywhere; margin: 0.6rem 0 0; }
+
+/* Chapter 18.1 (DenoiseLab, used through Module 18) */
+.denoiselab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.denoiselab .seg { flex-wrap: wrap; }
+.denoiselab .seg button { white-space: normal; }
+.denoiselab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.denoiselab .dn-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 0.6rem; margin-bottom: 0.6rem; }
+.denoiselab .dn-view { margin: 0; }
+.denoiselab .dn-img { display: block; width: 100%; height: auto; border-radius: 4px; border: 1px solid var(--line); }
+.denoiselab .dn-zoom { image-rendering: pixelated; }
+.denoiselab .dn-view figcaption { font-size: 0.75rem; color: var(--fg-soft); margin-top: 0.2rem; }
+
+/* Chapter 19.1 (RestoreLab, used through Module 19) */
+.restorelab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.restorelab .seg { flex-wrap: wrap; }
+.restorelab .seg button { white-space: normal; }
+.restorelab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.restorelab .rs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 0.6rem; margin-bottom: 0.6rem; }
+.restorelab .rs-view { margin: 0; }
+.restorelab .rs-img { display: block; width: 100%; height: auto; border-radius: 4px; border: 1px solid var(--line); }
+.restorelab .rs-view figcaption { font-size: 0.75rem; color: var(--fg-soft); margin-top: 0.2rem; }
+.restorelab .rs-row { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: flex-start; }
+.restorelab .rs-pbox { flex: 1 1 16rem; min-width: 0; }
+.restorelab .rs-prof { display: block; width: 100%; height: auto; max-height: 11rem; }
+.restorelab .rs-prof polyline { fill: none; stroke-width: 1.6; }
+.restorelab .rs-in { stroke: var(--fg-soft); stroke-dasharray: 4 3; }
+.restorelab .rs-out { stroke: var(--accent); }
+.restorelab .rs-lim { stroke: var(--line); stroke-width: 1; }
+.restorelab .rs-t { font-size: 7px; fill: var(--fg-soft); }
+.restorelab .rs-cap { font-size: 0.78rem; color: var(--fg-soft); margin: 0.2rem 0 0; }
+.restorelab .rs-k { display: inline-block; width: 1.2rem; height: 0; border-top: 2px solid var(--accent); vertical-align: middle; }
+.restorelab .rs-kin { border-top: 2px dashed var(--fg-soft); }
+
+/* Chapter 20.1 (PyramidLab, used through Module 20) */
+.pyramidlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.pyramidlab .seg { flex-wrap: wrap; }
+.pyramidlab .seg button { white-space: normal; }
+.pyramidlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.pyramidlab .py-row { display: flex; align-items: flex-end; gap: 0.4rem; margin-bottom: 0.6rem; }
+.pyramidlab .py-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: 0.6rem; margin-bottom: 0.6rem; }
+.pyramidlab .py-view { margin: 0; min-width: 0; }
+.pyramidlab .py-img { display: block; width: 100%; height: auto; image-rendering: pixelated; border-radius: 3px; border: 1px solid var(--line); }
+.pyramidlab .py-view figcaption { font-size: 0.72rem; color: var(--fg-soft); margin-top: 0.2rem; overflow-wrap: anywhere; }
+.pyramidlab .py-cap { font-size: 0.8rem; color: var(--fg-soft); margin: 0; }
+
+/* Chapter 21.1 (RegisterLab, used through Module 21) */
+.registerlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.registerlab .seg { flex-wrap: wrap; }
+.registerlab .seg button { white-space: normal; }
+.registerlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.registerlab .rg-head { font-size: 0.8rem; font-weight: 600; margin: 0.3rem 0 0; }
+.registerlab .rg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 0.6rem; margin-bottom: 0.5rem; }
+.registerlab .rg-view { margin: 0; min-width: 0; }
+.registerlab .rg-img { display: block; width: 100%; height: auto; border-radius: 3px; border: 1px solid var(--line); }
+.registerlab .rg-pix { image-rendering: pixelated; max-width: 12rem; }
+.registerlab .rg-view figcaption { font-size: 0.72rem; color: var(--fg-soft); margin-top: 0.2rem; }
+.registerlab .rg-read { font-size: 0.82rem; margin: 0; font-variant-numeric: tabular-nums; }
+
+/* Chapter 22.2 (EdgeLab, used through Module 22) */
+.edgelab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.edgelab .seg { flex-wrap: wrap; }
+.edgelab .seg button { white-space: normal; }
+.edgelab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.edgelab .ed-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 0.6rem; }
+.edgelab .ed-view { margin: 0; min-width: 0; }
+.edgelab .ed-img { display: block; width: 100%; height: auto; border-radius: 3px; border: 1px solid var(--line); }
+.edgelab .ed-view figcaption { font-size: 0.72rem; color: var(--fg-soft); margin-top: 0.2rem; }
+
+/* Chapter 23.1 (MorphLab, used through Module 23) */
+.morphlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.morphlab .seg { flex-wrap: wrap; }
+.morphlab .seg button { white-space: normal; }
+.morphlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.morphlab .mo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 0.6rem; align-items: start; }
+.morphlab .mo-view { margin: 0; min-width: 0; }
+.morphlab .mo-img { display: block; width: 100%; height: auto; border-radius: 3px; border: 1px solid var(--line); }
+.morphlab .mo-pix { width: 5rem; image-rendering: pixelated; }
+.morphlab .mo-view figcaption { font-size: 0.72rem; color: var(--fg-soft); margin-top: 0.2rem; }
+
+/* Chapter 24.1 (ContourLab, used through Module 24) */
+.contourlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.contourlab .seg { flex-wrap: wrap; }
+.contourlab .seg button { white-space: normal; }
+.contourlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.contourlab .ct-checks { display: flex; flex-wrap: wrap; gap: 0.2rem 0.8rem; font-size: 0.8rem; }
+.contourlab .ct-checks label { display: inline-flex; gap: 0.25rem; align-items: center; }
+.contourlab .ct-main { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: flex-start; }
+.contourlab .ct-svg { flex: 2 1 18rem; min-width: 0; width: 100%; height: auto; background: #000; border-radius: 4px; }
+.contourlab .ct-c { fill: none; stroke-width: 1.2; cursor: pointer; }
+.contourlab .ct-sel { fill: none; stroke-width: 2.6; cursor: pointer; }
+.contourlab .ct-ov { fill: none; stroke: #ffffff; stroke-width: 1; stroke-dasharray: 3 2; }
+.contourlab .ct-ov2 { stroke: #7dd3fc; }
+.contourlab .ct-ov3 { stroke: #fde68a; }
+.contourlab .ct-ov4 { stroke: #c4b5fd; }
+.contourlab .ct-ov5 { stroke: #86efac; stroke-dasharray: none; }
+.contourlab .ct-ov6 { stroke: #fda4af; stroke-dasharray: none; stroke-width: 1.4; }
+.contourlab .ct-vtx { fill: #fda4af; }
+.contourlab .ct-def { fill: #f43f5e; }
+.contourlab .ct-cen { fill: #fff; stroke: #000; stroke-width: 0.8; }
+.contourlab .ct-side { flex: 1 1 12rem; min-width: 0; }
+.contourlab .ct-head { font-size: 0.75rem; color: var(--fg-soft); margin: 0 0 0.3rem; }
+.contourlab .ct-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.2rem; }
+.contourlab .ct-list button { width: 100%; text-align: left; font-size: 0.75rem; font-family: var(--font-mono, monospace); border: 1px solid var(--line); border-left: 4px solid; border-radius: 3px; background: none; color: inherit; padding: 0.15rem 0.4rem; cursor: pointer; }
+.contourlab .ct-list button.is-on { background: var(--bg-soft, rgba(127, 127, 127, 0.15)); font-weight: 600; }
+.contourlab .ct-table { width: 100%; font-size: 0.78rem; margin-top: 0.6rem; border-collapse: collapse; }
+.contourlab .ct-table th { text-align: left; font-weight: 500; color: var(--fg-soft); padding: 0.15rem 0.4rem; }
+.contourlab .ct-table td { padding: 0.15rem 0.4rem; font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) { .contourlab .ct-table tr { display: grid; grid-template-columns: 1fr 1fr; } }
+
+/* Chapter 25.1 (LabelLab, used through Module 25) */
+.labellab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.labellab .seg { flex-wrap: wrap; }
+.labellab .seg button { white-space: normal; }
+.labellab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.labellab .lb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: 0.6rem; }
+.labellab .lb-view { margin: 0; min-width: 0; }
+.labellab .lb-img { display: block; width: 100%; height: auto; border-radius: 3px; border: 1px solid var(--line); cursor: crosshair; }
+.labellab .lb-view figcaption { font-size: 0.75rem; color: var(--fg-soft); margin-top: 0.2rem; }
+.labellab .lb-read { font-size: 0.82rem; margin: 0.4rem 0 0; font-variant-numeric: tabular-nums; }
+
+/* Module 26 (HoughLab) */
+.houghlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.houghlab .seg { flex-wrap: wrap; }
+.houghlab .seg button { white-space: normal; }
+.houghlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.houghlab .hg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 0.6rem; }
+.houghlab .hg-view { margin: 0; min-width: 0; }
+.houghlab .hg-img { display: block; width: 100%; height: auto; border-radius: 3px; border: 1px solid var(--line); }
+.houghlab .hg-view figcaption { font-size: 0.75rem; color: var(--fg-soft); margin-top: 0.2rem; }
+.houghlab .hg-read { font-size: 0.82rem; margin: 0.5rem 0 0; font-variant-numeric: tabular-nums; }
+.houghlab .hg-svg { display: block; width: 100%; height: auto; max-width: 40rem; border-radius: 4px; border: 1px solid var(--line); }
+.houghlab .hg-bg { fill: var(--bg-soft, rgba(127, 127, 127, 0.08)); }
+.houghlab .hg-in { fill: #2f7de1; }
+.houghlab .hg-out { fill: #9a9a9a; }
+.houghlab .hg-sample { fill: none; stroke: #e0a800; stroke-width: 2; }
+.houghlab .hg-pair { stroke: #e0a800; stroke-width: 1.5; stroke-dasharray: 4 3; }
+.houghlab .hg-fit { fill: none; stroke: #1c9e5a; stroke-width: 2; }
+.houghlab .hg-ls { fill: none; stroke: #d64545; stroke-width: 1.5; }
+.houghlab .hg-ell { fill: none; stroke: #8b5cf6; stroke-width: 2; }
+.houghlab .hg-truth { fill: none; stroke: var(--fg-soft); stroke-width: 1; stroke-dasharray: 3 3; }
+.houghlab .hg-legend { list-style: none; padding: 0; margin: 0.5rem 0 0; font-size: 0.8rem; font-variant-numeric: tabular-nums; display: grid; gap: 0.15rem; }
+.houghlab .hg-k { display: inline-block; width: 1.1rem; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 0.3rem; }
+.houghlab .hg-k-truth { border-top: 1px dashed var(--fg-soft); }
+.houghlab .hg-k-ls { border-color: #d64545; }
+.houghlab .hg-k-fit { border-color: #1c9e5a; }
+.houghlab .hg-k-ell { border-color: #8b5cf6; }
+
+/* Module 27 (SegmentLab) */
+.segmentlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.segmentlab .seg { flex-wrap: wrap; }
+.segmentlab .seg button { white-space: normal; }
+.segmentlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.segmentlab .sg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 0.6rem; }
+.segmentlab .sg-view { margin: 0; min-width: 0; }
+.segmentlab .sg-view figcaption { font-size: 0.75rem; color: var(--fg-soft); margin-top: 0.2rem; }
+.segmentlab .sg-img { display: block; width: 100%; max-width: 40rem; height: auto; border-radius: 3px; border: 1px solid var(--line); }
+.segmentlab .sg-read { font-size: 0.82rem; margin: 0.5rem 0 0; font-variant-numeric: tabular-nums; }
+.segmentlab .sg-checks { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; font-size: 0.85rem; }
+.segmentlab .sg-checks label { display: inline-flex; align-items: center; gap: 0.3rem; }
+
+/* Module 28 (ActiveContourLab) */
+.activecontourlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.activecontourlab .seg { flex-wrap: wrap; }
+.activecontourlab .seg button { white-space: normal; }
+.activecontourlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.activecontourlab .sn-buttons { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.activecontourlab .sn-img { display: block; width: 100%; max-width: 40rem; height: auto; border-radius: 3px; border: 1px solid var(--line); }
+.activecontourlab .sn-read { font-size: 0.82rem; margin: 0.5rem 0 0; font-variant-numeric: tabular-nums; }

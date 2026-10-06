@@ -1,0 +1,297 @@
+export const meta = {
+  number: "15.5",
+  title: "Preprocessing for deep learning",
+  minutes: 25,
+  objectives: [
+    "List the preprocessing contract of a trained network: size, fit, colour order, scaling, normalisation, layout",
+    "Fit images into a fixed input by stretching, cropping or letterboxing, and map results back",
+    "Reproduce mean/std normalisation with cv2.dnn parameters",
+    "Recognise the silent errors of mismatched preprocessing",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 15.5 (Module 15 plan).
+  Builds on 8.5 (blobFromImage, BlobLab). New lab: LetterboxLab (lib/letterbox-ops.ts).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 15.5 Preprocessing for deep learning
+
+<Definition term="Preprocessing contract">the exact sequence of operations a neural network's training data went through before entering the network: resize and fit method, colour order, value scaling, mean and standard deviation, channel layout, data type. At inference time the same contract must be followed, or the network sees images unlike any it was trained on.</Definition>
+
+Classical pipelines (15.1–15.4) choose preprocessing to make the analysis easier. For a trained network the choice was already made, during training. Your job at inference is to reproduce it exactly. The difficulty is that mistakes are silent: a network fed BGR instead of RGB, or [0, 255] instead of normalised values, still returns an answer, just a worse one. 8.5 showed `blobFromImage` for one pixel; this chapter covers the whole contract.
+
+## 1. An analogy
+
+A recipe tested in grams, followed in ounces: every step is carried out, the oven works, and the cake still fails. Nothing tells you that the units were wrong; you only see the result.
+
+## 2. The contract
+
+<Flow
+  steps={[
+    { label: "Camera image (H × W × 3, BGR, uint8)", tone: "data" },
+    { label: "Fit into S × S: stretch, center crop or letterbox", tone: "process" },
+    { label: "Colour order: BGR → RGB if trained on RGB", tone: "process" },
+    { label: "Scale to 0…1, subtract mean, divide by std (per channel)", tone: "process" },
+    { label: "Layout NCHW, float32 → network", tone: "result" },
+  ]}
+/>
+
+| Item | Common choices | Where to find it |
+| --- | --- | --- |
+| Input size | 224 × 224 (classification), 640 × 640 (YOLO-style detection) | model card, export script, ONNX input shape |
+| Fit | stretch, resize short side + center crop, letterbox with padding value (often 114 or 0) | training data loader |
+| Colour order | RGB (PyTorch, TensorFlow), BGR (Caffe-era models) | training code |
+| Scaling | 1/255, or none | training transforms |
+| Normalisation | ImageNet mean (0.485, 0.456, 0.406), std (0.229, 0.224, 0.225) on RGB 0…1 | training transforms |
+| Layout and type | NCHW float32 (PyTorch/ONNX), NHWC (TensorFlow) | model input |
+
+## 3. Fitting the image into the square
+
+A 320 × 200 image into 224 × 224:
+
+| Fit | What happens | Cost |
+| --- | --- | --- |
+| Stretch | x scaled by 0.70, y by 1.12 | shapes distorted ×1.6 (a circle becomes an ellipse) |
+| Resize + center crop | short side to 224, centre cut | 37.5 % of the image is cut off (here 60 px left and right) |
+| Letterbox | long side to 224 (scale 0.7), pad above and below | 37.5 % of the input is padding; nothing lost, no distortion |
+
+Detectors return boxes in network-input coordinates; they must be mapped back with the inverse of the fit. For the letterbox, the whole 224 × 224 input corresponds to the image rectangle (0, −60, 320, 320): the padding lies outside the image.
+
+<LetterboxLab caption="Fit the colour image into a square network input three ways and at three sizes. The magenta box is the red disc: watch it become an ellipse when stretched, and see how the box in network coordinates maps back to the same image box with the right inverse." />
+
+## 4. Normalisation
+
+ImageNet-trained classifiers usually expect RGB values scaled to 0…1, then (value − mean) / std per channel. OpenCV's `blobFromImage` computes (value − mean) · scalefactor with one scale factor; `Image2BlobParams` allows a scale factor per channel, so mean/std normalisation is exact with mean = 255 · m and scalefactor = 1 / (255 · s). The result lies roughly between −2.1 and 2.6.
+
+What a mistake does to one pixel of the red disc (channel 0 of the blob):
+
+| Preprocessing | Channel 0 value |
+| --- | --- |
+| Correct: RGB, 0…1, ImageNet mean/std | 1.65 (strong red) |
+| BGR left as is, only scaled by 1/255 | 0.0 (channel 0 is blue: "no red at all") |
+
+## 5. Industrial example
+
+A team exported a defect classifier from PyTorch to ONNX and ran it with `cv2.dnn`. Accuracy on the line was clearly worse than on the validation set, with no errors or warnings anywhere. The cause: the training loader converted to RGB and resized the short side to 256 before a 224 center crop; the inference code stretched to 224 and kept BGR. After writing the contract down (size, fit, colour, mean/std, layout) and testing it by comparing the inference blob with the training loader's tensor for the same file (maximum difference below 1e-5), the line accuracy matched validation.
+
+## What you should remember from 15.5
+
+<Takeaways>
+<Takeaway n={1} title="Contract">Size, fit, colour order, scaling, mean/std, layout, dtype: all must match training.</Takeaway>
+<Takeaway n={2} title="Fit">Stretch distorts, crop loses, letterbox pads; map boxes back with the inverse.</Takeaway>
+<Takeaway n={3} title="Normalise">(x/255 − mean)/std per channel; Image2BlobParams does it exactly.</Takeaway>
+<Takeaway n={4} title="Test">Compare your blob with the training pipeline's tensor for the same image.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 1280 × 720 frame goes into a 640 × 640 letterboxed detector. What are the scale and the vertical padding?
+
+<Solution>
+
+Scale = min(640/1280, 640/720) = **0.5**; the image becomes 640 × 360, padded by (640 − 360)/2 = **140** pixels above and below.
+
+</Solution>
+
+**Q2.** The detector returns a box (100, 200, 50, 40) in network coordinates. Where is it in the original frame?
+
+<Solution>
+
+x = (100 − 0)/0.5 = **200**, y = (200 − 140)/0.5 = **120**, w = 50/0.5 = **100**, h = 40/0.5 = **80**: (200, 120, 100, 80).
+
+</Solution>
+
+### Next: 15.6 Augmentation
+
+Creating variations of training images so a model learns what should not matter.
+
+## Code
+
+Two examples: the three fits with `blobFromImageWithParams`, then exact mean/std normalisation.
+
+### 1. Fitting into 224 × 224
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")                          # 200 x 320, BGR
+S = 224
+for name, mode in [("stretch", None), ("center crop", cv2.dnn.DNN_PMODE_CROP_CENTER), ("letterbox", cv2.dnn.DNN_PMODE_LETTERBOX)]:
+    p = cv2.dnn.Image2BlobParams()
+    p.size = (S, S)
+    p.scalefactor = (1 / 255,) * 4
+    p.swapRB = True
+    if mode is not None:
+        p.paddingmode = mode
+    blob = cv2.dnn.blobFromImageWithParams(img, p)
+    back = p.blobRectToImageRect((0, 0, S, S), (img.shape[1], img.shape[0]))   # the whole input, in image coordinates
+    print(f"{name:12s} blob {blob.shape} | network input covers image rect {back} | top-left value R {blob[0, 0, 0, 0]:.3f}")
+```
+
+Output:
+
+```text
+stretch      blob (1, 3, 224, 224) | network input covers image rect (0, 0, 320, 200) | top-left value R 0.110
+center crop  blob (1, 3, 224, 224) | network input covers image rect (59, 0, 200, 200) | top-left value R 0.110
+letterbox    blob (1, 3, 224, 224) | network input covers image rect (0, -60, 320, 320) | top-left value R 0.000
+```
+
+- `blobRectToImageRect` applies the inverse fit: use `blobRectsToImageRects` for all detections at once.
+- The letterbox's top-left pixel is padding, filled with `borderValue` (default 0); many detectors were trained with 114, so set `p.borderValue` to match.
+
+### 2. Mean/std normalisation and a silent mistake
+
+```python
+import numpy as np
+import cv2
+
+mean = np.array([0.485, 0.456, 0.406])                         # ImageNet RGB mean and std
+std = np.array([0.229, 0.224, 0.225])
+rgb = cv2.cvtColor(cv2.resize(img, (S, S)), cv2.COLOR_BGR2RGB).astype(np.float32) / 255
+manual = ((rgb - mean) / std).transpose(2, 0, 1)[None].astype(np.float32)          # NCHW
+
+p = cv2.dnn.Image2BlobParams()
+p.size = (S, S)
+p.swapRB = True
+p.mean = tuple(255 * mean) + (0,)                              # subtracted first (on 0..255 values)
+p.scalefactor = tuple(1 / (255 * std)) + (1,)                  # then multiplied, per channel
+blob = cv2.dnn.blobFromImageWithParams(img, p)
+print("OpenCV params == manual normalisation:", np.allclose(blob, manual, atol=1e-5),
+      "| range", round(float(blob.min()), 2), "to", round(float(blob.max()), 2))
+
+wrong = cv2.dnn.blobFromImage(img, 1 / 255, (S, S), swapRB=False)
+y, x = 95 * S // 200, 70 * S // 320
+print("disc pixel, channel 0: correct (R)", round(float(blob[0, 0, y, x]), 2), "| no swapRB, no normalisation", round(float(wrong[0, 0, y, x]), 2))
+```
+
+Output:
+
+```text
+OpenCV params == manual normalisation: True | range -2.12 to 2.25
+disc pixel, channel 0: correct (R) 1.65 | no swapRB, no normalisation 0.0
+```
+
+- Comparing your blob with the training loader's output for the same file (`np.allclose`) is the single most useful test of an inference pipeline.
+
+## OpenCV API notes
+
+**`cv2.dnn.blobFromImage(image, scalefactor=1.0, size, mean, swapRB=False, crop=False, ddepth=CV_32F)`**: (image − mean) · scalefactor; one scale for all channels; `crop=True` = resize short side + center crop.
+
+**`cv2.dnn.Image2BlobParams`** with `blobFromImageWithParams`: per-channel `scalefactor` and `mean`, `paddingmode` (`DNN_PMODE_NULL` stretch, `DNN_PMODE_CROP_CENTER`, `DNN_PMODE_LETTERBOX`), `borderValue`, `datalayout` (NCHW/NHWC), `blobRectToImageRect(s)` for mapping results back.
+
+**Batches**: `blobFromImages` / `blobFromImagesWithParams` for several images (N > 1).
+
+## Where it fails
+
+- **Undocumented contracts**: the training code is the only truth; ask for it or for a reference tensor.
+- **Different resize interpolation** (bilinear vs area vs antialiased PIL) changes inputs slightly; for small objects it can change results.
+- **Different JPEG decoders or colour management** between training and inference produce small systematic differences.
+- **Image statistics far from training** (new camera, new light): normalisation cannot fix a domain shift; collect data or fine-tune.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **BGR into an RGB model** (OpenCV loads BGR, 7.2).
+- **Forgetting /255 or mean/std**, or applying them twice.
+- **Stretching when the model was trained with crop or letterbox**, or forgetting to map boxes back.
+- **NHWC into an NCHW model** (or vice versa); check the model's input shape.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why normalise at all
+
+Centering inputs at zero with unit variance keeps early-layer activations in a well-conditioned range and makes gradient descent better behaved (LeCun et al., "Efficient BackProp") [2]. The ImageNet mean and std are simply the per-channel statistics of the ImageNet training set; models pretrained on ImageNet inherit them, even when fine-tuned on very different images.
+
+### Letterbox in detection
+
+YOLO-family detectors popularised letterboxing with a grey (114) padding so that objects keep their aspect ratio across images of different shapes; the "rectangular" inference variants pad only to a multiple of the network stride (e.g. 32) instead of a full square, saving computation.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A model was trained on RGB images. What must you do with cv2.imread images?",
+      options: ["Nothing", "Swap to RGB (swapRB=True or cvtColor)", "Convert to grey", "Invert them"],
+      answer: 1,
+      explanation: "OpenCV loads BGR.",
+    },
+    {
+      question: "Which fit keeps the whole image without distortion?",
+      options: ["Stretch", "Center crop", "Letterbox", "None"],
+      answer: 2,
+      explanation: "It pads instead of cutting or stretching.",
+    },
+    {
+      question: "How do you get (x/255 − m)/s per channel with Image2BlobParams?",
+      options: ["mean = m, scalefactor = s", "mean = 255·m, scalefactor = 1/(255·s)", "mean = s, scalefactor = m", "It is impossible"],
+      answer: 1,
+      explanation: "OpenCV computes (x − mean) · scalefactor.",
+    },
+    {
+      question: "The best test that inference preprocessing matches training is…",
+      options: ["Looking at the image", "Comparing the blob with the training loader's tensor for the same file", "Checking the file size", "Running faster"],
+      answer: 1,
+      explanation: "A numerical comparison catches every silent mismatch.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 640 × 480 image is resized (short side) to 256 and center-cropped to 224. What part of the original image does the crop cover?
+
+<Solution>
+
+Scale 256/480 = 0.5333; resized to 341.3 × 256. Crop 224 × 224 from the centre: in original pixels 224/0.5333 = **420 × 420**, centred: x from 110 to 530, y from 30 to 450.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Letterbox `sample-color.png` into 640 × 640 with padding 114 and map the disc's box (25, 50, 90, 90) to the network input and back with `blobRectToImageRect`.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+p = cv2.dnn.Image2BlobParams()
+p.size = (640, 640)
+p.paddingmode = cv2.dnn.DNN_PMODE_LETTERBOX
+p.borderValue = (114, 114, 114, 0)
+blob = cv2.dnn.blobFromImageWithParams(img, p)
+s = min(640 / 320, 640 / 200)
+oy = (640 - 200 * s) / 2
+net_box = (int(25 * s), int(50 * s + oy), int(90 * s), int(90 * s))
+print("scale", s, "| pad top", oy, "| box in input", net_box, "| back", p.blobRectToImageRect(net_box, (320, 200)))
+print("padding pixel value:", blob[0, 0, 0, 0])
+```
+
+Output:
+
+```text
+scale 2.0 | pad top 120.0 | box in input (50, 220, 180, 180) | back (25, 50, 90, 90)
+padding pixel value: 114.0
+```
+
+</Solution>
+
+## References
+
+1. OpenCV 4.13.0 documentation: `dnn::blobFromImage`, `dnn::Image2BlobParams`, `dnn::blobFromImageWithParams`. https://docs.opencv.org/4.13.0/
+2. Y. LeCun, L. Bottou, G. B. Orr, K.-R. Müller, "Efficient BackProp", in *Neural Networks: Tricks of the Trade*, Springer, 1998, 9–50.
+3. PyTorch / torchvision documentation: `torchvision.transforms.Normalize` and the ImageNet pretrained-model preprocessing. https://pytorch.org/vision/stable/models.html

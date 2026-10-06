@@ -1,0 +1,267 @@
+export const meta = {
+  number: "15.2",
+  title: "Step order rules",
+  minutes: 20,
+  objectives: [
+    "Apply the main ordering rules: correct sensor effects first, denoise before decisions, threshold last",
+    "Tell which steps commute and which do not",
+    "Recognise steps that do nothing for the next step (wasted work)",
+    "Order a pipeline for speed: crop and reduce early",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 15.2 (Module 15 plan).
+  Reuses PipeLab (15.1) with initialOrder to start from a wrong order.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 15.2 Step order rules
+
+<Definition term="Step order">the sequence in which preprocessing operations are applied. Most image operations do not commute: blur then threshold is not the same as threshold then blur. A few rules decide the right order in almost every case.</Definition>
+
+15.1 showed that the right step matters. The right **position** matters just as much. A blur after a threshold smears a binary mask instead of removing noise; a contrast stretch before Otsu changes nothing at all; cropping last makes every earlier step process pixels that are thrown away. These are not matters of taste: each has a reason and a measurable effect.
+
+## 1. An analogy
+
+Getting dressed: socks before shoes. Some steps can be swapped (shirt and trousers), some cannot, and doing them in the wrong order either fails or wastes effort.
+
+## 2. The rules
+
+<Flow
+  steps={[
+    { label: "1. Sensor and light corrections (black level, flat-field, white balance) on raw-like values", tone: "data" },
+    { label: "2. Crop / ROI and downscale (with anti-aliasing) as early as possible", tone: "process" },
+    { label: "3. Denoise (smoothing) before any decision", tone: "process" },
+    { label: "4. Normalise contrast only if the next step needs it", tone: "process" },
+    { label: "5. Decide last: threshold, edges, classify; then clean binary results (morphology)", tone: "result" },
+  ]}
+/>
+
+| Rule | Why | Wrong order gives |
+| --- | --- | --- |
+| Correct sensor/light effects first | They are physical: multiplicative shading and offsets in the measured values; later non-linear steps (gamma, equalize, threshold) destroy that structure | residual shading, wrong colours |
+| Crop early | Every later step processes fewer pixels | wasted time on discarded pixels |
+| Smooth before downscaling | Removes detail finer than the new pixel grid (3.3) | aliasing (moiré) |
+| Denoise before deciding | A decision (threshold, edge) turns noise into wrong labels that cannot be undone | speckle, broken objects |
+| Threshold last, then morphology | A binary image has lost the grey values; later grey operations have nothing to work with | blurred masks, no improvement |
+| Measure on calibrated data | Contrast enhancement changes grey values non-linearly | wrong measurements |
+
+## 3. Real numbers
+
+**Blur and threshold do not commute.** On the faint crack (13.6): blur σ = 1 then Otsu gives F1 **0.942**; Otsu then blur (then 128) gives **0.092**. After the threshold, the noise has already become thousands of wrong pixels; blurring the binary image only rounds their corners.
+
+**Linear steps nearly commute.** Illumination correction and blur are both (nearly) linear filters; on the label, "correct, blur, Otsu" and "blur, correct, Otsu" give 0.939 and 0.938.
+
+**A wasted step.** Otsu's threshold moves with any increasing linear map of the grey values: after `convertScaleAbs(img, alpha=0.5, beta=60)` the label's Otsu threshold goes from 137 to 128 (= 0.5 · 137 + 60 rounded) and selects the same pixels. A contrast stretch before Otsu costs time and changes nothing (as long as nothing clips).
+
+<PipeLab initial={["blur", "otsu"]} initialOrder={["otsu", "blur", "flat", "stretch"]} initialSource={1} caption="The steps start in the wrong order: Otsu before the blur. Move the blur above Otsu and watch F1 jump. Then try the stretch before Otsu: nothing changes. On the label, check that correction and blur can be swapped." />
+
+## 4. Order for speed
+
+Pixel count drives cost for most operations. On a 2 448 × 2 048 image (5 Mpx) where the part occupies a 600 × 400 region (0.24 Mpx), cropping first makes every later step about **21 times** cheaper. Downscaling by 2 in each direction (when the resolution allows it, 2.4) gives another factor 4. Locating the part (Part D) is itself often done on a downscaled image, and the full-resolution crop is taken only around the result.
+
+## 5. Industrial example
+
+A connector-pin inspection first ran CLAHE on the full image, then blurred, then cropped each pin and thresholded. Two changes in order fixed both quality and speed: crop the pin regions first (16 small ROIs instead of the full frame), and drop CLAHE in front of the threshold, because the per-pin Otsu threshold already adapted to each pin's contrast. The pipeline became several times faster and stopped producing CLAHE noise blobs between the pins.
+
+## What you should remember from 15.2
+
+<Takeaways>
+<Takeaway n={1} title="Physics first">Black level, flat-field, white balance before non-linear steps.</Takeaway>
+<Takeaway n={2} title="Small early">Crop and downscale (with smoothing) as early as possible.</Takeaway>
+<Takeaway n={3} title="Smooth, then decide">Denoise before threshold or edges; threshold last, then morphology.</Takeaway>
+<Takeaway n={4} title="Check usefulness">Linear steps commute; some steps are invisible to the next one (stretch before Otsu).</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Put these steps in order: Otsu threshold, crop ROI, white balance, Gaussian blur, opening (morphology).
+
+<Solution>
+
+**White balance → crop ROI → Gaussian blur → Otsu → opening.** (White balance and crop can be swapped if the white reference lies inside the ROI.)
+
+</Solution>
+
+**Q2.** Why is equalization before Otsu usually pointless?
+
+<Solution>
+
+Equalization is a monotonic mapping, so it keeps the order of grey values; Otsu then still splits the same population, just at a different grey value. Usually only small changes come from the merged levels and the changed histogram shape, at extra cost.
+
+</Solution>
+
+### Next: 15.3 Illumination correction
+
+Removing uneven lighting: flat-field images, background estimation, and division vs subtraction.
+
+## Code
+
+Two examples: blur/threshold order and commuting steps, then Otsu's invariance and the cost of cropping late.
+
+### 1. Order effects
+
+```python
+import numpy as np
+import cv2
+
+blur = lambda x: cv2.GaussianBlur(x, (0, 0), 1)
+otsu = lambda x: cv2.threshold(x, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+
+def flat(x):
+    bg = cv2.GaussianBlur(x, (0, 0), 15)
+    return np.clip(x.astype(np.float32) / np.maximum(bg, 1) * bg.mean(), 0, 255).astype(np.uint8)
+
+def f1(final, truth):
+    m = final < 128
+    return 2 * (m & truth).sum() / (m.sum() + truth.sum())
+
+crack_img = cv2.imread("sample-crack-faint.png", cv2.IMREAD_GRAYSCALE)
+crack = cv2.imread("sample-plate-crack-mask.png", cv2.IMREAD_GRAYSCALE) > 0
+label = cv2.imread("sample-print-uneven.png", cv2.IMREAD_GRAYSCALE)
+text = cv2.imread("sample-print-uneven-gt.png", cv2.IMREAD_GRAYSCALE) > 0
+
+print(f"crack: blur, Otsu {f1(otsu(blur(crack_img)), crack):.3f} | Otsu, blur {f1(blur(otsu(crack_img)), crack):.3f}")
+print(f"label: flat, blur, Otsu {f1(otsu(blur(flat(label))), text):.3f} | blur, flat, Otsu {f1(otsu(flat(blur(label))), text):.3f}")
+```
+
+Output:
+
+```text
+crack: blur, Otsu 0.942 | Otsu, blur 0.092
+label: flat, blur, Otsu 0.939 | blur, flat, Otsu 0.938
+```
+
+- Blur and threshold: order changes F1 by a factor of ten. Correction and blur: order changes almost nothing.
+
+### 2. Invisible steps and late cropping
+
+```python
+import numpy as np
+import cv2
+
+t1, m1 = cv2.threshold(label, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+mapped = cv2.convertScaleAbs(label, alpha=0.5, beta=60)              # an increasing linear map, no clipping
+t2, m2 = cv2.threshold(mapped, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+print(f"Otsu T: {t1:.0f} -> {t2:.0f} after 0.5 x + 60 | same pixels selected: {np.array_equal(m1, m2)}")
+
+full, roi = 2448 * 2048, 600 * 400
+print(f"pixels: full frame {full}, ROI {roi}, ratio {full / roi:.1f}")
+```
+
+Output:
+
+```text
+Otsu T: 137 -> 128 after 0.5 x + 60 | same pixels selected: True
+pixels: full frame 5013504, ROI 240000, ratio 20.9
+```
+
+- The threshold moved with the map, and the binary result is identical: the linear step was wasted work for Otsu.
+
+## OpenCV API notes
+
+No special API: order is a design decision. Useful helpers: `cv2.resize(img, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)` (area interpolation includes the anti-aliasing averaging), `cv2.pyrDown` (blur + halve), slicing for ROIs (views, no copy, 6.3).
+
+## Where it fails
+
+- **Rules have exceptions**: some methods need full-resolution context (a background estimate wider than the ROI); crop with a margin.
+- **Non-linear denoisers** (median, bilateral) do not commute with anything; test both orders when in doubt.
+- **Learned models** expect the exact preprocessing they were trained with (15.5); the order is then fixed by training.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Morphology or blur before the threshold** "to clean the mask" (blur before is right; morphology belongs after).
+- **Enhancing contrast before measuring** grey values.
+- **Downscaling with `INTER_NEAREST`** without smoothing (aliasing).
+- **Cropping last** after expensive full-frame steps.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Which operations commute
+
+Two linear shift-invariant filters (convolutions) always commute: a ∗ (b ∗ f) = b ∗ (a ∗ f). Point operations commute with each other only in special cases (two gains, two offsets), and a point operation commutes with a convolution only if it is affine (v → a·v + b). Thresholds, medians and morphology are non-linear and generally commute with nothing, which is why the "decide last" rule holds [1].
+
+### Invariances of automatic thresholds
+
+Otsu, triangle and entropy thresholds (13.3–13.4) depend only on the histogram's shape over the grey axis. An increasing affine map stretches the axis without changing which pixels fall on which side, so the split (not the number T) is invariant, up to rounding and clipping. Knowing a method's invariances tells you which preprocessing steps are useless before it.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which order is right for a noisy image to be thresholded?",
+      options: ["Threshold, then blur", "Blur, then threshold", "Either", "Threshold twice"],
+      answer: 1,
+      explanation: "Smoothing must happen before the decision.",
+    },
+    {
+      question: "Where should flat-field (illumination) correction go?",
+      options: ["After the threshold", "Early, before non-linear steps", "At the end", "Only on binary images"],
+      answer: 1,
+      explanation: "It corrects a physical, multiplicative effect in the measured values.",
+    },
+    {
+      question: "A linear contrast stretch (no clipping) before Otsu…",
+      options: ["Always improves Otsu", "Changes T but selects the same pixels", "Breaks Otsu", "Inverts the result"],
+      answer: 1,
+      explanation: "Otsu's split is invariant to increasing affine maps.",
+    },
+    {
+      question: "Why crop the ROI early?",
+      options: ["To improve accuracy", "So every later step processes fewer pixels", "Because OpenCV needs it", "To avoid aliasing"],
+      answer: 1,
+      explanation: "Cost scales with pixel count.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Which pairs commute? (a) multiply by 2 and add 10; (b) Gaussian blur and box blur; (c) threshold and median filter; (d) multiply by 2 and Gaussian blur.
+
+<Solution>
+
+(a) **No**: 2·(v) + 10 ≠ 2·(v + 10). (b) **Yes** (two convolutions). (c) **No** in general (non-linear). (d) **Yes** (scaling is linear, apart from rounding and clipping).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Show that a median filter and a threshold do not commute on the crack image: compare F1 of "median 5, Otsu" and "Otsu, median 5" (`cv2.medianBlur`).
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+med = lambda x: cv2.medianBlur(x, 5)
+print(f"median, Otsu {f1(otsu(med(crack_img)), crack):.3f} | Otsu, median {f1(med(otsu(crack_img)), crack):.3f}")
+```
+
+Output:
+
+```text
+median, Otsu 0.933 | Otsu, median 0.100
+```
+
+The median after the threshold is a morphological clean-up of a mask full of noise blobs; the same filter before the threshold removes the noise while the crack's grey values are still available. Both are useful, but they are different operations.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 3 (spatial filtering) and Section 10.3 (the role of noise and illumination in thresholding).
+2. OpenCV 4.13.0 documentation: `resize`, `pyrDown`, `GaussianBlur`, `medianBlur`, `threshold`. https://docs.opencv.org/4.13.0/

@@ -1,0 +1,340 @@
+export const meta = {
+  number: "12.3",
+  title: "CLAHE",
+  minutes: 25,
+  objectives: [
+    "Explain adaptive (tile-based) equalization and why it needs interpolation",
+    "Explain how the clip limit bounds noise amplification",
+    "Reproduce cv2.createCLAHE from scratch to within one grey level",
+    "Choose clipLimit and tileGridSize for display and for preprocessing",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 12.3 (Module 12 plan).
+  Reuses HistLab (12.1, 12.2). The from-scratch version matches OpenCV within 1 level (float rounding).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 12.3 CLAHE
+
+<Definition term="CLAHE (Contrast Limited Adaptive Histogram Equalization)">equalization done separately in small tiles of the image, with a cap on each tile's histogram so that flat areas cannot be stretched too much. The tile curves are blended smoothly, so no tile borders are visible.</Definition>
+
+Global equalization (12.2) uses one curve for the whole image. When one part is dark and another bright, or when a large flat background dominates, one curve cannot suit every region. CLAHE gives each region its own curve and limits how steep that curve may be. It is the most used contrast enhancement in OpenCV practice.
+
+## 1. An analogy
+
+Instead of one manager seating the whole stadium (12.2), every section gets its own manager who spreads people over that section's seats. And each manager has a rule: no more than a fixed number of people per row. Extra people are spread over all rows. The rule stops a manager from giving a huge area to a tiny crowd.
+
+## 2. Adaptive equalization: one curve per tile
+
+<Flow
+  steps={[
+    { label: "Split the image into a grid of tiles (tileGridSize, e.g. 8 × 8)", tone: "data" },
+    { label: "Histogram of each tile, clipped at the limit", tone: "process" },
+    { label: "Equalization curve (LUT) per tile", tone: "process" },
+    { label: "Each pixel: blend the curves of the 4 nearest tile centres", tone: "result" },
+  ]}
+/>
+
+- **Local**: a dark corner gets a curve made from dark values, a bright corner one from bright values. Both end up with good contrast.
+- **Interpolation**: if each pixel used only its own tile's curve, tile borders would show as steps. OpenCV blends the 4 nearest tile curves bilinearly, weighted by distance to the tile centres.
+- Without a limit this is **AHE** (adaptive histogram equalization). AHE has a serious flaw: a tile that is almost uniform has a very narrow histogram, and its curve stretches the noise to the full range, exactly like the flat wall in 12.2, but now in every flat tile.
+
+## 3. The clip limit
+
+Before computing a tile's curve, every histogram bin is cut at a limit. The cut-off pixels are spread evenly over all 256 bins.
+
+<Equation terms={[{ value: "limit (pixels per bin)" }, { op: "=", value: "int(clipLimit · tile pixels / 256)", result: true }]} />
+
+Example: a 25 × 40 tile of the plate image (1000 pixels), clipLimit 2: limit = int(2 · 1000 / 256) = **7**. The tile's tallest bin has 54 pixels; in total 736 pixels lie above the limit and are redistributed, about 2.9 per bin.
+
+Why this works: the slope of an equalization curve at value v is proportional to h[v]. Capping h[v] caps the slope at about **clipLimit**: an input step of 1 grey level becomes at most about clipLimit output levels. So noise is amplified by at most that factor.
+
+| clipLimit | Effect |
+| --- | --- |
+| 1 | histogram cut to the average: curve close to a straight line, almost no change |
+| 2 to 4 | typical: clear local contrast, limited noise |
+| 40 (OpenCV's default) or more | hardly any clipping: behaves like AHE, noise in flat areas stretched |
+
+<HistLab ops={["none", "equalize", "clahe"]} initial="clahe" caption="Compare global equalization with CLAHE on the low-contrast plate. Move clipLimit from 1 to 8 and change the tile grid: small clip limits keep the background calm, large ones bring out every grain of noise." />
+
+## 4. Real numbers
+
+The same flat surface with one faint feature as in 12.2 (background noise std 2.0, feature 25 levels brighter), contrast-to-noise ratio CNR = feature contrast / background noise:
+
+| Method | Background noise std | CNR |
+| --- | --- | --- |
+| Original | 2.0 | 12.2 |
+| equalizeHist | 70.0 | 1.6 |
+| CLAHE clip 2, 8 × 8 tiles | 5.1 | 5.6 |
+| CLAHE clip 40, 8 × 8 tiles | 64.7 | 0.8 |
+
+No contrast operation improves the CNR of the original; CLAHE with a moderate clip limit simply loses far less than global equalization or unclipped AHE.
+
+## 5. Industrial example
+
+An X-ray inspection station for aluminium castings shows thick walls (dark) and thin walls (bright) in the same image. With global equalization the operator sees either the thick or the thin areas well, never both. CLAHE with 8 × 8 tiles and clipLimit 2.5 shows porosity in both at once, without turning the smooth thin walls into grain. As in 12.2, the enhanced image is for the operator's display; the automatic pore detection measures on the original grey values with locally adaptive thresholds (13.5).
+
+## What you should remember from 12.3
+
+<Takeaways>
+<Takeaway n={1} title="Adaptive">One equalization curve per tile, blended bilinearly between tile centres.</Takeaway>
+<Takeaway n={2} title="Contrast limited">Histogram bins capped at clipLimit × average; the curve's slope is limited to about clipLimit.</Takeaway>
+<Takeaway n={3} title="Parameters">clipLimit 2–4 and 8 × 8 tiles are good starting points; OpenCV's default clip of 40 barely clips.</Takeaway>
+<Takeaway n={4} title="Use">Display and preprocessing for feature detection; not for measuring grey values.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 512 × 512 image is processed with an 8 × 8 tile grid and clipLimit 3. What is the bin limit per tile?
+
+<Solution>
+
+Tiles are 64 × 64 = 4096 pixels; limit = int(3 · 4096 / 256) = **48** pixels per bin.
+
+</Solution>
+
+**Q2.** Why does an image processed with tile curves but without interpolation look blocky?
+
+<Solution>
+
+Neighbouring pixels on either side of a tile border use **different curves**, so the same input value can jump by many output levels at the border.
+
+</Solution>
+
+### Next: 12.4 Histogram matching
+
+Instead of a flat histogram, give an image the histogram of a reference image.
+
+## Code
+
+Two examples: CLAHE from scratch, then OpenCV with parameter sweeps and colour.
+
+### 1. From scratch: clipped tile curves and bilinear blending
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-plate-poor.png", cv2.IMREAD_GRAYSCALE)     # 200 × 320, divisible by 8
+
+def clahe_np(img, clip=2.0, grid=8):
+    H, W = img.shape
+    th, tw = H // grid, W // grid
+    area = th * tw
+    limit = max(int(clip * area / 256), 1)                             # bin cap, as in OpenCV
+    luts = np.zeros((grid, grid, 256))
+    for ty in range(grid):
+        for tx in range(grid):
+            h = np.bincount(img[ty*th:(ty+1)*th, tx*tw:(tx+1)*tw].ravel(), minlength=256)
+            excess = int(np.maximum(h - limit, 0).sum())
+            h = np.minimum(h, limit) + excess // 256                   # clip, spread the excess evenly
+            res = excess % 256                                         # remainder: one extra pixel in every step-th bin
+            for i in range(0, 256, max(256 // res, 1) if res else 256):
+                if res == 0:
+                    break
+                h[i] += 1
+                res -= 1
+            luts[ty, tx] = np.clip(np.round(np.cumsum(h) * 255 / area), 0, 255)
+    y = np.arange(H) / th - 0.5                                        # position in tile-centre units
+    x = np.arange(W) / tw - 0.5
+    y0, x0 = np.floor(y).astype(int), np.floor(x).astype(int)
+    ya, xa = (y - y0)[:, None], (x - x0)[None, :]                      # blending weights
+    Y0, Y1 = np.clip(y0, 0, grid - 1)[:, None], np.clip(y0 + 1, 0, grid - 1)[:, None]
+    X0, X1 = np.clip(x0, 0, grid - 1)[None, :], np.clip(x0 + 1, 0, grid - 1)[None, :]
+    out = (1 - ya) * ((1 - xa) * luts[Y0, X0, img] + xa * luts[Y0, X1, img]) \
+        + ya * ((1 - xa) * luts[Y1, X0, img] + xa * luts[Y1, X1, img])
+    return np.clip(np.round(out), 0, 255).astype(np.uint8)
+
+mine = clahe_np(img, 2.0, 8)
+ref = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(img)
+d = np.abs(mine.astype(int) - ref)
+print(f"max difference to OpenCV: {d.max()} level(s), on {(d > 0).mean():.2%} of pixels")
+```
+
+Output:
+
+```text
+max difference to OpenCV: 1 level(s), on 0.06% of pixels
+```
+
+- The remaining 1-level differences come from OpenCV computing the blend in 32-bit floats.
+- The four corner terms are the bilinear interpolation: each pixel's value goes through four tile curves, weighted by its distance to their centres. Near the image border the indices are clamped, so border pixels use fewer distinct tiles.
+
+### 2. OpenCV: clip limit, tiles, colour
+
+```python
+import numpy as np
+import cv2
+
+def local_std(im, g=8):                                                # mean std over a g × g grid of tiles
+    H, W = im.shape
+    th, tw = H // g, W // g
+    return np.mean([im[y:y + th, x:x + tw].std() for y in range(0, H, th) for x in range(0, W, tw)])
+
+print(f"original      : global std {img.std():.1f}, local std {local_std(img):.1f}")
+eq = cv2.equalizeHist(img)
+print(f"equalizeHist  : global std {eq.std():.1f}, local std {local_std(eq):.1f}")
+for clip in (1, 2, 4, 40):
+    out = cv2.createCLAHE(clipLimit=clip, tileGridSize=(8, 8)).apply(img)
+    print(f"CLAHE clip {clip:<3}: global std {out.std():.1f}, local std {local_std(out):.1f}")
+
+print("default parameters:", cv2.createCLAHE().getClipLimit(), cv2.createCLAHE().getTilesGridSize())
+
+color = cv2.imread("sample-color.png")
+lab = cv2.cvtColor(color, cv2.COLOR_BGR2Lab)
+lab[..., 0] = cv2.createCLAHE(2.0, (8, 8)).apply(lab[..., 0])         # lightness only
+out = cv2.cvtColor(lab, cv2.COLOR_Lab2BGR)
+print("colour:", color.shape, "->", out.shape, out.dtype)
+```
+
+Output:
+
+```text
+original      : global std 17.0, local std 8.4
+equalizeHist  : global std 73.6, local std 34.9
+CLAHE clip 1  : global std 19.0, local std 13.5
+CLAHE clip 2  : global std 23.7, local std 20.5
+CLAHE clip 4  : global std 34.7, local std 33.4
+CLAHE clip 40 : global std 71.0, local std 70.8
+default parameters: 40.0 (8, 8)
+colour: (200, 320, 3) -> (200, 320, 3) uint8
+```
+
+- Global std measures contrast across the whole image, local std the contrast inside tiles. CLAHE raises the local contrast much more than the global one: that is its purpose.
+- Clip 40 (the default) is almost unclipped and approaches global equalization's numbers; set clipLimit explicitly.
+
+## OpenCV API notes
+
+**`cv2.createCLAHE(clipLimit=40.0, tileGridSize=(8, 8))`** returns a CLAHE object; **`clahe.apply(src)`** returns the result.
+
+- **Input**: `CV_8UC1` or `CV_16UC1` only. Colour: apply to L (Lab) or Y (YCrCb).
+- **clipLimit**: relative to the average bin count of a tile; ≤ 1 effectively means "almost no change". The bin limit is `max(int(clipLimit · tileArea / 256), 1)` (for 16-bit images, the histogram has 65 536 bins).
+- **tileGridSize**: number of tiles (columns, rows), not tile size in pixels. Images not divisible by the grid are padded internally (mirror border).
+- **Reuse**: create the object once and call `apply` per frame; `setClipLimit`, `setTilesGridSize` change it.
+- **GPU**: `cv2.cuda.createCLAHE` in CUDA builds; `apply` also accepts a `cv2.UMat` (OpenCL path).
+
+## Where it fails
+
+- **Halos and texture**: with small tiles and high limits, CLAHE creates dark/bright halos around large objects and grain in flat areas.
+- **Grey values lose meaning**: different curves in different places; thresholds and measurements on the output are unreliable.
+- **Very small objects** compared with the tile size are treated like noise of that tile.
+- **Video**: tile curves change from frame to frame; small changes can flicker. Keep parameters fixed and consider temporal smoothing.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using the default clipLimit of 40** and wondering why the result looks like AHE.
+- **Reading tileGridSize as tile size in pixels**: (8, 8) means 8 × 8 tiles.
+- **Applying CLAHE to B, G, R separately** (colour shifts, as in 12.2).
+- **Passing float or 3-channel images**: an assertion error; convert first.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### From AHE to CLAHE
+
+Adaptive histogram equalization originally computed a curve from the neighbourhood of every single pixel, which is slow. Pizer et al. (1987) introduced the tile grid with bilinear interpolation of the tile curves as a fast approximation, and the contrast limit to control noise in medical images [2]. Zuiderveld's implementation (1994) is the version most libraries, including OpenCV, follow [3].
+
+### Why the slope bound is clipLimit
+
+For a tile with A pixels, the equalization curve has slope T′(v) = 255 · h[v] / A. Clipping gives h[v] ≤ clipLimit · A / 256, so T′(v) ≤ clipLimit · 255 / 256 ≈ clipLimit (before the small extra from the redistributed pixels). The blend of four curves keeps this bound, because a weighted average of slopes is never steeper than the steepest one.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does the 'contrast limited' part of CLAHE do?",
+      options: ["Limits the output to 0–255", "Caps each tile's histogram bins, which caps the curve's slope", "Limits the number of tiles", "Blurs the image"],
+      answer: 1,
+      explanation: "Capped bins mean a capped slope, so noise is amplified at most about clipLimit times.",
+    },
+    {
+      question: "Why are tile curves blended bilinearly?",
+      options: ["To be faster", "To avoid visible steps at tile borders", "To remove noise", "To keep colours"],
+      answer: 1,
+      explanation: "Each pixel blends the 4 nearest tile curves, so the mapping changes smoothly across the image.",
+    },
+    {
+      question: "cv2.createCLAHE() without arguments uses clipLimit…",
+      options: ["1.0", "2.0", "4.0", "40.0"],
+      answer: 3,
+      explanation: "40 barely clips; set a smaller value such as 2 explicitly.",
+    },
+    {
+      question: "tileGridSize=(8, 8) on a 640 × 480 image gives tiles of…",
+      options: ["8 × 8 pixels", "80 × 60 pixels", "64 × 64 pixels", "640 × 480 pixels"],
+      answer: 1,
+      explanation: "The grid has 8 tiles in each direction: 640/8 by 480/8.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A tile of 100 pixels uses only two values: 60 pixels at 100 and 40 pixels at 104. With clipLimit 10 (limit = int(10 · 100 / 256) = 3), about how many pixels end up in each bin after clipping and redistribution, and what does that mean for the curve?
+
+<Solution>
+
+Clipping keeps 3 + 3 = 6 pixels; 94 are redistributed: 94 // 256 = 0 per bin, plus 1 extra pixel in 94 bins (every 2nd bin). So bins hold 0 to 4 pixels and the histogram is nearly flat: the curve is close to a **straight line**. The curve gives T(100) = 138 and T(104) = 150: the 4-level difference becomes 12 levels (a slope of about 3), instead of 0 and 255 with plain equalization.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+For the flat image from 12.2 (noise std 2, feature +25), test clipLimit 1, 1.5, 2, 2.5, 3, 3.5 and 4 with 8 × 8 tiles. Print the CNR for each and the largest clip limit whose CNR is still at least 5.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(0)
+flat = np.full((100, 200), 120, np.float64) + rng.normal(0, 2, (100, 200))
+flat[40:60, 80:120] += 25
+flat = np.clip(flat, 0, 255).astype(np.uint8)
+bg, fe = (slice(0, 30), slice(0, 60)), (slice(40, 60), slice(80, 120))
+best = None
+for clip in (1, 1.5, 2, 2.5, 3, 3.5, 4):
+    o = cv2.createCLAHE(clip, (8, 8)).apply(flat)
+    cnr = (o[fe].mean() - o[bg].mean()) / o[bg].std()
+    print(f"clip {clip}: CNR {cnr:.1f}")
+    if cnr >= 5:
+        best = clip
+print("largest clip with CNR >= 5:", best)
+```
+
+Output:
+
+```text
+clip 1: CNR 6.7
+clip 1.5: CNR 6.7
+clip 2: CNR 5.6
+clip 2.5: CNR 4.7
+clip 3: CNR 4.7
+clip 3.5: CNR 4.0
+clip 4: CNR 4.0
+largest clip with CNR >= 5: 2
+```
+
+The CNR falls as the clip limit rises, but **in steps**: 100 rows do not divide by 8, so OpenCV pads the image to 104 rows and the tiles are 13 × 25 = 325 pixels. The bin limit int(clip · 325 / 256) is then 1, 1, 2, 3, 3, 4, 5 for the seven values, and clip values with the same integer limit give identical images (1 and 1.5, 2.5 and 3). With small tiles, clipLimit can only be tuned coarsely.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 3.3 (local histogram processing).
+2. S. M. Pizer et al., "Adaptive histogram equalization and its variations", *Computer Vision, Graphics, and Image Processing* 39(3), 355–368, 1987.
+3. K. Zuiderveld, "Contrast Limited Adaptive Histogram Equalization", in P. Heckbert (ed.), *Graphics Gems IV*, Academic Press, 1994, 474–485.
+4. OpenCV 4.13.0 documentation: `createCLAHE`, `CLAHE`; tutorial "Histograms 2: Histogram Equalization". https://docs.opencv.org/4.13.0/

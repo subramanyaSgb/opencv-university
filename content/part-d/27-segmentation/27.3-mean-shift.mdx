@@ -1,0 +1,318 @@
+export const meta = {
+  number: "27.3",
+  title: "Mean shift",
+  minutes: 25,
+  objectives: [
+    "Find the modes of a distribution with the mean-shift procedure, by hand",
+    "Explain the two radii of image mean shift: space (sp) and colour (sr)",
+    "Segment with cv2.pyrMeanShiftFiltering followed by flood filling",
+    "Compare mean shift with k-means",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 27.3 (Module 27).
+  Lab: SegmentLab mode "meanshift" (exact cv2.pyrMeanShiftFiltering at maxLevel 0).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 27.3 Mean shift
+
+<Definition term="Mean shift">a procedure that moves a point repeatedly to the mean of its neighbours within a window, until it stops at a local peak (mode) of the data density. Points that end at the same mode form one cluster, so the number of clusters is found automatically.</Definition>
+
+K-means (27.2) needs K. Mean shift needs a **window size** instead: how far apart two colours (and pixels) may be and still belong together. It finds as many clusters as the data has peaks at that scale. In images it is used as an edge-preserving smoother that flattens each region to one colour, which makes segmentation by flood filling easy (Comaniciu and Meer 2002 [2]).
+
+## 1. An analogy
+
+People in a dark park, each holding a torch that lights a small circle. Everyone walks to the centre of the people they can see in their circle. Where people are crowded, the centre pulls further into the crowd. After a few steps, everyone stands at the middle of a crowd, and the number of crowds is simply how many places people ended up.
+
+## 2. The procedure
+
+<Flow
+  steps={[
+    { label: "Start at a pixel: position (x, y) and colour c", tone: "data" },
+    { label: "Window: pixels within sp in space and sr in colour", tone: "process" },
+    { label: "Move to their mean position and mean colour", tone: "process" },
+    { label: "Repeat until the move is tiny (or 5 steps)", tone: "process" },
+    { label: "Output pixel = the colour where it stopped", tone: "result" },
+  ]}
+/>
+
+- **sp (spatial radius)**: the window extends sp pixels in x and y.
+- **sr (colour radius)**: only window pixels whose colour is within Euclidean distance sr count.
+
+The colour radius is what makes mean shift preserve edges: across a strong edge the colours differ by more than sr, so the other side is ignored. Inside a region, small variations (noise, texture weaker than sr) are averaged away.
+
+## 3. A worked example by hand
+
+One-dimensional values 1, 2, 3, 10, 11 and a window radius 2:
+
+| Start | Window | Mean | Next window | Mean | Mode |
+| --- | --- | --- | --- | --- | --- |
+| 3 | [1, 5]: 1, 2, 3 | 2 | [0, 4]: 1, 2, 3 | 2 | **2** |
+| 1 | [−1, 3]: 1, 2, 3 | 2 | [0, 4] | 2 | **2** |
+| 10 | [8, 12]: 10, 11 | 10.5 | [8.5, 12.5] | 10.5 | **10.5** |
+
+All starts end at 2 or at 10.5: two clusters, found without being told K. With radius 8, every window would contain all five values and everything would converge to one mode, 5.4: the radius sets the scale of the clusters.
+
+## 4. On the scene
+
+`cv2.pyrMeanShiftFiltering` does the procedure for every pixel in joint space–colour, then regions of (nearly) equal colour are collected by flood filling (±4, floating range), as in OpenCV's mean-shift segmentation sample:
+
+| Input | Regions | Regions ≥ 50 px | Cloth | Orange | Red | Crimson | Green box | Label |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| no filtering | 2 591 | 18 | 0.85 | 0.93 | 0.92 | 0.92 | 0.08 | 0.68 |
+| sp 10, sr 20 | 585 | 17 | 0.99 | 0.94 | 0.96 | 0.99 | 0.08 | 0.81 |
+| sp 10, sr 40 | 126 | 9 | 1.00 | 0.99 | 0.55 | 0.45 | 0.95 | 0.85 |
+| sp 20, sr 40 | 139 | 10 | 1.00 | 0.96 | **0.97** | **0.98** | **1.00** | 0.86 |
+
+(IoU of the best region per object.) Mean shift flattens noise and the cloth weave, so the flood fill no longer breaks into thousands of pieces. A colour radius of 20 is smaller than the stripes on the green box (about 35 apart), so the stripes stay separate; 40 merges them. With sp 10 and sr 40 the red and crimson discs (about 40 apart) merge; a larger spatial window (sp 20) happens to keep them apart here (0.97 and 0.98): the result depends on both radii together, not on sr alone.
+
+<SegmentLab mode="meanshift" caption="cv2.pyrMeanShiftFiltering at maxLevel 0 (exact to OpenCV). Compare the filtered image with the input: noise and weave vanish, edges stay sharp. Switch to 'regions' to flood-fill the result and score it. Raise sr to merge the green stripes; watch the red and crimson discs as you change sp and sr. Large sp is slow: the work grows with sp²."/>
+
+## 5. Mean shift vs k-means
+
+| | K-means | Mean shift |
+| --- | --- | --- |
+| You choose | K | the window radii |
+| Cluster shape | round, similar size | any shape (follows density peaks) |
+| Spatial coherence | none (pixels independent) | yes, with the spatial radius |
+| Speed | fast | slow (window per pixel per iteration) |
+| Deterministic | no (random start) | yes |
+
+## 6. Industrial use
+
+- **Pre-segmentation** of natural or textured scenes (food, wood, textiles) before region analysis.
+- **Edge-preserving smoothing** before colour measurement.
+- **Tracking**: `cv2.meanShift` and `cv2.CamShift` move a window to the peak of a back-projection (40.4); same procedure, one window instead of every pixel.
+
+## What you should remember from 27.3
+
+<Takeaways>
+<Takeaway n={1} title="Climb to a mode">Move to the window mean until it stops; equal endpoints = one cluster.</Takeaway>
+<Takeaway n={2} title="Two radii">sp in pixels, sr in colour; sr sets which colours merge.</Takeaway>
+<Takeaway n={3} title="No K">The number of clusters comes from the radii.</Takeaway>
+<Takeaway n={4} title="Then flood fill">pyrMeanShiftFiltering flattens; floodFill collects regions.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Values 4, 5, 6, 20 with window radius 3. Where do 4 and 20 end?
+
+<Solution>
+
+From 4: window [1, 7] holds 4, 5, 6 → mean 5; window [2, 8] → 5: mode **5**. From 20: only 20 → **20**. Two clusters.
+
+</Solution>
+
+**Q2.** Two regions differ by 30 in colour. Which sr keeps them apart?
+
+<Solution>
+
+sr **below 30** (pixels across the border then never fall in each other's colour window). In practice choose well below, e.g. 15–20, because noise widens the colour distributions.
+
+</Solution>
+
+### Next: 27.4 Watershed
+
+Segmentation as flooding a landscape from markers.
+
+## Code
+
+Three examples: 1D mean shift from scratch, filtering the scene, and regions from the filtered image.
+
+### 1. Mean shift in 1D
+
+```python
+import numpy as np
+import cv2
+
+values = np.array([1, 2, 3, 10, 11], float)
+
+def mode(start, radius):
+    x = start
+    for _ in range(20):
+        window = values[np.abs(values - x) <= radius]
+        new = window.mean()
+        if abs(new - x) < 1e-9:
+            break
+        x = new
+    return round(float(x), 2)
+
+print("radius 2:", [mode(v, 2) for v in values])
+print("radius 8:", [mode(v, 8) for v in values])
+```
+
+Output:
+
+```text
+radius 2: [2.0, 2.0, 2.0, 10.5, 10.5]
+radius 8: [5.4, 5.4, 5.4, 5.4, 5.4]
+```
+
+### 2. Filtering the scene
+
+```python
+scene = cv2.imread("sample-seg.png")
+ids = cv2.imread("sample-seg-ids.png", cv2.IMREAD_GRAYSCALE)
+h, w = ids.shape
+for sp, sr in [(10, 20), (10, 40), (20, 40)]:
+    f = cv2.pyrMeanShiftFiltering(scene, sp, sr, maxLevel=0)
+    colours = len(np.unique(f.reshape(-1, 3), axis=0))
+    print(f"sp {sp} sr {sr}: {colours} distinct colours (input {len(np.unique(scene.reshape(-1, 3), axis=0))})")
+```
+
+Output:
+
+```text
+sp 10 sr 20: 1203 distinct colours (input 17451)
+sp 10 sr 40: 1151 distinct colours (input 17451)
+sp 20 sr 40: 564 distinct colours (input 17451)
+```
+
+- `maxLevel=0` works on the full image only. The default `maxLevel=1` first filters a half-size pyramid level and then refines only pixels near edges at full size: faster, slightly different.
+
+### 3. Regions by flood filling
+
+```python
+def regions(img, tol=4):
+    mask = np.zeros((h + 2, w + 2), np.uint8)
+    labels = np.zeros((h, w), np.int32)
+    n = 0
+    for y in range(h):
+        for x in range(w):
+            if mask[y + 1, x + 1] == 0:                                 # not yet in any region
+                n += 1
+                before = mask[1:-1, 1:-1].copy()
+                cv2.floodFill(img, mask, (x, y), 0, (tol,) * 3, (tol,) * 3, 4 | cv2.FLOODFILL_MASK_ONLY | (1 << 8))
+                labels[(mask[1:-1, 1:-1] > 0) & (before == 0)] = n
+    return labels, n
+
+def best_iou(labels):
+    return [round(float(max(((labels == c) & (ids == k)).sum() / ((labels == c) | (ids == k)).sum()
+                            for c in np.unique(labels[ids == k]))), 2) for k in range(6)]
+
+for sp, sr in [(10, 20), (20, 40)]:
+    labels, n = regions(cv2.pyrMeanShiftFiltering(scene, sp, sr, maxLevel=0))
+    big = int((np.bincount(labels.ravel()) >= 50).sum())
+    print(f"sp {sp} sr {sr}: {n} regions, {big} of at least 50 px, best IoU {best_iou(labels)}")
+```
+
+Output:
+
+```text
+sp 10 sr 20: 585 regions, 17 of at least 50 px, best IoU [0.99, 0.94, 0.96, 0.99, 0.08, 0.81]
+sp 20 sr 40: 139 regions, 10 of at least 50 px, best IoU [1.0, 0.96, 0.97, 0.98, 1.0, 0.86]
+```
+
+## OpenCV API notes
+
+- **`cv2.pyrMeanShiftFiltering(src, sp, sr, dst=None, maxLevel=1, termcrit=(MAX_ITER + EPS, 5, 1))`** → filtered image. `src`: 8-bit, 3 channels. `sp`: spatial window radius; `sr`: colour window radius. Each pixel moves at most 5 times by default.
+- **`maxLevel`**: number of pyramid levels (0 = full resolution only).
+- **Cost**: about (2·sp + 1)² window pixels × up to 5 iterations per pixel; sp 20 is about 4 times slower than sp 10.
+- **Tracking versions**: `cv2.meanShift(probImage, window, criteria)` and `cv2.CamShift(...)` (40.4).
+
+## Where it fails
+
+- **Slow** for large sp on large images; use a pyramid (`maxLevel`) or downscale.
+- **Gradual colour changes** (strong shading) larger than sr inside an object: the object splits.
+- **Objects with similar colours** close together: merged within the window.
+- **Fine texture** with contrast above sr: kept, not smoothed.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Expecting labels**: `pyrMeanShiftFiltering` returns a filtered image, not a segmentation; collect regions afterwards.
+- **Grey images**: the function needs 3 channels; convert with `cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)`.
+- **Large sp on full HD**: minutes instead of milliseconds.
+- **Confusing sr with a threshold on single channels**: it is a Euclidean distance over all three channels.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Density gradient ascent
+
+Fukunaga and Hostetler [1] showed that the mean-shift vector, the difference between the window mean and the current point, points along the gradient of a kernel density estimate. Moving by it climbs to a local maximum of the density (a mode). Comaniciu and Meer [2] applied it in the joint spatial–range domain with a uniform or Epanechnikov kernel, giving discontinuity-preserving filtering and segmentation; the bandwidths (sp, sr) are its only parameters.
+
+### Relation to the bilateral filter
+
+The bilateral filter (18.4) averages once with weights for space and colour distance; mean shift repeats the averaging and moves the window each time, so it converges to region modes instead of only smoothing.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does mean shift need instead of K?",
+      options: ["A seed", "Window radii (sp, sr)", "The number of iterations only", "Markers"],
+      answer: 1,
+      explanation: "The radii set the scale; the number of modes follows.",
+    },
+    {
+      question: "Why does mean shift preserve edges?",
+      options: ["It detects edges first", "Pixels across a strong edge are outside the colour radius sr", "It uses a median", "It is slow"],
+      answer: 1,
+      explanation: "The other side does not enter the average.",
+    },
+    {
+      question: "What does cv2.pyrMeanShiftFiltering return?",
+      options: ["Labels", "A filtered colour image", "Cluster centres", "A mask"],
+      answer: 1,
+      explanation: "Segment it afterwards, e.g. with floodFill.",
+    },
+    {
+      question: "With sr = 40 the 35-apart green stripes…",
+      options: ["Stay separate", "Merge into one region", "Disappear", "Become edges"],
+      answer: 1,
+      explanation: "Their colour difference is inside the colour radius.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Values 0, 1, 2, 6, 7, 8 and radius 2.5. Find the modes starting from 2 and from 6.
+
+<Solution>
+
+From 2: window [−0.5, 4.5] = 0, 1, 2 → 1; window [−1.5, 3.5] → 1: mode **1**. From 6: window [3.5, 8.5] = 6, 7, 8 → 7; then 7: mode **7**. Two clusters.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Compare `maxLevel=0` and the default `maxLevel=1` for sp 10, sr 20: what fraction of pixels differ, and by how much at most?
+
+<Solution>
+
+```python
+a = cv2.pyrMeanShiftFiltering(scene, 10, 20, maxLevel=0).astype(int)
+b = cv2.pyrMeanShiftFiltering(scene, 10, 20).astype(int)             # maxLevel = 1
+diff = np.abs(a - b).max(axis=2)
+print("pixels that differ:", round(float((diff > 0).mean() * 100), 1), "% | largest difference:", int(diff.max()))
+```
+
+Output:
+
+```text
+pixels that differ: 36.6 % | largest difference: 11
+```
+
+About a third of the pixels differ, but by at most 11 grey levels: the pyramid version is a close, faster approximation. Use `maxLevel=0` when results must match a reference exactly.
+
+</Solution>
+
+## References
+
+1. K. Fukunaga, L. Hostetler, "The estimation of the gradient of a density function, with applications in pattern recognition", *IEEE Trans. Information Theory* 21(1), 32–40, 1975.
+2. D. Comaniciu, P. Meer, "Mean shift: a robust approach toward feature space analysis", *IEEE Trans. Pattern Analysis and Machine Intelligence* 24(5), 603–619, 2002.
+3. Y. Cheng, "Mean shift, mode seeking, and clustering", *IEEE Trans. Pattern Analysis and Machine Intelligence* 17(8), 790–799, 1995.
+4. OpenCV 4.13.0 documentation: `pyrMeanShiftFiltering`; sample `samples/cpp/meanshift_segmentation.cpp`. https://docs.opencv.org/4.13.0/

@@ -1,0 +1,302 @@
+export const meta = {
+  number: "19.2",
+  title: "Laplacian sharpening",
+  minutes: 20,
+  objectives: [
+    "Compute the discrete Laplacian of an image and explain what it measures",
+    "Sharpen with S = I − c·∇²I, and write it as a single 3 × 3 kernel",
+    "Use cv2.Laplacian and cv2.filter2D with the right data types",
+    "Predict how much a sharpening kernel amplifies noise",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 19.2 (Module 19).
+  Lab: RestoreLab (mode sharpen, Laplacian).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 19.2 Laplacian sharpening
+
+<Definition term="Laplacian">the sum of the second derivatives in x and y, ∇²I = ∂²I/∂x² + ∂²I/∂y². On an image it compares each pixel with the average of its neighbours: zero in flat areas and on straight ramps, large on both sides of an edge, with opposite signs. Subtracting it from the image makes edges steeper.</Definition>
+
+The unsharp mask (19.1) needed a blur and a subtraction. Laplacian sharpening does the same job with one small convolution, which is why the "sharpen" kernel of every image editor looks the way it does. The Laplacian itself returns in edge detection (22.3) and in focus measures (50.3).
+
+## 1. An analogy
+
+A pixel asks: "am I above or below the average of my four neighbours?" On a flat floor, nobody stands out. At the edge of a step, the pixel at the top of the step is above its neighbours' average and the pixel at the bottom is below it. Sharpening exaggerates the answer: those above are raised, those below are lowered.
+
+## 2. The discrete Laplacian
+
+<Flow
+  steps={[
+    { label: "Pixel and its 4 neighbours", tone: "data" },
+    { label: "∇²I = up + down + left + right − 4 · centre", tone: "process" },
+    { label: "Sharpened: S = I − c · ∇²I", tone: "process" },
+    { label: "One kernel: centre 1 + 4c, neighbours −c", tone: "result" },
+  ]}
+/>
+
+The second derivative along x is approximated by I(x − 1) − 2I(x) + I(x + 1); adding the same along y gives the 4-neighbour Laplacian kernel. Including the diagonals gives the 8-neighbour version:
+
+<Columns>
+<Panel title="4-neighbour" tone="a">
+<KernelGrid cells={[["0", "1", "0"], ["1", "−4", "1"], ["0", "1", "0"]]} />
+</Panel>
+<Panel title="8-neighbour" tone="b">
+<KernelGrid cells={[["1", "1", "1"], ["1", "−8", "1"], ["1", "1", "1"]]} />
+</Panel>
+</Columns>
+
+A worked example: a dark pixel (100) at the corner of a bright region (160), with c = 0.5:
+
+<PixelMatrix values={[[100, 100, 100], [100, 100, 160], [100, 160, 160]]} highlight={[[1, 1]]} />
+
+∇²I = 100 + 160 + 100 + 160 − 4 · 100 = **120** (its neighbours are brighter on average, so the Laplacian is positive). S = 100 − 0.5 · 120 = **40**: the dark side of the edge gets darker. On the bright side the Laplacian is negative and the pixels get brighter. In a flat area all four neighbours equal the centre: ∇²I = 0, nothing changes.
+
+Because S = I − c·∇²I is linear, the two steps combine into one kernel. With c = 1 it is the classic sharpening kernel:
+
+<KernelGrid cells={[["0", "−1", "0"], ["−1", "5", "−1"], ["0", "−1", "0"]]} label="I − ∇²I" />
+
+It sums to 1, so flat areas keep their brightness.
+
+## 3. Strength and noise
+
+The test image blurred with σ = 1.5, sharpened with the 4-neighbour Laplacian; row 60 across the square's edge (230 → 105):
+
+| c | PSNR | Edge width | Darkest / brightest near the edge | Noise gain |
+| --- | --- | --- | --- | --- |
+| 0 (input) | 21.7 dB | 4 px | 105 / 230 | 1 |
+| 0.25 | 22.0 dB | 4 px | 106 / 230 | 2.1 |
+| 0.5 | 22.3 dB | 2 px | 105 / 230 | 3.2 |
+| 1 | 22.9 dB | 2 px | 101 / 235 | 5.4 |
+| 2 | 23.9 dB | 2 px | 91 / 245 | 9.8 |
+
+The overshoot is smaller than with the unsharp mask at σ = 2 (19.1), because the 3 × 3 Laplacian only looks one pixel away: it boosts the very finest detail and leaves broad transitions alone. That is also why it amplifies noise so strongly. Independent noise passes through a kernel with gain √(sum of squared weights): for c = 1, √(5² + 4 · 1²) = **5.39**. The 8-neighbour kernel with c = 1 (centre 9) gives √(81 + 8) = 9.43.
+
+<RestoreLab mode="sharpen" initial="laplacian" caption="The same blurred input as in 19.1. Raise the strength c and compare the 4- and 8-neighbour kernels: the edge profile steepens with a narrow overshoot. Then add a little noise to the input (2 or 3 grey levels) and watch the flat circle: the noise grows several times faster than with the unsharp mask."/>
+
+## 4. Industrial example
+
+The 3 × 3 sharpening kernel is the cheapest way to improve the look of slightly soft images on an operator screen or in a report, and it is built into many camera ISPs and display pipelines. In analysis pipelines it is used with care: its strong noise gain makes thresholds unstable, so it is applied after denoising (18), or replaced by an unsharp mask with a threshold. The Laplacian itself is used more often as a *measurement* than as a filter: its variance over an image is a standard focus score for autofocus and for rejecting blurred frames (50.3).
+
+## What you should remember from 19.2
+
+<Takeaways>
+<Takeaway n={1} title="Laplacian">Sum of neighbours minus 4 × centre: zero on flat areas and ramps, ± at edges.</Takeaway>
+<Takeaway n={2} title="Sharpen">S = I − c·∇²I; one kernel with centre 1 + 4c, neighbours −c.</Takeaway>
+<Takeaway n={3} title="Noise">Gain = √(sum of squared weights): 5.4 for the classic kernel.</Takeaway>
+<Takeaway n={4} title="Use">Cheap, fine-detail sharpening; denoise first; also a focus measure.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Write the single 3 × 3 kernel for c = 0.5 with the 4-neighbour Laplacian.
+
+<Solution>
+
+Centre 1 + 4 · 0.5 = **3**, the four neighbours **−0.5**, corners 0. It sums to 1.
+
+</Solution>
+
+**Q2.** On a straight ramp 10, 20, 30, 40, 50 (in x, constant in y), what is the Laplacian at 30?
+
+<Solution>
+
+20 + 40 − 2 · 30 = **0** along x, and 0 along y. Ramps are unchanged; only changes of slope (edges, corners, lines) are boosted.
+
+</Solution>
+
+### Next: 19.3 Blur models (PSF)
+
+To undo blur rather than hide it, describe it first: the point spread function.
+
+## Code
+
+Two examples: the Laplacian with OpenCV and the sharpening kernel, then noise gain.
+
+### 1. Laplacian and sharpening
+
+```python
+import numpy as np
+import cv2
+
+d = np.zeros((5, 5), np.float32)
+d[2, 2] = 1
+print("cv2.Laplacian ksize=1:", cv2.Laplacian(d, cv2.CV_32F, ksize=1)[1:4, 1:4].tolist())
+print("cv2.Laplacian ksize=3:", cv2.Laplacian(d, cv2.CV_32F, ksize=3)[1:4, 1:4].tolist())
+
+p = np.array([[100, 100, 100], [100, 100, 160], [100, 160, 160]], np.float32)
+k4 = np.array([[0, 1, 0], [1, -4, 1], [0, 1, 0]], np.float32)
+lap = float((p * k4).sum())
+print("Laplacian at the centre:", lap, "| sharpened (c = 0.5):", 100 - 0.5 * lap)
+
+img = cv2.imread("sample-clean.png", cv2.IMREAD_GRAYSCALE)
+soft = cv2.GaussianBlur(img, (0, 0), 1.5)
+two_step = np.clip(np.rint(soft - 1.0 * cv2.Laplacian(soft.astype(np.float32), cv2.CV_32F, ksize=1)), 0, 255).astype(np.uint8)
+sharpen = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], np.float32)
+one_kernel = cv2.filter2D(soft, -1, sharpen)                         # uint8 in, uint8 out (saturated)
+print("one kernel == two steps:", np.array_equal(one_kernel, two_step))
+print("row 60:", one_kernel[60, 105:117].tolist())
+```
+
+Output:
+
+```text
+cv2.Laplacian ksize=1: [[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]]
+cv2.Laplacian ksize=3: [[2.0, 0.0, 2.0], [0.0, -8.0, 0.0], [2.0, 0.0, 2.0]]
+Laplacian at the centre: 120.0 | sharpened (c = 0.5): 40.0
+one kernel == two steps: True
+row 60: [230, 231, 232, 235, 224, 190, 144, 113, 101, 103, 107, 106]
+```
+
+- `ksize=1` is the 4-neighbour kernel; `ksize=3` is a different 3 × 3 kernel (diagonals only, weights 2, centre −8), derived from Sobel second derivatives. Read the kernel before assuming which one you get.
+- The Laplacian has negative values: compute it in `CV_32F` or `CV_16S`, never in uint8.
+
+### 2. Noise gain
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(1)
+flat = (128 + rng.normal(0, 2, (300, 300))).astype(np.float32)
+for name, c, k in [("4-neighbour, c=0.5", 0.5, k4), ("4-neighbour, c=1", 1, k4),
+                   ("8-neighbour, c=1", 1, np.array([[1, 1, 1], [1, -8, 1], [1, 1, 1]], np.float32))]:
+    out = flat - c * cv2.filter2D(flat, -1, k)
+    kernel = -c * k
+    kernel[1, 1] += 1
+    print(f"{name:20s} measured gain {out[5:-5, 5:-5].std() / flat.std():.2f} | predicted {np.sqrt((kernel ** 2).sum()):.2f}")
+```
+
+Output:
+
+```text
+4-neighbour, c=0.5   measured gain 3.16 | predicted 3.16
+4-neighbour, c=1     measured gain 5.39 | predicted 5.39
+8-neighbour, c=1     measured gain 9.45 | predicted 9.43
+```
+
+## OpenCV API notes
+
+**`cv2.Laplacian(src, ddepth, ksize=1, scale=1, delta=0, borderType=...)`**:
+- `ddepth`: use `cv2.CV_16S` or `cv2.CV_32F` (negative values); convert back with `cv2.convertScaleAbs` only for display.
+- `ksize=1`: the 4-neighbour kernel. `ksize` 3, 5, 7: built from Sobel second derivatives, smoother and larger.
+- `scale`: multiplies the result (e.g. the strength c with a negative sign handled by you).
+
+**`cv2.filter2D(src, -1, kernel)`**: applies any sharpening kernel in one pass; with uint8 input and `ddepth=-1` the result is saturated to 0–255 (17.6).
+
+**Focus measure**: `cv2.Laplacian(gray, cv2.CV_64F).var()` (50.3).
+
+## Where it fails
+
+- **Noise**: the strongest noise amplifier of the usual sharpening tools; denoise first or use an unsharp mask with a threshold.
+- **Only the finest scale**: a 3 × 3 Laplacian does little for broad blur (σ of several pixels); use an unsharp mask with a larger σ or deconvolution.
+- **Lost detail**: like every sharpening, it cannot restore detail the blur removed.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Laplacian in uint8**: negative values are clipped to 0, and the sharpening becomes one-sided.
+- **Wrong sign**: S = I + c·∇²I blurs instead of sharpening (with the kernel convention above).
+- **Assuming ksize=3 is the 4-neighbour kernel**: in OpenCV it is not.
+- **Kernel that does not sum to 1**: the brightness of flat areas changes.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why the second derivative
+
+At a blurred edge, the first derivative has a peak and the second derivative changes sign: positive on the dark side, negative on the bright side. Subtracting it moves values away from the middle of the transition, steepening it. Gonzalez and Woods derive the kernels and the sharpening formula in detail [1].
+
+### Frequency response
+
+The 4-neighbour Laplacian has the frequency response −(4 − 2cos 2πu − 2cos 2πv): zero at the origin, −8 at the highest frequency (u = v = 1/2). Sharpening with c multiplies the highest frequency by 1 + 8c: with c = 1, nine times. That is the noise gain at its worst; the 5.39 measured above is the average over all frequencies.
+
+### Laplacian of Gaussian
+
+Smoothing first and then taking the Laplacian is one operator, the Laplacian of Gaussian (LoG, 22.3), which is the basis of blob detection (25.3) and of Marr–Hildreth edges. Sharpening with LoG instead of the plain Laplacian amplifies noise less.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The 4-neighbour Laplacian of a pixel in a flat area is…",
+      options: ["The pixel value", "0", "4 × the pixel value", "255"],
+      answer: 1,
+      explanation: "Neighbours equal the centre; the sum minus 4 × centre is 0.",
+    },
+    {
+      question: "Which single kernel equals I − 1·∇²I (4-neighbour)?",
+      options: ["Centre 4, neighbours 1", "Centre 5, neighbours −1", "Centre −4, neighbours 1", "All 1/9"],
+      answer: 1,
+      explanation: "1 + 4c in the centre, −c for the neighbours.",
+    },
+    {
+      question: "Noise gain of the classic sharpen kernel (5 and four −1)?",
+      options: ["1", "2.2", "5.4", "29"],
+      answer: 2,
+      explanation: "√(25 + 4) = 5.39.",
+    },
+    {
+      question: "cv2.Laplacian(img, cv2.CV_8U) on a uint8 image…",
+      options: ["Is correct", "Loses the negative half of the response", "Raises an error", "Gives the 8-neighbour kernel"],
+      answer: 1,
+      explanation: "Negative values saturate to 0; use CV_16S or CV_32F.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+1-D signal 50, 50, 50, 150, 150, 150. Compute the 1-D Laplacian I(x − 1) − 2I(x) + I(x + 1) at positions 3 and 4, then S = I − 0.5·∇²I.
+
+<Solution>
+
+At 3: 50 − 100 + 150 = **100**; S = 50 − 50 = **0**. At 4: 50 − 300 + 150 = **−100**; S = 150 + 50 = **200**. Elsewhere 0. Result 50, 50, 0, 200, 150, 150: the same kind of overshoot as the unsharp mask in 19.1.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Use the variance of the Laplacian as a focus score: compute it for the clean test image and for Gaussian blurs with σ = 0.5, 1, 2 and 4.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+for s in (0, 0.5, 1, 2, 4):
+    x = img if s == 0 else cv2.GaussianBlur(img, (0, 0), s)
+    print(f"sigma {s}: focus score {cv2.Laplacian(x, cv2.CV_64F).var():9.1f}")
+```
+
+Output:
+
+```text
+sigma 0: focus score    2926.7
+sigma 0.5: focus score    1406.5
+sigma 1: focus score     152.7
+sigma 2: focus score       6.0
+sigma 4: focus score       1.7
+```
+
+The score falls by orders of magnitude as the image gets softer: a simple, fast way to reject blurred frames or to drive autofocus (50.3). It only compares images of the same scene; a scene with more texture scores higher at the same focus.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 3 (the Laplacian, sharpening spatial filters).
+2. D. Marr, E. Hildreth, "Theory of edge detection", *Proc. Royal Society of London B* 207, 187–217, 1980.
+3. OpenCV 4.13.0 documentation: `Laplacian`, `filter2D`, `convertScaleAbs`. https://docs.opencv.org/4.13.0/

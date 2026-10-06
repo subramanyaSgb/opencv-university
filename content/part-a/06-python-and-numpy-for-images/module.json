@@ -1,0 +1,12 @@
+{
+  "number": 6,
+  "title": "Python and NumPy for images",
+  "summary": "The NumPy array behind every image in Python: shape and dtype, slicing and views, overflow and conversions, vectorised code instead of loops, and plotting results with matplotlib.",
+  "chapters": [
+    { "number": "6.1", "slug": "6.1-arrays-shape-dtype", "title": "Arrays, shape, dtype" },
+    { "number": "6.2", "slug": "6.2-slicing-and-views", "title": "Slicing and views" },
+    { "number": "6.3", "slug": "6.3-overflow-and-type-conversion", "title": "Overflow and type conversion" },
+    { "number": "6.4", "slug": "6.4-vectorization-vs-loops", "title": "Vectorization vs loops" },
+    { "number": "6.5", "slug": "6.5-plotting-with-matplotlib", "title": "Plotting with matplotlib" }
+  ]
+}

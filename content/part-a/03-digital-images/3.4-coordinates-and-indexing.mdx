@@ -1,0 +1,440 @@
+export const meta = {
+  number: "3.4",
+  title: "Coordinates and indexing",
+  minutes: 35,
+  objectives: [
+    "Switch confidently between NumPy [row, col] and OpenCV (x, y)",
+    "Slice regions of interest correctly, knowing that slices are views",
+    "Convert between 2D positions and flat indices",
+    "Know which OpenCV functions take or return (x, y), and which (w, h)",
+    "Understand pixel centres and sub-pixel positions",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 3.4 (Module 3 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 3.4 Coordinates and indexing
+
+<Definition term="Indexing">naming one pixel (or a block of pixels) by its position, so a program can read or change it.</Definition>
+
+Chapter 1.2 introduced the grid: rows, columns, counting from 0. This chapter makes you **fluent**: the two conventions you will use every day, regions, flat indices, which OpenCV function wants what, and positions **between** pixels.
+
+<Flow direction="right" steps={[{ label: "Position in the scene", tone: "world" }, { label: "Pixel (row, col) or (x, y)", tone: "process" }, { label: "Value img[row, col]", tone: "result" }]} />
+
+## 1. Two conventions, one grid
+
+The same pixel has two names:
+
+<VsTable
+  left="NumPy (arrays)"
+  right="OpenCV geometry (points, shapes)"
+  rows={[
+    ["img[row, col]", "(x, y)"],
+    ["row first = vertical position", "x first = horizontal position"],
+    ["img[1, 6]", "(6, 1)"],
+  ]}
+/>
+
+**row = y** and **col = x**. Only the **order** changes. When you index an array, use `[y, x]`; when you call an OpenCV drawing or geometry function, pass `(x, y)`.
+
+## 2. The origin and the axes
+
+The origin (0, 0) is the **top-left** pixel. **x grows to the right**, **y grows downward**. That is the opposite of school graphs, where y grows upward. It follows the order in which images are stored and read: row by row, from the top.
+
+<CoordAxes width={8} height={6} points={[{ row: 1, col: 6, label: "(x 6, y 1) = img[1, 6]" }]} caption="x to the right, y downward. The marked pixel is (x = 6, y = 1), i.e. img[1, 6]." />
+
+## 3. Try it
+
+Click a pixel to see all its names. Click a second pixel to make a region.
+
+<CoordLab caption="An 8 × 6 image. Each cell shows its flat index. The table shows the NumPy index, the OpenCV point, and for a region the slice and the rectangle." />
+
+## 4. Swapping the order is a silent bug
+
+`cv2.circle(img, (6, 1), …)` draws at **x = 6, y = 1**: NumPy finds it at `img[1, 6]`. Asking for `img[6, 1]` on a 5-row image fails with an `IndexError`, and on a larger image it silently reads the **wrong pixel** (Code example 1). Most coordinate bugs are this swap.
+
+## 5. Regions of interest (ROI)
+
+A rectangular region is a **slice**:
+
+```text
+roi = img[y1:y2, x1:x2]
+```
+
+- The **start** is included, the **end is excluded**: `img[1:4, 2:6]` is rows 1, 2, 3 and columns 2, 3, 4, 5, a 3 × 4 block.
+- Its size is simply `(y2 − y1, x2 − x1)`.
+- Leaving out a bound means "from the start" or "to the end": `img[:, 100:]`.
+
+## 6. Slices are views
+
+A slice does **not** copy the data. It is a **window** onto the same memory. Changing the ROI **changes the original image** (Code example 2). Use `.copy()` when you need an independent piece.
+
+<Callout kind="mistake">
+
+Drawing on or thresholding an ROI "in place" also changes the full image. Sometimes that is what you want (process just one region); often it is a surprise.
+
+</Callout>
+
+## 7. Flat index
+
+In memory, the pixels of a gray image are one long line, row after row. Pixel (row r, col c) sits at:
+
+<Equation terms={[{ value: "r × width", label: "rows before it" }, { op: "+", value: "c", label: "within its row" }, { op: "=", value: "flat index", result: true }]} />
+
+For an 8-wide image, (row 2, col 3) is 2 × 8 + 3 = **19**. `np.ravel_multi_index` and `np.unravel_index` convert both ways. You meet flat indices in `np.argmax`, in line-scan data and in deep-learning tensors.
+
+## 8. Which OpenCV functions use what
+
+<Glossary
+  items={[
+    { term: "(x, y) points", desc: "cv2.circle, cv2.line, cv2.rectangle, cv2.putText, contour points, cv2.minMaxLoc results, keypoints." },
+    { term: "(width, height) sizes", desc: "cv2.resize dsize, kernel sizes in cv2.GaussianBlur and cv2.blur, cv2.getRectSubPix patch size." },
+    { term: "(x, y, w, h) rectangles", desc: "cv2.boundingRect, cv2.selectROI, detection boxes in most tools." },
+    { term: "(rows, cols) shapes", desc: "img.shape, np.zeros((h, w)), np.argwhere, np.unravel_index results." },
+  ]}
+/>
+
+When in doubt, test on a tiny array where you know the answer (Code example 3).
+
+## 9. Rectangle conventions
+
+There are three common ways to describe the same box:
+
+| Form | Example for rows 1–3, cols 2–5 |
+| --- | --- |
+| Slice (end exclusive) | `img[1:4, 2:6]` |
+| Corners (inclusive) for `cv2.rectangle` | `(2, 1)` and `(5, 3)` |
+| `(x, y, w, h)` | `(2, 1, 4, 3)` |
+
+Convert carefully: `x2 = x + w` for a slice end, but `x + w − 1` for the last included column.
+
+## 10. Out of bounds
+
+NumPy raises `IndexError` for a single index outside the image, but **slices are clipped silently**: `img[-5:300, :]` on a 200-row image just returns what exists. Negative indices count **from the end**: `img[-1]` is the last row. Both behaviours hide bugs when a computed ROI runs off the image. Check ROIs against `img.shape` before use.
+
+## 11. Pixel centres and sub-pixel positions
+
+Edge detection, corner finding and measurement give positions **between** pixels, such as x = 12.37. In OpenCV, the **centre** of pixel (x, y) is at the integer coordinates (x, y), and the pixel covers x − 0.5 … x + 0.5.
+
+A value at a sub-pixel position is **interpolated** from the neighbours: at (x = 1.5, y = 0.5), halfway between four pixels, bilinear interpolation gives their average (Code example 4).
+
+<PixelMatrix values={[[10, 20, 30], [40, 50, 60]]} caption="At (x = 1.5, y = 0.5), between 20, 30, 50 and 60, the interpolated value is 40." />
+
+## 12. Image coordinates vs world coordinates
+
+Pixel coordinates are not millimetres (2.4), and their y-axis points **down**. For measurement you convert:
+
+<Flow direction="right" steps={["(x, y) in pixels", "× mm per pixel, + offset", "flip y if the world axis points up", { label: "(X, Y) in mm", tone: "result" }]} />
+
+Full camera models (Module 41) do this properly, including perspective and distortion.
+
+## 13. Industrial example
+
+A PLC expects the **centre** of a billet end in millimetres, with **Y upward**. The vision code finds the centroid at pixel (x = 812.4, y = 455.8) in a 1080-row image with 0.5 mm/px and the origin at the bottom-left:
+
+<Equation terms={[{ value: "812.4 px", label: "x" }, { op: "×", value: "0.5 mm/px" }, { op: "=", value: "406.2 mm", label: "X", result: true }]} />
+
+<Equation terms={[{ value: "(1079 − 455.8) px", label: "flip: last row − y" }, { op: "×", value: "0.5 mm/px" }, { op: "=", value: "311.6 mm", label: "Y", result: true }]} />
+
+Forgetting the flip sends the robot or PLC to the mirror position.
+
+## What you should remember from 3.4
+
+<Takeaways>
+<Takeaway n={1} title="Two orders">NumPy img[y, x]; OpenCV points (x, y). Same pixel.</Takeaway>
+<Takeaway n={2} title="Origin">Top-left; x right, y down.</Takeaway>
+<Takeaway n={3} title="Slices">img[y1:y2, x1:x2], end excluded, and a view (use .copy()).</Takeaway>
+<Takeaway n={4} title="Sizes">cv2.resize and kernel sizes want (width, height); img.shape is (height, width).</Takeaway>
+<Takeaway n={5} title="Sub-pixel">Pixel centres are at integer coordinates; in-between values are interpolated.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** `cv2.minMaxLoc` returns the maximum at (12, 40). How do you read that pixel in NumPy?
+
+<Solution>
+
+`img[40, 12]`: the location is (x, y), the array index is [y, x].
+
+</Solution>
+
+**Q2.** What shape does `img[100:250, 30:90]` have?
+
+<Solution>
+
+**(150, 60)**: 250 − 100 rows and 90 − 30 columns.
+
+</Solution>
+
+**Q3.** In a 640-wide image, what is the flat index of (row 3, col 10)?
+
+<Solution>
+
+3 × 640 + 10 = **1930**.
+
+</Solution>
+
+**Q4.** A box is (x = 50, y = 20, w = 30, h = 10). Give the NumPy slice.
+
+<Solution>
+
+`img[20:30, 50:80]`.
+
+</Solution>
+
+### Next: 3.5 Aliasing and Nyquist
+
+In 3.1 a stripe pattern **vanished** when sampled too coarsely. In 3.5 we see the stranger case: patterns that turn into **different, false** patterns, and the rule that tells you how fine you must sample.
+
+## Code
+
+Four experiments: the (x, y) vs [row, col] swap, ROI slices as views and flat indices, which functions return what, and sub-pixel values.
+
+### 1. (x, y) for OpenCV, [row, col] for NumPy
+
+```python
+import numpy as np
+import cv2
+
+img = np.zeros((5, 8), np.uint8)                 # 5 rows (y), 8 columns (x)
+cv2.circle(img, (6, 1), 0, 255, -1)              # OpenCV point: (x=6, y=1)
+print("NumPy finds it at [row, col]:", np.argwhere(img == 255)[0])
+print("img[1, 6] =", img[1, 6], "  img[6, 1] -> ", end="")
+try:
+    print(img[6, 1])
+except IndexError as e:
+    print("IndexError:", e)
+```
+
+Output:
+
+```text
+NumPy finds it at [row, col]: [1 6]
+img[1, 6] = 255   img[6, 1] -> IndexError: index 6 is out of bounds for axis 0 with size 5
+```
+
+- `cv2.circle` with radius 0 and thickness −1 sets a single pixel: handy for testing conventions.
+- `np.argwhere` returns `[row, col]` pairs.
+
+### 2. ROI slices are views; flat indices
+
+```python
+import numpy as np
+
+img = np.arange(48, dtype=np.uint8).reshape(6, 8)    # values 0..47, row by row
+roi = img[1:4, 2:6]                                  # rows 1,2,3 and columns 2,3,4,5
+print("roi shape:", roi.shape)
+print(roi)
+roi[:] = 0                                           # a view: this changes img too
+print("img[2, 3] after editing the roi:", img[2, 3])
+safe = img[1:4, 2:6].copy()                          # an independent copy
+print("flat index of (row 2, col 3):", 2 * img.shape[1] + 3, "=", np.ravel_multi_index((2, 3), img.shape))
+```
+
+Output:
+
+```text
+roi shape: (3, 4)
+[[10 11 12 13]
+ [18 19 20 21]
+ [26 27 28 29]]
+img[2, 3] after editing the roi: 0
+flat index of (row 2, col 3): 19 = 19
+```
+
+- `np.arange(48).reshape(6, 8)` fills the image with its own flat indices: pixel (2, 3) holds 19.
+- After `roi[:] = 0`, the original image has zeros in that block.
+
+### 3. What OpenCV and NumPy functions return
+
+```python
+import numpy as np
+import cv2
+
+img = np.zeros((4, 6), np.uint8)
+img[3, 1] = 200                                      # brightest pixel: row 3, column 1
+_, max_val, _, max_loc = cv2.minMaxLoc(img)
+print("cv2.minMaxLoc  ->", max_loc, "(x, y)")
+print("np.argmax      ->", tuple(int(v) for v in np.unravel_index(np.argmax(img), img.shape)), "(row, col)")
+x, y, w, h = cv2.boundingRect(np.argwhere(img > 0)[:, ::-1].astype(np.int32))   # points as (x, y)
+print("cv2.boundingRect ->", (x, y, w, h), "(x, y, width, height)")
+print("img.shape ->", img.shape, "(rows, cols);  cv2.resize wants (width, height) =", (img.shape[1], img.shape[0]))
+```
+
+Output:
+
+```text
+cv2.minMaxLoc  -> (1, 3) (x, y)
+np.argmax      -> (3, 1) (row, col)
+cv2.boundingRect -> (1, 3, 1, 1) (x, y, width, height)
+img.shape -> (4, 6) (rows, cols);  cv2.resize wants (width, height) = (6, 4)
+```
+
+- The same pixel comes back as (1, 3) from OpenCV and (3, 1) from NumPy.
+- `[:, ::-1]` reverses each `[row, col]` pair into `(x, y)` before passing points to OpenCV.
+
+### 4. Sub-pixel values with `cv2.getRectSubPix`
+
+```python
+import numpy as np
+import cv2
+
+img = np.array([[10, 20, 30],
+                [40, 50, 60]], np.float32)
+# OpenCV puts pixel centres at integer coordinates: pixel (x=0, y=0) is centred at (0.0, 0.0)
+for x, y in [(1.0, 0.0), (1.5, 0.0), (1.5, 0.5)]:
+    v = cv2.getRectSubPix(img, (1, 1), (x, y))[0, 0]
+    print(f"value at (x={x}, y={y}): {v:.1f}")
+```
+
+Output:
+
+```text
+value at (x=1.0, y=0.0): 20.0
+value at (x=1.5, y=0.0): 25.0
+value at (x=1.5, y=0.5): 40.0
+```
+
+- `cv2.getRectSubPix(img, patchSize, center)` extracts a patch centred at a sub-pixel point using bilinear interpolation; `patchSize` is (width, height), `center` is (x, y).
+- At an integer position you get the pixel itself; halfway between two pixels, their average; in the middle of four, the average of four.
+
+## OpenCV API notes
+
+**Points**: tuples `(x, y)`; drawing functions need integers, geometry functions (`cv2.getRectSubPix`, `cv2.remap`, contours from `cv2.findContours`) use or return `(x, y)` too.
+
+**Contours** from `cv2.findContours` have shape (N, 1, 2) with **(x, y)** pairs.
+
+**`cv2.minMaxLoc(src) → minVal, maxVal, minLoc, maxLoc`**: locations are (x, y).
+
+**`cv2.selectROI(img)`** (interactive window) returns `(x, y, w, h)`.
+
+**NumPy**: `img.shape → (rows, cols[, channels])`; `np.argwhere`, `np.nonzero`, `np.unravel_index` return row/column order.
+
+## Where it fails
+
+- **Libraries differ**: some (for example some plotting or annotation tools) use (row, col) for points, or put the origin at the bottom-left. Check each tool.
+- **Bounding box formats** differ between datasets and models (x, y, w, h vs x1, y1, x2, y2; absolute vs normalized).
+- **Pixel-centre conventions** differ: some tools put the centre of pixel 0 at 0.5. Half-pixel offsets matter for precise measurement.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **`img[x, y]` instead of `img[y, x]`.**
+- **`cv2.resize(img, img.shape[:2])`**: passes (height, width) where (width, height) is expected.
+- **Editing an ROI and being surprised the full image changed.**
+- **Off-by-one between inclusive corners and exclusive slice ends.**
+- **ROIs that run off the image** and are silently clipped.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Row-major order
+
+NumPy arrays are row-major ("C order") by default: the last index changes fastest in memory. Iterating over rows in the outer loop and columns in the inner loop reads memory in order and is faster [1].
+
+### Continuous vs discrete coordinates
+
+Image formation (2.1) produces continuous coordinates; pixels sample them. Being explicit about where pixel centres lie is essential when combining calibration, resampling and sub-pixel measurement [2].
+
+### Homogeneous coordinates
+
+Writing (x, y) as (x, y, 1) lets translations, rotations, scaling and perspective all be written as matrix products. Chapter 5.3 and Module 21 use this.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "OpenCV draws a point at (x = 20, y = 5). Which NumPy index reads it?",
+      options: ["img[20, 5]", "img[5, 20]", "img[25]", "img[(20, 5)]"],
+      answer: 1,
+      explanation: "NumPy uses [row, col] = [y, x].",
+    },
+    {
+      question: "What is the shape of img[10:30, 5:50]?",
+      options: ["(20, 45)", "(21, 46)", "(30, 50)", "(45, 20)"],
+      answer: 0,
+      explanation: "30 − 10 = 20 rows, 50 − 5 = 45 columns; ends are excluded.",
+    },
+    {
+      question: "Which argument order does cv2.resize's dsize use?",
+      options: ["(rows, cols)", "(width, height)", "(height, width)", "(channels, width)"],
+      answer: 1,
+      explanation: "dsize is (width, height), the opposite of img.shape.",
+    },
+    {
+      question: "You set roi = img[0:10, 0:10] and then roi[:] = 0. What happens to img?",
+      options: ["Nothing", "Its top-left 10 × 10 block becomes 0", "An error", "All of img becomes 0"],
+      answer: 1,
+      explanation: "A slice is a view of the same memory.",
+    },
+    {
+      question: "In OpenCV's convention, where is the centre of pixel (3, 2)?",
+      options: ["(3.5, 2.5)", "(3.0, 2.0)", "(2.0, 3.0)", "(4, 3)"],
+      answer: 1,
+      explanation: "Pixel centres are at integer (x, y) coordinates.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A detector returns a box (x1 = 120, y1 = 40, x2 = 220, y2 = 100), corners inclusive. Write (a) the NumPy slice, (b) its shape, (c) the (x, y, w, h) form.
+
+<Solution>
+
+(a) `img[40:101, 120:221]`. (b) **(61, 101)**. (c) **(120, 40, 101, 61)**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Make a 6 × 8 image of zeros. Set the pixel at OpenCV point (x = 7, y = 2) to 255 with NumPy indexing, then confirm with `cv2.minMaxLoc` and print its flat index.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+img = np.zeros((6, 8), np.uint8)
+img[2, 7] = 255                                   # [y, x]
+print("maxLoc:", cv2.minMaxLoc(img)[3], " flat index:", int(np.argmax(img)))
+```
+
+Output:
+
+```text
+maxLoc: (7, 2)  flat index: 23
+```
+
+2 × 8 + 7 = 23.
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+An image is 1000 rows high with 0.2 mm/px. A part's centre is at pixel (x = 300, y = 250). Give its position in mm with the origin at the **bottom-left** and Y pointing up (use row index 999 as Y = 0).
+
+<Solution>
+
+X = 300 × 0.2 = **60 mm**. Y = (999 − 250) × 0.2 = **149.8 mm**.
+
+</Solution>
+
+## References
+
+1. NumPy documentation, *Indexing on ndarrays*: [numpy.org/doc/stable/user/basics.indexing.html](https://numpy.org/doc/stable/user/basics.indexing.html).
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. Springer, 2022. Ch. 2 (image formation, coordinates). Free online edition: [szeliski.org/Book](https://szeliski.org/Book/).
+3. OpenCV 4.13.0 documentation, *Operations on arrays* (`minMaxLoc`): [docs.opencv.org/4.13.0/d2/de8/group__core__array.html](https://docs.opencv.org/4.13.0/d2/de8/group__core__array.html); *Image Filtering* and *Geometric Image Transformations* (`getRectSubPix`): [docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html](https://docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html).

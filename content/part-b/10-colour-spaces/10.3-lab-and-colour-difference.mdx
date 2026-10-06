@@ -1,0 +1,351 @@
+export const meta = {
+  number: "10.3",
+  title: "LAB and colour difference",
+  minutes: 30,
+  objectives: [
+    "Explain CIELAB: L* lightness, a* green–red, b* blue–yellow, designed for perceptual uniformity",
+    "Convert to Lab with OpenCV and understand the 8-bit scaling",
+    "Measure colour differences with ΔE76 and CIEDE2000 and set tolerances",
+    "Know the conditions for meaningful colour measurement (white balance, lighting, calibration)",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 10.3 (Module 10 plan).
+  CIEDE2000 implementation checked against the test data of Sharma, Wu & Dalal (2005).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 10.3 LAB and colour difference
+
+<Definition term="CIELAB (L*a*b*)">a colour space defined by the CIE in 1976 so that equal distances correspond roughly to equally visible colour differences. L* is lightness (0 black to 100 white), a* runs from green (negative) to red (positive), b* from blue (negative) to yellow (positive).</Definition>
+
+"Is this part the right colour?" is a measurement question: how far is the measured colour from the reference, and is that within tolerance? RGB and HSV distances do not match what people see. Lab was built for exactly this, and the colour-difference number ΔE is how paint, plastics, textile and print industries specify colour.
+
+## 1. An analogy
+
+A road map where distances on paper match the real driving times. In RGB, one centimetre on the map can mean five minutes in one region and an hour in another: useless for planning. Lab redraws the map so that one unit means roughly one noticeable step everywhere.
+
+## 2. The three axes
+
+<Flow
+  steps={[
+    { label: "sRGB values (camera, after white balance)", tone: "data" },
+    { label: "Linear RGB → XYZ (CIE 1931) with the D65 white", tone: "process" },
+    { label: "Cube roots (like the eye's compression, 9.2)", tone: "process" },
+    { label: "L* lightness, a* green–red, b* blue–yellow", tone: "result" },
+  ]}
+/>
+
+- **L\***: perceived lightness, the cube-root scale of 9.2. Middle grey (sRGB 128) has L\* ≈ 53.6.
+- **a\***, **b\***: the opponent channels of 9.4. Neutral greys have a\* = b\* = 0.
+- **Chroma** C\* = √(a\*² + b\*²) (colourfulness), **hue angle** h = atan2(b\*, a\*).
+
+**OpenCV conversion**: `cv2.cvtColor(img, cv2.COLOR_BGR2Lab)` assumes sRGB input and the D65 white.
+
+| Input | L\* | a\*, b\* |
+| --- | --- | --- |
+| float32 in 0…1 | 0…100 | about −127…127 |
+| uint8 | L\* · 255/100 | a\* + 128, b\* + 128 |
+
+For measurement, convert **float32** images: the 8-bit form rounds to steps of about 0.4 L\* and 1 unit of a\*, b\*.
+
+## 3. ΔE: one number for "how different"
+
+**ΔE76** (CIE 1976) is the straight distance in Lab:
+
+<Equation terms={[{ value: "ΔE76" }, { op: "=", value: "√(ΔL*² + Δa*² + Δb*²)", result: true }]} />
+
+It is simple but not quite uniform: people are less sensitive to chroma differences in saturated colours and more sensitive in some hue regions (blues). **CIEDE2000** (ΔE00) corrects this with weights for lightness, chroma and hue and a rotation term for blues [1], [2]. It is the current standard (ISO/CIE 11664-6).
+
+Rules of thumb for ΔE00 under good viewing conditions:
+
+| ΔE00 | Visible to … |
+| --- | --- |
+| below 1 | hardly anyone, even side by side |
+| 1–2 | trained observers, side by side |
+| 2–3.5 | most people, side by side |
+| above 3.5–5 | clearly different colours |
+
+Real tolerances are set per product (and often separately for lightness and hue), agreed with the customer.
+
+<DeltaELab caption="Shift a sample away from a reference colour in L*, a* and b*. ΔE76 treats all directions and colours alike; CIEDE2000 follows perception more closely. Choose a tolerance and see the verdict." />
+
+Things to try: light grey with Δa\* = +2: ΔE00 ≈ 2.8, reject at tolerance 2. Signal red with the same Δa\* = +2: ΔE00 ≈ 0.7, pass. ΔE76 is 2.0 in both cases.
+
+## 4. Conditions for colour measurement with a camera
+
+A camera does not measure Lab directly; the conversion assumes sRGB. Meaningful ΔE values need:
+
+1. **Stable, uniform lighting** with a known colour temperature (ideally a D65-like source), shielded from ambient light.
+2. **White balance** on a white or grey reference (10.6), checked regularly.
+3. **Linear exposure without clipping**, fixed exposure and gain.
+4. **Colour calibration**: a colour chart (24-patch) photographed under the station's light gives a 3 × 3 (or larger) correction matrix from camera RGB to sRGB or XYZ.
+5. **Averaging** over a patch (many pixels) to reduce noise.
+
+Without these, ΔE values are still useful for **relative** comparisons on the same station (this part vs the golden part, both measured now), which is how many inline checks work.
+
+## 5. Industrial example
+
+An injection-moulding plant checks the colour of grey housings against a master sample. The camera station has a diffuse D65 LED dome, a white reference tile in every image, and a colour matrix from a 24-patch chart. Each housing is measured as the mean Lab of a 100 × 100 pixel patch (float32 conversion), and ΔE00 to the master is computed. Parts above 1.5 are flagged for a visual check in a viewing booth, above 3.0 rejected. The white tile's Lab is logged every hour; a drift of its L\* by more than 1 triggers re-white-balancing. Light-grey parts turned out to be the most critical: small hue shifts that are invisible on saturated colours are obvious on greys, exactly as CIEDE2000 predicts.
+
+## What you should remember from 10.3
+
+<Takeaways>
+<Takeaway n={1} title="Axes">L* lightness, a* green–red, b* blue–yellow; greys at a* = b* = 0.</Takeaway>
+<Takeaway n={2} title="OpenCV">COLOR_BGR2Lab assumes sRGB/D65; use float32 for measurement (8-bit is scaled and offset).</Takeaway>
+<Takeaway n={3} title="ΔE">ΔE76 = Lab distance; CIEDE2000 matches perception better and is the standard.</Takeaway>
+<Takeaway n={4} title="Tolerance">≈ 1 barely visible, ≈ 2–3.5 visible side by side; set per product.</Takeaway>
+<Takeaway n={5} title="Conditions">Controlled light, white balance, no clipping, calibration, averaging.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A uint8 Lab pixel from OpenCV is (128, 128, 128). What are L\*, a\*, b\*?
+
+<Solution>
+
+L\* = 128 · 100/255 ≈ **50.2**, a\* = **0**, b\* = **0**: a middle grey.
+
+</Solution>
+
+**Q2.** Reference (60, 10, 20), sample (61, 12, 18). ΔE76?
+
+<Solution>
+
+√(1² + 2² + 2²) = √9 = **3.0**.
+
+</Solution>
+
+**Q3.** Why can the same Δa\* = 2 be acceptable on a red part but not on a grey part?
+
+<Solution>
+
+Perception (and CIEDE2000) is less sensitive to chroma changes in strongly saturated colours; on a neutral grey the same shift is a visible tint.
+
+</Solution>
+
+### Next: 10.4 YCrCb
+
+Luma and chroma: the colour space of video and JPEG, and why it is useful for skin and shadow detection.
+
+## Code
+
+Two examples: sRGB to Lab from scratch compared with OpenCV, and a colour check with ΔE76 and CIEDE2000.
+
+### 1. From scratch: sRGB to Lab
+
+```python
+import numpy as np
+import cv2
+
+def srgb_to_lab(bgr_u8):
+    """From scratch: sRGB (BGR order, 0..255) -> CIELAB with D65 white."""
+    c = bgr_u8[..., ::-1].astype(np.float64) / 255                      # to RGB, 0..1
+    lin = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    M = np.array([[0.4124564, 0.3575761, 0.1804375], [0.2126729, 0.7151522, 0.0721750], [0.0193339, 0.1191920, 0.9503041]])
+    xyz = lin @ M.T / np.array([0.95047, 1.0, 1.08883])                  # normalise by the D65 white
+    f = np.where(xyz > 0.008856, np.cbrt(xyz), 7.787 * xyz + 16 / 116)
+    return np.stack([116 * f[..., 1] - 16, 500 * (f[..., 0] - f[..., 1]), 200 * (f[..., 1] - f[..., 2])], axis=-1)
+
+px = np.array([[[40, 40, 220], [60, 180, 40], [128, 128, 128], [255, 255, 255]]], np.uint8)   # BGR
+ours = srgb_to_lab(px)[0]
+cv_f = cv2.cvtColor(px.astype(np.float32) / 255, cv2.COLOR_BGR2Lab)[0]
+cv_8 = cv2.cvtColor(px, cv2.COLOR_BGR2Lab)[0]
+for i, name in enumerate(["red", "green", "grey", "white"]):
+    print(f"{name:5s} ours {[round(float(v), 1) + 0.0 for v in ours[i]]} | cv2 float {[round(float(v), 1) + 0.0 for v in cv_f[i]]} | cv2 8-bit {cv_8[i].tolist()}")
+print("max |ours - cv2 float|:", round(float(np.abs(ours - cv_f).max()), 2))
+```
+
+Output:
+
+```text
+red   ours [48.1, 66.5, 46.1] | cv2 float [48.0, 66.5, 46.0] | cv2 8-bit [123, 195, 174]
+green ours [64.5, -59.8, 49.2] | cv2 float [64.4, -59.8, 49.2] | cv2 8-bit [165, 68, 177]
+grey  ours [53.6, 0.0, 0.0] | cv2 float [53.6, 0.0, 0.0] | cv2 8-bit [137, 128, 128]
+white ours [100.0, 0.0, 0.0] | cv2 float [100.0, 0.0, 0.0] | cv2 8-bit [255, 128, 128]
+max |ours - cv2 float|: 0.09
+```
+
+- The from-scratch version agrees with OpenCV to within 0.1 (OpenCV uses slightly different constants and a lookup-table gamma).
+- 8-bit Lab: L\* 48.0 → 123 (× 2.55), a\* 66.5 → 195 (+ 128). Easy to misread as "real" Lab values.
+- `+ 0.0` turns −0.0 (from tiny negative rounding) into 0.0 for printing.
+
+### 2. OpenCV + CIEDE2000: a colour tolerance check
+
+```python
+import numpy as np
+import cv2
+
+def de2000(lab1, lab2):
+    """CIEDE2000 colour difference (kL = kC = kH = 1), following Sharma, Wu & Dalal (2005)."""
+    L1, a1, b1 = lab1; L2, a2, b2 = lab2
+    C1, C2 = np.hypot(a1, b1), np.hypot(a2, b2)
+    G = 0.5 * (1 - np.sqrt(((C1 + C2) / 2) ** 7 / (((C1 + C2) / 2) ** 7 + 25 ** 7)))
+    a1p, a2p = (1 + G) * a1, (1 + G) * a2
+    C1p, C2p = np.hypot(a1p, b1), np.hypot(a2p, b2)
+    h1p, h2p = np.degrees(np.arctan2(b1, a1p)) % 360, np.degrees(np.arctan2(b2, a2p)) % 360
+    dLp, dCp = L2 - L1, C2p - C1p
+    dhp = h2p - h1p
+    dhp = dhp - 360 if dhp > 180 else dhp + 360 if dhp < -180 else dhp
+    dHp = 2 * np.sqrt(C1p * C2p) * np.sin(np.radians(dhp / 2))
+    Lbp, Cbp = (L1 + L2) / 2, (C1p + C2p) / 2
+    hbp = (h1p + h2p) / 2 if abs(h1p - h2p) <= 180 else (h1p + h2p + 360) / 2 if h1p + h2p < 360 else (h1p + h2p - 360) / 2
+    T = 1 - 0.17 * np.cos(np.radians(hbp - 30)) + 0.24 * np.cos(np.radians(2 * hbp)) + 0.32 * np.cos(np.radians(3 * hbp + 6)) - 0.20 * np.cos(np.radians(4 * hbp - 63))
+    Rt = -np.sin(np.radians(60 * np.exp(-((hbp - 275) / 25) ** 2))) * 2 * np.sqrt(Cbp ** 7 / (Cbp ** 7 + 25 ** 7))
+    Sl = 1 + 0.015 * (Lbp - 50) ** 2 / np.sqrt(20 + (Lbp - 50) ** 2)
+    Sc, Sh = 1 + 0.045 * Cbp, 1 + 0.015 * Cbp * T
+    return float(np.sqrt((dLp / Sl) ** 2 + (dCp / Sc) ** 2 + (dHp / Sh) ** 2 + Rt * (dCp / Sc) * (dHp / Sh)))
+
+print("Sharma test pair 1:", round(de2000((50, 2.6772, -79.7751), (50, 0, -82.7485)), 4), "(published 2.0425)")
+
+def lab_of(bgr):                                                   # mean Lab of a patch, via OpenCV (float input)
+    return cv2.cvtColor(np.full((8, 8, 3), bgr, np.uint8).astype(np.float32) / 255, cv2.COLOR_BGR2Lab).reshape(-1, 3).mean(0)
+
+ref = lab_of((40, 40, 200))                                        # reference red paint
+for name, bgr in [("part A", (40, 40, 200)), ("part B", (42, 40, 205)), ("part C", (40, 55, 200)), ("part D", (60, 60, 190))]:
+    lab = lab_of(bgr)
+    d76 = float(np.linalg.norm(lab - ref))
+    d00 = de2000(ref, lab)
+    print(f"{name}: BGR {bgr} | dE76 {d76:5.2f} | dE00 {d00:5.2f} | {'PASS' if d00 <= 2 else 'REJECT'}")
+```
+
+Output:
+
+```text
+Sharma test pair 1: 2.0425 (published 2.0425)
+part A: BGR (40, 40, 200) | dE76  0.00 | dE00  0.00 | PASS
+part B: BGR (42, 40, 205) | dE76  1.82 | dE00  1.06 | PASS
+part C: BGR (40, 55, 200) | dE76  5.30 | dE00  2.87 | REJECT
+part D: BGR (60, 60, 190) | dE76 14.30 | dE00  4.33 | REJECT
+```
+
+- The implementation reproduces the published CIEDE2000 test value: always test colour-difference code against reference data.
+- On this saturated red, ΔE00 is much smaller than ΔE76 (part D: 4.3 vs 14.3). A tolerance written as "ΔE ≤ 2" must say which ΔE.
+
+## OpenCV API notes
+
+**Conversion**: `cv2.cvtColor(img, cv2.COLOR_BGR2Lab)` / `COLOR_Lab2BGR`; `COLOR_LBGR2Lab` for linear BGR input; also `COLOR_BGR2Luv`, `COLOR_BGR2XYZ`. Float32 input in 0–1 gives true Lab values.
+
+**Statistics**: `cv2.mean(lab, mask)` for the mean colour of a region; `cv2.meanStdDev` for its spread.
+
+**Colour difference**: OpenCV has no ΔE function; compute ΔE76 with `np.linalg.norm` and implement CIEDE2000 (as above) or use a colour-science library. The contrib package (`opencv-contrib-python` 4.13) adds `cv2.ccm.ColorCorrectionModel`, which fits a colour correction matrix from a photographed colour chart.
+
+## Where it fails
+
+- **Uncalibrated cameras**: Lab from raw camera RGB is only approximate; absolute ΔE values need a calibrated station.
+- **Metamerism**: two materials can match under one light and differ under another (9.4); a three-channel camera cannot detect that, a spectrophotometer can.
+- **Texture, gloss and translucency**: change the measured colour with viewing angle and lighting geometry.
+- **Large differences**: ΔE formulas are designed for small differences; for very different colours the number is not meaningful beyond "very different".
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Reading 8-bit Lab values as real L\*, a\*, b\***.
+- **Measuring colour without white balance or with clipped channels**.
+- **Specifying "ΔE ≤ 2" without saying ΔE76 or ΔE00**.
+- **Comparing Lab values from different cameras or lights** as if absolute.
+- **Using single pixels** instead of averaged patches.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why cube roots and the D65 white
+
+Lab normalises X, Y, Z by the white point (dividing out the illuminant, a simple model of adaptation) and applies a cube root (the lightness compression of 9.2). a\* and b\* are differences of these compressed values, mimicking opponent channels. Different white points (D50 in printing, D65 in displays) give different Lab values for the same physical colour; always state which one is used [2].
+
+### The CIEDE2000 terms
+
+ΔE00 divides lightness, chroma and hue differences by weighting functions S_L, S_C, S_H that grow with lightness distance from 50, with chroma and with a hue-dependent term T; R_T rotates the ellipses of equal perceived difference in the blue region (around 275°). The a\* axis is first stretched by (1 + G) for near-neutral colours. The formula is complex but standardised, and the published test pairs make implementations checkable [1].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "In CIELAB, positive a* means…",
+      options: ["more yellow", "more red", "lighter", "more blue"],
+      answer: 1,
+      explanation: "a* runs from green (−) to red (+).",
+    },
+    {
+      question: "A float32 image in 0…1 converted with COLOR_BGR2Lab gives L* in…",
+      options: ["0…255", "0…100", "−1…1", "0…1"],
+      answer: 1,
+      explanation: "Only 8-bit output is scaled to 0…255.",
+    },
+    {
+      question: "Why use CIEDE2000 instead of ΔE76?",
+      options: ["It is faster", "It matches perceived differences better across colours", "It needs no Lab conversion", "It ignores lightness"],
+      answer: 1,
+      explanation: "It weights lightness, chroma and hue like the eye.",
+    },
+    {
+      question: "Which is essential for absolute colour measurement with a camera?",
+      options: ["A higher resolution", "Controlled lighting, white balance and calibration", "JPEG compression", "HSV conversion"],
+      answer: 1,
+      explanation: "Lab from an uncontrolled camera is only relative.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Convert the 8-bit OpenCV Lab triple (200, 100, 160) to real L\*, a\*, b\* and compute its chroma C\*.
+
+<Solution>
+
+L\* = 200 · 100/255 ≈ **78.4**; a\* = 100 − 128 = **−28**; b\* = 160 − 128 = **32**. C\* = √(28² + 32²) ≈ **42.5** (a fairly strong yellow-green).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using `lab_of` and `de2000` from example 2, take a light grey reference BGR (200, 200, 200) and a sample with a slight blue tint (206, 200, 196). Print ΔE76 and ΔE00. Then do the same tint relative to the red paint: (46, 40, 196) vs (40, 40, 200).
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+for ref_bgr, smp_bgr in [((200, 200, 200), (206, 200, 196)), ((40, 40, 200), (46, 40, 196))]:
+    r, s = lab_of(ref_bgr), lab_of(smp_bgr)
+    print(f"{ref_bgr} vs {smp_bgr}: dE76 {np.linalg.norm(s - r):.2f} | dE00 {de2000(r, s):.2f}")
+```
+
+Output:
+
+```text
+(200, 200, 200) vs (206, 200, 196): dE76 3.46 | dE00 3.22
+(40, 40, 200) vs (46, 40, 196): dE76 4.53 | dE00 2.00
+```
+
+The same small change of the blue and red channels gives a larger ΔE76 on the red (4.5) than on the grey (3.5), but CIEDE2000 reverses the ranking: a clearly visible tint on the grey (3.2) and a borderline difference on the saturated red (2.0).
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A customer specifies "ΔE ≤ 1.0 to the master sample" for a beige part, measured inline with a camera. What do you discuss before accepting the specification?
+
+<Solution>
+
+Which ΔE (76, 94, 2000) and which illuminant/observer; whether the camera station can reach the needed repeatability (measure the master repeatedly: if its own ΔE scatter is 0.5, a 1.0 tolerance leaves little margin; a gauge R&R study, 49.4); calibration and drift control (white tile, colour chart); how the master sample itself ages; and whether a spectrophotometer measurement on samples should remain the reference, with the camera used for screening.
+
+</Solution>
+
+## References
+
+1. G. Sharma, W. Wu, E. N. Dalal, "The CIEDE2000 color-difference formula: Implementation notes, supplementary test data, and mathematical observations", *Color Research & Application* 30(1), 2005.
+2. CIE 15:2004, *Colorimetry*, 3rd ed.; ISO/CIE 11664-4 (CIELAB) and ISO/CIE 11664-6 (CIEDE2000).
+3. M. R. Luo, G. Cui, B. Rigg, "The development of the CIE 2000 colour-difference formula: CIEDE2000", *Color Research & Application* 26(5), 2001.
+4. OpenCV 4.13.0 documentation, "Color conversions" (RGB ↔ CIE L*a*b*). https://docs.opencv.org/4.13.0/

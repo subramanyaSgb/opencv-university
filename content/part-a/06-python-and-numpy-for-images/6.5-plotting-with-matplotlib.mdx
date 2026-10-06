@@ -1,0 +1,393 @@
+export const meta = {
+  number: "6.5",
+  title: "Plotting with matplotlib",
+  minutes: 30,
+  objectives: [
+    "Show OpenCV images correctly with matplotlib: BGR vs RGB, gray colour maps and colour limits",
+    "Plot pixel profiles and histograms next to the image",
+    "Show float and signed results with suitable colour maps and a colour bar",
+    "Save figures from scripts without a screen (Agg backend)",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 6.5 (Module 6 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92, NumPy 2.5.3 and matplotlib 3.11.2.
+  Figures in the lesson are made by assets/images/generate_plots.py.
+*/}
+
+# 6.5 Plotting with matplotlib
+
+<Definition term="matplotlib">the standard Python plotting library. With `plt.imshow` it displays arrays as pictures, and with `plt.plot` and `plt.hist` it shows the numbers behind them.</Definition>
+
+`cv2.imshow` opens a quick window (Module 7), but for notebooks, reports and side-by-side comparisons most people use matplotlib. It has three traps for OpenCV users: colour order, automatic contrast and automatic colour maps. Knowing them makes your figures honest.
+
+## 1. An analogy
+
+A slide projector with an automatic contrast knob and a colour filter. Put in a dull slide and the projector stretches it to look vivid; put in a slide with red and blue swapped and it shows exactly that. matplotlib is helpful in the same way: it shows **what you give it**, adjusted by settings you may not know are on.
+
+## 2. Trap 1: BGR vs RGB
+
+OpenCV stores colour as **B, G, R**; matplotlib reads channel 0 as **red**. A pure red pixel (0, 0, 220) in BGR is shown as blue *(Code example 1)*:
+
+![matplotlib shows the BGR array with red and blue swapped; after cvtColor BGR2RGB the colours are right](/images/sample-plot-bgr.png)
+
+Convert first: `plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))` (or `img[..., ::-1]`, a view, 6.2).
+
+## 3. Trap 2: automatic contrast and colour maps
+
+For a **2-D** array (gray, float, a mask), `plt.imshow` maps values to colours with a **colour map** (default: viridis, purple to yellow) between **colour limits** (vmin, vmax) that default to the data's **minimum and maximum**. A dull image with values 100 … 140 *(Code example 2)*:
+
+![The same low-contrast gray image three times: viridis with automatic limits, gray with automatic limits (looks high contrast), gray with limits 0 to 255 (looks dull, as it really is)](/images/sample-plot-gray-scaling.png)
+
+| Arguments | Colour limits | What you see |
+| --- | --- | --- |
+| none | (100, 140) | false colours, full contrast |
+| `cmap="gray"` | (100, 140) | gray, but stretched: looks perfect |
+| `cmap="gray", vmin=0, vmax=255` | (0, 255) | the truth: a dull image |
+
+The middle version is the dangerous one: a badly exposed image looks fine in your notebook. **For 8-bit images always pass `cmap="gray", vmin=0, vmax=255`** when the brightness itself matters.
+
+## 4. Try it
+
+<ImshowLab caption="The same arrays under different imshow arguments. This is a browser simulation of matplotlib's rules (colour limits + colour map)." />
+
+Things to try: the colour image with and without conversion; the low-contrast gray with automatic and fixed limits; the signed Sobel result with symmetric limits (0 becomes the middle colour).
+
+## 5. Profiles and histograms
+
+Pictures hide numbers. Next to the image, plot a **profile** (the values along one row, 5.5) and the **histogram** (how many pixels have each value, Part B) *(Code example 3)*:
+
+![The sample scene with row 100 marked in red, the pixel values along that row, and the histogram of the image](/images/sample-plot-profile-hist.png)
+
+The profile shows the disc (≈ 245), the dark rectangle (≈ 15) and the noisy gradient in numbers; the histogram shows how the grey levels are used.
+
+## 6. Float results: colour maps with a colour bar
+
+Results like gradient magnitudes (5.5), distance maps (3.6) or heights (4.4) are floats with no fixed range. Show them with a perceptual colour map (viridis, inferno, magma) and **always a colour bar**, so the colours can be read back as numbers:
+
+![Gradient magnitude of the scene in the inferno colour map, with a colour bar from 0 to about 880](/images/sample-plot-heatmap.png)
+
+For **signed** data (a Sobel derivative, a difference image), use a diverging map (`"coolwarm"`, `"RdBu"`) with **symmetric** limits (`vmin=-m, vmax=m`) so that zero is the neutral colour. Avoid rainbow maps (`"jet"`): their uneven brightness creates false edges.
+
+## 7. Pixels and interpolation
+
+When a small image is displayed large, matplotlib may smooth it. To see real pixels (masks, kernels, 5 × 5 examples), pass `interpolation="nearest"`. Use `ax.axis("off")` for pictures and keep axes (with labels) for plots of numbers.
+
+## 8. Scripts without a screen
+
+On servers, in scheduled jobs and in CI there is no display. Select the non-interactive backend before importing pyplot, draw, and save:
+
+<Flow
+  steps={[
+    { label: "matplotlib.use(\"Agg\")", tone: "process" },
+    { label: "fig, ax = plt.subplots(…)", tone: "process" },
+    { label: "ax.imshow / ax.plot / ax.hist", tone: "process" },
+    { label: "fig.savefig(\"report.png\", dpi=150); plt.close(fig)", tone: "result" },
+  ]}
+/>
+
+`plt.close(fig)` frees memory: a loop that makes thousands of figures without it eventually runs out.
+
+## 9. Industrial example
+
+A nightly quality report from a line's stored images:
+
+<Flow
+  steps={[
+    { label: "Load the day's NOK images and measurements", tone: "data" },
+    { label: "Grid of thumbnails (RGB, vmin/vmax fixed), titles with part IDs", tone: "process" },
+    { label: "Histogram of measured widths with tolerance lines", tone: "process" },
+    { label: "savefig → PDF/PNG attached to the shift report", tone: "result" },
+  ]}
+/>
+
+Fixed colour limits make images from different days comparable: a dimming lamp shows up as darker thumbnails instead of being hidden by automatic contrast.
+
+## What you should remember from 6.5
+
+<Takeaways>
+<Takeaway n={1} title="Colour">Convert BGR → RGB before plt.imshow.</Takeaway>
+<Takeaway n={2} title="Gray">cmap="gray", vmin=0, vmax=255; otherwise matplotlib stretches contrast and uses viridis.</Takeaway>
+<Takeaway n={3} title="Numbers">Plot profiles and histograms next to images.</Takeaway>
+<Takeaway n={4} title="Floats">Perceptual or diverging maps, symmetric limits for signed data, always a colour bar.</Takeaway>
+<Takeaway n={5} title="Scripts">matplotlib.use("Agg"), savefig, plt.close.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A gray image with values 0 … 60 looks perfectly exposed in `plt.imshow(img, cmap="gray")`. Is it?
+
+<Solution>
+
+Not necessarily: automatic limits stretch 0 … 60 to black … white. With `vmin=0, vmax=255` it looks dark; check `img.max()` or the histogram.
+
+</Solution>
+
+**Q2.** Which arguments for a difference image with values −40 … +25?
+
+<Solution>
+
+A diverging map with symmetric limits: `cmap="coolwarm", vmin=-40, vmax=40`, plus a colour bar.
+
+</Solution>
+
+**Q3.** Why might red parts look blue in your notebook?
+
+<Solution>
+
+The image is BGR (from OpenCV) and matplotlib expects RGB. Convert with `cv2.cvtColor(img, cv2.COLOR_BGR2RGB)`.
+
+</Solution>
+
+### Next: 7.1 Installing and versions
+
+Module 7 moves to OpenCV itself: installing the right package and knowing which version you run.
+
+## Code
+
+Three examples: the BGR trap measured on screen, automatic colour limits, and a profile and histogram figure. Copy the sample images next to the script. Needs `matplotlib` (tested with 3.11.2).
+
+### 1. matplotlib: what BGR looks like on screen
+
+```python
+import numpy as np
+import cv2
+import matplotlib
+matplotlib.use("Agg")                                   # draw into memory / files, no window (servers, scripts)
+import matplotlib.pyplot as plt
+
+img = cv2.imread("sample-color.png")                    # BGR: the circle is pure red (0, 0, 220)
+fig, ax = plt.subplots(1, 2, figsize=(6.4, 2.2), dpi=100)
+ax[0].imshow(img); ax[0].set_title("plt.imshow(img)  (BGR)")
+ax[1].imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)); ax[1].set_title("after cvtColor BGR2RGB")
+for a in ax:
+    a.axis("off")
+fig.canvas.draw()
+shown = np.asarray(fig.canvas.buffer_rgba())[..., :3]    # what the figure really shows, as RGB
+def colour_at(axis, x, y):                               # screen colour of image pixel (x, y) in one panel
+    px, py = axis.transData.transform((x, y))
+    return shown[int(round(fig.bbox.height - py)), int(round(px))]
+print("circle pixel in the file (B, G, R):", img[100, 70])
+print("panel 1 shows (R, G, B):", colour_at(ax[0], 70, 100), "-> blue on screen")
+print("panel 2 shows (R, G, B):", colour_at(ax[1], 70, 100), "-> red, correct")
+fig.savefig("bgr_vs_rgb.png", bbox_inches="tight")
+```
+
+Output:
+
+```text
+circle pixel in the file (B, G, R): [  0   0 220]
+panel 1 shows (R, G, B): [  0   0 220] -> blue on screen
+panel 2 shows (R, G, B): [220   0   0] -> red, correct
+```
+
+- `fig.canvas.buffer_rgba()` gives the rendered figure as an array: a way to test what a plot really shows.
+- `axis.transData.transform((x, y))` converts image coordinates to figure pixels (origin bottom-left, hence `fig.bbox.height - py`).
+- `matplotlib.use("Agg")` must come before `import matplotlib.pyplot`.
+
+### 2. matplotlib: automatic colour limits
+
+```python
+import numpy as np
+import cv2
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+gray = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+flat = (100 + gray.astype(np.float32) * 40 / 255).astype(np.uint8)   # a low-contrast image: values 100..140
+print("values:", flat.min(), "..", flat.max())
+fig, ax = plt.subplots(1, 3, figsize=(9, 2.2), dpi=100)
+settings = [("default (viridis, auto)", {}), ("cmap='gray' (auto)", {"cmap": "gray"}),
+            ("cmap='gray', vmin=0, vmax=255", {"cmap": "gray", "vmin": 0, "vmax": 255})]
+for a, (title, kw) in zip(ax, settings):
+    im = a.imshow(flat, **kw)
+    a.set_title(title, fontsize=9); a.axis("off")
+    print(f"{title:31s}: colour limits {tuple(float(v) for v in im.get_clim())}")
+fig.savefig("gray_scaling.png", bbox_inches="tight")
+```
+
+Output:
+
+```text
+values: 100 .. 140
+default (viridis, auto)        : colour limits (100.0, 140.0)
+cmap='gray' (auto)             : colour limits (100.0, 140.0)
+cmap='gray', vmin=0, vmax=255  : colour limits (0.0, 255.0)
+```
+
+- `imshow` returns an `AxesImage`; `get_clim()` reveals the colour limits it chose.
+- `**kw` passes a dictionary as keyword arguments.
+
+### 3. matplotlib: image, profile and histogram
+
+```python
+import numpy as np
+import cv2
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+row = 100
+profile = img[row, :]                                                   # one row of pixel values
+counts, edges = np.histogram(img, bins=32, range=(0, 256))               # 32 bins of 8 levels
+fig, ax = plt.subplots(1, 3, figsize=(10, 2.6), dpi=100)
+ax[0].imshow(img, cmap="gray", vmin=0, vmax=255); ax[0].axhline(row, color="red", lw=1)
+ax[0].set_title(f"image, row {row} in red", fontsize=9); ax[0].axis("off")
+ax[1].plot(profile, lw=1); ax[1].set_xlabel("x (column)"); ax[1].set_ylabel("value"); ax[1].set_ylim(0, 255)
+ax[1].set_title("profile along the row", fontsize=9)
+ax[2].bar(edges[:-1], counts, width=8, align="edge"); ax[2].set_xlabel("grey level"); ax[2].set_title("histogram", fontsize=9)
+fig.tight_layout()
+fig.savefig("profile_hist.png", dpi=100)
+print("profile: min", profile.min(), "max", profile.max(), "| darkest at x =", int(np.argmin(profile)))
+print("histogram: fullest bin", int(edges[np.argmax(counts)]), "..", int(edges[np.argmax(counts)]) + 7, "with", int(counts.max()), "pixels")
+```
+
+Output:
+
+```text
+profile: min 1 max 255 | darkest at x = 180
+histogram: fullest bin 8 .. 15 with 3491 pixels
+```
+
+- `np.histogram(img, bins=32, range=(0, 256))` returns counts and the 33 bin edges; `plt.hist(img.ravel(), …)` would compute and draw in one call.
+- `ax.axhline(row)` draws a horizontal line at y = row, marking where the profile was taken.
+- `fig.tight_layout()` adjusts spacing so labels do not overlap.
+
+## OpenCV API notes
+
+**Display in OpenCV**: `cv2.imshow` (expects BGR uint8; float images are shown as 0…1) and `cv2.waitKey` (Module 7). It needs a desktop and a GUI-enabled build (`opencv-python`, not `opencv-python-headless`).
+
+**Colour maps in OpenCV**: `cv2.applyColorMap(gray8, cv2.COLORMAP_VIRIDIS)` returns a BGR image with a colour map applied, for videos and operator screens where matplotlib is not used (9.5).
+
+**Conversions for plotting**: `cv2.cvtColor(img, cv2.COLOR_BGR2RGB)`; for 16-bit or float data, choose explicit `vmin`/`vmax` or scale with `cv2.normalize` (6.3).
+
+## Where it fails
+
+- **Large images** are downsampled for display; fine details (single-pixel defects) can vanish on screen. Zoom with slicing (6.2) or `interpolation="nearest"`.
+- **Notebook rendering** uses a fixed DPI; measure on the array, never on the picture.
+- **Colour perception** differs between people (9.4): use colour maps that also work in gray and for colour-blind viewers (viridis, cividis).
+- **Performance**: matplotlib is not meant for live video; use `cv2.imshow` or a GUI toolkit for real-time display.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **`plt.imshow(img)` on BGR images**.
+- **Judging exposure from automatically scaled gray plots**.
+- **No colour bar** on false-colour images.
+- **`jet`/rainbow colour maps** that invent edges.
+- **Forgetting `plt.close(fig)`** in loops that save many figures.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Perceptually uniform colour maps
+
+Viridis (matplotlib's default since 2.0) was designed so that equal steps in data look like equal steps in colour, brightness increases monotonically, and it stays readable in gray and for common colour-vision deficiencies [1]. Rainbow maps have bright bands (yellow, cyan) that look like features [2].
+
+### Normalisations
+
+`matplotlib.colors.LogNorm`, `PowerNorm` and `TwoSlopeNorm` change how values map to colours: logarithmic for data spanning decades (Fourier spectra), two-slope for signed data with an off-centre zero.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "plt.imshow(cv2.imread(path)) shows a red part as…",
+      options: ["Red", "Blue", "Green", "Gray"],
+      answer: 1,
+      explanation: "BGR channel 2 (red) is read as blue by an RGB viewer.",
+    },
+    {
+      question: "Without vmin/vmax, the colour limits of a gray image are…",
+      options: ["0 and 255", "The data's minimum and maximum", "0 and 1", "The mean ± 3σ"],
+      answer: 1,
+      explanation: "Automatic limits stretch the data range over the full colour map.",
+    },
+    {
+      question: "Best way to show a signed difference image?",
+      options: ["cmap='gray' automatic", "A diverging colour map with symmetric limits and a colour bar", "cmap='jet'", "Convert to uint8 first"],
+      answer: 1,
+      explanation: "Zero becomes the neutral middle colour; the bar makes colours readable as numbers.",
+    },
+    {
+      question: "A script on a server crashes with 'cannot connect to display'. Fix?",
+      options: ["Use cv2.imshow", "matplotlib.use('Agg') before importing pyplot, and savefig", "Install a monitor", "Lower the DPI"],
+      answer: 1,
+      explanation: "Agg renders to memory/files without a display.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+An image has values 50 … 90 and is plotted with `cmap="gray"` and no limits. Which screen gray does the value 70 get (0 = black, 255 = white)? And with `vmin=0, vmax=255`?
+
+<Solution>
+
+Automatic limits (50, 90): (70 − 50) / 40 = 0.5 → about **128** (mid-gray). With (0, 255): 70 → **70** (dark gray).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Plot the Sobel x derivative of `sample-scene.png` with `cmap="coolwarm"` and symmetric limits, add a colour bar, save the figure, and print the limits used.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+gx = cv2.Sobel(img, cv2.CV_32F, 1, 0, ksize=3)
+m = float(np.abs(gx).max())
+fig, ax = plt.subplots(figsize=(5, 3), dpi=100)
+im = ax.imshow(gx, cmap="coolwarm", vmin=-m, vmax=m)
+fig.colorbar(im, ax=ax, label="d/dx (Sobel)")
+ax.axis("off")
+fig.savefig("sobel_x.png", bbox_inches="tight")
+plt.close(fig)
+print("limits:", tuple(round(v) for v in im.get_clim()), "| zero maps to the middle colour:", im.norm(0.0) == 0.5)
+```
+
+Output:
+
+```text
+limits: (-803, 803) | zero maps to the middle colour: True
+```
+
+Dark-to-bright edges (left side of the disc) appear red, bright-to-dark edges blue, flat areas white.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Two engineers compare images from Monday and Friday in a notebook; both look identical, but the measurement algorithm fails on Friday's. What might the plots be hiding?
+
+<Solution>
+
+Probably automatic colour limits: if Friday's images are darker (a weaker lamp, a changed exposure) or have lower contrast, `imshow` stretches each one to full contrast, so they look the same. Plot both with `vmin=0, vmax=255` and compare their histograms and profiles.
+
+</Solution>
+
+## References
+
+1. N. Smith and S. van der Walt, "A better default colormap for matplotlib," SciPy 2015 talk; matplotlib documentation, *Choosing colormaps*: [matplotlib.org/stable/users/explain/colors/colormaps.html](https://matplotlib.org/stable/users/explain/colors/colormaps.html).
+2. D. Borland and R. M. Taylor II, "Rainbow color map (still) considered harmful," *IEEE Computer Graphics and Applications*, vol. 27, no. 2, pp. 14–17, 2007.
+3. J. D. Hunter, "Matplotlib: a 2D graphics environment," *Computing in Science & Engineering*, vol. 9, no. 3, pp. 90–95, 2007.
+4. OpenCV 4.13.0 documentation, *ColorMaps in OpenCV* (`applyColorMap`): [docs.opencv.org/4.13.0/d3/d50/group__imgproc__colormap.html](https://docs.opencv.org/4.13.0/d3/d50/group__imgproc__colormap.html).

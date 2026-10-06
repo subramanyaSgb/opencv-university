@@ -1,0 +1,380 @@
+export const meta = {
+  number: "18.6",
+  title: "Choosing a filter",
+  minutes: 20,
+  objectives: [
+    "Compare box, Gaussian, median, bilateral and non-local means on all four noise types",
+    "Choose a filter from the noise type, the detail that must survive and the time budget",
+    "Handle signal-dependent noise with a variance-stabilising transform",
+    "Evaluate a denoiser on your own images, not on PSNR alone",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 18.6 (last chapter of Module 18).
+  Lab: DenoiseLab (all filters, all noise types).
+  Reference tail: all examples are deterministic and compared automatically (timings are "Typical output").
+*/}
+
+# 18.6 Choosing a filter
+
+<Definition term="Choosing a denoising filter">matching three things: the type of noise (18.1), the detail that must survive (edges, thin lines, texture) and the time available per image. No filter is best for all three.</Definition>
+
+The last five chapters each looked at one filter. This one puts them side by side on the same image, with every noise type, and turns the results into a decision guide.
+
+## 1. An analogy
+
+Cleaning tools: a broom (Gaussian) is fast and good for dust everywhere, but it also sweeps away small things you wanted to keep; tweezers (median) pick out the odd big crumb; a careful hand-cleaning (non-local means) gives the best result and takes the longest. What you use depends on the dirt, on what lies on the floor, and on how much time you have.
+
+## 2. The comparison
+
+<Flow
+  steps={[
+    { label: "What noise? (18.1: impulses, additive, signal-dependent)", tone: "data" },
+    { label: "What must survive? (edges, thin lines, texture)", tone: "process" },
+    { label: "How much time per image?", tone: "process" },
+    { label: "Filter and parameters, checked on your own images", tone: "result" },
+  ]}
+/>
+
+PSNR in dB on the test image, each noise at the moderate level of 18.1 (Gaussian σ = 20, salt and pepper 5 %, speckle σ = 0.2, shot noise 50 photons at white). Fixed settings: Gaussian σ = 1, median 3 × 3, bilateral d = 9, σc = 40, σs = 3, NLM h = 20, 7 × 7 / 21 × 21.
+
+| Noise | None | Gaussian | Median | Bilateral | NLM |
+| --- | --- | --- | --- | --- | --- |
+| Gaussian | 22.2 | 23.3 | 24.4 | 32.1 | **35.6** |
+| Salt & pepper | 18.1 | 22.4 | **25.3** | 18.9 | 22.2 |
+| Speckle | 19.2 | 22.7 | 22.8 | 24.6 | **24.8** |
+| Shot | 20.0 | 22.9 | 23.4 | 27.2 | **30.0** |
+
+Time per 320 × 200 image on one test machine (the ratios matter, not the values):
+
+| Filter | Time | Relative to Gaussian |
+| --- | --- | --- |
+| Box 5 × 5 | 0.04 ms | 0.4 × |
+| Gaussian σ = 1 | 0.09 ms | 1 × |
+| Median 3 × 3 | 0.03 ms | 0.4 × |
+| Bilateral d = 9 | 0.8 ms | about 9 × |
+| NLM 7 / 21 | 32 ms | about 350 × |
+
+Three lessons:
+
+- **Impulses need a median.** Every other filter keeps or smears them; the bilateral even keeps them almost untouched (18.9 dB).
+- **For Gaussian noise, edge-preserving filters win by 10 dB or more** on an image with detail, at a large price in time.
+- **Signal-dependent noise** (speckle, shot) is handled worse by everything, because one strength cannot fit dark and bright areas. Section 4 fixes that.
+
+<DenoiseLab caption="All four noise types and all five filters. Reproduce the table: for each noise, find the filter and setting with the highest PSNR, then check the zoom: the best PSNR is not always the result you would want for your task."/>
+
+## 3. A decision guide
+
+<Tree
+  root="What noise do you see?"
+  branches={[
+    { title: "Isolated black/white dots", items: ["Median 3 × 3 first", "Then, if needed, a filter for the remaining noise"] },
+    { title: "Fine grain, same everywhere", items: ["Real time: Gaussian σ 1–2 (or box)", "Edges matter: bilateral, σc ≈ 2σ", "Best quality, offline: NLM, h ≈ σ"] },
+    { title: "Grain growing with brightness", items: ["Variance-stabilise (Anscombe for shot, log for speckle)", "Then filter as for fine grain, and transform back"] },
+    { title: "Must keep thin lines or tiny defects", items: ["No median, small or no Gaussian", "Bilateral or NLM, checked on real defects"] },
+  ]}
+/>
+
+Beyond filtering, often the cheaper fix is upstream: more light, a longer exposure, lower gain, or averaging several frames of a static scene (averaging N frames divides Gaussian noise by √N without any blur; 2.5 and 14.3).
+
+## 4. Signal-dependent noise: stabilise first
+
+Shot noise has variance proportional to brightness. The Anscombe transform 2·√(x + 3/8), applied to photon counts, turns it into noise with roughly constant standard deviation 1 (18.1 Go deeper). Then a filter with one strength fits everywhere, and the inverse transform brings the values back. For speckle, a logarithm turns multiplication into addition.
+
+| Noise | NLM directly | Transform, NLM, inverse |
+| --- | --- | --- |
+| Shot (50 photons at white) | 30.0 dB | **33.3 dB** (Anscombe, h matched to the stabilised σ) |
+| Speckle σ = 0.2 | 24.8 dB | **29.0 dB** (logarithm) |
+
+Gains of 3 and 4 dB, from two lines of code around the same filter.
+
+## 5. Evaluating on your own images
+
+PSNR rewards average closeness to a clean image you usually do not have, and it does not know what matters for your task. A practical evaluation:
+
+1. **Get references**: average 16 to 64 frames of a static scene (noise divided by 4 to 8), or use a known flat target.
+2. **Measure noise** in flat areas before and after (18.1), and **edge width** across a known edge.
+3. **Check the task**: run the real downstream step (threshold, edge detection, OCR, defect detector) on filtered images and count misses and false alarms on known defects. A filter that wins on PSNR can erase a one-pixel scratch.
+4. **Measure time** on the target hardware, at the real resolution.
+
+## 6. Industrial example
+
+A typical inspection station chooses in this order: fix the lighting and exposure; add a 3 × 3 median if the sensor has hot pixels or the surface gives specular sparkles; add a small Gaussian before thresholding; and only if edges must be measured precisely, replace the Gaussian by a bilateral filter. NLM appears in offline review tools, in X-ray inspection where dose limits the signal, and on GPUs. Learned denoisers (Part J) are used when a large set of matching clean and noisy images can be collected from the same camera.
+
+## What you should remember from 18.6
+
+<Takeaways>
+<Takeaway n={1} title="Impulses">Median first, always.</Takeaway>
+<Takeaway n={2} title="Grain">Gaussian when fast; bilateral to keep edges; NLM for the best quality offline.</Takeaway>
+<Takeaway n={3} title="Brightness-dependent">Stabilise the variance (Anscombe, log), filter, transform back.</Takeaway>
+<Takeaway n={4} title="Evaluate">On your images, with your downstream task, on your hardware.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A line-scan camera at 40 kHz shows hot pixels and mild grain; a crack detector follows. Which filters?
+
+<Solution>
+
+Median 3 × 3 for the hot pixels (or a defect-pixel map if cracks may be one pixel wide), then a small Gaussian if the grain causes false alarms. NLM and large bilateral windows will not fit the time budget.
+
+</Solution>
+
+**Q2.** Why does the bilateral filter score lower than no filter at all on salt and pepper in some settings?
+
+<Solution>
+
+Impulses differ from their neighbours by far more than σc, so they are kept, while the filter also smooths some real detail: the noise stays and a bit of image is lost.
+
+</Solution>
+
+### Next: Module 19, Sharpening and restoration
+
+Undoing blur: unsharp masking, Laplacian sharpening, blur models, Wiener filtering and deconvolution.
+
+## Code
+
+Two examples: the comparison table, then variance stabilisation for shot and speckle noise.
+
+### 1. The comparison table
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-clean.png", cv2.IMREAD_GRAYSCALE)
+clean = img.astype(float)
+rng = np.random.default_rng(0)
+u8 = lambda x: np.clip(np.rint(x), 0, 255).astype(np.uint8)
+
+noises = {"gaussian": u8(clean + rng.normal(0, 20, clean.shape))}
+sp = img.copy()
+u = rng.random(img.shape)
+sp[u < 0.025] = 0
+sp[(u >= 0.025) & (u < 0.05)] = 255
+noises["salt&pepper"] = sp
+noises["speckle"] = u8(clean * (1 + rng.normal(0, 0.2, clean.shape)))
+counts = rng.poisson(clean / 255 * 50)                             # photons, 50 at white
+noises["shot"] = u8(counts * 255 / 50)
+
+psnr = lambda a: 10 * np.log10(255 ** 2 / np.mean((a.astype(float) - clean) ** 2))
+filters = {"none": lambda x: x,
+           "gauss": lambda x: cv2.GaussianBlur(x, (0, 0), 1),
+           "median": lambda x: cv2.medianBlur(x, 3),
+           "bilateral": lambda x: cv2.bilateralFilter(x, 9, 40, 3),
+           "nlm": lambda x: cv2.fastNlMeansDenoising(x, None, 20, 7, 21)}
+print(f"{'':12s}" + "".join(f"{k:>10s}" for k in filters))
+for name, x in noises.items():
+    print(f"{name:12s}" + "".join(f"{psnr(f(x)):10.1f}" for f in filters.values()))
+```
+
+Output:
+
+```text
+                  none     gauss    median bilateral       nlm
+gaussian          22.2      23.3      24.4      32.1      35.6
+salt&pepper       18.1      22.4      25.3      18.9      22.2
+speckle           19.2      22.7      22.8      24.6      24.8
+shot              20.0      22.9      23.4      27.2      30.0
+```
+
+- All filters see exactly the same noisy images (one seeded generator, created once).
+
+### 2. Variance stabilisation
+
+```python
+import numpy as np
+import cv2
+
+# shot noise: Anscombe on the photon counts, noise std about 1, scaled by 15 to use the 8-bit range
+a = 2 * np.sqrt(counts + 3 / 8) * 15
+den = cv2.fastNlMeansDenoising(u8(a), None, 15, 7, 21).astype(float) / 15
+back = ((den / 2) ** 2 - 1 / 8) * 255 / 50                        # simple inverse, back to grey levels
+print(f"shot:    NLM {psnr(cv2.fastNlMeansDenoising(noises['shot'], None, 20, 7, 21)):.1f} dB"
+      f" | Anscombe + NLM {psnr(u8(back)):.1f} dB")
+
+# speckle: logarithm turns v * (1 + n) into log v + log(1 + n)
+L = np.log1p(noises["speckle"].astype(float))
+lo, hi = L.min(), L.max()
+den = cv2.fastNlMeansDenoising(u8((L - lo) / (hi - lo) * 255), None, 15, 7, 21).astype(float)
+back = np.expm1(den / 255 * (hi - lo) + lo)
+print(f"speckle: NLM {psnr(cv2.fastNlMeansDenoising(noises['speckle'], None, 20, 7, 21)):.1f} dB"
+      f" | log + NLM {psnr(u8(back)):.1f} dB")
+```
+
+Output:
+
+```text
+shot:    NLM 30.0 dB | Anscombe + NLM 33.3 dB
+speckle: NLM 24.8 dB | log + NLM 29.0 dB
+```
+
+- After the Anscombe transform the noise σ is about 1, so after scaling by 15 it is about 15, and h = 15 follows the h ≈ σ rule of 18.5.
+- The inverse (y/2)² − 1/8 is a simple approximation; exact unbiased inverses (Mäkitalo and Foi [2]) do slightly better at very low counts.
+- For the log version, h was chosen by trying a few values (15, 20, 30); the best depends on the normalisation.
+
+### 3. Timing
+
+```python
+import time
+import numpy as np
+import cv2
+
+x = noises["gaussian"]
+for name, f in [("box 5", lambda x: cv2.blur(x, (5, 5))), ("gauss 1", filters["gauss"]),
+                ("median 3", filters["median"]), ("bilateral", filters["bilateral"]), ("nlm", filters["nlm"])]:
+    f(x)
+    t = time.perf_counter()
+    for _ in range(30):
+        f(x)
+    print(f"{name:10s} {(time.perf_counter() - t) / 30 * 1000:7.3f} ms")
+```
+
+Typical output (depends on the machine):
+
+```text
+box 5        0.035 ms
+gauss 1      0.090 ms
+median 3     0.034 ms
+bilateral    0.792 ms
+nlm         31.909 ms
+```
+
+## OpenCV API notes
+
+| Need | Function | Key parameters |
+| --- | --- | --- |
+| Fast smoothing | `cv2.blur`, `cv2.GaussianBlur` | ksize; sigma |
+| Impulses | `cv2.medianBlur` | ksize odd (≥ 7 only for 8-bit) |
+| Edge-preserving | `cv2.bilateralFilter` | d, sigmaColor ≈ 2σ, sigmaSpace |
+| Best quality | `cv2.fastNlMeansDenoising(Colored/Multi)` | h ≈ σ, 7, 21 |
+| Guided / fast edge-preserving | `cv2.ximgproc.guidedFilter` (contrib) | radius, eps |
+| Measuring | `cv2.PSNR`, `cv2.meanStdDev` | |
+
+## Where it fails
+
+- **No filter recovers detail destroyed by noise**: below a contrast of about the noise σ, structures are not recoverable from one image; average frames or improve the acquisition.
+- **PSNR on a synthetic image** says little about your parts and your downstream task.
+- **Mixed noise** (impulses plus grain plus brightness dependence) needs steps in the right order: median, stabilise, filter, inverse.
+- **Structured noise** (stripes, rings, periodic patterns from electrical interference) is not random per pixel; it needs notch filters in the frequency domain (30.4) or a fixed-pattern correction.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Choosing by the look of one image**, or by PSNR alone, instead of by the task.
+- **Filtering before knowing the noise type** (Gaussian blur on hot pixels, bilateral on salt and pepper).
+- **Stacking filters "to be safe"**: each one costs detail.
+- **Tuning on a synthetic image** and deploying on real parts without re-checking.
+- **Ignoring the cheapest fix**: light, exposure, gain or frame averaging.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The limits of denoising
+
+For a given noise level there is a limit to how well any method can do, set by how predictable natural images are. Chatterjee and Milanfar estimated such bounds [3]: for images with much repeated structure the best methods of 2010 were already close to them, while for other images there was still room for improvement, which later methods have partly used.
+
+### Noise estimation
+
+Many filters need σ. It can be estimated without a clean image: from flat regions, from the median absolute deviation of a high-pass filtered image, or from the difference of two frames divided by √2 (18.1 exercise).
+
+### Learned denoisers
+
+Convolutional networks trained on pairs of noisy and clean images (DnCNN, 2017) or even only on noisy pairs (Noise2Noise, 2018) outperform NLM and BM3D on the noise they were trained for. They require training data from the same sensor and settings, and their failures are harder to predict, which matters in inspection.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Hot pixels and mild grain. First filter?",
+      options: ["Gaussian", "Median 3 × 3", "Bilateral", "NLM"],
+      answer: 1,
+      explanation: "Impulses first; then filter the grain if needed.",
+    },
+    {
+      question: "Gaussian noise, strong edges to measure, 2 ms budget per image. Best choice?",
+      options: ["Median 7 × 7", "Bilateral with σc ≈ 2σ", "NLM with a 35 × 35 search", "Box 9 × 9"],
+      answer: 1,
+      explanation: "Edge-preserving and fast enough for small d.",
+    },
+    {
+      question: "Why apply the Anscombe transform before filtering shot noise?",
+      options: ["To make it Gaussian with constant variance", "To remove impulses", "To speed up the filter", "To convert to colour"],
+      answer: 0,
+      explanation: "Then one filter strength fits dark and bright areas.",
+    },
+    {
+      question: "Which filter keeps salt-and-pepper noise almost untouched?",
+      options: ["Median", "Gaussian", "Bilateral", "Box"],
+      answer: 2,
+      explanation: "Impulses differ from all neighbours by much more than σc.",
+    },
+    {
+      question: "The most reliable way to judge a denoiser for an inspection system:",
+      options: ["PSNR on a standard test image", "How smooth the image looks", "The downstream task's misses and false alarms on known defects", "The number of parameters"],
+      answer: 2,
+      explanation: "Measure what the system is for.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A static scene; you can grab 16 frames in the time budget. Noise σ = 12 per frame. Noise after averaging? Compare with a 3 × 3 box on one frame.
+
+<Solution>
+
+Averaging: 12 / √16 = **3**, with no blur. Box 3 × 3: 12 / 3 = **4**, with blur. If the scene is static, averaging frames is better.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Mixed noise: Gaussian noise σ = 20 and 3 % salt and pepper on the clean image. Compare NLM alone, median alone, and median then NLM (h = 20).
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+mix = u8(clean + rng.normal(0, 20, clean.shape))
+u = rng.random(img.shape)
+mix[u < 0.015] = 0
+mix[(u >= 0.015) & (u < 0.03)] = 255
+for name, x in [("noisy", mix), ("nlm", cv2.fastNlMeansDenoising(mix, None, 20, 7, 21)),
+                ("median", cv2.medianBlur(mix, 3)),
+                ("median + nlm", cv2.fastNlMeansDenoising(cv2.medianBlur(mix, 3), None, 20, 7, 21))]:
+    print(f"{name:13s} {psnr(x):.1f} dB")
+```
+
+Output:
+
+```text
+noisy         18.3 dB
+nlm           23.2 dB
+median        24.3 dB
+median + nlm  25.5 dB
+```
+
+The combination wins: the median removes the impulses that would distort NLM's patch distances (NLM alone keeps many of them), then NLM removes the grain the median leaves.
+
+</Solution>
+
+## References
+
+1. A. Buades, B. Coll, J.-M. Morel, "A review of image denoising algorithms, with a new one", *Multiscale Modeling & Simulation* 4(2), 490–530, 2005.
+2. M. Mäkitalo, A. Foi, "Optimal inversion of the Anscombe transformation in low-count Poisson image denoising", *IEEE Trans. Image Processing* 20(1), 99–109, 2011.
+3. P. Chatterjee, P. Milanfar, "Is denoising dead?", *IEEE Trans. Image Processing* 19(4), 895–911, 2010.
+4. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 5 (restoration in the presence of noise only).
+5. OpenCV 4.13.0 documentation: `blur`, `GaussianBlur`, `medianBlur`, `bilateralFilter`, `fastNlMeansDenoising`. https://docs.opencv.org/4.13.0/

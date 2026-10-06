@@ -1,0 +1,305 @@
+export const meta = {
+  number: "14.5",
+  title: "Frame differencing",
+  minutes: 25,
+  objectives: [
+    "Detect change with |frame − previous frame| and a threshold",
+    "Explain ghosts, holes in uniform objects and stopped objects",
+    "Compare two-frame, three-frame, empty-reference and running-average methods",
+    "Choose the threshold from the noise level",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 14.5 (last chapter of Module 14).
+  New lab: DiffLab (lib/diff-ops.ts, synthetic video with ground truth).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 14.5 Frame differencing
+
+<Definition term="Frame differencing">finding change in video by subtracting two images of the same scene, usually consecutive frames or a frame and a background image, and thresholding the absolute difference. Pixels whose value changed by more than the noise are marked as "moving".</Definition>
+
+A fixed camera sees the same background in every frame. Anything that moves changes some pixels. Subtracting frames (with `absdiff`, 14.3) cancels the background and leaves the change. It is the oldest and fastest motion detector: one subtraction and one threshold per frame. It also has three classic failure modes that every more advanced method (background models, optical flow, later in the course) is designed to fix; this chapter shows them with real numbers.
+
+## 1. An analogy
+
+Spot-the-difference puzzles: lay one picture over the other and only the changed parts stand out. A video gives you a new pair of pictures every frame.
+
+## 2. Two frames
+
+<Flow
+  steps={[
+    { label: "Frame t and frame t − 1 (fixed camera)", tone: "data" },
+    { label: "D = absdiff(fₜ, fₜ₋₁)", tone: "process" },
+    { label: "Threshold D > T (T above the noise)", tone: "process" },
+    { label: "Motion mask", tone: "result" },
+  ]}
+/>
+
+A synthetic video: a uniform bright square (24 × 24, grey 170) moves right by 5 pixels per frame over a textured background, stands still in frames 12–19, then moves on. Sensor noise σ = 3, threshold T = 25.
+
+- **Only the edges are found.** Inside a uniform object, frame t and t − 1 have the same value, so the difference is zero. Only the 5-pixel strip the object has just covered changes: 21 % of the object is found.
+- **A ghost appears.** The strip the object has just left also changes: 120 false pixels where the object *was*.
+- **Stopped objects vanish.** In frames 12–19 nothing changes: 0 % found.
+
+<DiffLab caption="Step through the frames or press Play. Compare the methods while the object moves (frame 8), while it stands still (frames 12–19) and after it moves on (frame 25). With the running average, change α to see how fast a stopped object fades into the background, and how long its ghost stays." />
+
+## 3. Four methods
+
+| Method | Frame 8 (moving) | Frame 15 (standing) | Weakness |
+| --- | --- | --- | --- |
+| Two frames | 21 % found, 120 false | 0 % | ghosts, holes, stopped objects |
+| Three frames (AND of two differences) | 0 % found, 0 false | 0 % | removes ghosts, but uniform objects that move less than their size per frame give nothing |
+| Empty reference frame | 100 %, 0 false | 100 %, 0 false | needs an image of the empty scene; fails when lighting or scene changes |
+| Running average (α = 0.1) | 100 %, 810 false | 96 %, 300 false | trails behind moving objects; absorbs stopped objects (36 % found at frame 19); leaves a ghost when they move away (482 false at frame 25) |
+
+- **Three frames** mark a pixel only if it changed from t − 2 to t − 1 **and** from t − 1 to t: that is the object at t − 1 for a textured object, and it removes the ghost. On a uniform object moving slowly, no pixel changes twice, so nothing is found.
+- **Empty reference**: the best method when you can capture the empty scene and lighting is stable (indoor inspection, fixed cameras in a box).
+- **Running average** `bg ← (1 − α) · bg + α · frame` adapts to slow lighting changes, at the cost of trails and absorption. α sets the memory: about 1/α frames.
+
+Better background models (mixtures of Gaussians per pixel, `cv2.createBackgroundSubtractorMOG2`, KNN) follow in the video module; they are refinements of the running average.
+
+## 4. Choosing the threshold
+
+The difference of two noisy frames has noise std √2 · σ (two independent noise samples). With σ = 3, that is 4.2 levels; T = 25 is about 6 times that, so practically no background pixel passes. Measure σ on the empty scene (`np.std` of the difference of two empty frames divided by √2) and set T at 4–6 times the difference noise. Lower T finds fainter objects, but noise and flicker (2.x, 50/60 Hz lighting) start to appear.
+
+## 5. Industrial example
+
+A palletising cell must stop when a person enters a marked zone in front of a robot. Safety itself is handled by certified light curtains; the camera system adds a visual warning. An empty-reference image is recorded at each shift start, and each frame is differenced against it inside the zone mask (14.1). A person who stands still is still detected (unlike two-frame differencing), and the reference is re-recorded automatically when the zone is empty for a long time, which handles the slow daylight changes.
+
+## What you should remember from 14.5
+
+<Takeaways>
+<Takeaway n={1} title="Basic">absdiff of two frames, threshold above the noise.</Takeaway>
+<Takeaway n={2} title="Failure modes">Holes in uniform objects, ghosts, stopped objects disappear.</Takeaway>
+<Takeaway n={3} title="Methods">Three-frame (no ghosts), empty reference (stopped objects), running average (adapts to light).</Takeaway>
+<Takeaway n={4} title="Threshold">4–6 × the difference noise √2·σ.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Frames have noise σ = 5. What is the noise std of their difference, and a reasonable threshold?
+
+<Solution>
+
+√2 · 5 ≈ **7.1**; a threshold of about 30–40 (4–6 × 7.1).
+
+</Solution>
+
+**Q2.** A running average uses α = 0.02. Roughly how many frames does it "remember"?
+
+<Solution>
+
+About 1/α = **50** frames; a change persists in the background estimate for that order of time.
+
+</Solution>
+
+### Next: Module 15, Preprocessing pipelines
+
+Putting the point operations together: which step comes first, and how to prepare images for measurement, OCR and neural networks.
+
+## Code
+
+Two examples: the synthetic video and the two-frame, three-frame and reference methods; then the running average.
+
+### 1. Two frames, three frames, empty reference
+
+```python
+import numpy as np
+import cv2
+
+H, W, S = 100, 160, 24
+yy, xx = np.mgrid[0:H, 0:W]
+bg = 70 + 0.5 * xx + 12 * np.sin(xx / 5) * np.sin(yy / 7)          # static textured background
+
+def obj_x(t):
+    return 10 + 5 * min(t, 12) + 5 * max(0, t - 19)                   # moves, stands still in frames 12-19, moves on
+
+rng = np.random.default_rng(0)
+frames, truths = [], []
+for t in range(30):
+    f = bg.copy()
+    x0 = obj_x(t)
+    f[38:38 + S, x0:x0 + S] = 170                                      # uniform bright object
+    f += rng.normal(0, 3, f.shape)                                     # sensor noise, sigma 3
+    frames.append(np.clip(np.rint(f), 0, 255).astype(np.uint8))
+    m = np.zeros((H, W), bool)
+    m[38:38 + S, x0:x0 + S] = True
+    truths.append(m)
+empty = np.clip(np.rint(bg), 0, 255).astype(np.uint8)              # image of the empty scene
+
+def report(name, mask, truth):
+    print(f"{name:22s} found {mask[truth].mean():5.0%}, false pixels {int((mask & ~truth).sum()):4d}")
+
+T = 25
+for t in (8, 15):
+    print(f"frame {t}:")
+    d1 = cv2.absdiff(frames[t], frames[t - 1]) > T
+    d2 = cv2.absdiff(frames[t - 1], frames[t - 2]) > T
+    report("two frames", d1, truths[t])
+    report("three frames (t-1)", d1 & d2, truths[t - 1])
+    report("empty reference", cv2.absdiff(frames[t], empty) > T, truths[t])
+```
+
+Output:
+
+```text
+frame 8:
+two frames             found   21%, false pixels  120
+three frames (t-1)     found    0%, false pixels    0
+empty reference        found  100%, false pixels    0
+frame 15:
+two frames             found    0%, false pixels    0
+three frames (t-1)     found    0%, false pixels    0
+empty reference        found  100%, false pixels    0
+```
+
+- 21 % = 5 / 24: only the newly covered 5-pixel strip of the uniform square changes; the 120 false pixels are the 5 × 24 strip it just left (the ghost).
+- Three-frame differencing removes the ghost, but here it also removes everything: no pixel of a uniform square changes in two consecutive steps when it moves less than its own width.
+
+### 2. Running average background
+
+```python
+import numpy as np
+import cv2
+
+acc = frames[0].astype(np.float32)                                  # background estimate, float
+masks = {}
+for t in range(1, 30):
+    masks[t] = cv2.absdiff(frames[t], cv2.convertScaleAbs(acc)) > T
+    cv2.accumulateWeighted(frames[t], acc, 0.1)                    # bg = 0.9 bg + 0.1 frame
+for t in (8, 15, 19, 25):
+    report(f"running avg, frame {t}", masks[t], truths[t])
+```
+
+Output:
+
+```text
+running avg, frame 8   found  100%, false pixels  810
+running avg, frame 15  found   96%, false pixels  300
+running avg, frame 19  found   36%, false pixels    2
+running avg, frame 25  found   94%, false pixels  482
+```
+
+- Frame 8: the background estimate still contains a faded copy of the object along its path: a trail of 810 false pixels.
+- Frames 12–19: the standing object is slowly learned into the background (96 % → 36 % found).
+- Frame 25: the object has left, but the background still remembers it: a ghost of 482 pixels that fades over about 1/α = 10 frames.
+
+## OpenCV API notes
+
+**`cv2.absdiff(a, b)`**: |a − b| without overflow. Colour frames: convert to grey first or take the maximum over channels.
+
+**`cv2.accumulateWeighted(src, dst, alpha, mask=None)`**: dst ← (1 − α)·dst + α·src; `dst` must be float32/float64 and is updated in place. `mask` freezes the update where objects are (selective update).
+
+**Background subtractors**: `cv2.createBackgroundSubtractorMOG2(history, varThreshold, detectShadows)`, `createBackgroundSubtractorKNN`; `apply(frame)` returns a mask (shadows as 127 when enabled).
+
+**Cleaning the mask**: morphology (Module 16) to fill holes and remove specks; `connectedComponentsWithStats` to keep blobs above a minimum area.
+
+## Where it fails
+
+- **Moving camera**: everything changes; stabilise or register frames first.
+- **Lighting changes and flicker**: whole-image changes; use a running background, normalise brightness, or match exposure to the mains frequency.
+- **Uniform objects**: holes; use a reference background or fill with morphology.
+- **Shadows and reflections**: detected as motion; MOG2's shadow detection or colour-based tests help.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **`frame1 - frame2` on uint8** (wraps, 14.3); use `absdiff`.
+- **Threshold below the noise**: the whole image flickers.
+- **Updating the running average with the object in it** when the object should stay detected (use the mask argument to freeze those pixels).
+- **Comparing compressed video frames**: compression artefacts change between frames and look like motion; lower the threshold only after checking the artefact level.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The foreground aperture problem
+
+The holes inside uniform moving objects were named the "foreground aperture" problem by Toyama et al. (1999) in their analysis of background maintenance, together with other classic cases: a moved object leaving a ghost, sleeping persons absorbed into the background, waking objects, light switches and shadows [2]. Their list is still a good checklist for any motion detector.
+
+### Per-pixel Gaussian mixtures
+
+Stauffer and Grimson (1999) modelled each pixel's history as a mixture of a few Gaussians, so that a pixel can have several "background" values (a waving tree, a flickering screen). Zivkovic (2004) made the number of components adaptive; this is OpenCV's MOG2 [3, 4].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A uniform grey box moves slowly. Two-frame differencing marks…",
+      options: ["The whole box", "Mainly its leading and trailing edges", "Nothing", "The background"],
+      answer: 1,
+      explanation: "Inside the box the value does not change between frames.",
+    },
+    {
+      question: "Which method still detects an object that has stopped?",
+      options: ["Two-frame differencing", "Three-frame differencing", "Differencing against an empty reference frame", "None"],
+      answer: 2,
+      explanation: "The empty reference never contains the object.",
+    },
+    {
+      question: "What is the main side effect of a running-average background?",
+      options: ["It never adapts", "Stopped objects are absorbed and leave ghosts when they move", "It needs colour", "It doubles the noise"],
+      answer: 1,
+      explanation: "The average learns whatever stays long enough.",
+    },
+    {
+      question: "Frame noise σ = 3. The difference of two frames has noise std of about…",
+      options: ["3", "4.2", "6", "9"],
+      answer: 1,
+      explanation: "√2 · 3 ≈ 4.2 for two independent noise samples.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 1D row has a uniform object of value 200 at positions 4–9 in frame t − 1 and 6–11 in frame t, on background 50. Which positions does |fₜ − fₜ₋₁| > 20 mark?
+
+<Solution>
+
+Positions **4, 5** (object left: 200 → 50) and **10, 11** (object arrived: 50 → 200). Positions 6–9 are 200 in both frames and are not marked: a hole in the middle.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Estimate the noise σ from the video itself: take the difference of two frames in a region the object never touches (rows 0–30), compute its standard deviation in int16, divide by √2, and propose a threshold of 5 × the difference noise.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+d = frames[1][:30].astype(np.int16) - frames[0][:30].astype(np.int16)
+sd = d.std()
+print(f"difference std {sd:.2f} -> sigma {sd / np.sqrt(2):.2f}; threshold 5 x {sd:.2f} = {5 * sd:.0f}")
+```
+
+Output:
+
+```text
+difference std 4.23 -> sigma 2.99; threshold 5 x 4.23 = 21
+```
+
+The estimate recovers the simulated σ = 3. A threshold of about 21 to 25 keeps noise out, which is why T = 25 gave zero false pixels against the empty reference.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 2.6 (image subtraction).
+2. K. Toyama, J. Krumm, B. Brumitt, B. Meyers, "Wallflower: principles and practice of background maintenance", *Proc. ICCV*, 255–261, 1999.
+3. C. Stauffer, W. E. L. Grimson, "Adaptive background mixture models for real-time tracking", *Proc. CVPR*, 246–252, 1999.
+4. Z. Zivkovic, "Improved adaptive Gaussian mixture model for background subtraction", *Proc. ICPR*, 28–31, 2004.
+5. OpenCV 4.13.0 documentation: `absdiff`, `accumulateWeighted`, `createBackgroundSubtractorMOG2`. https://docs.opencv.org/4.13.0/

@@ -1,0 +1,551 @@
+export const meta = {
+  number: "4.3",
+  title: "How JPEG works",
+  minutes: 45,
+  objectives: [
+    "Name the steps of a baseline JPEG encoder and say which ones lose information",
+    "Explain the 8 × 8 DCT as 'average + patterns' and why most coefficients become zero",
+    "Explain the quality setting as scaling of the quantization table",
+    "Recognise blocking, ringing and colour bleeding, and choose JPEG settings for inspection",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 4.3 (Module 4 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3 (libjpeg-turbo bundled in the wheel).
+  Quantization tables: ITU-T T.81 Annex K (Tables K.1, K.2); quality scaling as in libjpeg, checked against the tables OpenCV writes.
+*/}
+
+# 4.3 How JPEG works
+
+<Definition term="JPEG">a lossy image format that cuts the image into 8 × 8 blocks, describes each block as a mix of 64 standard patterns, and stores the important patterns precisely and the unimportant ones roughly or not at all.</Definition>
+
+Chapter 4.2 showed **that** JPEG changes pixels. This chapter shows **where** and **why**. JPEG is a standard from 1992 (ITU-T T.81 / ISO/IEC 10918-1) and still the most common image format in the world, including in many industrial cameras and vision systems.
+
+## 1. An analogy
+
+Describing a wall to a painter over the phone. You don't read out the colour of every brick. You say: "mostly light gray, slightly darker towards the bottom, with a faint horizontal pattern". The painter gets **the average first, then the big changes, then the small details**. If the phone line is bad, you skip the small details: the wall still looks right from a distance.
+
+JPEG does this for every 8 × 8 block: **average + a few patterns**, small details rounded away.
+
+## 2. The steps
+
+<Flow
+  steps={[
+    { label: "BGR image", tone: "world" },
+    { label: "1. Colour → Y, Cb, Cr", tone: "process" },
+    { label: "2. Shrink Cb, Cr (4:2:0)", tone: "process" },
+    { label: "3. Cut into 8 × 8 blocks, subtract 128", tone: "process" },
+    { label: "4. DCT: 64 pattern weights", tone: "process" },
+    { label: "5. Quantize: divide and round", tone: "process" },
+    { label: "6. Zigzag, run-length, Huffman", tone: "process" },
+    { label: ".jpg file", tone: "result" },
+  ]}
+/>
+
+The decoder runs the same steps backwards. Only steps **2** and **5** throw information away on purpose (plus small rounding in steps 1 and 4). Step 6 is lossless packing (4.2).
+
+## 3. Step 1–2: brightness and colour separately
+
+The eye sees fine detail mainly in **brightness**, much less in colour. JPEG therefore converts BGR to **Y** (brightness, luma) and **Cb, Cr** (blue and red colour differences):
+
+<Equation terms={[{ value: "Y" }, { op: "=", value: "0.299 R + 0.587 G + 0.114 B", result: true }]} />
+
+The same weights as `cv2.COLOR_BGR2GRAY` (3.3). Then **chroma subsampling** stores Cb and Cr at lower resolution. With **4:2:0**, one Cb and one Cr value cover a 2 × 2 block of pixels: the colour data shrinks to a quarter before any other step.
+
+OpenCV writes **4:2:0 by default, at every quality, even 100**. On sharp colour edges that costs a lot:
+
+| Colour shapes, quality 95 | File size | PSNR | Max error |
+| --- | --- | --- | --- |
+| 4:4:4 (full colour resolution) | 14 182 B | 46.4 dB | 19 |
+| 4:2:2 (half horizontally) | 11 170 B | 35.0 dB | 96 |
+| 4:2:0 (half both ways, default) | 9 475 B | 31.5 dB | 107 |
+
+*(Code example 4.)*
+
+<ImageCompare
+  before={{ src: "/images/sample-jpeg-color-444.png", label: "4:4:4" }}
+  after={[{ src: "/images/sample-jpeg-color-420.png", label: "4:2:0 (default)" }, { src: "/images/sample-jpeg-color.png", label: "Original" }]}
+  width={320}
+  height={192}
+  pixelated
+  alt="Edge of a red circle on a dark background, enlarged 8 times: with 4:4:4 the edge stays crisp; with 4:2:0 the red bleeds into the background over two to three pixels"
+  caption="Edge of the red circle, enlarged 8×, after JPEG at quality 95. With 4:2:0 the red smears across the edge ('colour bleeding'); 4:4:4 keeps it crisp."
+/>
+
+For colour inspection (colour sorting, print checks), set `IMWRITE_JPEG_SAMPLING_FACTOR_444`, or avoid JPEG.
+
+## 4. Step 3: 8 × 8 blocks
+
+Each channel is cut into blocks of 8 × 8 pixels, processed **independently**. 128 is subtracted so the values are centred around 0 (−128 … 127). Our worked example is an edge block, dark on the left, bright on the right:
+
+<PixelMatrix
+  values={[[60, 60, 60, 60, 180, 180, 180, 180], [60, 60, 60, 60, 180, 180, 180, 180], [60, 60, 60, 60, 180, 180, 180, 180], [60, 60, 60, 60, 180, 180, 180, 180], [60, 60, 60, 60, 180, 180, 180, 180], [60, 60, 60, 60, 180, 180, 180, 180], [60, 60, 60, 60, 180, 180, 180, 180], [60, 60, 60, 60, 180, 180, 180, 180]]}
+  size="sm"
+  label="Edge block (8 × 8)"
+/>
+
+## 5. Step 4: the DCT, "average + patterns"
+
+The **discrete cosine transform** (DCT) rewrites the 64 pixel values as 64 **weights** of 64 fixed patterns. The patterns are cosine waves: the top-left one is flat (the average), patterns to the right vary horizontally, patterns further down vary vertically, faster and faster:
+
+<DctBasis caption="The 64 DCT patterns of an 8 × 8 block (gray = 0, white = positive, black = negative). Every block is a weighted sum of these. Top-left: flat ('DC'); the others: 'AC' detail patterns." />
+
+For the edge block, the first row of weights is:
+
+| Pattern (row 0) | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| DCT weight | −64 | −435 | 0 | 153 | 0 | −102 | 0 | 87 |
+
+All other rows are 0, because the block does not change vertically. **−64** is the average (120 − 128 = −8, times 8); **−435** says "darker on the left, brighter on the right": the slow horizontal wave. The DCT itself loses nothing; `cv2.idct` gives back the block exactly. Its value is that, in real images, almost all of the energy ends up in a few low-frequency weights.
+
+## 6. Step 5: quantization, where the loss happens
+
+Each weight is divided by a **step size** from a **quantization table** and rounded to an integer. Big steps for high frequencies (the eye hardly sees them), small steps for low frequencies. The standard luminance table (quality 50), row 0, and the result for the edge block:
+
+| | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| DCT weight | −64 | −435 | 0 | 153 | 0 | −102 | 0 | 87 |
+| Step (Q) | 16 | 11 | 10 | 16 | 24 | 40 | 51 | 61 |
+| round(weight / Q) | **−4** | **−40** | 0 | **10** | 0 | **−3** | 0 | **1** |
+
+Only **5 of 64** numbers are non-zero. The decoder multiplies back (−3 × 40 = −120 instead of −102) and the small errors become small pixel errors *(Code example 1)*:
+
+<MatrixTransform
+  before={[[60, 60, 60, 60, 180, 180, 180, 180]]}
+  after={[[58, 65, 54, 61, 179, 186, 175, 182]]}
+  rule="JPEG q50"
+  beforeLabel="Original row"
+  afterLabel="Decoded row"
+  size="sm"
+/>
+
+Our NumPy version and OpenCV's JPEG give **identical** pixels for this block.
+
+### The quality setting = scaling the table
+
+"Quality" is not stored in the file. The encoder scales the standard table: quality 50 uses it as is, higher quality makes the steps smaller, lower quality bigger (libjpeg: factor 5000/q below 50, 200 − 2q above). Row 0 of the tables OpenCV actually writes *(Code example 2)*:
+
+| Quality | Luma steps, row 0 | Chroma steps, row 0 |
+| --- | --- | --- |
+| 95 | 2 1 1 2 2 4 5 6 | 2 2 2 5 10 10 10 10 |
+| 75 | 8 6 5 8 12 20 26 31 | 9 9 12 24 50 50 50 50 |
+| 50 | 16 11 10 16 24 40 51 61 | 17 18 24 47 99 99 99 99 |
+| 10 | 80 55 50 80 120 200 255 255 | 85 90 120 235 255 255 255 255 |
+
+At quality 100 every step is 1: almost lossless, but rounding, colour conversion and 4:2:0 still change pixels (4.2).
+
+## 7. Step 6: packing the numbers
+
+The 64 numbers are read in **zigzag** order, from low to high frequency, so the zeros end up together at the end:
+
+<ZigZag caption="Zigzag order: 0 is the DC weight; the shaded low-frequency corner holds most of the non-zero values." />
+
+For the edge block:
+
+```text
+[-4, -40, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, -3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1] + EOB
+```
+
+Runs of zeros are coded as "skip n zeros", the trailing zeros as one **end-of-block** (EOB) code, and the result is **Huffman-coded** (frequent symbols get short bit codes). The DC weight is coded as the difference from the previous block's DC. All of this is lossless.
+
+## 8. Try it
+
+<DctLab caption="One 8 × 8 block through JPEG: the same maths as libjpeg (quality scaling, standard luminance table). Blue = positive, red = negative weights; gray zeros cost almost nothing to store." />
+
+Things to try:
+
+- **Smooth ramp**: 4 non-zero numbers at quality 50, 2 at quality 10. Smooth areas are cheap.
+- **Edge**: lower the quality and watch the decoded row start to "wobble" near the edge: ringing.
+- **Noise** and **Fine checkerboard**: many high-frequency weights. At low quality they are rounded away: the block becomes flat.
+
+## 9. Artefacts you will see
+
+**Blocking**: each block is coded independently, so at low quality the block borders become visible as a grid of 8 × 8 squares.
+
+**Ringing**: sharp edges need many high-frequency patterns; when those are rounded off, ripples appear next to edges (like the 54/65 values in the decoded row above).
+
+**Colour bleeding**: 4:2:0 colour smears across colour edges (Section 3).
+
+<ImageCompare
+  before={{ src: "/images/sample-jpeg-text.png", label: "Original" }}
+  after={{ src: "/images/sample-jpeg-text-q10.png", label: "JPEG quality 10" }}
+  width={320}
+  height={192}
+  pixelated
+  alt="Text on the test chart enlarged 4 times; after JPEG quality 10 the letters are surrounded by ripples and the background shows 8 by 8 pixel blocks"
+  caption="Text from the test chart, enlarged 4×. At quality 10 the letters ring and the flat background shows the 8 × 8 block grid. Hover to compare pixel values."
+/>
+
+For measurement, ringing is the dangerous one: it shifts the gray values right next to edges, exactly where edge detectors and sub-pixel fits look.
+
+## 10. Why JPEG works so well on photos
+
+Over the whole test chart, the share of quantized weights that are **zero** *(Code example 3)*:
+
+| Quality | Zero weights |
+| --- | --- |
+| 90 | 87.7 % |
+| 50 | 92.2 % |
+| 10 | 95.1 % |
+
+Most blocks are smooth, so most weights round to zero and cost almost nothing. That is the whole trick.
+
+## 11. Industrial notes
+
+<Columns>
+<Panel title="If you must use JPEG" tone="a">
+
+- Quality **90 or higher** for anything you analyse.
+- **4:4:4** for colour inspection.
+- Encode **once**, from the original (generation loss, 4.2).
+- Know where your 8 × 8 grid is: a feature moved by a few pixels compresses differently.
+
+</Panel>
+<Panel title="Where JPEG appears" tone="d">
+
+- Cameras and smart cameras that compress on board to save bandwidth (4.1).
+- IP cameras (as Motion JPEG, 4.5).
+- Images saved for reports and dashboards.
+- Many public datasets and web images used to train models.
+
+</Panel>
+</Columns>
+
+## What you should remember from 4.3
+
+<Takeaways>
+<Takeaway n={1} title="Steps">YCbCr → chroma subsampling → 8 × 8 blocks → DCT → quantize → zigzag + Huffman.</Takeaway>
+<Takeaway n={2} title="Loss">Chroma subsampling and quantization throw information away; the DCT and the packing do not.</Takeaway>
+<Takeaway n={3} title="DCT">Average + patterns; in real images most weights are small and round to zero.</Takeaway>
+<Takeaway n={4} title="Quality">Scales the quantization table; 100 is not lossless.</Takeaway>
+<Takeaway n={5} title="Artefacts">Blocking, ringing near edges, colour bleeding with 4:2:0.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A DCT weight is 50 and its step is 16. What does the decoder get back?
+
+<Solution>
+
+round(50 / 16) = round(3.125) = 3; 3 × 16 = **48** (error 2).
+
+</Solution>
+
+**Q2.** A completely flat block of value 140. Which weights are non-zero?
+
+<Solution>
+
+Only the DC weight: (140 − 128) × 8 = **96**. All 63 pattern weights are 0.
+
+</Solution>
+
+**Q3.** Why does JPEG keep brightness at full resolution but not colour?
+
+<Solution>
+
+The eye sees fine detail mainly in brightness; colour detail can be halved in each direction with little visible change, saving a lot of data.
+
+</Solution>
+
+### Next: 4.4 PNG, TIFF, 16-bit and raw
+
+The lossless formats used in inspection: how they store 8- and 16-bit data, and what "raw" really means.
+
+## Code
+
+Four examples: one block through JPEG by hand, the quantization tables OpenCV writes, how many weights are zero, and chroma subsampling. Copy the sample images next to the script.
+
+### 1. From scratch: one 8 × 8 block through JPEG
+
+```python
+import numpy as np
+import cv2
+
+T = np.array([[16, 11, 10, 16, 24, 40, 51, 61], [12, 12, 14, 19, 26, 58, 60, 55],
+              [14, 13, 16, 24, 40, 57, 69, 56], [14, 17, 22, 29, 51, 87, 80, 62],
+              [18, 22, 37, 56, 68, 109, 103, 77], [24, 35, 55, 64, 81, 104, 113, 92],
+              [49, 64, 78, 87, 103, 121, 120, 101], [72, 92, 95, 98, 112, 100, 103, 99]])
+
+def qtable(quality):                                       # libjpeg scaling of the standard table
+    s = 5000 // quality if quality < 50 else 200 - 2 * quality
+    return np.clip((T * s + 50) // 100, 1, 255)
+
+block = np.where(np.arange(8) < 4, 60, 180).astype(np.uint8)[None, :].repeat(8, axis=0)   # an edge
+Q = qtable(50)
+coef = cv2.dct(block.astype(np.float32) - 128)            # 1. level shift, 2. DCT
+q = np.round(coef / Q).astype(int)                         # 3. quantize: the lossy step
+rec = np.clip(np.round(cv2.idct((q * Q).astype(np.float32)) + 128), 0, 255).astype(np.uint8)
+
+print("row 0 of the DCT  :", np.round(coef[0]).astype(int))
+print("row 0 of Q (q50)  :", Q[0])
+print("row 0 quantized   :", q[0])
+print("non-zero coefficients:", np.count_nonzero(q), "of 64")
+print("decoded row 0     :", rec[0])
+libjpeg = cv2.imdecode(cv2.imencode(".jpg", block, [cv2.IMWRITE_JPEG_QUALITY, 50])[1], cv2.IMREAD_GRAYSCALE)
+print("OpenCV's JPEG     :", libjpeg[0], "| identical:", np.array_equal(rec, libjpeg))
+```
+
+Output:
+
+```text
+row 0 of the DCT  : [ -64 -435    0  153    0 -102    0   87]
+row 0 of Q (q50)  : [16 11 10 16 24 40 51 61]
+row 0 quantized   : [ -4 -40   0  10   0  -3   0   1]
+non-zero coefficients: 5 of 64
+decoded row 0     : [ 58  65  54  61 179 186 175 182]
+OpenCV's JPEG     : [ 58  65  54  61 179 186 175 182] | identical: True
+```
+
+- `T` is the standard luminance table (ITU-T T.81, Table K.1).
+- `cv2.dct` on an 8 × 8 `float32` array is the orthonormal DCT, which for 8 × 8 equals JPEG's forward DCT. Input must be `float32` or `float64`.
+- `np.round` then `.astype(int)`: quantization. Everything else is reversible.
+- libjpeg-turbo uses a fast fixed-point DCT, so on other blocks its result can differ from this float version by 1 level.
+
+### 2. OpenCV: read the quantization tables from a JPEG
+
+```python
+import numpy as np
+import cv2
+
+def read_dqt(jpeg_bytes):
+    """Return the quantization tables stored in a JPEG file (DQT markers, 8-bit tables)."""
+    zz = sorted(((r, c) for r in range(8) for c in range(8)),
+                key=lambda p: (p[0] + p[1], p[0] if (p[0] + p[1]) % 2 else p[1]))
+    b, tables, i = bytes(jpeg_bytes), [], 0
+    while (i := b.find(b"\xff\xdb", i)) >= 0:              # DQT marker
+        length = int.from_bytes(b[i + 2:i + 4], "big")
+        j = i + 4
+        while j < i + 2 + length:
+            table = np.zeros((8, 8), int)
+            for k, (r, c) in enumerate(zz):                # stored in zigzag order
+                table[r, c] = b[j + 1 + k]
+            tables.append(table)
+            j += 65
+        i += 2 + length
+    return tables
+
+color = cv2.imread("sample-color.png")
+for quality in [95, 75, 50, 10]:
+    luma, chroma = read_dqt(cv2.imencode(".jpg", color, [cv2.IMWRITE_JPEG_QUALITY, quality])[1])
+    print(f"quality {quality:2d}: luma row 0 {luma[0]}, chroma row 0 {chroma[0]}")
+```
+
+Output:
+
+```text
+quality 95: luma row 0 [2 1 1 2 2 4 5 6], chroma row 0 [ 2  2  2  5 10 10 10 10]
+quality 75: luma row 0 [ 8  6  5  8 12 20 26 31], chroma row 0 [ 9  9 12 24 50 50 50 50]
+quality 50: luma row 0 [16 11 10 16 24 40 51 61], chroma row 0 [17 18 24 47 99 99 99 99]
+quality 10: luma row 0 [ 80  55  50  80 120 200 255 255], chroma row 0 [ 85  90 120 235 255 255 255 255]
+```
+
+- A JPEG file is a sequence of **markers** (two bytes starting with `0xFF`); `0xFFDB` (DQT) holds quantization tables, 64 bytes each, in zigzag order.
+- The sorted `zz` list is the zigzag order: anti-diagonals, alternating direction.
+- This simple reader assumes 8-bit tables (baseline JPEG), which is what OpenCV writes.
+
+### 3. OpenCV: how many weights become zero?
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-pinhole-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32) - 128
+T = np.array([[16, 11, 10, 16, 24, 40, 51, 61], [12, 12, 14, 19, 26, 58, 60, 55],
+              [14, 13, 16, 24, 40, 57, 69, 56], [14, 17, 22, 29, 51, 87, 80, 62],
+              [18, 22, 37, 56, 68, 109, 103, 77], [24, 35, 55, 64, 81, 104, 113, 92],
+              [49, 64, 78, 87, 103, 121, 120, 101], [72, 92, 95, 98, 112, 100, 103, 99]])
+h, w = img.shape
+for quality in [90, 50, 10]:
+    s = 5000 // quality if quality < 50 else 200 - 2 * quality
+    Q = np.clip((T * s + 50) // 100, 1, 255)
+    zeros = 0
+    for y in range(0, h, 8):
+        for x in range(0, w, 8):
+            zeros += np.count_nonzero(np.round(cv2.dct(img[y:y+8, x:x+8]) / Q) == 0)
+    print(f"quality {quality}: {100 * zeros / img.size:5.1f} % of the {img.size} coefficients are zero")
+```
+
+Output:
+
+```text
+quality 90:  87.7 % of the 64000 coefficients are zero
+quality 50:  92.2 % of the 64000 coefficients are zero
+quality 10:  95.1 % of the 64000 coefficients are zero
+```
+
+- The image is 320 × 200, a multiple of 8 in both directions. Encoders pad other sizes up to a multiple of 8 (or 16 with 4:2:0) by repeating edge pixels.
+- `img[y:y+8, x:x+8]` is one block (3.4).
+
+### 4. OpenCV: chroma subsampling
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+for name, sf in [("4:4:4", cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444), ("4:2:2", cv2.IMWRITE_JPEG_SAMPLING_FACTOR_422), ("4:2:0", cv2.IMWRITE_JPEG_SAMPLING_FACTOR_420)]:
+    buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 95, cv2.IMWRITE_JPEG_SAMPLING_FACTOR, sf])[1]
+    dec = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+    err = np.abs(dec.astype(int) - img).max(axis=2)
+    print(f"{name}: {len(buf):5d} B, PSNR {cv2.PSNR(img, dec):4.1f} dB, max error {err.max():3d}")
+```
+
+Output:
+
+```text
+4:4:4: 14182 B, PSNR 46.4 dB, max error  19
+4:2:2: 11170 B, PSNR 35.0 dB, max error  96
+4:2:0:  9475 B, PSNR 31.5 dB, max error 107
+```
+
+- `IMWRITE_JPEG_SAMPLING_FACTOR` takes one of the `IMWRITE_JPEG_SAMPLING_FACTOR_*` constants (411, 420, 422, 440, 444).
+- `.max(axis=2)` takes the worst of the three channels per pixel.
+
+## OpenCV API notes
+
+**`cv2.imwrite` / `cv2.imencode` JPEG flags**: `IMWRITE_JPEG_QUALITY` (0–100, default 95), `IMWRITE_JPEG_SAMPLING_FACTOR` (default 4:2:0), `IMWRITE_JPEG_OPTIMIZE` (optimised Huffman tables: smaller file, same pixels), `IMWRITE_JPEG_PROGRESSIVE` (coarse-to-fine loading, same pixels), `IMWRITE_JPEG_RST_INTERVAL` (restart markers for error recovery), `IMWRITE_JPEG_LUMA_QUALITY` / `IMWRITE_JPEG_CHROMA_QUALITY` (separate qualities).
+
+**`cv2.dct(src[, flags])`, `cv2.idct`**: 1-D or 2-D DCT of a `float32`/`float64` array; even sizes only. Orthonormal scaling.
+
+**Reading**: `cv2.imread` decodes to BGR `uint8`; the JPEG's YCbCr, block structure and tables are gone. EXIF orientation is applied by default (4.6); use `cv2.IMREAD_IGNORE_ORIENTATION` to keep the stored orientation.
+
+**Gray input**: a single-channel image is encoded as Y only (one table, no subsampling), smaller and without colour bleeding.
+
+## Where it fails
+
+- **Sharp synthetic images** (text, drawings, masks, label images): ringing and large files compared with PNG. Use PNG.
+- **Masks and label images must never be JPEG**: values like 0/255 or labels 1, 2, 3 change at edges.
+- **Measurement**: ringing and blocking bias edge positions and gray levels; store lossless.
+- **More than 8 bits**: baseline JPEG is 8-bit per channel. 12-bit JPEG exists but is rarely supported; use PNG/TIFF 16-bit (4.4).
+- Modern formats (JPEG 2000, JPEG XL, WebP, AVIF) compress better; support in cameras and tools varies.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Saving segmentation masks or label images as JPEG**.
+- **Assuming quality 100 means no change**: 4:2:0 and rounding still alter pixels.
+- **Forgetting 4:2:0 in colour inspection**: colour edges smear over 2–3 pixels.
+- **Comparing quality numbers across programs**: the scaling and tables may differ.
+- **Cropping or shifting, then re-saving** many times: the 8 × 8 grid moves, the loss adds up (4.2).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why the DCT?
+
+For images whose neighbouring pixels are strongly correlated, the DCT packs the energy into few coefficients almost as well as the optimal (Karhunen–Loève) transform, but with a fixed, fast algorithm [2]. The DCT was introduced by Ahmed, Natarajan and Rao in 1974 [2].
+
+### The JPEG standard
+
+T.81 [1] defines baseline sequential JPEG (8-bit, Huffman), progressive and lossless modes, and arithmetic coding. The quantization tables in Annex K are examples, not requirements; the "quality" scale is a libjpeg convention, not part of the standard. Wallace's 1991 article is a readable overview [3].
+
+### Block boundaries and deblocking
+
+Because blocks are coded independently, decoders and post-processing can apply **deblocking filters** that smooth across block borders. Video codecs (4.5) build such filters into the standard.
+
+### JPEG 2000 and JPEG XL
+
+JPEG 2000 uses a wavelet transform on the whole image: no 8 × 8 blocks, so it blurs instead of blocking at low rates, and it supports lossless coding and more than 8 bits. JPEG XL (2022) offers better compression than JPEG and can losslessly recompress existing JPEG files. In the `opencv-python` 4.13.0 wheel, `.jp2` (JPEG 2000, OpenJPEG) and `.avif` can be written; JPEG XL (`.jxl`) cannot (checked with `cv2.imencode`).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which step of JPEG throws away most information?",
+      options: ["The DCT", "Quantization", "Huffman coding", "Zigzag ordering"],
+      answer: 1,
+      explanation: "Dividing by the step and rounding; the DCT and the packing are reversible.",
+    },
+    {
+      question: "The top-left DCT weight of a block represents…",
+      options: ["The sharpest edge", "The block's average brightness", "The noise level", "The colour"],
+      answer: 1,
+      explanation: "The DC weight is the flat pattern: the average (times 8, after subtracting 128).",
+    },
+    {
+      question: "What does 4:2:0 chroma subsampling do?",
+      options: ["Stores brightness at half resolution", "Stores colour at half resolution both ways", "Uses 4 bits for colour", "Removes the blue channel"],
+      answer: 1,
+      explanation: "One Cb and one Cr value per 2 × 2 pixels; Y stays full resolution.",
+    },
+    {
+      question: "Raising the quality from 50 to 90 mainly…",
+      options: ["Uses bigger blocks", "Makes the quantization steps smaller", "Switches to PNG", "Removes chroma subsampling"],
+      answer: 1,
+      explanation: "Quality scales the table; at 90 the steps are 5× smaller than at 50. Subsampling stays 4:2:0 unless you change it.",
+    },
+    {
+      question: "Why are ripples seen next to sharp edges in a low-quality JPEG?",
+      options: ["Sensor noise", "High-frequency patterns needed for the edge were rounded away", "Gamma correction", "Huffman errors"],
+      answer: 1,
+      explanation: "This is ringing: the edge is rebuilt from too few patterns.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A block's first three DCT weights are 200, −45 and 12; the steps at quality 50 are 16, 11 and 10. Quantize them and compute what the decoder gets back.
+
+<Solution>
+
+200/16 = 12.5 → 12 (NumPy rounds halves to even) → 192. −45/11 = −4.09 → −4 → −44. 12/10 = 1.2 → 1 → 10. Decoded weights **192, −44, 10**; errors 8, 1, 2.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Write the zigzag sequence (up to the last non-zero value) for the quantized edge block from Code example 1.
+
+<Solution>
+
+```python
+import numpy as np
+
+q = np.zeros((8, 8), int)
+q[0, [0, 1, 3, 5, 7]] = [-4, -40, 10, -3, 1]              # the quantized edge block (all other rows are 0)
+zz = sorted(((r, c) for r in range(8) for c in range(8)), key=lambda p: (p[0] + p[1], p[0] if (p[0] + p[1]) % 2 else p[1]))
+seq = [int(q[r, c]) for r, c in zz]
+print(zz[:10])
+last = max(i for i, v in enumerate(seq) if v != 0)
+print("zigzag:", seq[:last + 1], "+ EOB")
+```
+
+Output:
+
+```text
+[(0, 0), (0, 1), (1, 0), (2, 0), (1, 1), (0, 2), (0, 3), (1, 2), (2, 1), (3, 0)]
+zigzag: [-4, -40, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, -3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1] + EOB
+```
+
+Row 0 positions 3, 5 and 7 are visited at zigzag steps 6, 15 and 28. A block that varies vertically would put its values at steps 2, 3, 9, … instead.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colour-sorting machine for candy saves JPEG images (default settings) and later re-checks the colour of each candy from the files. Small candies are about 10 pixels across. What could go wrong, and what do you change?
+
+<Solution>
+
+With 4:2:0, colour is stored at half resolution, so colour from the background bleeds 2–3 pixels into a 10-pixel candy: a large part of it. The measured colour shifts towards the background. Measure colour on the live image, or save with `IMWRITE_JPEG_SAMPLING_FACTOR_444` and high quality, or use PNG.
+
+</Solution>
+
+## References
+
+1. ITU-T Recommendation T.81 / ISO/IEC 10918-1, *Information technology: Digital compression and coding of continuous-tone still images: Requirements and guidelines*, 1992 (Annex K: example quantization and Huffman tables).
+2. N. Ahmed, T. Natarajan and K. R. Rao, "Discrete cosine transform," *IEEE Transactions on Computers*, vol. C-23, no. 1, pp. 90–93, 1974.
+3. G. K. Wallace, "The JPEG still picture compression standard," *Communications of the ACM*, vol. 34, no. 4, pp. 30–44, 1991.
+4. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Chapter 8 (Image compression and watermarking).
+5. OpenCV 4.13.0 documentation, *Image file reading and writing* (`ImwriteFlags`, `ImwriteJPEGSamplingFactorParams`): [docs.opencv.org/4.13.0/d4/da8/group__imgcodecs.html](https://docs.opencv.org/4.13.0/d4/da8/group__imgcodecs.html); `dct`: [docs.opencv.org/4.13.0/d2/de8/group__core__array.html](https://docs.opencv.org/4.13.0/d2/de8/group__core__array.html).

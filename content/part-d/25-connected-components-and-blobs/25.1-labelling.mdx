@@ -1,0 +1,292 @@
+export const meta = {
+  number: "25.1",
+  title: "Labelling",
+  minutes: 20,
+  objectives: [
+    "Explain connected-component labelling and the difference between 4- and 8-connectivity",
+    "Follow the two-pass algorithm with union-find on a small example",
+    "Label masks with cv2.connectedComponents and read the label image",
+    "Choose between labelling and contours",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 25.1 (first chapter of Module 25).
+  New lab: LabelLab (lib/label-ops.ts; components and stats equal cv2.connectedComponentsWithStats up to label order).
+  New sample: sample-particles.png (40 particles, some touching).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 25.1 Labelling
+
+<Definition term="Connected-component labelling">giving every pixel of a binary image the number of the connected region it belongs to: 0 for the background, 1, 2, 3, … for the objects. Two white pixels belong to the same component if a path of white pixels joins them, where a step may go to the 4 direct neighbours (4-connectivity) or also to the 4 diagonal ones (8-connectivity).</Definition>
+
+Contours (24) describe objects by their outlines. Labelling describes them by their pixels: the result is an image of the same size in which each object has its own value. It is the fastest way to count objects, to compute areas and boxes for all of them at once (25.2), and to select or remove objects by number. OpenCV's `connectedComponents` labels a full-HD mask in a few milliseconds.
+
+## 1. An analogy
+
+Colouring islands on a map: start on any land, colour everything you can reach without crossing water, then pick a new colour for the next uncoloured land. Whether you may walk diagonally between two squares of land that only touch at a corner is the connectivity question.
+
+## 2. Two passes and a union-find
+
+<Flow
+  steps={[
+    { label: "Binary mask", tone: "data" },
+    { label: "Pass 1: scan row by row; copy the label of an already labelled neighbour, or start a new one", tone: "process" },
+    { label: "When two different labels meet, record that they are equal (union-find)", tone: "process" },
+    { label: "Pass 2: replace every label by its group's final number", tone: "result" },
+  ]}
+/>
+
+A worked example (1 = white):
+
+<PixelMatrix size="sm" values={[[255, 255, 0, 0, 0, 0], [255, 0, 0, 255, 255, 0], [0, 0, 255, 255, 0, 0], [0, 255, 0, 0, 0, 255], [0, 255, 255, 0, 255, 255]]} />
+
+| Connectivity | Components | Why |
+| --- | --- | --- |
+| 4 | **4** | top-left pair; the diagonal chain in the middle; bottom-left L; bottom-right L |
+| 8 | **3** | the pixel at row 3, column 1 touches row 2, column 2 diagonally, so the middle chain and the bottom-left L merge |
+
+The first pass (8-connectivity) walks row by row. At row 3, column 1 it finds a white pixel whose up-right neighbour already has label 2: it takes label 2. At row 4, column 1 it continues with 2. Had the bottom-left L been reached first from another direction, it would have received its own provisional label, and the union-find would have recorded "this label = 2" when the two met; the second pass resolves all such equivalences.
+
+The choice matters: a one-pixel-wide diagonal line is **one** component with 8-connectivity and **46** separate pixels with 4-connectivity (on a 50-pixel line). On the test mask of Module 23, 8-connectivity gives 89 components and 4-connectivity 90. For objects, 8-connectivity is the usual choice (and OpenCV's default); the background is then implicitly 4-connected, which keeps holes and objects consistent (24.2).
+
+<LabelLab caption="Every connected component in its own colour. Switch between 8- and 4-connectivity on the test mask: look at the thin diagonal line, which falls apart with 4-connectivity. Raise the minimum area to hide the specks. Click a component to see its area, box and centroid (25.2). The particle image shows touching particles merged into one label: 25.4 separates them."/>
+
+## 3. Labels or contours?
+
+| Need | Use |
+| --- | --- |
+| Count objects, areas, boxes, centroids of all objects | `connectedComponentsWithStats` (one call) |
+| Select pixels of object k (`labels == k`), remove small objects | labels |
+| Outline, perimeter, shape, hull, holes structure | contours (24) |
+| Grey-value statistics per object (mean brightness) | labels as a mask, or `cv2.mean(img, mask)` |
+
+Labelling is usually faster and gives pixel-exact areas; contours are needed for anything about the outline.
+
+## 4. Industrial example
+
+Counting and sizing particles, cells, pills, holes in perforated sheet or defects on a surface is labelling plus statistics: threshold, clean (23.2), label, discard components outside the size range, and count the rest. In defect inspection, each labelled component of a difference image (14.5) is a defect candidate with its own area, position and bounding box, which decides whether the part passes.
+
+## What you should remember from 25.1
+
+<Takeaways>
+<Takeaway n={1} title="Labels">Background 0, objects 1…n−1, one value per connected region.</Takeaway>
+<Takeaway n={2} title="Connectivity">8 joins diagonal neighbours, 4 does not; 8 is the usual choice for objects.</Takeaway>
+<Takeaway n={3} title="Algorithm">Two passes with union-find; OpenCV's block-based versions are very fast.</Takeaway>
+<Takeaway n={4} title="When">Counting and per-object statistics; contours for outlines.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A checkerboard of 4 × 4 single white and black pixels. How many white components with 4- and with 8-connectivity?
+
+<Solution>
+
+4-connectivity: **8** (no two white pixels share a side). 8-connectivity: **1** (all white pixels touch diagonally).
+
+</Solution>
+
+**Q2.** `n, labels = cv2.connectedComponents(mask)` returns n = 15. How many objects?
+
+<Solution>
+
+**14**: n includes the background label 0.
+
+</Solution>
+
+### Next: 25.2 Region statistics
+
+Area, bounding box, centroid and grey-value statistics for every component at once.
+
+## Code
+
+Two examples: the worked example, then labelling the test mask and a diagonal line.
+
+### 1. The worked example
+
+```python
+import numpy as np
+import cv2
+
+a = np.array([[1, 1, 0, 0, 0, 0],
+              [1, 0, 0, 1, 1, 0],
+              [0, 0, 1, 1, 0, 0],
+              [0, 1, 0, 0, 0, 1],
+              [0, 1, 1, 0, 1, 1]], np.uint8)
+for conn in (4, 8):
+    n, labels = cv2.connectedComponents(a, connectivity=conn)
+    print(f"{conn}-connectivity: {n - 1} components")
+    print(labels)
+```
+
+Output:
+
+```text
+4-connectivity: 4 components
+[[1 1 0 0 0 0]
+ [1 0 0 2 2 0]
+ [0 0 2 2 0 0]
+ [0 3 0 0 0 4]
+ [0 3 3 0 4 4]]
+8-connectivity: 3 components
+[[1 1 0 0 0 0]
+ [1 0 0 2 2 0]
+ [0 0 2 2 0 0]
+ [0 2 0 0 0 3]
+ [0 2 2 0 3 3]]
+```
+
+### 2. Masks and lines
+
+```python
+import numpy as np
+import cv2
+
+mask = cv2.imread("sample-morph.png", cv2.IMREAD_GRAYSCALE)
+for conn in (8, 4):
+    n, _ = cv2.connectedComponents(mask, connectivity=conn)
+    print(f"test mask, {conn}-connectivity: {n - 1} components")
+
+line = np.zeros((60, 60), np.uint8)
+cv2.line(line, (5, 5), (55, 50), 255, 1)                             # one pixel wide, diagonal steps
+for conn in (8, 4):
+    print(f"diagonal line, {conn}-connectivity: {cv2.connectedComponents(line, connectivity=conn)[0] - 1} components")
+
+n, labels = cv2.connectedComponents(mask)
+big = [k for k in range(1, n) if (labels == k).sum() > 1000]
+print("labels of components larger than 1000 px:", big)
+```
+
+Output:
+
+```text
+test mask, 8-connectivity: 89 components
+test mask, 4-connectivity: 90 components
+diagonal line, 8-connectivity: 1 components
+diagonal line, 4-connectivity: 46 components
+labels of components larger than 1000 px: [17, 20, 55]
+```
+
+- The label numbers (17, 20, 55) follow the scanning order of the algorithm, not the size or position you might expect. Selecting objects by testing `labels == k` in a loop is slow for many components; use the statistics of 25.2 instead.
+
+## OpenCV API notes
+
+**`n, labels = cv2.connectedComponents(image, connectivity=8, ltype=cv2.CV_32S)`**:
+- `image`: 8-bit single channel; non-zero = object.
+- `n`: number of labels including the background; `labels`: int32 (or uint16 with `ltype=cv2.CV_16U`) image.
+- **`cv2.connectedComponentsWithAlgorithm(image, connectivity, ltype, ccltype)`**: choose the algorithm (`cv2.CCL_DEFAULT`, `CCL_SPAGHETTI`, `CCL_BBDT`, `CCL_SAUF`, `CCL_BOLK`, `CCL_GRANA`, `CCL_WU`); results are the same up to label order.
+- **`cv2.connectedComponentsWithStats`** (25.2) also returns areas, boxes and centroids.
+
+**Display**: map labels to colours (`labels * 37 % 256` through `cv2.applyColorMap`) for a quick look.
+
+## Where it fails
+
+- **Touching objects** share one label; separate them first (23.5, 25.4, 27.4).
+- **Broken objects** (a thin part cut by a threshold) get several labels; close the mask (23.2) or merge labels by distance.
+- **Noise** adds many tiny components; filter by area.
+- **Huge images with many components**: labels need 32 bits once there are more than 65 535 components.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Counting n instead of n − 1**.
+- **Labelling a grey image**: every non-zero pixel is foreground; threshold first.
+- **4-connectivity on thin diagonal structures**: they fall apart.
+- **Assuming labels follow a particular spatial order**: they depend on the algorithm.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Algorithms
+
+Rosenfeld and Pfaltz (1966) [1] introduced two-pass labelling with an equivalence table. Wu, Otoo and Suzuki (2009) [2] made the union-find efficient (SAUF); Grana, Borghesani and Cucchiara (2010) [3] scan 2 × 2 blocks with a decision tree (BBDT), and Bolelli et al. (2019) generated optimal decision forests (Spaghetti, OpenCV's default for 8-connectivity). These process each pixel once and are limited mainly by memory bandwidth.
+
+### Connectivity paradox
+
+With the same connectivity for objects and background, a diagonal pair of pixels would both connect and separate the regions around it. Using 8 for the foreground and 4 for the background (or the reverse) avoids the paradox: a closed 8-connected curve separates its inside from its outside in the 4-connected sense.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "With 8-connectivity, two white pixels that touch only at a corner are…",
+      options: ["Separate components", "In the same component", "Background", "Undefined"],
+      answer: 1,
+      explanation: "Diagonal neighbours count.",
+    },
+    {
+      question: "cv2.connectedComponents returns n = 1. What does the mask contain?",
+      options: ["One object", "No objects (only background)", "An error", "One pixel"],
+      answer: 1,
+      explanation: "n includes the background.",
+    },
+    {
+      question: "Why does a one-pixel diagonal line fall apart with 4-connectivity?",
+      options: ["It is too dark", "Its pixels touch only at corners", "Labels overflow", "It is too long"],
+      answer: 1,
+      explanation: "Diagonal steps are not 4-connections.",
+    },
+    {
+      question: "Which tool gives areas and boxes of all objects in one call?",
+      options: ["findContours", "connectedComponentsWithStats", "Canny", "HoughCircles"],
+      answer: 1,
+      explanation: "25.2.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Label with 8-connectivity: rows "1 0 1", "0 1 0", "1 0 1". Then with 4-connectivity.
+
+<Solution>
+
+8-connectivity: the centre touches all four corners diagonally: **1** component. 4-connectivity: no two white pixels share a side: **5** components.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Remove all components smaller than 20 pixels from the test mask using labels and a lookup table (no Python loop over the components), and report how many components remain.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+n, labels = cv2.connectedComponents(mask)
+areas = np.bincount(labels.ravel(), minlength=n)                    # pixels per label
+keep = areas >= 20
+keep[0] = False                                                      # background
+clean = (keep[labels] * 255).astype(np.uint8)                        # lookup: label -> keep?
+print("components before:", n - 1, "| after:", cv2.connectedComponents(clean)[0] - 1)
+```
+
+Output:
+
+```text
+components before: 89 | after: 6
+```
+
+`np.bincount` gives all areas in one pass and `keep[labels]` applies the decision to every pixel at once. The 6 survivors are the five large shapes and the thin line; this is the same result an area filter in 25.2 gives, without any morphology changing the shapes.
+
+</Solution>
+
+## References
+
+1. A. Rosenfeld, J. L. Pfaltz, "Sequential operations in digital picture processing", *J. ACM* 13(4), 471–494, 1966.
+2. K. Wu, E. Otoo, K. Suzuki, "Optimizing two-pass connected-component labeling algorithms", *Pattern Analysis and Applications* 12(2), 117–135, 2009.
+3. C. Grana, D. Borghesani, R. Cucchiara, "Optimized block-based connected components labeling with decision trees", *IEEE Trans. Image Processing* 19(6), 1596–1609, 2010.
+4. F. Bolelli, S. Allegretti, L. Baraldi, C. Grana, "Spaghetti labeling: directed acyclic graphs for block-based connected components labeling", *IEEE Trans. Image Processing* 29, 1999–2012, 2019.
+5. OpenCV 4.13.0 documentation: `connectedComponents`, `connectedComponentsWithStats`, `connectedComponentsWithAlgorithm`. https://docs.opencv.org/4.13.0/

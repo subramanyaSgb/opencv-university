@@ -1,0 +1,279 @@
+export const meta = {
+  number: "24.5",
+  title: "Convex hull and defects",
+  minutes: 20,
+  objectives: [
+    "Compute the convex hull of a contour and the solidity (area / hull area)",
+    "Find convexity defects and read their start, end, farthest point and depth",
+    "Filter meaningful defects from pixel-staircase noise",
+    "Use hulls and defects to detect dents, notches, missing material and counted protrusions",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 24.5 (Module 24).
+  Lab: ContourLab (hull and defects layers).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 24.5 Convex hull and defects
+
+<Definition term="Convex hull and convexity defects">the convex hull is the smallest convex polygon that contains a shape: a rubber band stretched around it. Wherever the shape curves inwards, there is a gap between the band and the outline: a convexity defect, described by where it starts and ends on the hull, its deepest point, and its depth.</Definition>
+
+Many shape errors are dents: a notch punched in the wrong place, a chipped edge, a missing tooth, a bent tab. A convex part has no defects at all, so any defect deeper than the pixel noise is suspicious. Defects also count protrusions: the gaps between the fingers of a hand or the points of a star. The tools are `cv2.convexHull` and `cv2.convexityDefects`.
+
+## 1. An analogy
+
+Wrap a rubber band around a shape cut out of cardboard. On a disc or a rectangle the band touches the outline everywhere. On a star it jumps from point to point, leaving a triangular gap between every two points. The size of each gap, measured from the band to the deepest point of the outline, is the defect's depth.
+
+## 2. Hull, solidity, defects
+
+<Flow
+  steps={[
+    { label: "Contour", tone: "data" },
+    { label: "cv2.convexHull: hull points (or indices into the contour)", tone: "process" },
+    { label: "Solidity = contour area / hull area (1 for convex shapes)", tone: "process" },
+    { label: "cv2.convexityDefects: (start, end, farthest point, depth × 256) per gap", tone: "result" },
+  ]}
+/>
+
+The L-bracket is a 60 × 75 pixel L: its hull is a five-sided polygon (pentagon) that closes the inner corner with a diagonal. There is one defect: it starts at (135, 95) on the bottom of the vertical leg, ends at (175, 40) on the end of the horizontal leg, and its farthest point is the inner corner (135, 41), **31.8 pixels** from the hull edge. The bracket's solidity is 0.68: a third of its hull is empty.
+
+On all six parts:
+
+| Part | Hull points | Solidity | Defects found | Deepest defects (px) |
+| --- | --- | --- | --- | --- |
+| Plate | 4 | 1.000 | 0 | — |
+| Washer (outer border) | 36 | 0.986 | 32 | all ≤ 0.9 |
+| Oval | 35 | 0.985 | 29 | all ≤ 0.8 |
+| Rotated bar | 12 | 0.970 | 8 | all ≤ 0.9 |
+| L-bracket | 5 | 0.677 | 1 | 31.8 |
+| Star | 6 | 0.516 | 6 | 14.0, 13.4, 13.1, 13.0, 12.5, 12.3 |
+
+`convexityDefects` reports every gap, including the sub-pixel dents of digitised curves and tilted edges (the washer, oval and bar have dozens, all under one pixel). **Always filter by depth**: with a 2-pixel threshold, only the L-bracket's inner corner and the star's six valleys remain. The six deep defects of the star count its points.
+
+<ContourLab initialMode="external" layers={["hull", "defects"]} initialSelected={1} caption="Convex hulls (green) and the deepest point of every defect deeper than 1 pixel (red). The star has six defects, one between every two points; the L-bracket one; the plate none. The property table shows the solidity: the fraction of the hull that the shape fills."/>
+
+## 3. Practical rules
+
+- **Hull points vs indices**: `convexHull(c)` returns points for drawing and area; `convexHull(c, returnPoints=False)` returns indices, which `convexityDefects` needs.
+- **Depth units**: the fourth value of each defect is the depth × 256 (fixed point); divide by 256.
+- **Thresholds in pixels or relative**: a dent of 2 pixels matters on a 50-pixel part but not on a 1 000-pixel one; relative depth (depth / hull diameter) is often better.
+- **Solidity** is a one-number convexity check: below about 0.95 for parts that should be convex means missing material or a deformation.
+- **Hull for robust size**: the hull's perimeter and area ignore inward noise on the outline, which makes them more stable than the contour's.
+
+## 4. Industrial example
+
+Stamped and moulded parts that should be convex (washers, discs, rectangular plates, bottle caps) are checked for edge defects by solidity and by the deepest convexity defect: a chipped rim or a short shot in moulding leaves a dent in the outline. For parts with intended concavities (brackets, gears, combs), the expected number and depth of defects is part of the specification: a gear with a broken tooth has one defect too few between neighbouring teeth, or one that is too wide.
+
+## What you should remember from 24.5
+
+<Takeaways>
+<Takeaway n={1} title="Hull">Rubber band around the shape: cv2.convexHull.</Takeaway>
+<Takeaway n={2} title="Solidity">Area / hull area: 1 for convex shapes, lower for dents and concavities.</Takeaway>
+<Takeaway n={3} title="Defects">(start, end, farthest, depth·256); filter by depth to ignore pixel staircases.</Takeaway>
+<Takeaway n={4} title="Uses">Dents, notches, chipped edges, counting points and fingers.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A shape has area 3 000 px² and hull area 3 750 px². Solidity?
+
+<Solution>
+
+3 000 / 3 750 = **0.80**: a fifth of the hull is empty, a clearly non-convex shape.
+
+</Solution>
+
+**Q2.** A defect row is [12, 48, 30, 2560]. What is its depth in pixels, and what are 12, 48 and 30?
+
+<Solution>
+
+Depth 2 560 / 256 = **10 px**. 12 and 48 are the contour indices where the defect starts and ends (on the hull), 30 is the index of the farthest contour point.
+
+</Solution>
+
+### Next: 24.6 Moments
+
+Area, centroid, orientation and invariant shape descriptors from one set of sums.
+
+## Code
+
+Two examples: hulls and solidity, then defects with a depth filter.
+
+### 1. Hulls and solidity
+
+```python
+import numpy as np
+import cv2
+
+parts = cv2.imread("sample-parts.png", cv2.IMREAD_GRAYSCALE)
+contours, _ = cv2.findContours(parts, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+names = ["oval", "star", "bar", "L-bracket", "washer", "plate"]
+for name, c in zip(names, contours):
+    hull = cv2.convexHull(c)                                          # hull points
+    solidity = cv2.contourArea(c) / cv2.contourArea(hull)
+    print(f"{name:9s} hull points {len(hull):2d} | solidity {solidity:.3f}")
+```
+
+Output:
+
+```text
+oval      hull points 35 | solidity 0.985
+star      hull points  6 | solidity 0.516
+bar       hull points 12 | solidity 0.970
+L-bracket hull points  5 | solidity 0.677
+washer    hull points 36 | solidity 0.986
+plate     hull points  4 | solidity 1.000
+```
+
+### 2. Convexity defects
+
+```python
+import numpy as np
+import cv2
+
+def defects(c, min_depth=2.0):
+    idx = cv2.convexHull(c, returnPoints=False)                      # indices, required by convexityDefects
+    d = cv2.convexityDefects(c, idx)
+    if d is None:
+        return []
+    return [(tuple(c[s][0]), tuple(c[e][0]), tuple(c[f][0]), depth / 256) for s, e, f, depth in d[:, 0] if depth / 256 >= min_depth]
+
+for name, c in zip(names, contours):
+    found = defects(c)
+    print(f"{name:9s} {len(found)} defect(s) deeper than 2 px" + (f": depths {[round(float(x[3]), 1) for x in found]}" if found else ""))
+start, end, far, depth = defects(contours[3])[0]
+print("L-bracket defect: start", [int(v) for v in start], "end", [int(v) for v in end], "farthest", [int(v) for v in far], f"depth {depth:.1f}")
+```
+
+Output:
+
+```text
+oval      0 defect(s) deeper than 2 px
+star      6 defect(s) deeper than 2 px: depths [12.3, 12.5, 14.0, 13.4, 13.1, 13.0]
+bar       0 defect(s) deeper than 2 px
+L-bracket 1 defect(s) deeper than 2 px: depths [31.8]
+washer    0 defect(s) deeper than 2 px
+plate     0 defect(s) deeper than 2 px
+L-bracket defect: start [135, 95] end [175, 40] farthest [135, 41] depth 31.8
+```
+
+## OpenCV API notes
+
+- **`cv2.convexHull(points, clockwise=False, returnPoints=True)`**: Sklansky's algorithm, O(N log N); `returnPoints=False` returns indices into `points`.
+- **`cv2.convexityDefects(contour, convexhull_indices)`** → (K, 1, 4) int32 array `[start, end, farthest, fixpt_depth]` or `None`; depth = fixpt_depth / 256. Requires indices, a contour with at least 4 points, and a hull that is monotonic (use the hull from the same contour).
+- **`cv2.isContourConvex(contour)`**: True only for exactly convex polygons; digitised curves are rarely convex at pixel level, so apply it after `approxPolyDP`.
+
+## Where it fails
+
+- **Self-intersecting or noisy contours**: convexityDefects can raise "The convex hull indices are not monotonous"; simplify the contour or use `CHAIN_APPROX_NONE` with a cleaned mask.
+- **Shallow, wide dents**: small depth even if large in area; also check the defect's area (the polygon between hull edge and contour).
+- **Holes**: the hull of the outer contour ignores holes; a missing hole does not change solidity.
+- **Defects on both sides of thin parts**: a thin bent wire has defects that describe its bend, not damage.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Passing hull points instead of indices** to `convexityDefects`.
+- **Forgetting /256** on the depth.
+- **No depth filter**: dozens of sub-pixel "defects" on every curved part.
+- **Using isContourConvex on raw digitised contours** and concluding nothing is convex.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Hull algorithms
+
+Graham's scan (1972) and Andrew's monotone chain sort the points and keep only left turns, O(N log N); for simple polygons such as contours, Melkman's algorithm builds the hull in linear time. OpenCV uses Sklansky's algorithm [1], which is linear for simple polygons when the points are ordered.
+
+### Concavity trees
+
+Recursively computing hulls of the defect regions gives a concavity tree: the shape, its concavities, the concavities of those concavities, and so on. It is a classic hierarchical shape descriptor for recognition and for describing complex outlines such as leaves or gears [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The solidity of a perfectly convex shape is…",
+      options: ["0", "0.5", "1", "Undefined"],
+      answer: 2,
+      explanation: "Its area equals its hull's area.",
+    },
+    {
+      question: "What does convexityDefects need as its second argument?",
+      options: ["Hull points", "Hull indices (returnPoints=False)", "The contour area", "The image"],
+      answer: 1,
+      explanation: "Indices into the contour.",
+    },
+    {
+      question: "A disc's contour shows 30 defects of depth under 1 px. They are…",
+      options: ["Real dents", "Pixel staircase effects to filter out", "Holes", "Errors in the hull"],
+      answer: 1,
+      explanation: "Filter defects by a minimum depth.",
+    },
+    {
+      question: "How many deep convexity defects does a six-pointed star have?",
+      options: ["1", "3", "6", "12"],
+      answer: 2,
+      explanation: "One valley between every two neighbouring points.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A square of side 10 with a 2 × 2 notch cut from the middle of one side. What is its solidity (contour area / hull area, using these idealised areas), and how deep is the defect?
+
+<Solution>
+
+Area 100 − 4 = 96; hull = the full square, 100. Solidity **0.96**. The defect's depth is the notch depth, **2**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Count "fingers": draw a hand-like shape (a palm disc of radius 30 plus five rectangles of 12 × 40 pointing outwards at −60°, −30°, 0°, 30° and 60° from vertical), and count the deep defects. How many fingers does that imply?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+hand = np.zeros((200, 200), np.uint8)
+cv2.circle(hand, (100, 120), 30, 255, -1)
+for a in (-60, -30, 0, 30, 60):
+    box = cv2.boxPoints(((100 + 50 * np.sin(np.radians(a)), 120 - 50 * np.cos(np.radians(a))), (12, 40), a)).astype(np.int32)
+    cv2.fillPoly(hand, [box], 255)
+c = cv2.findContours(hand, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0][0]
+print("all defects deeper than 10 px:", sorted(round(float(d[3]), 1) for d in defects(c, min_depth=10)))
+deep = defects(c, min_depth=20)
+print("deep defects:", len(deep), "-> fingers:", len(deep) + 1)
+```
+
+Output:
+
+```text
+all defects deeper than 10 px: [14.2, 14.6, 39.6, 40.1, 40.3, 40.3]
+deep defects: 4 -> fingers: 5
+```
+
+Four deep valleys (about 40 px) lie between the five fingers. Two more defects of about 14 px sit between the outer fingers and the palm; a 20-pixel threshold separates the two groups. Choosing that threshold from the shape, not from one example, is the hard part of real finger counting. The "defects + 1" rule is the classic convexity-defect finger counter.
+
+</Solution>
+
+## References
+
+1. J. Sklansky, "Finding the convex hull of a simple polygon", *Pattern Recognition Letters* 1(2), 79–83, 1982.
+2. J. Sklansky, "Measuring concavity on a rectangular mosaic", *IEEE Trans. Computers* C-21(12), 1355–1364, 1972.
+3. OpenCV 4.13.0 documentation: `convexHull`, `convexityDefects`, `isContourConvex`. https://docs.opencv.org/4.13.0/

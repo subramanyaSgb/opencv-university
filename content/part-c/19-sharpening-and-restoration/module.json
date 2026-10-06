@@ -1,0 +1,13 @@
+{
+  "number": 19,
+  "title": "Sharpening and restoration",
+  "summary": "Making blurred images look sharper and, when the blur is known, undoing it: unsharp masking, Laplacian sharpening, point spread functions, Wiener filtering, deconvolution and super-resolution.",
+  "chapters": [
+    { "number": "19.1", "slug": "19.1-unsharp-mask", "title": "Unsharp mask" },
+    { "number": "19.2", "slug": "19.2-laplacian-sharpening", "title": "Laplacian sharpening" },
+    { "number": "19.3", "slug": "19.3-blur-models-psf", "title": "Blur models (PSF)" },
+    { "number": "19.4", "slug": "19.4-wiener-filter", "title": "Wiener filter" },
+    { "number": "19.5", "slug": "19.5-deconvolution", "title": "Deconvolution" },
+    { "number": "19.6", "slug": "19.6-super-resolution", "title": "Super-resolution" }
+  ]
+}

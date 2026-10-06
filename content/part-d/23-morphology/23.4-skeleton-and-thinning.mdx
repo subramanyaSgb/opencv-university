@@ -1,0 +1,284 @@
+export const meta = {
+  number: "23.4",
+  title: "Skeleton and thinning",
+  minutes: 20,
+  objectives: [
+    "Explain the skeleton (medial axis) of a shape and what it is used for",
+    "Compute the morphological (Lantuéjoul) skeleton with erosions and openings",
+    "Thin shapes to connected one-pixel lines with Zhang–Suen (cv2.ximgproc.thinning)",
+    "Measure lengths and find end points on a skeleton, and know its sensitivity to noise",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 23.4 (Module 23).
+  Lab: MorphLab (mode skeleton).
+  Reference tail: all examples are deterministic and compared automatically; the thinning block needs opencv-contrib.
+*/}
+
+# 23.4 Skeleton and thinning
+
+<Definition term="Skeleton (medial axis)">a one-pixel-wide line through the middle of a shape: the set of points that are equally far from two or more points of the outline. It keeps the shape's topology (branches, loops) and, together with the distance to the outline, describes the whole shape. Thinning is the practical way to compute a connected skeleton on a pixel grid.</Definition>
+
+Many objects are long and thin: cracks, cables, roads, blood vessels, handwritten strokes, fibres. Their width matters less than their length, their branching and their end points. The skeleton reduces them to exactly that. Blum introduced the medial axis in 1967 to describe biological shapes [1]; Zhang and Suen's 1984 thinning algorithm [2] is still the most used way to compute it on binary images.
+
+## 1. An analogy
+
+Set fire to the edge of a dry grass field, all around at the same moment. The fire burns inwards at the same speed everywhere. The places where two fire fronts meet and go out form the skeleton: the middle line of a long strip, the centre of a disc, the diagonals of a rectangle's corners. (This is Blum's "grassfire" picture.)
+
+## 2. Two ways to compute it
+
+<Flow
+  steps={[
+    { label: "Binary shape (clean it first: 23.2)", tone: "data" },
+    { label: "Morphological skeleton: union of erode^k(X) − open(erode^k(X)) for k = 0, 1, 2, …", tone: "process" },
+    { label: "Thinning: peel boundary pixels in passes, never breaking connectivity or removing end points", tone: "process" },
+    { label: "One-pixel-wide centre lines → length, end points, branches", tone: "result" },
+  ]}
+/>
+
+**Morphological skeleton (Lantuéjoul)**: erode the shape step by step; at each step, the pixels that an opening would remove are "ridge" pixels (they are centres of the largest discs that still fit). Collecting them over all steps gives the skeleton, and the step number of each pixel is its distance to the outline, which allows exact reconstruction. Its drawback on a grid: the result is often **not connected**.
+
+**Thinning (Zhang–Suen)**: in each pass, delete a boundary pixel only if (a) it has 2–6 white neighbours (so it is not an end point or an interior pixel), (b) exactly one 0 → 1 transition when walking around its 8 neighbours (so deleting it does not split anything), and (c) one of two directional conditions that alternate between sub-passes (so the shape is peeled evenly from all sides). Repeat until nothing changes. The result is connected and one pixel wide.
+
+On the cleaned test mask (6 objects):
+
+| Method | Skeleton pixels | Connected pieces | End points |
+| --- | --- | --- | --- |
+| Morphological skeleton | 997 | **128** | 133 |
+| Zhang–Suen thinning | 860 | **6** | 11 |
+| Guo–Hall thinning | 708 | 6 | 11 |
+
+The morphological skeleton breaks every object into many pieces (a filled ellipse alone gives 36). Thinning keeps one connected skeleton per object, with the end points where the shapes really end.
+
+<MorphLab mode="skeleton" caption="The cleaned test mask, its morphological skeleton and its Zhang–Suen thinning. Zoom in on the ellipse and the discs: the morphological skeleton is a scattered set of ridge points; the thinning is a connected line through the middle with short branches towards corners. The rectangle's notch and holes create extra loops and branches: skeletons are sensitive to every bump of the outline."/>
+
+## 3. Using a skeleton
+
+- **Length**: count skeleton pixels, weighting diagonal steps by √2. A 7-pixel-thick line drawn from x = 10 to x = 190 (181 pixels long) thins to 179 pixels.
+- **End points** (exactly one neighbour) and **branch points** (three or more neighbours, after removing staircase duplicates): count the arms of a part, find where a crack ends.
+- **Width**: the distance transform (23.5) sampled along the skeleton gives the local half-width.
+- **Pruning**: short spurs caused by small bumps of the outline are removed by repeatedly deleting end points for a few iterations and regrowing the main branches.
+
+Skeletons react strongly to noise: one notch in the outline adds a branch. Clean and smooth the mask first (opening and closing, 23.2) and prune afterwards.
+
+## 4. Industrial example
+
+Crack inspection on concrete, ceramics and castings segments the crack and then thins it: the skeleton length is the crack length reported to the operator, the number of end points tells whether it reaches an edge, and the distance transform along the skeleton gives the maximum crack width, which decides the severity class. The same pipeline measures fibre length in paper and composites, root length in plant phenotyping, and the routing of wires and hoses in assembly checks.
+
+## What you should remember from 23.4
+
+<Takeaways>
+<Takeaway n={1} title="Skeleton">The centre line of a shape (Blum's medial axis): topology, length, branches.</Takeaway>
+<Takeaway n={2} title="Morphological">Union of erosion − opening residues: exact but disconnected on grids.</Takeaway>
+<Takeaway n={3} title="Thinning">Zhang–Suen peels boundary pixels: connected, one pixel wide.</Takeaway>
+<Takeaway n={4} title="Care">Very sensitive to outline noise: clean first, prune spurs after.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** What is the skeleton of a filled disc? Of a filled square?
+
+<Solution>
+
+Disc: its centre point (all outline points are equally far from it). Square: its two diagonals (each point on a diagonal is equally far from two sides). On pixel grids, thinning gives approximately these.
+
+</Solution>
+
+**Q2.** A skeleton pixel has exactly one white neighbour. What is it?
+
+<Solution>
+
+An **end point** of a branch: the end of a crack, a stroke or a spur.
+
+</Solution>
+
+### Next: 23.5 Distance transform
+
+For every pixel of a shape, the distance to the nearest background pixel: widths, centres and separation of touching objects.
+
+## Code
+
+Two examples: the morphological skeleton with OpenCV, then Zhang–Suen thinning from contrib.
+
+### 1. Morphological skeleton
+
+```python
+import numpy as np
+import cv2
+
+mask = cv2.imread("sample-morph.png", cv2.IMREAD_GRAYSCALE)
+clean = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))   # remove specks first
+
+def morph_skeleton(img):
+    cross = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+    skel, cur = np.zeros_like(img), img.copy()
+    while cur.any():
+        skel |= cv2.subtract(cur, cv2.morphologyEx(cur, cv2.MORPH_OPEN, cross))   # ridge pixels at this level
+        cur = cv2.erode(cur, cross)
+    return skel
+
+def end_points(sk):
+    b = (sk > 0).astype(np.uint8)
+    neighbours = cv2.filter2D(b, -1, np.ones((3, 3), np.float32), borderType=cv2.BORDER_CONSTANT) - b
+    return int(((neighbours == 1) & (b == 1)).sum())
+
+pieces = lambda x: cv2.connectedComponents(x, connectivity=8)[0] - 1
+sk = morph_skeleton(clean)
+print("objects:", pieces(clean), "| skeleton pixels:", int((sk > 0).sum()), "| pieces:", pieces(sk), "| end points:", end_points(sk))
+```
+
+Output:
+
+```text
+objects: 6 | skeleton pixels: 997 | pieces: 128 | end points: 133
+```
+
+### 2. Thinning (opencv-contrib)
+
+```python
+# Needs opencv-contrib (cv2.ximgproc)
+import numpy as np
+import cv2
+
+for kind, name in [(cv2.ximgproc.THINNING_ZHANGSUEN, "Zhang-Suen"), (cv2.ximgproc.THINNING_GUOHALL, "Guo-Hall")]:
+    thin = cv2.ximgproc.thinning(clean, thinningType=kind)
+    print(f"{name:10s} pixels {int((thin > 0).sum())} | pieces {pieces(thin)} | end points {end_points(thin)}")
+
+line = np.zeros((100, 200), np.uint8)
+cv2.line(line, (10, 50), (190, 50), 255, 7)                                  # 181 px long, 7 px thick
+print("thinned line length (pixels):", int((cv2.ximgproc.thinning(line) > 0).sum()))
+```
+
+Output:
+
+```text
+Zhang-Suen pixels 860 | pieces 6 | end points 11
+Guo-Hall   pixels 708 | pieces 6 | end points 11
+thinned line length (pixels): 179
+```
+
+- Thinning shortens lines slightly at their ends (here by 2 pixels): the end of a thick line is rounded and peeled.
+- Without contrib, the same algorithm is about 25 lines of NumPy (the MorphLab uses a TypeScript version that matches `cv2.ximgproc.thinning`).
+
+## OpenCV API notes
+
+**`cv2.ximgproc.thinning(src, thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)`** (opencv-contrib): 8-bit binary input (0/255), output 0/255 one-pixel-wide skeleton; `THINNING_GUOHALL` gives slightly thinner results with fewer staircase pixels.
+
+**Morphological skeleton**: build from `cv2.erode`, `cv2.morphologyEx(MORPH_OPEN)`, `cv2.subtract` and `|`, as in example 1.
+
+**Neighbour counts**: `cv2.filter2D(binary, -1, np.ones((3, 3)))` minus the pixel itself; end points have 1, line pixels 2, branch points 3 or more.
+
+**Medial axis with widths**: skeleton + `cv2.distanceTransform` (23.5); scikit-image's `medial_axis` returns both.
+
+## Where it fails
+
+- **Noisy outlines**: every bump creates a branch; prune or smooth.
+- **Holes**: create loops in the skeleton; fill small holes first (23.2).
+- **Thick, round shapes**: the skeleton is short and says little (a disc gives a point).
+- **Grid artefacts**: diagonal lines become staircases; measure lengths with diagonal weighting or by fitting.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Skeletonising an uncleaned mask**: hundreds of spurs.
+- **Counting pixels as length** on diagonal lines without the √2 correction.
+- **Using the morphological skeleton when connectivity matters**.
+- **Expecting a unique skeleton**: different thinning algorithms give slightly different lines and branch positions.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Medial axis transform
+
+Blum's medial axis transform (MAT) [1] stores, for each skeleton point, the radius of the largest disc centred there that fits in the shape; the union of these discs is exactly the shape. The morphological skeleton is its discrete form with the radius given by the erosion step.
+
+### Thinning algorithms
+
+Zhang and Suen [2] proposed the two-sub-iteration parallel algorithm; Guo and Hall (1989) [3] refined the deletion conditions for thinner, more symmetric results. Lam, Lee and Suen (1992) surveyed dozens of variants. Their common requirements: one pixel wide, connected, preserving the topology (number of objects and holes), and centred.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The skeleton of a long, uniform strip is…",
+      options: ["Its outline", "Its centre line", "A point", "Empty"],
+      answer: 1,
+      explanation: "Equidistant from both long sides.",
+    },
+    {
+      question: "Why use Zhang–Suen thinning instead of the morphological skeleton?",
+      options: ["It is exact", "It keeps the skeleton connected", "It is invertible", "It needs no binary image"],
+      answer: 1,
+      explanation: "The morphological skeleton breaks into many pieces on pixel grids.",
+    },
+    {
+      question: "A small bump on the outline of a shape causes…",
+      options: ["Nothing", "An extra branch (spur) in the skeleton", "A hole", "A shorter skeleton"],
+      answer: 1,
+      explanation: "Skeletons are sensitive to outline noise.",
+    },
+    {
+      question: "How do you find the end points of a skeleton?",
+      options: ["Pixels with exactly one white neighbour", "Pixels with three neighbours", "The brightest pixels", "With Canny"],
+      answer: 0,
+      explanation: "Count 8-neighbours with a 3 × 3 sum.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A white "plus" shape: a 9 × 3 horizontal bar and a 3 × 9 vertical bar crossing at the centre. Sketch its skeleton. How many end points and branch points?
+
+<Solution>
+
+A thin plus: horizontal and vertical centre lines crossing at the centre. **4 end points** (the ends of the arms) and **1 branch point** (the centre, with 4 neighbours on the skeleton).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Measure the length of a diagonal line (from (10, 10) to (150, 150), thickness 5) from its morphological skeleton: count pixels, and compute a length with √2 for diagonal steps. Compare with the true length.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+diag = np.zeros((160, 160), np.uint8)
+cv2.line(diag, (10, 10), (150, 150), 255, 5)
+sk = morph_skeleton(diag)
+ys, xs = np.nonzero(sk)
+order = np.argsort(xs + ys)                                         # along the line
+steps = np.hypot(np.diff(xs[order]), np.diff(ys[order]))
+print(f"skeleton pixels: {len(xs)} | length with sqrt(2) steps: {steps[steps < 2].sum():.1f} | true: {np.hypot(140, 140):.1f}")
+```
+
+Output:
+
+```text
+skeleton pixels: 143 | length with sqrt(2) steps: 198.0 | true: 198.0
+```
+
+Counting pixels gives 143, 28 % below the true length of 198: on a diagonal, each pixel step covers √2 pixels of length. Weighting the steps correctly gives 198.0. For curved skeletons, sum the step lengths along the path in the same way (or fit a polyline).
+
+</Solution>
+
+## References
+
+1. H. Blum, "A transformation for extracting new descriptors of shape", in *Models for the Perception of Speech and Visual Form*, MIT Press, 362–380, 1967.
+2. T. Y. Zhang, C. Y. Suen, "A fast parallel algorithm for thinning digital patterns", *Communications of the ACM* 27(3), 236–239, 1984.
+3. Z. Guo, R. W. Hall, "Parallel thinning with two-subiteration algorithms", *Communications of the ACM* 32(3), 359–373, 1989.
+4. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 9 (skeletons, thinning).
+5. OpenCV 4.13.0 documentation: `erode`, `morphologyEx`, `ximgproc::thinning` (contrib). https://docs.opencv.org/4.13.0/

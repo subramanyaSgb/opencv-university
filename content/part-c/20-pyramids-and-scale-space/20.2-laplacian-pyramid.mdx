@@ -1,0 +1,313 @@
+export const meta = {
+  number: "20.2",
+  title: "Laplacian pyramid",
+  minutes: 20,
+  objectives: [
+    "Build a Laplacian pyramid: each level is a Gaussian level minus the enlarged next level",
+    "Rebuild the image exactly by collapsing the pyramid",
+    "Store the levels in a signed or float type, and explain what goes wrong in uint8",
+    "Use band levels for compression, detail enhancement and blending",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 20.2 (Module 20).
+  Lab: PyramidLab (mode laplacian).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 20.2 Laplacian pyramid
+
+<Definition term="Laplacian pyramid">a stack of "detail" images. Each level holds what a Gaussian pyramid level has that the next, smaller level cannot represent: the difference between the level and an enlarged copy of the next one. Together with the smallest Gaussian level, the details rebuild the original image exactly.</Definition>
+
+The Gaussian pyramid (20.1) throws detail away at every step. The Laplacian pyramid keeps it, sorted by size: the first level holds the finest detail (edges, texture, noise), the next level detail twice as coarse, and so on. Burt and Adelson introduced it for image compression [1]; today it is used most for blending (20.3), detail enhancement and as the model for multi-scale processing in general. The name comes from the fact that each level looks like the image filtered with a Laplacian (19.2) of a matching size.
+
+## 1. An analogy
+
+Describing a city from the air in stages: first the shape of the whole city, then what you see when you zoom in by 2 that was not visible before (districts), then the next zoom (streets), then buildings. Each stage only adds what is new at its scale. Read all stages in order and you have the full city.
+
+## 2. Difference of neighbouring levels
+
+<Flow
+  steps={[
+    { label: "Gaussian levels G0, G1, G2, …", tone: "data" },
+    { label: "Enlarge the next level: up(G1) with pyrUp, to the size of G0", tone: "process" },
+    { label: "Detail: L0 = G0 − up(G1); L1 = G1 − up(G2); …", tone: "process" },
+    { label: "Keep the last Gaussian level as the residual; collapse: G0 = L0 + up(L1 + up(…))", tone: "result" },
+  ]}
+/>
+
+A worked example on the row from 20.1 (computed in float):
+
+| | Values |
+| --- | --- |
+| G0 (row) | 10, 20, 30, 40, 50, 60, 70, 80 |
+| G1 = pyrDown(G0) | 17.5, 30, 50, 68.75 |
+| up(G1) = pyrUp(G1) | 20.6, 23.8, 30.9, 40, 49.8, 59.4, 66.4, 68.8 |
+| **L0 = G0 − up(G1)** | **−10.6, −3.8, −0.9, 0, 0.2, 0.6, 3.6, 11.3** |
+
+In the middle of the ramp L0 is about 0: the coarse level already describes a straight ramp. At the two ends, where the border reflection bent the ramp, L0 stores the correction. Adding L0 back to up(G1) returns 10, 20, …, 80 exactly, by construction: whatever pyrUp does, the difference makes up for it.
+
+## 3. What the levels contain
+
+Laplacian pyramid of the 320 × 200 scene, 5 levels (computed in float32):
+
+| Level | Size | Mean | Standard deviation |
+| --- | --- | --- | --- |
+| L0 | 320 × 200 | 0.0 | 12.9 |
+| L1 | 160 × 100 | 0.0 | 10.3 |
+| L2 | 80 × 50 | −0.1 | 11.5 |
+| L3 | 40 × 25 | −0.1 | 14.9 |
+| G4 (residual) | 20 × 13 | 117.1 | 58.4 |
+
+The band levels have a mean of zero (they are differences) and are concentrated around 0: a quarter of all L0 values lie within ±2. Only edges and texture give large values. That is why the pyramid compresses well: quantising the band levels to steps of 4 grey levels turns 35 % of their values into exact zeros and still rebuilds the image at 44.5 dB PSNR.
+
+<PyramidLab mode="laplacian" initialSource="scene" caption="Laplacian pyramid of the image: four band levels (grey = 0, brighter = positive detail, darker = negative; use the gain to see weak detail) and the small residual. The line below confirms that collapsing the pyramid rebuilds the image to within floating-point rounding. Compare the zone plate: each ring frequency lives in one level."/>
+
+## 4. The data type matters
+
+The levels are signed. In uint8, the result depends on which arithmetic you use (14.3):
+
+| Storage | Collapse error (max) |
+| --- | --- |
+| float32 | 0.00002 |
+| int16 | 0 |
+| uint8 with `cv2.subtract` / `cv2.add` (saturating) | **136** (mean 14.2) |
+| uint8 with NumPy `-` and `+` (wrapping) | 0, but the levels are meaningless numbers from 0 to 255 |
+
+With saturation, every negative detail value is clipped to 0 and lost. With NumPy's wrap-around, the errors happen to cancel when you add back, but the stored levels cannot be filtered, quantised or blended: −3 is stored as 253. Use float32 (or int16 for integer pipelines).
+
+## 5. Industrial example
+
+Multi-scale detail enhancement on X-ray and inspection images works directly on Laplacian levels: amplifying L0 and L1 makes fine cracks and porosity more visible, while leaving L3 and the residual alone keeps the overall brightness and large structures natural. Medical and industrial radiography viewers use this kind of multi-scale contrast processing. The pyramid is also the standard tool for blending images seamlessly (20.3), for example when combining exposures (48.1) or stitching tiles (34.6).
+
+## What you should remember from 20.2
+
+<Takeaways>
+<Takeaway n={1} title="Levels">Lᵢ = Gᵢ − pyrUp(Gᵢ₊₁); last level = smallest Gaussian.</Takeaway>
+<Takeaway n={2} title="Exact">Collapse (pyrUp and add, from the top) rebuilds the image exactly.</Takeaway>
+<Takeaway n={3} title="Bands">Each level holds detail of one size; mostly near 0.</Takeaway>
+<Takeaway n={4} title="Types">Store levels in float32 or int16, never saturating uint8.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A Laplacian pyramid of 5 levels for a 256 × 256 image: sizes of all stored arrays, and the total number of values?
+
+<Solution>
+
+256², 128², 64², 32² band levels and a 16² residual: 65 536 + 16 384 + 4 096 + 1 024 + 256 = **87 296** values, 1.33 times the image (like the Gaussian pyramid).
+
+</Solution>
+
+**Q2.** A flat grey image. What do the band levels contain?
+
+<Solution>
+
+Zeros everywhere (in float): every level equals the enlarged next level. All information sits in the residual.
+
+</Solution>
+
+### Next: 20.3 Blending
+
+Combine the Laplacian pyramids of two images with a blurred mask: seams disappear at every scale.
+
+## Code
+
+Two examples: building and collapsing a Laplacian pyramid, then the effect of the data type and of quantisation.
+
+### 1. Build and collapse
+
+```python
+import numpy as np
+import cv2
+
+def laplacian_pyramid(img, levels):
+    g = [img.astype(np.float32)]
+    for _ in range(levels - 1):
+        g.append(cv2.pyrDown(g[-1]))
+    lap = [g[i] - cv2.pyrUp(g[i + 1], dstsize=(g[i].shape[1], g[i].shape[0])) for i in range(levels - 1)]
+    return lap + [g[-1]]                                            # residual: smallest Gaussian level
+
+def collapse(lap):
+    cur = lap[-1]
+    for level in reversed(lap[:-1]):
+        cur = level + cv2.pyrUp(cur, dstsize=(level.shape[1], level.shape[0]))
+    return cur
+
+row = np.repeat(np.array([[10, 20, 30, 40, 50, 60, 70, 80]], np.float32), 5, axis=0)
+print("L0 of the row:", laplacian_pyramid(row, 2)[0][2].astype(float).round(2).tolist())
+
+scene = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+L = laplacian_pyramid(scene, 5)
+print("sizes:", [l.shape for l in L])
+print("std per level:", [round(float(l.std()), 1) for l in L])
+print("collapse error:", float(np.abs(collapse(L) - scene).max()))
+```
+
+Output:
+
+```text
+L0 of the row: [-10.62, -3.75, -0.94, 0.0, 0.16, 0.62, 3.59, 11.25]
+sizes: [(200, 320), (100, 160), (50, 80), (25, 40), (13, 20)]
+std per level: [12.9, 10.3, 11.5, 14.9, 58.4]
+collapse error: 1.52587890625e-05
+```
+
+- `dstsize` makes pyrUp match odd sizes (25 → 50, but 13 → 25, not 26).
+
+### 2. Data types and quantisation
+
+```python
+import numpy as np
+import cv2
+
+g = [scene]
+for _ in range(4):
+    g.append(cv2.pyrDown(g[-1]))
+up = lambda x, ref: cv2.pyrUp(x, dstsize=(ref.shape[1], ref.shape[0]))
+sat = [cv2.subtract(g[i], up(g[i + 1], g[i])) for i in range(4)] + [g[-1]]   # uint8, saturating
+cur = sat[-1]
+for level in reversed(sat[:-1]):
+    cur = cv2.add(level, up(cur, level))
+print("uint8 saturating: max error", int(np.abs(cur.astype(int) - scene).max()))
+
+for q in (2, 4, 8):
+    Lq = [np.round(l / q) * q for l in L[:-1]] + [L[-1]]
+    zeros = sum(int((l == 0).sum()) for l in Lq[:-1]) / sum(l.size for l in Lq[:-1])
+    rebuilt = np.clip(collapse(Lq), 0, 255)
+    psnr = 10 * np.log10(255 ** 2 / np.mean((rebuilt - scene) ** 2))
+    print(f"step {q}: {100 * zeros:.1f} % zeros in the band levels, PSNR {psnr:.2f} dB")
+```
+
+Output:
+
+```text
+uint8 saturating: max error 136
+step 2: 19.7 % zeros in the band levels, PSNR 50.35 dB
+step 4: 34.6 % zeros in the band levels, PSNR 44.46 dB
+step 8: 54.7 % zeros in the band levels, PSNR 38.57 dB
+```
+
+## OpenCV API notes
+
+OpenCV has no single Laplacian-pyramid function in Python; build it from:
+
+- **`cv2.pyrDown(src)`** and **`cv2.pyrUp(src, dstsize=(w, h))`**: always pass `dstsize` to pyrUp so odd sizes match.
+- **Arithmetic** in float32 with NumPy, or `cv2.subtract` / `cv2.add` with `dtype=cv2.CV_16S` / `CV_32F` outputs.
+- **Display** a band level with `cv2.convertScaleAbs(level, alpha=gain, beta=128)` or `np.clip(128 + gain * level, 0, 255)`.
+
+The `detail` module (stitching) has `cv2.detail_MultiBandBlender`, which builds Laplacian pyramids internally (20.3).
+
+## Where it fails
+
+- **Not a compact code by itself**: 4/3 as many values as the image; compression needs quantisation and entropy coding (wavelets and DCT codecs do better, 31).
+- **Not shift-invariant**: shifting the image changes the band levels; small shifts can move detail between levels.
+- **No orientation**: horizontal and vertical detail share one level; steerable pyramids and wavelets separate them (31.2).
+- **Edits can ring**: amplifying fine levels strongly creates halos, as in 19.1.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Storing levels in uint8**.
+- **pyrUp without dstsize** on odd-sized levels: shape mismatch errors or a one-pixel shift.
+- **Building up(Gᵢ₊₁) from a different pyrUp** than the one used when collapsing: the reconstruction is no longer exact.
+- **Forgetting the residual** (the last Gaussian level): the collapsed image loses its overall brightness.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why "Laplacian"
+
+Each level is G − up(down(G)): the image minus a blurred version of itself, a difference of two low-pass filters, which is a band-pass filter. Its kernel is close to a difference of Gaussians, which in turn approximates the Laplacian of a Gaussian (20.4, 22.3), hence the name [1].
+
+### Overcomplete and critically sampled
+
+A Laplacian pyramid stores 4/3 as many values as pixels (overcomplete). Wavelet transforms (31.2) split each level into three oriented detail bands at half resolution and store exactly as many values as pixels (critically sampled), which is why JPEG 2000 uses wavelets rather than Laplacian pyramids.
+
+### Local Laplacian filters
+
+Paris, Hasinoff and Kautz (2011) showed that manipulating Laplacian coefficients with a pixel-dependent remapping gives edge-aware detail enhancement and tone mapping without halos [2]: one of the strongest classical tools for photo enhancement.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A Laplacian pyramid level Lᵢ equals…",
+      options: ["Gᵢ + pyrUp(Gᵢ₊₁)", "Gᵢ − pyrUp(Gᵢ₊₁)", "pyrDown(Gᵢ)", "The Laplacian of the original"],
+      answer: 1,
+      explanation: "What the level has that the next coarser level cannot represent.",
+    },
+    {
+      question: "How is the image rebuilt?",
+      options: ["Average all levels", "From the residual: pyrUp and add each band level, coarse to fine", "Take L0 only", "pyrDown repeatedly"],
+      answer: 1,
+      explanation: "Collapse in reverse order of construction.",
+    },
+    {
+      question: "Why store the levels in float32 or int16?",
+      options: ["Speed", "They contain negative values", "pyrUp requires it", "Less memory"],
+      answer: 1,
+      explanation: "Saturating uint8 loses every negative detail value.",
+    },
+    {
+      question: "Most values of the band levels of a natural image are…",
+      options: ["Near 255", "Near 0", "Exactly 128", "Random"],
+      answer: 1,
+      explanation: "Only edges and texture produce large detail values.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+1-D: G0 = 0, 0, 100, 100 (a step), and suppose pyrUp(G1) = 10, 30, 70, 90. What is L0, and what is the collapse L0 + pyrUp(G1)?
+
+<Solution>
+
+L0 = −10, −30, 30, 10. Collapse: 0, 0, 100, 100, the original. The detail level holds the sharpness of the step that the enlarged coarse level smoothed away, with opposite signs on the two sides.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Enhance fine detail: multiply L0 and L1 of the scene by 2, collapse, and report how many pixels clip at 0 or 255 and the standard deviation of the result compared with the original.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+E = [L[0] * 2, L[1] * 2] + L[2:]
+out = collapse(E)
+print("clipped pixels:", int(((out < 0) | (out > 255)).sum()))
+print(f"std: original {scene.std():.1f} -> enhanced {np.clip(out, 0, 255).std():.1f}")
+```
+
+Output:
+
+```text
+clipped pixels: 5368
+std: original 69.6 -> enhanced 73.8
+```
+
+Fine detail is boosted while the large-scale brightness (L2, L3, residual) is unchanged, so the overall contrast grows only a little (69.6 to 73.8). 5 368 pixels (8 %) overshoot the 8-bit range at strong edges: the same halo effect as with unsharp masking (19.1).
+
+</Solution>
+
+## References
+
+1. P. J. Burt, E. H. Adelson, "The Laplacian pyramid as a compact image code", *IEEE Trans. Communications* 31(4), 532–540, 1983.
+2. S. Paris, S. W. Hasinoff, J. Kautz, "Local Laplacian filters: edge-aware image processing with a Laplacian pyramid", *ACM Trans. Graphics (SIGGRAPH)* 30(4), 68, 2011.
+3. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022: Section 3.5 (pyramids and wavelets).
+4. OpenCV 4.13.0 documentation: `pyrDown`, `pyrUp`, `detail::MultiBandBlender`. https://docs.opencv.org/4.13.0/

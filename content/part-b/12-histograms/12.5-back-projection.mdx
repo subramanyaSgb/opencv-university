@@ -1,0 +1,289 @@
+export const meta = {
+  number: "12.5",
+  title: "Back-projection",
+  minutes: 25,
+  objectives: [
+    "Use a colour histogram of a sample region as a model of an object's colours",
+    "Compute a back-projection by hand and with cv2.calcBackProject",
+    "Choose channels and bin counts: hue only vs hue × saturation, coarse vs fine",
+    "Clean up and use the result: smoothing, thresholding, tracking with CamShift",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 12.5 (Module 12 plan).
+  New lab: BackProjLab (lib/backproj-ops.ts, tested against recorded cv2.calcHist/calcBackProject results).
+  New samples: sample-caps.png + sample-caps-ids.png (the 10.7 scene, generated in Python).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 12.5 Back-projection
+
+<Definition term="Histogram back-projection">replacing every pixel by the value of a model histogram at that pixel's colour. The model histogram is taken from a sample of the object; the result is a "likelihood map": bright where the colour is common in the object, dark where it never occurs in the object.</Definition>
+
+In 10.7 we selected colours with `inRange`: a box in HSV space, chosen by hand. Back-projection learns the shape of the colour region from an example instead. Show it a patch of the object, and it finds the same colours everywhere in the image. It is the basis of colour-based tracking (CamShift) and a quick, explainable segmentation tool.
+
+## 1. An analogy
+
+A detective has a list of how often each shoe size appeared at past crime scenes: size 43 very often, 44 sometimes, 38 never. Back-projection gives every person in a crowd a score from that list based on their shoe size. Nobody is identified yet, but the likely ones light up.
+
+## 2. From model patch to likelihood map
+
+<Flow
+  steps={[
+    { label: "Sample patch of the object (HSV)", tone: "data" },
+    { label: "Model histogram: count H × S bins, normalise to 0–255", tone: "process" },
+    { label: "For every image pixel: look up its bin's value", tone: "process" },
+    { label: "Likelihood map → smooth → threshold → mask", tone: "result" },
+  ]}
+/>
+
+Real numbers for the orange cap in `sample-caps.png`: a 13 × 13 patch (169 pixels) with 30 hue bins × 32 saturation bins (960 bins in all). Only **3** of the 960 bins are non-empty; the largest holds 85 pixels and becomes 255 after normalisation. Every image pixel whose colour falls into one of those 3 bins gets that bin's value; all others get 0.
+
+- **Hue and saturation, not value**: V changes with shading (10.2); leaving it out makes the model work in the darker right half of the scene too.
+- **Normalisation** to 0–255 is a convention so the back-projection fits into 8 bits; only the relative heights matter.
+- Back-projection is a **lookup**, like a LUT (11.1), but indexed by two channels at once.
+
+<BackProjLab caption="Pick a model patch and a histogram layout. 'H only' also lights up the cardboard (same hue, lower saturation); coarse 8 × 8 bins also accept the red cap; 30 × 32 bins of hue and saturation separate the caps." />
+
+## 3. Choosing channels and bins
+
+For the orange cap model, the percentage of each object's pixels above 50 in the back-projection:
+
+| Model histogram | Orange cap | Red cap | Cardboard | Belt |
+| --- | --- | --- | --- | --- |
+| H only, 180 bins | 96 % | 0 % | **40 %** | 3 % |
+| H × S, 8 × 8 bins | 96 % | **69 %** | 0 % | 0 % |
+| H × S, 30 × 32 bins | 94 % | 0 % | 0 % | 0 % |
+
+- **Hue only**: cardboard is a dull orange, the same hue at lower saturation, so it partly matches.
+- **Too coarse**: one 8 × 8 bin covers 22.5 hue units; orange and red share a bin.
+- **Too fine**: with many bins and a small patch, most bins of the object's real colour range stay empty (holes). Use a larger or several patches, or smooth the histogram.
+
+## 4. Cleaning up the map
+
+A raw back-projection is speckled: single pixels whose noise pushed them into an empty bin. The usual recipe (as in the OpenCV tutorial) is to smooth the map with a small disc, then threshold. With a 5 × 5 disc the orange cap goes from 94 % to 99 % of its pixels found, with 1 % of belt pixels at the cap's edge.
+
+## 5. Industrial example
+
+A packaging line sorts bottle caps by colour, but the colours change with each supplier batch. Instead of retuning `inRange` limits, the operator puts a few caps of the new batch under the camera; the system stores an H × S histogram of their pixels as the model. In production, each cap region is back-projected and the **mean** back-projection value inside it is compared with a limit. A new colour is taught in seconds, and the score is easy to explain ("87 % of the pixels look like the taught colour").
+
+## What you should remember from 12.5
+
+<Takeaways>
+<Takeaway n={1} title="Idea">A model histogram from a sample; each pixel gets its bin's value.</Takeaway>
+<Takeaway n={2} title="Channels">H × S (not V) for colour objects under changing light.</Takeaway>
+<Takeaway n={3} title="Bins">Coarse bins merge similar colours; fine bins need more sample pixels.</Takeaway>
+<Takeaway n={4} title="Use">Smooth + threshold for a mask; mean inside a region as a score; CamShift for tracking.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A model histogram has 2 non-empty bins: bin A with 60 pixels and bin B with 20. After min–max normalisation to 0–255, what values do pixels in A, in B and in an empty bin get?
+
+<Solution>
+
+Min = 0 (empty bins), max = 60: A → **255**, B → 20 · 255 / 60 = **85**, empty → **0**.
+
+</Solution>
+
+**Q2.** Why does a back-projection with a hue-only model light up a white highlight on the orange cap only sometimes?
+
+<Solution>
+
+White has almost no saturation, so its hue is undefined and noisy (10.2): any hue can come out, including orange. With an H × S model, the low saturation puts it into an empty bin.
+
+</Solution>
+
+### Next: 12.6 2D histograms
+
+Look at the joint histogram of two channels directly, and use it to understand an image's colours.
+
+## Code
+
+Two examples: back-projection from scratch and with OpenCV, then the effect of channels, bins and smoothing.
+
+### 1. From scratch vs cv2.calcBackProject
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-caps.png")
+ids = cv2.imread("sample-caps-ids.png", cv2.IMREAD_GRAYSCALE)        # ground truth: 0 belt, 1 orange, 2 red, 3 crimson, 4 green, 5 cardboard
+hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+roi = hsv[34:47, 28:41]                                               # 13 × 13 patch on the orange cap
+
+hist = cv2.calcHist([roi], [0, 1], None, [30, 32], [0, 180, 0, 256])  # channels H, S; 30 × 32 bins
+print("non-empty bins:", int((hist > 0).sum()), "of", hist.size, "| largest", int(hist.max()))
+cv2.normalize(hist, hist, 0, 255, cv2.NORM_MINMAX)
+
+hb = (hsv[..., 0].astype(int) * 30) // 180                           # bin index = floor(value · bins / range)
+sb = (hsv[..., 1].astype(int) * 32) // 256
+mine = np.clip(np.rint(hist[hb, sb]), 0, 255).astype(np.uint8)       # the lookup
+bp = cv2.calcBackProject([hsv], [0, 1], hist, [0, 180, 0, 256], 1)
+print("identical:", np.array_equal(mine, bp))
+```
+
+Output:
+
+```text
+non-empty bins: 3 of 960 | largest 85
+identical: True
+```
+
+- `hist[hb, sb]` with two index arrays is the whole back-projection: NumPy looks up one histogram value per pixel.
+- The last argument of `calcBackProject` is a scale factor applied to the looked-up value.
+
+### 2. Channels, bins, smoothing
+
+```python
+import numpy as np
+import cv2
+
+names = ["belt", "orange", "red", "crimson", "green", "cardboard"]
+def hits(mask):
+    return " ".join(f"{n} {mask[ids == o].mean():.0%}" for o, n in enumerate(names))
+
+print("H×S 30×32 :", hits(bp > 50))
+for ch, bins, rng, label in [([0], [180], [0, 180], "H only 180"), ([0, 1], [8, 8], [0, 180, 0, 256], "H×S 8×8   ")]:
+    h = cv2.calcHist([roi], ch, None, bins, rng)
+    cv2.normalize(h, h, 0, 255, cv2.NORM_MINMAX)
+    print(label, ":", hits(cv2.calcBackProject([hsv], ch, h, rng, 1) > 50))
+
+disc = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)).astype(np.float32)
+smooth = cv2.filter2D(bp, -1, disc / disc.sum())                     # average over a small disc
+print("smoothed  :", hits(smooth > 50))
+```
+
+Output:
+
+```text
+H×S 30×32 : belt 0% orange 94% red 0% crimson 0% green 0% cardboard 0%
+H only 180 : belt 3% orange 96% red 0% crimson 0% green 0% cardboard 40%
+H×S 8×8    : belt 0% orange 96% red 69% crimson 0% green 0% cardboard 0%
+smoothed  : belt 1% orange 99% red 0% crimson 0% green 0% cardboard 0%
+```
+
+- The numbers match the table in section 3: hue alone confuses the cardboard, coarse bins confuse the red cap.
+- Smoothing fills the speckles inside the cap; the 1 % of belt pixels are a thin ring around the cap's edge.
+
+## OpenCV API notes
+
+**`cv2.calcHist(images, channels, mask, histSize, ranges)`**: for H × S use `channels=[0, 1]`, `histSize=[hBins, sBins]`, `ranges=[0, 180, 0, 256]` (8-bit HSV). `mask` restricts the model to a region of any shape.
+
+**`cv2.calcBackProject(images, channels, hist, ranges, scale)`**: same `channels` and `ranges` as for the histogram; returns an 8-bit map (values saturated to 0–255) for 8-bit input.
+
+**Normalise first**: `cv2.normalize(hist, hist, 0, 255, cv2.NORM_MINMAX)`; otherwise counts above 255 saturate.
+
+**Tracking**: `cv2.CamShift(backproj, window, criteria)` and `cv2.meanShift` move a window to the densest part of the back-projection, frame after frame.
+
+## Where it fails
+
+- **Similar colours elsewhere**: the model knows only colours, not shape or position.
+- **Grey, white, black objects**: hue is undefined at low saturation; use a different feature (intensity, texture).
+- **Lighting colour changes** shift hue and saturation: white balance first (10.6) or teach under production lighting.
+- **Too few sample pixels** for many bins: holes in the model; take more samples or use fewer bins.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Building the model in BGR** (brightness changes all three channels) instead of H × S.
+- **Using the hue range 0–256** instead of 0–180 for 8-bit HSV: half of the bins stay empty and the bin edges shift.
+- **Forgetting to normalise**: large counts saturate at 255 and the map loses its gradation.
+- **Different channels or ranges** in `calcHist` and `calcBackProject`.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Origins: colour indexing
+
+Swain and Ballard (1991) introduced colour histograms for object recognition and histogram back-projection to locate a known object in a cluttered scene [2]. They used a **ratio histogram**: model histogram divided by the image histogram, bin by bin, clipped at 1. A colour that is common in the model but rare in the image scores highest; a colour common everywhere (the background) is down-weighted. In OpenCV: compute both histograms, divide with `np.divide(..., where=...)`, clip, and back-project the ratio.
+
+### Back-projection as a likelihood
+
+With the model histogram normalised to sum 1, the back-projected value is an estimate of P(colour | object). With the image histogram as P(colour), the ratio histogram is proportional to P(object | colour) by Bayes' rule (5.6): the probability that a pixel of that colour belongs to the object. CamShift (Bradski, 1998) tracks the peak of this probability map from frame to frame [3].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does a back-projection pixel value represent?",
+      options: ["The pixel's brightness", "How common that pixel's colour is in the model sample", "The distance to the model patch", "The edge strength"],
+      answer: 1,
+      explanation: "Each pixel gets the model histogram's value for its colour bin.",
+    },
+    {
+      question: "Why are colour models usually built on H and S but not V?",
+      options: ["V has too many values", "V changes with shading and lighting strength", "OpenCV does not support V", "V is always 255"],
+      answer: 1,
+      explanation: "Leaving out V makes the model work in light and shadow.",
+    },
+    {
+      question: "A hue-only model of an orange cap also lights up brown cardboard. Best fix?",
+      options: ["More hue bins", "Add saturation as a second channel", "Use BGR", "Lower the threshold"],
+      answer: 1,
+      explanation: "Cardboard has the same hue but a lower saturation.",
+    },
+    {
+      question: "Which function tracks an object using a back-projection?",
+      options: ["cv2.matchTemplate", "cv2.CamShift", "cv2.equalizeHist", "cv2.inRange"],
+      answer: 1,
+      explanation: "CamShift (and meanShift) move a window to the peak of the back-projection.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A model hue histogram with 6 bins (30 hue units each) has counts [0, 40, 10, 0, 0, 0]. After min–max normalisation, what back-projection values do pixels with H = 15, 35, 65 and 100 get?
+
+<Solution>
+
+Normalised: [0, 255, 64 (63.75 rounded), 0, 0, 0]. H = 15 → bin 0 → **0**; H = 35 → bin 1 → **255**; H = 65 → bin 2 → **64**; H = 100 → bin 3 → **0**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Build an H × S (30 × 32) model of the **green cap** from the patch `hsv[69:82, 34:47]`, back-project it, smooth it with the 5 × 5 disc, and print the mean back-projection value inside each object (use `ids`). Which object scores highest after the green cap?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+g = hsv[69:82, 34:47]
+hist = cv2.calcHist([g], [0, 1], None, [30, 32], [0, 180, 0, 256])
+cv2.normalize(hist, hist, 0, 255, cv2.NORM_MINMAX)
+bp = cv2.calcBackProject([hsv], [0, 1], hist, [0, 180, 0, 256], 1)
+sm = cv2.filter2D(bp, -1, disc / disc.sum())
+print(" | ".join(f"{n} {sm[ids == o].mean():.1f}" for o, n in enumerate(names)))
+```
+
+Output:
+
+```text
+belt 0.7 | orange 0.0 | red 0.0 | crimson 0.0 | green 172.5 | cardboard 0.0
+```
+
+Only the green cap scores; the belt's tiny score comes from the smoothed ring around the cap. As a per-region score, the mean back-projection separates the caps clearly.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 3.3 (histogram processing) and Chapter 6 (colour image processing).
+2. M. J. Swain, D. H. Ballard, "Color indexing", *International Journal of Computer Vision* 7(1), 11–32, 1991.
+3. G. R. Bradski, "Computer vision face tracking for use in a perceptual user interface", *Intel Technology Journal*, Q2 1998.
+4. OpenCV 4.13.0 documentation: `calcHist`, `calcBackProject`, `CamShift`; tutorial "Histogram Backprojection". https://docs.opencv.org/4.13.0/

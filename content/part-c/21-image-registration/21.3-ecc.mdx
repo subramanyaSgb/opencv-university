@@ -1,0 +1,316 @@
+export const meta = {
+  number: "21.3",
+  title: "ECC",
+  minutes: 25,
+  objectives: [
+    "Explain the enhanced correlation coefficient (ECC) and why it ignores brightness gain and offset",
+    "Register images with cv2.findTransformECC for translation, Euclidean, affine and homography motion",
+    "Understand that ECC is an iterative, local method: initial guess, smoothing and pyramids",
+    "Apply the estimated warp correctly with warpAffine / warpPerspective",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 21.3 (Module 21).
+  Lab: RegisterLab (mode ecc).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 21.3 ECC
+
+<Definition term="ECC (enhanced correlation coefficient) alignment">an iterative registration method: start from a guess of the transform, warp one image with it, measure how well it matches the other with the correlation coefficient, and improve the guess with a Gauss–Newton step. Repeat until the improvement is negligible. Because it uses the correlation coefficient, it ignores differences in brightness and contrast.</Definition>
+
+Phase correlation (21.2) finds translations quickly but not rotation, scale or perspective, and its sub-pixel accuracy is limited. Evangelidis and Psarakis (2008) [1] formulated alignment as maximising the correlation coefficient between the reference and the warped image, for any parametric motion model, and derived an efficient iterative solution. OpenCV implements it as `cv2.findTransformECC`. It reaches a hundredth of a pixel on textured images.
+
+## 1. An analogy
+
+Adjusting a slide projector onto a screen with a printed copy of the same picture. You cannot see the final position directly, but you can see which way the projected edges are off: a bit too far left here, too high there. You nudge the projector in that direction, look again, nudge again, a little less each time, until the projection sits exactly on the print. A darker or brighter projector lamp does not matter: you are judging where the edges are, not how bright they are.
+
+## 2. Maximise the correlation coefficient
+
+<Flow
+  steps={[
+    { label: "Template T, input I, initial warp p (often identity)", tone: "data" },
+    { label: "Warp I with p; correlation coefficient ρ between T and I(W(x; p))", tone: "process" },
+    { label: "Linearise with the image gradients; solve for the update Δp (3 × 3 to 8 × 8 system)", tone: "process" },
+    { label: "p ← p + Δp; repeat until Δp is tiny → final warp", tone: "result" },
+  ]}
+/>
+
+The correlation coefficient between two sets of pixel values subtracts each set's mean and divides by its spread:
+
+```text
+ρ = Σ (t − t̄)(i − ī) / √( Σ (t − t̄)² · Σ (i − ī)² )        −1 ≤ ρ ≤ 1
+```
+
+A worked example: template values 10, 20, 30, 40 and input values 25, 45, 65, 85. The input is 2 × template + 5 (brighter and more contrasty), so the sum of squared differences is large (2 700) but after subtracting means (25 and 55) the deviations are −15, −5, 5, 15 and −30, −10, 10, 30: exactly proportional, ρ = **1**. ECC rates them a perfect match. That is why it copes with exposure changes, flicker and different gains between cameras.
+
+Motion models and their parameters (OpenCV names):
+
+| `motionType` | Warp matrix | Parameters |
+| --- | --- | --- |
+| `MOTION_TRANSLATION` | 2 × 3 | 2 |
+| `MOTION_EUCLIDEAN` | 2 × 3 | 3 (angle, tx, ty) |
+| `MOTION_AFFINE` | 2 × 3 | 6 |
+| `MOTION_HOMOGRAPHY` | 3 × 3 | 8 |
+
+On the scene, rotated by 3° and shifted by (2.3, −1.7) pixels, Euclidean ECC from the identity finds the shift as (2.298, −1.704) and the angle to 0.01°. With the second image at gain 0.6 and offset +40 it finds (2.297, −1.703): the brightness change makes no difference. With noise σ = 10: (2.278, −1.692), still within 0.03 pixel.
+
+<RegisterLab mode="ecc" caption="Euclidean ECC (written in TypeScript, same algorithm as OpenCV's) aligns the moved image starting from 'no motion'. Change the true rotation, shift, gain and noise: the estimate and the correlation after alignment update. The overlay turns grey when the alignment is right. Large motions converge here because the scene has large smooth shapes; on fine textures, ECC needs a starting point close to the answer (Section 3)."/>
+
+## 3. A local method: initial guess, smoothing, pyramids
+
+Each ECC step uses image gradients, which only "see" a few pixels around each edge. If the starting guess is further off than the size of the structures, the gradients point the wrong way and ECC converges to a wrong local optimum. On the fine-detail test chart (thin lines, 2-pixel bars), shifted horizontally:
+
+| True shift | ECC without pre-smoothing (`gaussFiltSize=1`) | With `gaussFiltSize=5` |
+| --- | --- | --- |
+| 2 px | 2.00 (ρ 1.000) | 2.01 |
+| 4 px | **0.15** (ρ 0.926, wrong) | 4.00 |
+| 8 px | **0.14** (ρ 0.868, wrong) | 8.01 |
+| 16 px | **0.17** (ρ 0.756, wrong) | 15.99 |
+
+Without smoothing, a 4-pixel shift is already too much: ECC stops near zero with a clearly lower ρ. Gaussian pre-smoothing (the last argument of `findTransformECC`, default 5) widens the basin of convergence. For larger motions:
+
+- **Initial guess**: from phase correlation (21.2), from features (34.5) or from the mechanics (the expected position).
+- **Coarse to fine**: run ECC on a pyramid level (20.1), scale the translation by 2, and refine on the next level down.
+- **Check ρ**: a final correlation clearly below what good alignments give (here 0.93 against 1.00) flags a failure.
+
+## 4. Industrial example
+
+ECC is used where a reference image exists and sub-pixel alignment matters: golden-template comparison of printed products, labels and PCBs, alignment of successive frames before averaging (low-light imaging, 48.4), and alignment of colour channels of cameras with separate sensors or prisms. Its invariance to gain and offset handles lamp ageing and exposure differences between the reference and the production image. A typical pipeline: fixture position or phase correlation as the initial guess, Euclidean or affine ECC on a mask that excludes regions where defects may appear, then warp and compare.
+
+## What you should remember from 21.3
+
+<Takeaways>
+<Takeaway n={1} title="Criterion">Maximise the correlation coefficient: invariant to brightness gain and offset.</Takeaway>
+<Takeaway n={2} title="Models">Translation, Euclidean, affine or homography, with sub-pixel accuracy (about 0.01 px).</Takeaway>
+<Takeaway n={3} title="Local">Needs a start close to the answer: smoothing, pyramids, or an initial estimate.</Takeaway>
+<Takeaway n={4} title="Check">The final ρ is a quality measure; a low value means failure.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Template 0, 10, 20 and input 100, 90, 80. What is ρ, and what does it mean?
+
+<Solution>
+
+Deviations −10, 0, 10 and 10, 0, −10: ρ = **−1**. The input is an inverted copy (contrast reversed). ECC maximises ρ, so it will not align such images; this matters for different sensors (21.4).
+
+</Solution>
+
+**Q2.** Which motion type for a camera that views a flat panel from a slightly different angle each time?
+
+<Solution>
+
+`MOTION_HOMOGRAPHY` (perspective view of a plane, 8 parameters).
+
+</Solution>
+
+### Next: 21.4 Multi-camera and thermal-visible fusion
+
+Registering images from different cameras and different kinds of sensors, where the grey values do not correspond.
+
+## Code
+
+Two examples: Euclidean and homography ECC with brightness changes, then the convergence problem and its fix.
+
+### 1. findTransformECC
+
+```python
+import numpy as np
+import cv2
+
+a = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 200, 1e-6)
+
+theta = np.deg2rad(3)
+M = np.float32([[np.cos(theta), -np.sin(theta), 2.3], [np.sin(theta), np.cos(theta), -1.7]])
+b = cv2.warpAffine(a, M, (320, 200), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+b_dim = (0.6 * b + 40).astype(np.float32)                        # same image, different gain and offset
+
+for name, img in [("plain", b), ("gain 0.6, offset 40", b_dim)]:
+    cc, W = cv2.findTransformECC(a, img, np.eye(2, 3, dtype=np.float32), cv2.MOTION_EUCLIDEAN, criteria, None, 5)
+    angle = np.degrees(np.arctan2(W[1, 0], W[0, 0]))
+    print(f"{name:20s} rho {cc:.4f} | angle {angle:.3f} deg | shift ({W[0, 2]:.3f}, {W[1, 2]:.3f})")
+
+H = np.float32([[1.02, 0.03, -4], [-0.02, 0.99, 3], [1e-4, -5e-5, 1]])
+c = cv2.warpPerspective(a, H, (320, 200), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+cc, Wh = cv2.findTransformECC(a, c, np.eye(3, dtype=np.float32), cv2.MOTION_HOMOGRAPHY, criteria, None, 5)
+print("homography: rho", round(cc, 4), "| max parameter error", round(float(np.abs(Wh / Wh[2, 2] - H).max()), 4))
+aligned = cv2.warpAffine(b, W, (320, 200), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP)
+print("mean |a - aligned| inside:", round(float(np.abs(aligned - a)[20:-20, 20:-20].mean()), 2))
+```
+
+Output:
+
+```text
+plain                rho 0.9993 | angle 3.000 deg | shift (2.298, -1.704)
+gain 0.6, offset 40  rho 0.9986 | angle 3.000 deg | shift (2.297, -1.703)
+homography: rho 0.9994 | max parameter error 0.0186
+mean |a - aligned| inside: 3.77
+```
+
+- The remaining mean difference of 3.8 grey levels is the scene's pixel noise, resampled twice by bilinear interpolation (once to create b, once to align it), not misalignment.
+- `findTransformECC(template, input, warp, motionType, criteria, inputMask, gaussFiltSize)` returns (ρ, warp). The warp maps template coordinates to input coordinates, so bring the input onto the template with `WARP_INVERSE_MAP`.
+- Images must be single-channel float32 (or uint8); the initial warp float32 of the right shape (2 × 3, or 3 × 3 for homography).
+
+### 2. Convergence and smoothing
+
+```python
+import numpy as np
+import cv2
+
+chart = cv2.imread("sample-clean.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+for shift in (2, 4, 8, 16):
+    moved = cv2.warpAffine(chart, np.float32([[1, 0, shift], [0, 1, 0]]), (320, 200), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    row = []
+    for g in (1, 5):
+        cc, W = cv2.findTransformECC(chart, moved, np.eye(2, 3, dtype=np.float32), cv2.MOTION_TRANSLATION, criteria, None, g)
+        row.append(f"gaussFiltSize {g}: x {W[0, 2]:6.2f} (rho {cc:.3f})")
+    print(f"shift {shift:2d} | " + " | ".join(row))
+```
+
+Output:
+
+```text
+shift  2 | gaussFiltSize 1: x   2.00 (rho 1.000) | gaussFiltSize 5: x   2.01 (rho 1.000)
+shift  4 | gaussFiltSize 1: x   0.15 (rho 0.926) | gaussFiltSize 5: x   4.00 (rho 1.000)
+shift  8 | gaussFiltSize 1: x   0.14 (rho 0.868) | gaussFiltSize 5: x   8.01 (rho 1.000)
+shift 16 | gaussFiltSize 1: x   0.17 (rho 0.756) | gaussFiltSize 5: x  15.99 (rho 1.000)
+```
+
+## OpenCV API notes
+
+**`cv2.findTransformECC(templateImage, inputImage, warpMatrix, motionType, criteria, inputMask, gaussFiltSize)`** → (ρ, warpMatrix):
+- `motionType`: `MOTION_TRANSLATION`, `MOTION_EUCLIDEAN`, `MOTION_AFFINE` (2 × 3), `MOTION_HOMOGRAPHY` (3 × 3).
+- `criteria`: `(TERM_CRITERIA_EPS | TERM_CRITERIA_COUNT, max_iterations, epsilon)`; 50–200 iterations and 1e-5–1e-6 are typical.
+- `inputMask`: uint8 mask of pixels to use in the input image (exclude regions that differ, borders, moving parts).
+- `gaussFiltSize`: Gaussian pre-smoothing size (default 5); larger values widen the convergence range, smaller ones keep fine detail.
+- Raises `cv2.error` ("The algorithm stopped before its convergence" or a correlation error) when it fails: wrap it in try/except.
+
+**`cv2.computeECC(templateImage, inputImage, inputMask=None)`**: the correlation coefficient for already aligned images, as a quality score.
+
+**Apply**: `cv2.warpAffine(input, W, size, flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP)`; for homographies `cv2.warpPerspective(..., cv2.WARP_INVERSE_MAP)`.
+
+## Where it fails
+
+- **Large initial errors on fine textures**: local optimum; use smoothing, pyramids or an initial estimate.
+- **Contrast inversion or different sensors**: ρ is negative or meaningless; use gradient-based features or mutual information (21.4).
+- **Large changed regions** (defects, moving objects, occlusion): bias the result; mask them.
+- **Too flexible a model** on weakly textured images: homographies drift; prefer Euclidean or affine.
+- **Speed**: each iteration touches every pixel; downsample for the first iterations.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Wrong warp direction**: forgetting `WARP_INVERSE_MAP` moves the image twice as far instead of back.
+- **Initial warp of the wrong type or shape** (float64 instead of float32, 2 × 3 for homography).
+- **Not catching the exception** when ECC does not converge.
+- **Trusting the result without checking ρ**.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Relation to Lucas–Kanade
+
+The Lucas–Kanade method (1981) [2] minimises the sum of squared differences with the same Gauss–Newton linearisation; Baker and Matthews unified its variants [3]. ECC replaces SSD with a zero-mean, normalised criterion and solves for the optimal scaling in closed form at each step, which makes it invariant to gain and offset and, according to its authors, more robust to noise.
+
+### Inverse compositional updates
+
+Computing the gradients and Jacobian on the template instead of the warped input lets most of the work be precomputed once (the inverse compositional algorithm [3]). ECC has a similar inverse-compositional variant; OpenCV's implementation uses the forward-additive form with warped input gradients.
+
+### Masks and robust weights
+
+Defects, reflections and moving objects violate the "same scene" assumption. Masking them, or weighting pixels by how well they agree (iteratively reweighted least squares), keeps them from pulling the estimate.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why does ECC tolerate a brightness gain and offset between images?",
+      options: ["It uses the median", "The correlation coefficient removes means and normalises the spread", "It works in the frequency domain", "It equalises histograms"],
+      answer: 1,
+      explanation: "ρ is unchanged by i → a·i + b with a > 0.",
+    },
+    {
+      question: "ECC from the identity converges to a wrong result on a fine texture shifted by 8 px. Best fix?",
+      options: ["More iterations", "Pre-smoothing, a pyramid, or a better initial guess", "A homography model", "uint8 images"],
+      answer: 1,
+      explanation: "It is a local method; widen the basin of convergence or start closer.",
+    },
+    {
+      question: "The warp from findTransformECC maps…",
+      options: ["Input to template", "Template coordinates to input coordinates", "Pixels to millimetres", "Nothing; it is a score"],
+      answer: 1,
+      explanation: "So use WARP_INVERSE_MAP to bring the input onto the template.",
+    },
+    {
+      question: "How many parameters does MOTION_AFFINE estimate?",
+      options: ["2", "3", "6", "8"],
+      answer: 2,
+      explanation: "The full 2 × 3 matrix.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Template 2, 4, 6, 8; input 5, 9, 13, 17. Compute the SSD and ρ.
+
+<Solution>
+
+Differences 3, 5, 7, 9: SSD = 9 + 25 + 49 + 81 = **164**. Input = 2 × template + 1, so ρ = **1**. SSD calls them very different; ECC calls them a perfect match.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Coarse-to-fine ECC: on the test chart shifted by (24, −6), run translation ECC with `gaussFiltSize=1` directly, then on a 3-level pyramid (start at level 2 with the translation divided by 4, double it after each level).
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+moved = cv2.warpAffine(chart, np.float32([[1, 0, 24], [0, 1, -6]]), (320, 200), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+cc, W = cv2.findTransformECC(chart, moved, np.eye(2, 3, dtype=np.float32), cv2.MOTION_TRANSLATION, criteria, None, 1)
+print(f"direct: ({W[0, 2]:.2f}, {W[1, 2]:.2f}) rho {cc:.3f}")
+A, B = [chart], [moved]
+for _ in range(2):
+    A.append(cv2.pyrDown(A[-1]))
+    B.append(cv2.pyrDown(B[-1]))
+W = np.eye(2, 3, dtype=np.float32)
+for level in (2, 1, 0):
+    cc, W = cv2.findTransformECC(A[level], B[level], W, cv2.MOTION_TRANSLATION, criteria, None, 1)
+    if level:
+        W[:, 2] *= 2                                                  # to the next finer level
+print(f"pyramid: ({W[0, 2]:.2f}, {W[1, 2]:.2f}) rho {cc:.3f}")
+```
+
+Output:
+
+```text
+direct: (0.30, -5.97) rho 0.601
+pyramid: (24.01, -6.00) rho 1.000
+```
+
+Directly, ECC finds the vertical shift (small) but not the horizontal one (24 px), and ρ = 0.60 shows the failure. At level 2 the shift is only (6, −1.5) pixels and the pyrDown blur makes the structures wider, so ECC converges; each finer level only refines.
+
+</Solution>
+
+## References
+
+1. G. D. Evangelidis, E. Z. Psarakis, "Parametric image alignment using enhanced correlation coefficient maximization", *IEEE Trans. PAMI* 30(10), 1858–1865, 2008.
+2. B. D. Lucas, T. Kanade, "An iterative image registration technique with an application to stereo vision", *Proc. IJCAI*, 674–679, 1981.
+3. S. Baker, I. Matthews, "Lucas-Kanade 20 years on: a unifying framework", *Int. J. Computer Vision* 56(3), 221–255, 2004.
+4. OpenCV 4.13.0 documentation: `findTransformECC`, `computeECC`, `warpAffine`, `warpPerspective`. https://docs.opencv.org/4.13.0/

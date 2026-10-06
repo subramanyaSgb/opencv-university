@@ -1,0 +1,289 @@
+export const meta = {
+  number: "14.3",
+  title: "Saturating vs wrapping arithmetic",
+  minutes: 20,
+  objectives: [
+    "Predict what adding, subtracting and multiplying 8-bit images does in NumPy and in OpenCV",
+    "Choose the right tool: cv2.add/subtract, absdiff, a wider dtype, or float",
+    "Average and accumulate frames without overflow",
+    "Know OpenCV's rounding (half to even) and division by zero rules",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 14.3 (Module 14 plan).
+  Builds on 6.3 (overflow basics, OverflowLab). New lab: ArithLab (uses lib/overflow-ops).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 14.3 Saturating vs wrapping arithmetic
+
+<Definition term="Saturating and wrapping arithmetic">two rules for results that do not fit into 8 bits. **Saturating** (OpenCV) clips them to the nearest end: 250 + 10 = 255, 10 − 20 = 0. **Wrapping** (NumPy uint8) keeps only the lowest 8 bits: 250 + 10 = 4, 10 − 20 = 246.</Definition>
+
+Chapter 6.3 introduced the two rules on single numbers. Here they meet whole images: brightening, background subtraction, averaging frames, scaling. Wrapping produces striking errors (black spots in bright areas, white noise in dark areas) that are easy to recognise once you have seen them. Saturation is quieter but loses information. The cure for both is the same: compute in a wider type when the result can leave 0–255.
+
+## 1. An analogy
+
+A car's odometer and a speedometer. The odometer **wraps**: after 99 999 it shows 00 000, a tiny value for a huge distance. The speedometer **saturates**: above its maximum the needle just stays at the end stop. Neither shows the true value, but the wrong odometer reading is far more misleading.
+
+## 2. The same operation, two results
+
+<Flow
+  steps={[
+    { label: "uint8 image + constant or second image", tone: "data" },
+    { label: "Exact result may be < 0 or > 255", tone: "process" },
+    { label: "NumPy uint8: keep low 8 bits (wrap) · OpenCV: clip (saturate)", tone: "process" },
+    { label: "Safe: compute in int16 / float32, then clip and convert once", tone: "result" },
+  ]}
+/>
+
+Adding 60 to `sample-scene.png` (bright areas up to 255): every pixel above 195 has an exact result above 255. NumPy turns it into a small value (black spots in the brightest regions); OpenCV turns it into 255 (flat white).
+
+<ArithLab caption="Add, subtract or multiply on a grey image. Left: NumPy uint8 (wraps); right: OpenCV (saturates). Marked pixels are those whose exact result does not fit into 0–255: the same pixels are wrong in both, but in very different ways." />
+
+| Operation | NumPy uint8 | OpenCV | Exact |
+| --- | --- | --- | --- |
+| 250 + 10 | 4 | 255 | 260 |
+| 10 − 20 | 246 | 0 | −10 |
+| 100 · 3 | 44 | 255 | 300 |
+| 7 / 2 | 3 (`//`) | 4 (rounded half to even) | 3.5 |
+| 5 / 2 | 2 (`//`) | 2 (half to even) | 2.5 |
+| x / 0 | error or warning | 0 | — |
+
+## 3. Recipes for common image arithmetic
+
+| Task | Do | Avoid |
+| --- | --- | --- |
+| Brighten | `cv2.add(img, 60)` (all channels) or a LUT | `img + 60` on uint8 |
+| Difference of two images | `cv2.absdiff(a, b)` | `a - b` (wraps) |
+| Signed difference (keep sign) | `cv2.subtract(a, b, dtype=cv2.CV_16S)` or `a.astype(np.int16) - b` | uint8 subtraction |
+| Average N frames | `cv2.accumulate` into float32, divide by N | summing uint8 frames |
+| Scale and offset | `cv2.convertScaleAbs(img, alpha=k, beta=c)` (saturates; note the absolute value) | `img * k` with integer k on uint8 |
+| Ratio, normalisation | float32: `img.astype(np.float32) / ref` | integer division |
+
+## 4. Industrial example
+
+A flat-field correction divides each image by an image of a white reference target to remove vignetting (2.x, 15.3). The first implementation used `cv2.divide(img, white, scale=255)` on uint8: correct for most pixels, but where the white reference was dark (lens corners) the result saturated to 255, and pixels with white = 0 became 0. The fix was to compute in float32 (`img.astype(np.float32) * (mean_white / np.maximum(white, 1))`), clip once at the end, and log how many pixels clip; that count became a health check for the lens and lighting.
+
+## What you should remember from 14.3
+
+<Takeaways>
+<Takeaway n={1} title="Rules">NumPy uint8 wraps; OpenCV saturates; neither is the exact value.</Takeaway>
+<Takeaway n={2} title="Symptoms">Wrap: black spots in bright areas, bright noise in dark areas. Saturation: flat 0 or 255 regions.</Takeaway>
+<Takeaway n={3} title="Fix">Compute in int16 or float32, clip once, convert back.</Takeaway>
+<Takeaway n={4} title="Tools">absdiff, add/subtract with dtype, accumulate, convertScaleAbs; OpenCV rounds half to even.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Two uint8 frames have values 200 and 180 at a pixel. What do `a - b`, `b - a` (NumPy) and `cv2.absdiff(a, b)` give?
+
+<Solution>
+
+a − b = **20**; b − a = −20 → **236** (wraps); absdiff = **20**.
+
+</Solution>
+
+**Q2.** Why can averaging four uint8 frames with `(f1 + f2 + f3 + f4) // 4` give a much too dark result?
+
+<Solution>
+
+The sum wraps above 255: four values of 200 sum to 800, stored as 800 − 3 · 256 = 32, and 32 // 4 = **8** instead of 200.
+
+</Solution>
+
+### Next: 14.4 Blending
+
+Mixing two images with weights: addWeighted, alpha masks and soft edges.
+
+## Code
+
+Two examples: brightening and differences on real images, then averaging, rounding and division.
+
+### 1. Brightening and differences
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+exact = img.astype(np.int16) + 60
+print(f"pixels whose exact result exceeds 255: {(exact > 255).sum()} ({(exact > 255).mean():.1%})")
+np_out = img + np.uint8(60)                                  # wraps
+cv_out = cv2.add(img, 60)                                    # saturates
+y, x = np.argwhere(img == 250)[0]
+print(f"pixel 250 -> NumPy {np_out[y, x]}, OpenCV {cv_out[y, x]}, exact {exact[y, x]}")
+
+color = cv2.imread("sample-color.png")
+print("cv2.add(color, 50) on (0, 0, 220):", cv2.add(color, 50)[95, 70].tolist(), "| NumPy:", (color + np.uint8(50))[95, 70].tolist())
+
+a = np.array([[250, 10]], np.uint8)
+b = np.array([[10, 20]], np.uint8)
+print("b - a (NumPy):", (b - a).tolist(), "| cv2.subtract:", cv2.subtract(b, a).tolist(),
+      "| absdiff:", cv2.absdiff(a, b).tolist(), "| subtract CV_16S:", cv2.subtract(b, a, dtype=cv2.CV_16S).tolist())
+```
+
+Output:
+
+```text
+pixels whose exact result exceeds 255: 9022 (14.1%)
+pixel 250 -> NumPy 54, OpenCV 255, exact 310
+cv2.add(color, 50) on (0, 0, 220): [50, 50, 255] | NumPy: [50, 50, 14]
+b - a (NumPy): [[16, 10]] | cv2.subtract: [[0, 10]] | absdiff: [[240, 10]] | subtract CV_16S: [[-240, 10]]
+```
+
+- In OpenCV 4.13's Python bindings a plain number added to a 3-channel image is applied to every channel. (Some older versions treated a plain number as (50, 0, 0, 0) and changed only the first channel; a tuple `(50, 50, 50, 0)` is explicit in every version.)
+- `dtype=cv2.CV_16S` keeps the sign of the difference, which tells whether a pixel got darker or brighter.
+
+### 2. Averaging, rounding, division
+
+```python
+import numpy as np
+import cv2
+
+frames = [np.full((2, 2), v, np.uint8) for v in (200, 210, 220, 230)]
+total = frames[0] + frames[1] + frames[2] + frames[3]               # uint8: wraps
+print("uint8 sum:", total[0, 0], "-> // 4 =", total[0, 0] // 4)
+acc = np.zeros((2, 2), np.float32)
+for f in frames:
+    cv2.accumulate(f, acc)                                          # float32 running sum
+print("accumulate / 4:", acc[0, 0] / 4, "| np.mean:", np.mean(frames, axis=0)[0, 0])
+
+one = lambda v: np.array([[v]], np.uint8)
+print("cv2.divide 7/2:", cv2.divide(one(7), one(2))[0, 0], "| 5/2:", cv2.divide(one(5), one(2))[0, 0], "| 7/0:", cv2.divide(one(7), one(0))[0, 0])
+print("cv2.multiply 100*3:", cv2.multiply(one(100), one(3))[0, 0], "| NumPy:", (one(100) * np.uint8(3))[0, 0])
+print("convertScaleAbs(-40 as float):", cv2.convertScaleAbs(np.array([[-40.0]], np.float32))[0, 0])
+```
+
+Output:
+
+```text
+uint8 sum: 92 -> // 4 = 23
+accumulate / 4: 215.0 | np.mean: 215.0
+cv2.divide 7/2: 4 | 5/2: 2 | 7/0: 0
+cv2.multiply 100*3: 255 | NumPy: 44
+convertScaleAbs(-40 as float): 40
+```
+
+- 860 wraps to 860 − 3 · 256 = 92: the uint8 "average" is 23 instead of 215.
+- OpenCV rounds 3.5 to 4 and 2.5 to 2 (round half to even, `saturate_cast`), and defines x / 0 = 0 for integer images.
+- `convertScaleAbs` takes the **absolute value** before saturating (11.4): −40 becomes 40, not 0.
+
+## OpenCV API notes
+
+**`cv2.add(src1, src2, dst=None, mask=None, dtype=-1)`**, `subtract`, `multiply(src1, src2, scale=1, dtype=-1)`, `divide(src1, src2, scale=1, dtype=-1)`: saturating; `src2` may be a scalar or tuple; `dtype` sets the output depth (e.g. `cv2.CV_16S`, `cv2.CV_32F`).
+
+**`cv2.absdiff(a, b)`**: |a − b|, never overflows for same-type inputs.
+
+**`cv2.accumulate(src, dst, mask=None)`**, `accumulateWeighted(src, dst, alpha)` (running average, 14.5): `dst` float32 or float64.
+
+**`cv2.convertScaleAbs(src, alpha=1, beta=0)`**: |α · src + β| saturated to uint8.
+
+**NumPy**: uint8 arithmetic wraps silently (array + array) or raises/warns for Python scalars out of range in NumPy 2 (`np.uint8(200) + 300` raises `OverflowError`); convert with `astype(np.int16)` or `astype(np.float32)` first, then `np.clip(...).astype(np.uint8)`.
+
+## Where it fails
+
+- **Saturation hides information**: clipped pixels cannot be recovered; log how many clip.
+- **Float precision** is rarely a problem for 8-bit images in float32, but accumulating thousands of frames in float32 loses small differences; use float64 for long averages.
+- **Mixed types**: OpenCV requires equal types for two-array operations unless `dtype` is given.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **`a - b` on uint8 images** for differences (use `absdiff` or a signed type).
+- **Summing uint8 frames** before dividing.
+- **Assuming `cv2.add(img, 50)` behaves the same in every OpenCV version** for colour images; pass a tuple to be explicit.
+- **Converting to uint8 in the middle** of a calculation instead of once at the end.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why OpenCV saturates
+
+For images, a too-bright pixel is still bright: clipping to 255 is the visually closest representable value, while wrapping turns it dark. Saturating arithmetic is also built into SIMD instruction sets (SSE2 `paddusb`, NEON `vqadd.u8`), so OpenCV gets it at no extra cost [2].
+
+### Round half to even
+
+`saturate_cast` uses `cvRound`, which follows the IEEE 754 default rounding (round half to even). Over many operations, half-to-even does not drift upwards like "always round .5 up", which matters when a result is rounded repeatedly (filters, pyramids).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is cv2.add of uint8 values 250 and 10?",
+      options: ["4", "255", "260", "0"],
+      answer: 1,
+      explanation: "OpenCV saturates to 255.",
+    },
+    {
+      question: "What is NumPy uint8 10 − 20?",
+      options: ["0", "−10", "246", "10"],
+      answer: 2,
+      explanation: "It wraps modulo 256.",
+    },
+    {
+      question: "Best way to get |a − b| for two uint8 frames?",
+      options: ["a - b", "np.abs(a - b)", "cv2.absdiff(a, b)", "cv2.subtract(a, b)"],
+      answer: 2,
+      explanation: "np.abs(a - b) is too late: a - b has already wrapped.",
+    },
+    {
+      question: "cv2.divide on uint8 7 / 0 gives…",
+      options: ["An error", "255", "0", "7"],
+      answer: 2,
+      explanation: "OpenCV defines integer division by zero as 0.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Compute NumPy uint8 and OpenCV results for 30 − 50, 200 + 100 and 120 · 3.
+
+<Solution>
+
+30 − 50: NumPy **236**, OpenCV **0**. 200 + 100: NumPy **44**, OpenCV **255**. 120 · 3 = 360: NumPy **104**, OpenCV **255**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Brighten `sample-scene.png` by 60 in three ways (NumPy uint8, `cv2.add`, int16 + clip) and print, for each, how many pixels differ from the exact clipped result.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+ref = np.clip(img.astype(np.int16) + 60, 0, 255).astype(np.uint8)
+for name, out in [("NumPy uint8", img + np.uint8(60)), ("cv2.add", cv2.add(img, 60)), ("int16 + clip", np.clip(img.astype(np.int16) + 60, 0, 255).astype(np.uint8))]:
+    print(f"{name:12s}: {(out != ref).sum()} pixels differ")
+```
+
+Output:
+
+```text
+NumPy uint8 : 9022 pixels differ
+cv2.add     : 0 pixels differ
+int16 + clip: 0 pixels differ
+```
+
+For a single addition, `cv2.add` is exactly "compute exactly, then clip". The wide-type recipe matters when several operations follow each other and intermediate values leave 0–255.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 2.6 (arithmetic operations).
+2. OpenCV 4.13.0 documentation: `add`, `subtract`, `multiply`, `divide`, `absdiff`, `accumulate`, `convertScaleAbs`, `saturate_cast`. https://docs.opencv.org/4.13.0/

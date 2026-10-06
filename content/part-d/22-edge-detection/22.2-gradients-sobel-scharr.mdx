@@ -1,0 +1,308 @@
+export const meta = {
+  number: "22.2",
+  title: "Gradients (Sobel, Scharr)",
+  minutes: 25,
+  objectives: [
+    "Compute the image gradient (gx, gy) with Sobel and Scharr kernels, by hand and with OpenCV",
+    "Derive edge strength (magnitude) and edge direction from the gradient",
+    "Choose ksize, output depth and kernel (Sobel vs Scharr) for accuracy and noise",
+    "Explain why thresholding the magnitude gives thick edges",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 22.2 (Module 22).
+  Lab: EdgeLab (mode gradient).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 22.2 Gradients (Sobel, Scharr)
+
+<Definition term="Image gradient">at each pixel, a small arrow (gx, gy): gx is how fast the brightness rises to the right, gy how fast it rises downwards. Its length is the edge strength; its direction points across the edge, from dark to bright. Edges run perpendicular to it.</Definition>
+
+22.1 found an edge in one row with a simple difference. Images have edges in every direction, so we need the derivative in x and in y at every pixel, and we need it to be less sensitive to noise than a plain difference. Sobel (presented in 1968, published by Duda and Hart [1]) and Scharr (2000) [2] kernels do both: they differentiate in one direction and smooth in the other.
+
+## 1. An analogy
+
+Standing on a hillside in fog. You cannot see the hill, but you can feel which way the ground slopes under your feet and how steeply. The gradient is that slope: its direction is "straight uphill", its size is how steep. An edge in an image is a steep slope in brightness; a flat area is level ground.
+
+## 2. Two kernels, one per direction
+
+<Flow
+  steps={[
+    { label: "Image I", tone: "data" },
+    { label: "gx = I * Sobel-x (difference across columns, smoothing down rows)", tone: "process" },
+    { label: "gy = I * Sobel-y (difference across rows, smoothing along columns)", tone: "process" },
+    { label: "Magnitude √(gx² + gy²), direction atan2(gy, gx)", tone: "result" },
+  ]}
+/>
+
+The Sobel kernels are separable (17.4): a central difference −1, 0, 1 in one direction times a smoothing 1, 2, 1 in the other.
+
+<Columns>
+<Panel title="Sobel x" tone="a">
+<KernelGrid cells={[["−1", "0", "1"], ["−2", "0", "2"], ["−1", "0", "1"]]} />
+</Panel>
+<Panel title="Sobel y" tone="b">
+<KernelGrid cells={[["−1", "−2", "−1"], ["0", "0", "0"], ["1", "2", "1"]]} />
+</Panel>
+</Columns>
+
+A worked example at the corner of a bright region:
+
+<PixelMatrix values={[[10, 10, 90], [10, 10, 90], [10, 90, 90]]} highlight={[[1, 1]]} />
+
+- gx = (90 − 10) · 1 + (90 − 10) · 2 + (90 − 10) · 1 = 80 + 160 + 80 = **320**
+- gy = (10 − 10) · 1 + (90 − 10) · 2 + (90 − 10) · 1 = 0 + 160 + 80 = **160**
+- Magnitude √(320² + 160²) = **357.8** (L1 alternative |gx| + |gy| = 480)
+- Direction atan2(160, 320) = **26.6°**: mostly to the right, a bit downwards, towards the bright pixels.
+
+The values are much larger than the brightness step of 80: the kernel weights sum to 8 on each side. Divide by 8 for "grey levels per pixel", or ignore the scale and set thresholds in kernel units, as OpenCV does.
+
+## 3. Sobel or Scharr
+
+The 3 × 3 Sobel kernel's direction is slightly wrong for diagonal and fine structures, because its smoothing is not perfectly round. Scharr optimised the weights (3, 10, 3 instead of 1, 2, 1) for rotation invariance. On a ring pattern with the true gradient direction known everywhere:
+
+| Kernel | Ring period about 12 px: mean / max direction error | Ring period about 6 px: mean / max |
+| --- | --- | --- |
+| Sobel 3 × 3 | 0.19° / 0.40° | 0.79° / 1.42° |
+| Scharr 3 × 3 | 0.05° / 0.09° | 0.15° / 0.28° |
+
+Scharr is about five times more accurate in direction, at the same cost. It matters when directions are used (Canny's non-maximum suppression, Hough voting (26), HOG features (35.3), orientation of parts); for magnitude only, Sobel is fine. Larger Sobel kernels (`ksize=5`, `7`) smooth more and respond to wider edges.
+
+<EdgeLab mode="gradient" caption="gx and gy (grey = 0, bright = positive, dark = negative), the magnitude, and the direction shown as colour (the same colour means the same direction; brightness is the magnitude). Increase σ to suppress noise and texture; switch to the metal plate to see a noisy surface. The last panel thresholds the magnitude: the edges come out several pixels thick, which is the problem Canny solves (22.4)."/>
+
+## 4. Practical details
+
+- **Output depth**: gradients are signed and larger than 255. Use `cv2.CV_16S` (fast, exact for 8-bit input) or `cv2.CV_32F`. With `ddepth=cv2.CV_8U` negative values are clipped to 0 and half the edges disappear.
+- **Magnitude**: `cv2.magnitude(gx, gy)` (float inputs) or the cheaper L1 form |gx| + |gy| (Canny's default).
+- **Direction**: `cv2.phase(gx, gy, angleInDegrees=True)` (0–360°), or `np.arctan2`.
+- **Noise**: a flat area with noise σ = 5 gives Sobel responses with a standard deviation of about 17; a 100-grey-level step gives 400. Smooth first (Gaussian, 18.2) if the edges of interest are weak.
+
+## 5. Industrial example
+
+Gradient magnitude images are the input to many inspection steps: edge-based template matching (shape-based matching in commercial tools compares gradient directions, which are robust to lighting changes), focus scoring (sum of squared gradients, 50.3), and defect detection on smooth surfaces, where scratches appear as gradient ridges. Directions are used to verify that an edge has the expected orientation: a crack across a weld seam has a different gradient direction from the seam's own edges.
+
+## What you should remember from 22.2
+
+<Takeaways>
+<Takeaway n={1} title="Gradient">(gx, gy): direction points from dark to bright, across the edge.</Takeaway>
+<Takeaway n={2} title="Kernels">Sobel: difference × (1, 2, 1) smoothing; Scharr: (3, 10, 3), more accurate in direction.</Takeaway>
+<Takeaway n={3} title="Outputs">Magnitude (strength) and direction; use CV_16S or CV_32F.</Takeaway>
+<Takeaway n={4} title="Limits">Thresholded magnitude gives thick edges; noise needs smoothing first.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A vertical edge, dark (20) on the left, bright (220) on the right. What are gx and gy with Sobel on the edge?
+
+<Solution>
+
+gx = (220 − 20)(1 + 2 + 1) = **800**, gy = **0**. The gradient points right (0°), and the edge runs vertically.
+
+</Solution>
+
+**Q2.** Why is cv2.Sobel(img, cv2.CV_8U, 1, 0) wrong for a uint8 image?
+
+<Solution>
+
+The result is clipped to 0–255: negative gradients (bright-to-dark edges in x) become 0, and strong positive ones saturate at 255.
+
+</Solution>
+
+### Next: 22.3 Laplacian and LoG
+
+The second-derivative route: zero crossings of the Laplacian of Gaussian.
+
+## Code
+
+Two examples: Sobel by hand and with OpenCV, then direction accuracy of Sobel and Scharr.
+
+### 1. Gradients
+
+```python
+import numpy as np
+import cv2
+
+p = np.array([[10, 10, 90], [10, 10, 90], [10, 90, 90]], np.float32)
+kx = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], np.float32)
+gx, gy = float((p * kx).sum()), float((p * kx.T).sum())
+print(f"by hand: gx {gx}, gy {gy}, magnitude {np.hypot(gx, gy):.1f}, direction {np.degrees(np.arctan2(gy, gx)):.1f} deg")
+
+scene = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+Gx = cv2.Sobel(scene, cv2.CV_16S, 1, 0, ksize=3)                    # signed 16-bit: exact
+Gy = cv2.Sobel(scene, cv2.CV_16S, 0, 1, ksize=3)
+mag = cv2.magnitude(Gx.astype(np.float32), Gy.astype(np.float32))
+ang = cv2.phase(Gx.astype(np.float32), Gy.astype(np.float32), angleInDegrees=True)
+print("gx range", int(Gx.min()), int(Gx.max()), "| at the disc's left edge (100, 35):", int(Gx[100, 35]), int(Gy[100, 35]), round(float(ang[100, 35]), 1))
+print("clipped CV_8U version keeps", int((cv2.Sobel(scene, cv2.CV_8U, 1, 0) > 0).sum()), "of", int((Gx != 0).sum()), "non-zero pixels")
+```
+
+Output:
+
+```text
+by hand: gx 320.0, gy 160.0, magnitude 357.8, direction 26.6 deg
+gx range -745 803 | at the disc's left edge (100, 35): 803 -19 358.6
+clipped CV_8U version keeps 34440 of 62383 non-zero pixels
+```
+
+- `cv2.phase` returns 0–360°: 358.6° is just below the x axis, the gradient points right across the vertical disc edge.
+- With `CV_8U`, almost half of the gradient information is lost (every negative value is clipped to 0, and values above 255 saturate).
+
+### 2. Sobel vs Scharr directions
+
+```python
+import numpy as np
+import cv2
+
+y, x = np.mgrid[-100:101, -100:101].astype(np.float64)
+r = np.hypot(x, y)
+true_dir = np.arctan2(y, x)                                         # rings: gradient is radial
+for k in (0.5, 1.0):                                                # ring frequency in rad/px
+    img = 128 + 100 * np.cos(r * k)
+    mask = (r > 20) & (r < 90) & (np.abs(np.sin(r * k)) > 0.5)      # where the gradient is strong
+    for name, (gx, gy) in {"Sobel ": (cv2.Sobel(img, cv2.CV_64F, 1, 0), cv2.Sobel(img, cv2.CV_64F, 0, 1)),
+                           "Scharr": (cv2.Scharr(img, cv2.CV_64F, 1, 0), cv2.Scharr(img, cv2.CV_64F, 0, 1))}.items():
+        err = np.abs(np.angle(np.exp(2j * (np.arctan2(gy, gx) - true_dir))) / 2)    # ignore the sign
+        print(f"k {k}: {name} mean {np.degrees(err[mask].mean()):.2f} deg | max {np.degrees(err[mask].max()):.2f} deg")
+```
+
+Output:
+
+```text
+k 0.5: Sobel  mean 0.19 deg | max 0.40 deg
+k 0.5: Scharr mean 0.05 deg | max 0.09 deg
+k 1.0: Sobel  mean 0.79 deg | max 1.42 deg
+k 1.0: Scharr mean 0.15 deg | max 0.28 deg
+```
+
+## OpenCV API notes
+
+**`cv2.Sobel(src, ddepth, dx, dy, ksize=3, scale=1, delta=0, borderType=cv2.BORDER_DEFAULT)`**:
+- `dx`, `dy`: derivative order in x and y (1, 0 for gx; 0, 1 for gy; 2, 0 for second derivatives).
+- `ksize`: 1, 3, 5, 7. `ksize=1` uses a 3 × 1 or 1 × 3 kernel without smoothing; `ksize=-1` (`cv2.FILTER_SCHARR`) uses Scharr.
+- `ddepth`: `cv2.CV_16S` or `cv2.CV_32F`/`CV_64F`.
+
+**`cv2.Scharr(src, ddepth, dx, dy, scale=1, delta=0, borderType=...)`**: 3 × 3 only, first derivatives only.
+
+**`cv2.spatialGradient(src, ksize=3)`**: gx and gy in one call (uint8 in, int16 out), faster than two Sobel calls.
+
+**`cv2.magnitude(x, y)`**, **`cv2.phase(x, y, angleInDegrees)`**, **`cv2.cartToPolar(x, y)`**: float32/float64 inputs. **`cv2.getDerivKernels(dx, dy, ksize)`** returns the 1-D kernels used.
+
+**Display**: `cv2.convertScaleAbs(G)` maps |G| to 0–255 for viewing only.
+
+## Where it fails
+
+- **Noise and texture**: produce strong gradients everywhere; smooth first or use larger kernels.
+- **Thick responses**: magnitude thresholds give bands several pixels wide; use non-maximum suppression (22.4).
+- **Low-contrast edges**: below the gradient noise level they cannot be separated by a threshold.
+- **Corners and junctions**: the gradient direction is undefined where several edges meet.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **`ddepth=cv2.CV_8U`** for derivatives.
+- **Expecting values in grey levels**: Sobel's scale is 8 × (and Scharr's 32 ×) the per-pixel step.
+- **Confusing edge direction and gradient direction**: they are perpendicular.
+- **Using `convertScaleAbs` output for measurement**: it is a display image (absolute, saturated).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Derivative filters as smoothed differences
+
+Every practical derivative kernel combines a difference with smoothing. Sobel's 1-2-1 is a binomial (approximately Gaussian) smoother; a derivative of Gaussian with σ is the continuous ideal, and larger Sobel kernels approach it. Scharr [2] chose integer weights that minimise the directional error of the gradient across all frequencies, a problem later revisited for larger optimised kernels by Farid and Simoncelli [3].
+
+### Gradient and structure
+
+The gradient is defined for each pixel; the structure tensor (the local covariance of gradients) describes a neighbourhood: two strong eigenvalues mean a corner (Harris, 33.2), one means an edge, none a flat area.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The gradient at an edge points…",
+      options: ["Along the edge", "Across the edge, from dark to bright", "Always to the right", "From bright to dark"],
+      answer: 1,
+      explanation: "The edge runs perpendicular to it.",
+    },
+    {
+      question: "Sobel-x is a difference in x combined with…",
+      options: ["Smoothing 1-2-1 in y", "Sharpening in y", "Nothing", "A median"],
+      answer: 0,
+      explanation: "Separable: [−1 0 1] × [1 2 1]ᵀ.",
+    },
+    {
+      question: "Why prefer Scharr over 3 × 3 Sobel?",
+      options: ["It is faster", "More accurate gradient directions", "It removes noise completely", "It works on colour"],
+      answer: 1,
+      explanation: "About five times smaller direction errors in the test.",
+    },
+    {
+      question: "Which output depth is correct for Sobel on uint8 images?",
+      options: ["CV_8U", "CV_16S or CV_32F", "CV_8S", "Any"],
+      answer: 1,
+      explanation: "Signed and large values.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A diagonal edge: (0 0 0; 0 0 100; 0 100 100) around the centre. Compute Sobel gx, gy, the magnitude and the direction.
+
+<Solution>
+
+gx = (0 − 0)·1 + (100 − 0)·2 + (100 − 0)·1 = **300**; gy = (0 − 0)·1 + (100 − 0)·2 + (100 − 0)·1 = **300**. Magnitude 424.3, direction **45°** (down-right, towards the bright corner).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Compare `cv2.spatialGradient` with two `cv2.Sobel` calls on the scene: are the results identical, and which is faster?
+
+<Solution>
+
+```python
+import time
+import numpy as np
+import cv2
+
+sx, sy = cv2.spatialGradient(scene)
+print("identical:", np.array_equal(sx, Gx) and np.array_equal(sy, Gy))
+t = time.perf_counter()
+for _ in range(200):
+    cv2.spatialGradient(scene)
+t1 = time.perf_counter()
+for _ in range(200):
+    cv2.Sobel(scene, cv2.CV_16S, 1, 0); cv2.Sobel(scene, cv2.CV_16S, 0, 1)
+t2 = time.perf_counter()
+print(f"spatialGradient {(t1 - t) / 200 * 1e3:.3f} ms | two Sobel calls {(t2 - t1) / 200 * 1e3:.3f} ms")
+```
+
+Typical output (timings depend on the machine):
+
+```text
+identical: True
+spatialGradient 0.040 ms | two Sobel calls 0.060 ms
+```
+
+The results are identical (both use 3 × 3 Sobel kernels and the default border); `spatialGradient` computes both derivatives in one pass over the image, which saves time.
+
+</Solution>
+
+## References
+
+1. R. O. Duda, P. E. Hart, *Pattern Classification and Scene Analysis*, Wiley, 1973 (the Sobel operator, attributed to I. Sobel and G. Feldman, 1968).
+2. H. Scharr, *Optimale Operatoren in der digitalen Bildverarbeitung*, PhD thesis, University of Heidelberg, 2000.
+3. H. Farid, E. P. Simoncelli, "Differentiation of discrete multidimensional signals", *IEEE Trans. Image Processing* 13(4), 496–508, 2004.
+4. OpenCV 4.13.0 documentation: `Sobel`, `Scharr`, `spatialGradient`, `magnitude`, `phase`. https://docs.opencv.org/4.13.0/

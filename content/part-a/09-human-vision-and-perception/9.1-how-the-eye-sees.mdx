@@ -1,0 +1,359 @@
+export const meta = {
+  number: "9.1",
+  title: "How the eye sees",
+  minutes: 25,
+  objectives: [
+    "Name the parts of the eye and compare them with a camera (lens, aperture, sensor)",
+    "Explain rods and cones, the fovea and why only the centre of gaze is sharp",
+    "Use visual angle (arcminutes) to decide whether an operator can see a defect on a screen",
+    "Know why grey conversion weights green most",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 9.1 (Module 9 plan).
+  Anatomy numbers follow Gonzalez & Woods, 4th ed., Section 2.1; cone peak wavelengths follow Bowmaker & Dartnall (1980).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 9.1 How the eye sees
+
+<Definition term="Human visual system">the eye, which focuses light onto a layer of light-sensitive cells (the retina), together with the brain, which turns the cells' signals into what we perceive. In every vision system it is the final "camera": the operator who looks at the result.</Definition>
+
+A machine vision system is designed with cameras, but it is set up, checked and trusted by people looking at screens. Knowing how the eye works explains why some defects are obvious to a person and invisible to a camera (and the reverse), and how to show images so operators can judge them.
+
+## 1. An analogy
+
+The eye is a camera with a very unusual sensor: extremely sharp in a tiny spot in the middle, blurry everywhere else, and constantly moving that spot around. The brain stitches the sharp glimpses into what feels like one sharp picture. A camera sensor is the opposite: equally sharp everywhere, but it does not know where to look.
+
+## 2. The eye as a camera
+
+<LightPath to="eye" object="PART" caption="Light from the part enters the eye like it enters a camera: through the cornea and lens, onto the retina." />
+
+| Eye | Camera (Module 2) | What it does |
+| --- | --- | --- |
+| Cornea + lens | Lens | Focuses light; the eye's lens changes shape to focus (accommodation), a camera lens moves |
+| Iris and pupil (about 2–8 mm) | Aperture (f-number) | Controls light; small pupil = more depth of field |
+| Retina | Sensor | Converts light into signals |
+| Rods and cones | Pixels | Light-sensitive cells |
+| Optic nerve | Cable and interface | About one million fibres carry the signals to the brain |
+| Brain | Image processing | Builds what we perceive |
+
+## 3. Rods and cones
+
+The retina has two kinds of light-sensitive cells [1]:
+
+| | Rods | Cones |
+| --- | --- | --- |
+| Number | about 75–150 million | about 6–7 million |
+| Works in | dim light (night, scotopic vision) | daylight (photopic vision) |
+| Colour | no (one type only) | yes: three types, S, M, L |
+| Where | everywhere except the very centre | concentrated in the fovea |
+| Detail | low (many rods share one nerve fibre) | high in the fovea (nearly one fibre per cone) |
+
+The three cone types are sensitive to short, medium and long wavelengths, with peaks near 420 nm (S, "blue"), 534 nm (M, "green") and 564 nm (L, "red") [2]. Colour is the brain comparing their three signals (9.4). In dim light only rods work: we see in shades of grey, like a monochrome camera at high gain.
+
+## 4. The fovea: only the centre is sharp
+
+The **fovea** is a pit about 1.5 mm across in the centre of the retina, packed with cones. Only there do we see fine detail; a few degrees away, acuity drops steeply. Where the optic nerve leaves the eye there are no receptors at all: the **blind spot**, which we do not notice because the brain fills it in and the other eye covers it.
+
+<ImageCompare
+  before={{ src: "/images/sample-scene.png", label: "Camera" }}
+  after={[{ src: "/images/sample-scene-foveated.png", label: "Eye, looking at the centre" }]}
+  width={320}
+  height={200}
+  alt="The sample scene sharp everywhere, and the same scene sharp only in the middle and increasingly blurred towards the corners"
+  caption="A rough impression: the eye sees fine detail only where it looks. To inspect a whole image, an operator must move their gaze across it."
+/>
+
+Consequence for inspection: an operator watching a live image notices motion and large changes everywhere, but small defects only where they happen to look. Visual inspection by people misses defects not because people are careless, but because the sharp spot is small and attention moves.
+
+## 5. Visual acuity: angle, not size
+
+What matters is not how big a detail is, but the **angle** it covers at the eye. Normal ("20/20") vision resolves details of about **1 arcminute** (1/60 of a degree): a 0.17 mm gap at 600 mm, or a 1 mm gap at 3.4 m.
+
+<Equation terms={[{ value: "angle (arcmin)" }, { op: "=", value: "2 · atan(size / (2 · distance)) · (180/π) · 60", result: true }]} />
+
+A pixel on a 24" full-HD monitor is 0.277 mm: about 1.6 arcmin at 600 mm. A 1-pixel defect shown at 1:1 is therefore at the very limit of what an operator can see. The lab lets you check your own screen.
+
+<AcuityLab caption="Screen, viewing distance, defect size in image pixels and display zoom → visual angle at the operator's eye. Below about 1′ a detail cannot be resolved." />
+
+Things to try: 2-pixel defect, 24" monitor, 600 mm: about 3′, at the limit. Step back to 1500 mm (operator standing at the line): about 1.3′, barely resolvable; a 1-pixel defect there is invisible. The cure is not a bigger monitor but **zoom**: show a magnified ROI around each candidate defect.
+
+## 6. Eye vs camera
+
+| | Eye | Industrial camera |
+| --- | --- | --- |
+| Sharp area | about 1–2° in the centre | whole sensor |
+| Brightness range | adapts over a huge range (G&W: about 10¹⁰ overall), but much less within one view | about 10³–10⁴ within one image (60–80 dB) |
+| Colour | three cone types, adaptive white balance | Bayer filter, fixed or auto white balance |
+| Speed | flicker fusion around 50–90 Hz | microseconds of exposure, 1000 fps possible |
+| Consistency | tires, adapts, is fooled by context (9.3) | repeatable, measurable |
+| Strength | understanding, new defect types, context | tireless, numeric, fast, objective |
+
+## 7. Industrial example
+
+A glass-inspection station shows the camera image of each sheet on a 24" monitor at 1:1 for a human final check. Coatings defects of 2–3 pixels are regularly missed by operators, while the vision system flags them. Using the acuity calculation, the team sees that at the operator's 1.2 m distance a 2-pixel defect covers about 1.6′: barely resolvable even when looked at directly. They change the HMI: the overview stays, but each flagged defect is shown as a 4× zoomed tile with a coloured frame. Operator confirmation rates rise, and the remaining disagreements become real classification questions instead of "I can't see it".
+
+## What you should remember from 9.1
+
+<Takeaways>
+<Takeaway n={1} title="Camera-like">Cornea and lens focus, the pupil is the aperture, the retina is the sensor.</Takeaway>
+<Takeaway n={2} title="Rods and cones">Rods for dim light (no colour), three cone types for daylight and colour.</Takeaway>
+<Takeaway n={3} title="Fovea">Only the centre of gaze is sharp; people inspect by moving their eyes.</Takeaway>
+<Takeaway n={4} title="Acuity">About 1 arcminute; screen details below that are invisible. Zoom, don't squint.</Takeaway>
+<Takeaway n={5} title="Green">The eye is most sensitive to green; grey conversion weights green most.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Which cells do you use to read text in daylight, and where are they concentrated?
+
+<Solution>
+
+**Cones**, concentrated in the **fovea**.
+
+</Solution>
+
+**Q2.** What visual angle does a 0.5 mm scratch cover at 1 m? Can a person with normal vision resolve it?
+
+<Solution>
+
+0.5 / 1000 rad ≈ 0.0286° ≈ **1.7 arcmin**: just above the 1′ limit; visible when looked at directly with good contrast.
+
+</Solution>
+
+**Q3.** Why does a pure green pixel look brighter than a pure blue pixel of the same RGB value?
+
+<Solution>
+
+The eye's daylight sensitivity peaks in the green (the M and L cones overlap there); blue contributes little to perceived brightness. Grey conversion copies this: green weight 0.587, blue 0.114.
+
+</Solution>
+
+### Next: 9.2 Brightness and Weber's law
+
+How we perceive brightness: not linearly, but relative to the surroundings and in ratios.
+
+## Code
+
+Three examples: visual angle of screen pixels, a foveated view with OpenCV, and the grey weights.
+
+### 1. From scratch: how big is a pixel to the eye?
+
+```python
+import numpy as np
+import cv2
+
+def arcmin(size_mm, dist_mm):
+    return np.degrees(2 * np.arctan(size_mm / (2 * dist_mm))) * 60
+
+screens = [("15.6in laptop 1920x1080", 15.6, 1920, 1080), ("24in monitor 1920x1080", 24, 1920, 1080),
+           ("27in monitor 3840x2160", 27, 3840, 2160), ("12in HMI 1280x800", 12, 1280, 800)]
+for name, diag, w, h in screens:
+    pitch = diag * 25.4 / np.hypot(w, h)
+    print(f"{name:24s} pitch {pitch:.3f} mm | 1 px at 600 mm: {arcmin(pitch, 600):.2f} arcmin | at 1500 mm: {arcmin(pitch, 1500):.2f} arcmin")
+```
+
+Output:
+
+```text
+15.6in laptop 1920x1080  pitch 0.180 mm | 1 px at 600 mm: 1.03 arcmin | at 1500 mm: 0.41 arcmin
+24in monitor 1920x1080   pitch 0.277 mm | 1 px at 600 mm: 1.59 arcmin | at 1500 mm: 0.63 arcmin
+27in monitor 3840x2160   pitch 0.156 mm | 1 px at 600 mm: 0.89 arcmin | at 1500 mm: 0.36 arcmin
+12in HMI 1280x800        pitch 0.202 mm | 1 px at 600 mm: 1.16 arcmin | at 1500 mm: 0.46 arcmin
+```
+
+- On a 4K 27" monitor a single pixel is below 1′ even at desk distance: high-resolution screens show more of the image, not smaller visible details.
+- At 1.5 m, no screen here makes a 1-pixel detail visible without zoom.
+
+### 2. OpenCV: what the eye sees when looking at the centre
+
+Blur grows with distance from the fixation point: four images with increasing Gaussian blur, blended per pixel by eccentricity.
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+h, w = img.shape
+fy, fx = h // 2, w // 2                                       # where the viewer looks
+yy, xx = np.mgrid[0:h, 0:w]
+ecc = np.hypot(xx - fx, yy - fy) / np.hypot(w / 2, h / 2)     # 0 at the fixation point, ~1 in the corners
+levels = [img] + [cv2.GaussianBlur(img, (0, 0), s) for s in (1.5, 3.0, 6.0)]
+idx = np.clip(ecc * (len(levels) - 1), 0, len(levels) - 1.001)
+lo = idx.astype(int)
+t = idx - lo
+stack = np.stack(levels)
+fovea = ((1 - t) * stack[lo, yy, xx] + t * stack[lo + 1, yy, xx]).astype(np.float32)
+
+def sharpness(a):
+    return float(cv2.Laplacian(a, cv2.CV_32F).var())
+
+c = (slice(fy - 10, fy + 10), slice(fx - 15, fx + 15))
+k = (slice(0, 40), slice(0, 60))
+print(f"centre sharpness: original {sharpness(img[c]):.1f} -> foveated {sharpness(fovea[c]):.1f}")
+print(f"corner sharpness: original {sharpness(img[k]):.1f} -> foveated {sharpness(fovea[k]):.2f}")
+cv2.imwrite("scene-foveated.png", np.clip(fovea, 0, 255).astype(np.uint8))
+```
+
+Output:
+
+```text
+centre sharpness: original 1485.0 -> foveated 1033.9
+corner sharpness: original 756.0 -> foveated 0.03
+```
+
+- The variance of the Laplacian is a simple sharpness measure (high = much fine detail). In the corner, fine detail (the noise and edges) is gone.
+- This is an illustration, not a model of the retina: real acuity falls with the visual angle from the fovea, so it depends on screen size and viewing distance.
+
+### 3. OpenCV: why green counts most
+
+```python
+import numpy as np
+import cv2
+
+px = np.array([[[255, 0, 0], [0, 255, 0], [0, 0, 255]]], np.uint8)     # pure B, G, R (BGR order)
+gray = cv2.cvtColor(px, cv2.COLOR_BGR2GRAY)[0]
+print("cv2 gray of pure blue, green, red:", gray.tolist(), "(weights 0.114, 0.587, 0.299)")
+rec709 = np.array([0.0722, 0.7152, 0.2126])                            # B, G, R weights of Rec. 709 luminance
+print("Rec. 709 luminance of the same:", np.round(255 * rec709).astype(int).tolist())
+```
+
+Output:
+
+```text
+cv2 gray of pure blue, green, red: [29, 150, 76] (weights 0.114, 0.587, 0.299)
+Rec. 709 luminance of the same: [18, 182, 54]
+```
+
+- OpenCV uses the ITU-R BT.601 weights; HD video and sRGB use Rec. 709 weights for linear light. Both give green the largest share because the eye's daylight sensitivity peaks near 555 nm (green) [3].
+- Chapter 10.5 treats grey conversion in detail.
+
+## OpenCV API notes
+
+There are no "eye" functions in OpenCV; this chapter uses tools from earlier chapters:
+
+- `cv2.GaussianBlur(src, (0, 0), sigma)`: kernel size computed from sigma.
+- `cv2.Laplacian(src, ddepth)` and its variance as a sharpness measure (Part C).
+- `cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)`: BT.601 weights (0.299 R + 0.587 G + 0.114 B).
+- For HMI zoom tiles: `cv2.resize(roi, None, fx=4, fy=4, interpolation=cv2.INTER_NEAREST)` keeps pixels square and honest.
+
+## Where it fails
+
+- **Simplified acuity**: 1′ holds for high-contrast details in the fovea of a person with normal vision; low contrast, age, tiredness and peripheral viewing all make the limit larger.
+- **Screens are not the eye's only limit**: display scaling, compression of the video stream and screen gamma (9.2) also hide details.
+- **Individual differences**: colour vision deficiencies (9.4), glasses, lighting at the workstation.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Showing full-resolution images downscaled to fit the screen** and expecting operators to see single-pixel defects.
+- **Buying a higher-resolution monitor** to make details more visible: smaller pixels make them less visible at 1:1.
+- **Assuming the operator watches the whole image**: attention covers a small area at a time.
+- **Treating "the operator didn't see it" as a training problem** before checking the visual angle.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Photopic and scotopic sensitivity
+
+The CIE luminous efficiency function V(λ) describes daylight (photopic) brightness sensitivity: it peaks at 555 nm and falls to about 1 % at 430 nm and 690 nm. In dim light the rods' scotopic curve V′(λ) peaks near 507 nm, so blue-green objects look relatively brighter at dusk (the Purkinje shift) [3].
+
+### Acuity and the Nyquist limit of the fovea
+
+Foveal cones are spaced about 0.5 arcmin apart. By the sampling theorem (3.1) this allows patterns of about 60 cycles per degree to be resolved, which matches the measured limit of human acuity and the 1′ (one dark + one bright bar per 2′) rule [1].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which part of the eye plays the role of the camera's aperture?",
+      options: ["Retina", "Iris and pupil", "Optic nerve", "Cornea"],
+      answer: 1,
+      explanation: "The pupil diameter controls how much light enters.",
+    },
+    {
+      question: "Where is human vision sharpest?",
+      options: ["Evenly over the whole retina", "In the fovea, at the centre of gaze", "At the blind spot", "In the periphery"],
+      answer: 1,
+      explanation: "Cone density and nerve wiring give full detail only in the fovea.",
+    },
+    {
+      question: "Normal visual acuity is about…",
+      options: ["1 degree", "1 arcminute", "1 arcsecond", "1 millimetre"],
+      answer: 1,
+      explanation: "Angle, not size: about 1/60 of a degree.",
+    },
+    {
+      question: "Which colour contributes most to perceived brightness?",
+      options: ["Blue", "Green", "Red", "All equally"],
+      answer: 1,
+      explanation: "Daylight sensitivity peaks near 555 nm.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+An operator stands 1.5 m from a 24" full-HD monitor (pixel 0.277 mm). How many screen pixels must a defect span to reach 4 arcmin?
+
+<Solution>
+
+4′ at 1500 mm: size = 1500 · tan(4/60°) ≈ 1.745 mm → 1.745 / 0.277 ≈ **6.3 screen pixels**. A 2-pixel image defect needs about 3× zoom.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Write `zoom_for(defect_px, pitch_mm, dist_mm, target_arcmin=4)` and print the zoom needed for a 1-pixel and a 3-pixel defect on the 12" HMI panel at 600 and 1500 mm.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+def zoom_for(defect_px, pitch_mm, dist_mm, target_arcmin=4):
+    size = 2 * dist_mm * np.tan(np.radians(target_arcmin / 60) / 2)
+    return size / (defect_px * pitch_mm)
+
+pitch = 12 * 25.4 / np.hypot(1280, 800)
+for d in [600, 1500]:
+    print(f"{d} mm: 1 px needs {zoom_for(1, pitch, d):.1f}x, 3 px need {zoom_for(3, pitch, d):.1f}x")
+```
+
+Output:
+
+```text
+600 mm: 1 px needs 3.5x, 3 px need 1.2x
+1500 mm: 1 px needs 8.6x, 3 px need 2.9x
+```
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Why do people detect a missing component on a board almost instantly, while they easily overlook a 0.2 mm scratch on the same board?
+
+<Solution>
+
+A missing component is a large change in shape and contrast, visible in peripheral vision and attracting attention. A 0.2 mm scratch covers less than 1′ at normal viewing distance (0.2 mm at 600 mm ≈ 1.1′) and has low contrast, so it is visible only if the fovea happens to look exactly there. Machine vision has the opposite strengths: it examines every pixel equally, but must be told what "missing" means.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 2.1 (elements of visual perception).
+2. J. K. Bowmaker, H. J. A. Dartnall, "Visual pigments of rods and cones in a human retina", *Journal of Physiology* 298, 1980.
+3. CIE, luminous efficiency functions V(λ) and V′(λ) (CIE 1924 / 1951); ITU-R Recommendations BT.601 and BT.709.
+4. B. A. Wandell, *Foundations of Vision*, Sinauer, 1995.

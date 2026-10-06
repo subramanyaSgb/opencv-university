@@ -1,0 +1,13 @@
+{
+  "number": 3,
+  "title": "Digital images",
+  "summary": "Pixels as data: sampling, quantization, channels, coordinates, aliasing and neighbourhoods.",
+  "chapters": [
+    { "number": "3.1", "slug": "3.1-sampling-and-resolution", "title": "Sampling and resolution" },
+    { "number": "3.2", "slug": "3.2-quantization-and-bit-depth", "title": "Quantization and bit depth" },
+    { "number": "3.3", "slug": "3.3-channels", "title": "Channels" },
+    { "number": "3.4", "slug": "3.4-coordinates-and-indexing", "title": "Coordinates and indexing" },
+    { "number": "3.5", "slug": "3.5-aliasing-and-nyquist", "title": "Aliasing and Nyquist" },
+    { "number": "3.6", "slug": "3.6-neighbours-connectivity-distance", "title": "Neighbours, connectivity, distance" }
+  ]
+}

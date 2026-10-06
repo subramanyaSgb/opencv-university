@@ -1,0 +1,13 @@
+{
+  "number": 18,
+  "title": "Noise and smoothing",
+  "summary": "Where noise comes from and how to remove it: box, Gaussian, median, bilateral and non-local means filters, and how to choose between them.",
+  "chapters": [
+    { "number": "18.1", "slug": "18.1-noise-types", "title": "Noise types" },
+    { "number": "18.2", "slug": "18.2-box-and-gaussian", "title": "Box and Gaussian" },
+    { "number": "18.3", "slug": "18.3-median", "title": "Median" },
+    { "number": "18.4", "slug": "18.4-bilateral", "title": "Bilateral" },
+    { "number": "18.5", "slug": "18.5-non-local-means", "title": "Non-local means" },
+    { "number": "18.6", "slug": "18.6-choosing-a-filter", "title": "Choosing a filter" }
+  ]
+}

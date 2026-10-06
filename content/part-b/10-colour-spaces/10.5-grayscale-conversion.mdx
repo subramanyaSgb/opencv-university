@@ -1,0 +1,285 @@
+export const meta = {
+  number: "10.5",
+  title: "Grayscale conversion",
+  minutes: 20,
+  objectives: [
+    "Know the common grey conversions (BT.601, BT.709, average, max, L*) and where each comes from",
+    "Recognise that colours with equal grey values disappear after conversion",
+    "Choose the channel or weighted combination that maximises the contrast an inspection needs",
+    "Convert with cv2.cvtColor, cv2.transform and imread flags",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 10.5 (Module 10 plan).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 10.5 Grayscale conversion
+
+<Definition term="Grayscale conversion">turning three colour values per pixel into one, usually a weighted sum of R, G and B. The weights decide which colours become light and which dark, so "grey" is a choice, not a fact.</Definition>
+
+Most inspection algorithms work on single-channel images: thresholds, edges, contours, template matching. Converting colour to grey is therefore one of the most common first steps, and often done without thinking. This chapter shows that the weights matter, and that the "natural-looking" grey is not always the best for an algorithm.
+
+## 1. An analogy
+
+Photographing a coloured scene on black-and-white film through coloured filters. A red filter makes a blue sky dark and red bricks light; a green filter does the opposite. Photographers chose the filter that gave the contrast they wanted. Choosing grey-conversion weights is exactly that choice.
+
+## 2. Common conversions
+
+<Flow
+  steps={[
+    { label: "B, G, R of a pixel", tone: "data" },
+    { label: "Weights wB, wG, wR (the 'filter' you choose)", tone: "process" },
+    { label: "grey = wB·B + wG·G + wR·R", tone: "process" },
+    { label: "One value per pixel for thresholds, edges, OCR …", tone: "result" },
+  ]}
+/>
+
+| Name | Formula | Use |
+| --- | --- | --- |
+| BT.601 luma (OpenCV `COLOR_BGR2GRAY`) | 0.299 R + 0.587 G + 0.114 B | default; looks natural |
+| BT.709 luma | 0.2126 R + 0.7152 G + 0.0722 B | HD video / sRGB (strictly for linear values) |
+| Average | (R + G + B) / 3 | simple; treats channels equally |
+| Max (HSV V) | max(R, G, B) | "is anything bright here?" |
+| Lab L\* | perceptual lightness (10.3) | when grey should match perceived lightness |
+| One channel | R, G or B | maximum contrast for specific colours |
+| Custom weights | a·R + b·G + c·B (may be negative) | tuned to separate two colours |
+
+Monochrome cameras are a "conversion" too: their sensor's spectral sensitivity (plus any filter in front of the lens) sets the weights physically. A red filter on a mono camera (59.4) is the hardware version of "R only".
+
+## 3. Colours that vanish
+
+Two colours with the same weighted sum become the same grey. A red label (B, G, R = 40, 40, 200) on a green background (40, 112, 60): BT.601 gives 88 for both. The label disappears.
+
+<GrayLab caption="One label in colour and in grey with different conversions. Watch the label disappear in BT.601 and reappear with other weights. 'Best for this scene' picks the method with the largest contrast." />
+
+Things to try: red label on green: BT.601 contrast 0, R channel 140. Blue print on black: the R channel shows almost nothing, the B channel or max works. Orange part on grey belt: average and BT.601 differ a lot.
+
+## 4. Choosing the conversion for an inspection
+
+1. **Look at the colours that must be separated** (feature vs background), measured on real images.
+2. **Try the single channels** (`cv2.split`): often one channel alone gives the best contrast.
+3. **Try a difference** (for example R − G) when two colours have similar brightness but different hue.
+4. **Best of all, fix it with light**: illuminating with a colour that the feature reflects and the background absorbs (59.3) gives contrast before any processing.
+5. **Keep the conversion fixed** once chosen; document it.
+
+For **display to people**, BT.601 or L\* look natural. For **algorithms**, the "unnatural" conversion that maximises contrast is often better.
+
+## 5. Industrial example
+
+A pharmaceutical line reads red lot numbers printed on green blister foil. The OCR, trained on grey images converted with `COLOR_BGR2GRAY`, failed on a new foil colour: red text and green foil had nearly the same luma. Measuring the two colours showed a difference of 140 in the R channel and 72 in G, but only 0.4 in luma. Switching the preprocessing to the R channel (after white balance) restored a strong, stable contrast; the camera's mono successor model was later fitted with a red band-pass filter, which does the same optically and improves the signal-to-noise ratio.
+
+## What you should remember from 10.5
+
+<Takeaways>
+<Takeaway n={1} title="A choice">Grey = weighted sum; OpenCV's default is BT.601 (0.299, 0.587, 0.114).</Takeaway>
+<Takeaway n={2} title="Vanishing colours">Different colours with the same weighted sum become the same grey.</Takeaway>
+<Takeaway n={3} title="For algorithms">Pick the channel or weights that maximise the contrast you need.</Takeaway>
+<Takeaway n={4} title="For people">BT.601 or L* look natural.</Takeaway>
+<Takeaway n={5} title="Hardware">Coloured light or a filter on a mono camera does the same, with better SNR.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Compute the BT.601 grey of BGR (100, 100, 200).
+
+<Solution>
+
+0.299 · 200 + 0.587 · 100 + 0.114 · 100 = 59.8 + 58.7 + 11.4 = **129.9 → 130**.
+
+</Solution>
+
+**Q2.** A yellow mark (BGR 40, 210, 240) on white paper (235, 235, 235). Which single channel shows it best?
+
+<Solution>
+
+**B**: 40 vs 235 (yellow absorbs blue). R (240 vs 235) and G (210 vs 235) show almost nothing.
+
+</Solution>
+
+### Next: 10.6 White balance and colour constancy
+
+Making white look white: grey world, white patch and white references.
+
+## Code
+
+Two examples: weighted sums from scratch on a label that disappears, and custom conversions with `cv2.transform`.
+
+### 1. From scratch: which weights show the label?
+
+```python
+import numpy as np
+import cv2
+
+img = np.zeros((60, 160, 3), np.uint8)
+img[:] = (40, 112, 60)                                               # green background (BGR)
+cv2.putText(img, "LOT 4711", (8, 42), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (40, 40, 200), 3)   # red text
+text = cv2.inRange(img, (40, 40, 200), (40, 40, 200)) > 0
+
+weights = {"BT.601": (0.114, 0.587, 0.299), "BT.709": (0.0722, 0.7152, 0.2126), "average": (1 / 3, 1 / 3, 1 / 3),
+           "R only": (0, 0, 1), "G only": (0, 1, 0), "R - G": (0, -1, 1)}
+for name, (wb, wg, wr) in weights.items():
+    f = img.astype(np.float64)
+    g = wb * f[..., 0] + wg * f[..., 1] + wr * f[..., 2]               # from scratch: weighted sum
+    print(f"{name:8s}: text {g[text].mean():6.1f} | background {g[~text].mean():6.1f} | contrast {abs(g[text].mean() - g[~text].mean()):5.1f}")
+print("cv2 BGR2GRAY: text", int(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)[text][0]), "| background", int(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)[0, 0]))
+```
+
+Output:
+
+```text
+BT.601  : text   87.8 | background   88.2 | contrast   0.4
+BT.709  : text   74.0 | background   95.7 | contrast  21.7
+average : text   93.3 | background   70.7 | contrast  22.7
+R only  : text  200.0 | background   60.0 | contrast 140.0
+G only  : text   40.0 | background  112.0 | contrast  72.0
+R - G   : text  160.0 | background  -52.0 | contrast 212.0
+cv2 BGR2GRAY: text 88 | background 88
+```
+
+- OpenCV's default makes the text invisible (88 vs 88). R alone gives 140 levels of contrast, R − G even 212 (it uses both channels' differences).
+- Negative weights produce negative values: compute in float and rescale (example 2).
+
+### 2. OpenCV: custom weights with cv2.transform
+
+```python
+import numpy as np
+import cv2
+
+m = np.array([[0.0, -1.0, 1.0]], np.float32)                         # one output channel: R - G (B, G, R weights)
+rg = cv2.transform(img.astype(np.float32), m)                        # weighted sum of channels for every pixel
+rg8 = cv2.normalize(rg, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+print("R - G via cv2.transform:", rg.shape, "| text", int(rg8[text].mean()), "| background", int(rg8[~text].mean()))
+```
+
+Output:
+
+```text
+R - G via cv2.transform: (60, 160) | text 255 | background 0
+```
+
+- `cv2.transform` with a 1 × 3 matrix computes one weighted sum per pixel: the general "grey conversion" with any weights, fast and vectorised.
+- `cv2.normalize(..., NORM_MINMAX, CV_8U)` maps the result's range to 0–255; for production use fixed limits instead (the min/max depend on image content).
+
+## OpenCV API notes
+
+**Standard**: `cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)` (BT.601; also `COLOR_RGB2GRAY`, `COLOR_BGRA2GRAY`); `cv2.imread(path, cv2.IMREAD_GRAYSCALE)` (the decoder's conversion, which for JPEG may differ slightly from `cvtColor`).
+
+**Channels**: `cv2.split(img)`, `cv2.extractChannel(img, i)`.
+
+**Custom weights**: `cv2.transform(src, m)` with `m` of shape 1 × 3 (one output channel) or 1 × 4 (with offset); `cv2.addWeighted` for two channels.
+
+**Back to 3 channels for display**: `cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)`.
+
+## Where it fails
+
+- **Fixed weights and changing colours**: a conversion tuned for one product colour may lose contrast on the next.
+- **Noise**: single channels (especially B on Bayer cameras) are noisier than a weighted sum of all three.
+- **White balance**: channel weights assume a balanced camera; a colour cast changes which channel is best.
+- **Clipping**: a saturated channel loses the difference you rely on.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Converting to grey by habit** before checking where the contrast is.
+- **Using COLOR_BGR2GRAY on RGB images** (red and blue weights swapped).
+- **Rescaling with min/max per image** in production (contrast changes with content).
+- **Ignoring that IMREAD_GRAYSCALE and cvtColor** can give slightly different values for JPEGs.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Optimal weights
+
+For two classes of pixels (feature and background) with mean colours μ₁, μ₂ and a common covariance Σ, the linear combination w that best separates them is Fisher's linear discriminant: w ∝ Σ⁻¹(μ₁ − μ₂). It accounts for noise in each channel and correlations between channels, and often looks like "one channel minus a bit of another" (36.x). PCA's first component (5.6) gives the direction of largest overall variance instead, which is not necessarily the one that separates the classes [1].
+
+### Contrast-preserving decolourisation
+
+For photographs shown to people, methods exist that choose per-image weights (or even per-region mappings) so that colours that differ remain distinguishable in grey, for example by optimising a contrast-preserving objective (Lu, Xu & Jia, 2012). OpenCV's photo module offers `cv2.decolor`, based on this approach [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What weights does cv2.COLOR_BGR2GRAY use?",
+      options: ["Equal thirds", "0.299 R + 0.587 G + 0.114 B", "Max of the channels", "0.2126 R + 0.7152 G + 0.0722 B"],
+      answer: 1,
+      explanation: "ITU-R BT.601 luma.",
+    },
+    {
+      question: "A red feature on a green background disappears in grey because…",
+      options: ["Grey images have no information", "Both colours have the same weighted sum", "The camera is broken", "Red is always dark"],
+      answer: 1,
+      explanation: "Different colours can map to the same grey.",
+    },
+    {
+      question: "Which tool computes an arbitrary weighted sum of channels for every pixel?",
+      options: ["cv2.threshold", "cv2.transform", "cv2.resize", "cv2.flip"],
+      answer: 1,
+      explanation: "With a 1 × 3 matrix it produces one channel.",
+    },
+    {
+      question: "What is often better than any software conversion?",
+      options: ["More resolution", "Coloured lighting or an optical filter that creates contrast", "JPEG", "A larger screen"],
+      answer: 1,
+      explanation: "Contrast made by light is cleaner than contrast computed later.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Find a weight vector (wB, wG, wR) that maps the green background (40, 112, 60) to 0 and gives the red text (40, 40, 200) a large positive value. Check R − G.
+
+<Solution>
+
+R − G: background 60 − 112 = −52, text 200 − 40 = 160 (not 0 for the background). A combination that zeroes the background, e.g. wR = 1, wG = −60/112 ≈ −0.536, wB = 0: background 60 − 60 = **0**, text 200 − 0.536 · 40 ≈ **178.6**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+For the yellow mark on white of the lab, BGR (40, 210, 240) on (235, 235, 235), print the contrast for BT.601, average, and each single channel, using a 1 × 1 pixel per colour and `cv2.transform`.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+px = np.array([[[40, 210, 240], [235, 235, 235]]], np.float32)
+for name, w in {"BT.601": (0.114, 0.587, 0.299), "average": (1 / 3, 1 / 3, 1 / 3), "B": (1, 0, 0), "G": (0, 1, 0), "R": (0, 0, 1)}.items():
+    g = cv2.transform(px, np.array([w], np.float32))[0]
+    print(f"{name:7s}: mark {g[0]:6.1f} | paper {g[1]:6.1f} | contrast {abs(g[0] - g[1]):5.1f}")
+```
+
+Output:
+
+```text
+BT.601 : mark  199.6 | paper  235.0 | contrast  35.4
+average: mark  163.3 | paper  235.0 | contrast  71.7
+B      : mark   40.0 | paper  235.0 | contrast 195.0
+G      : mark  210.0 | paper  235.0 | contrast  25.0
+R      : mark  240.0 | paper  235.0 | contrast   5.0
+```
+
+The B channel gives more than five times the contrast of the default grey.
+
+</Solution>
+
+## References
+
+1. R. A. Fisher, "The use of multiple measurements in taxonomic problems", *Annals of Eugenics* 7(2), 1936.
+2. C. Lu, L. Xu, J. Jia, "Contrast Preserving Decolorization", *IEEE International Conference on Computational Photography (ICCP)*, 2012.
+3. ITU-R Recommendations BT.601 and BT.709.
+4. OpenCV 4.13.0 documentation: `cvtColor` (RGB ↔ GRAY), `transform`, `decolor`. https://docs.opencv.org/4.13.0/

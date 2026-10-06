@@ -1,0 +1,454 @@
+export const meta = {
+  number: "8.2",
+  title: "The C++ API and cv::Mat",
+  minutes: 35,
+  objectives: [
+    "Explain what a cv::Mat holds: a small header and a shared, reference-counted pixel buffer",
+    "Read and build type names such as CV_8UC3 and compute bytes per pixel and step",
+    "Predict when two Mats share pixels (assignment, ROI) and when they do not (clone, copyTo)",
+    "Map C++ Mat operations to their NumPy and cv2 equivalents",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 8.2 (Module 8 plan).
+  Reference tail: the Python examples are compared automatically on OpenCV 4.13.0. The C++ program was compiled
+  with g++ against the OpenCV core module and its printed output is pasted below it (cv::Mat behaves the same in all 4.x).
+*/}
+
+# 8.2 The C++ API and cv::Mat
+
+<Definition term="cv::Mat">OpenCV's C++ image (matrix) class: a small header (size, type, row length, pointer) that points to a block of pixel memory, which several Mats can share and which frees itself when the last Mat using it is gone.</Definition>
+
+Under every `cv2` call there is C++, and almost every C++ function takes and returns `cv::Mat`. Even if you only write Python, understanding Mat explains views, ROIs, "why did my original image change?" and what `cv2` does with your NumPy arrays (8.3).
+
+## 1. An analogy
+
+A library book and library cards. The **book** (the pixels) is big and expensive to copy. A **card** (the header) is small: it says which book, which pages, where to start reading. Giving a friend a copy of your card is instant, and you both read the same book; if one of you writes in the margin, the other sees it. The library counts how many cards point to a book; when the last card is torn up, the book goes back to storage. Photocopying the book (clone) gives a separate book.
+
+## 2. What a Mat holds
+
+<Flow
+  steps={[
+    { label: "Header (a few dozen bytes): rows, cols, type, step, data pointer", tone: "data" },
+    { label: "Pointer to pixel buffer + reference count", tone: "process" },
+    { label: "Pixel buffer: rows × step bytes, row after row", tone: "result" },
+  ]}
+/>
+
+| Field | Meaning | Example: 480 × 640 colour image |
+| --- | --- | --- |
+| `rows`, `cols` | Height and width in pixels | 480, 640 |
+| `type()` | Depth (bits and sign per value) + number of channels | `CV_8UC3` |
+| `channels()` | Values per pixel | 3 (B, G, R) |
+| `elemSize()` | Bytes per pixel | 3 |
+| `step` | Bytes from the start of one row to the next | 1920 |
+| `data` | Pointer to the first pixel of this Mat | address |
+| `isContinuous()` | Rows follow each other without gaps | true |
+
+Memory address of pixel (row y, column x): `data + y · step + x · elemSize()`. This is the same rule as NumPy strides (6.1): `strides = (step, elemSize, bytes per value)`.
+
+## 3. Type names: CV_8UC3
+
+A type name reads as **depth + channels**:
+
+<Equation terms={[{ value: "CV_" }, { op: "+", value: "8 (bits per value)" }, { op: "+", value: "U (unsigned)" }, { op: "+", value: "C3 (3 channels)" }, { op: "=", value: "CV_8UC3", result: true }]} />
+
+| Depth | C++ type | Bytes | NumPy dtype | Code |
+| --- | --- | --- | --- | --- |
+| `CV_8U` | `uchar` | 1 | uint8 | 0 |
+| `CV_8S` | `schar` | 1 | int8 | 1 |
+| `CV_16U` | `ushort` | 2 | uint16 | 2 |
+| `CV_16S` | `short` | 2 | int16 | 3 |
+| `CV_32S` | `int` | 4 | int32 | 4 |
+| `CV_32F` | `float` | 4 | float32 | 5 |
+| `CV_64F` | `double` | 8 | float64 | 6 |
+| `CV_16F` | `cv::float16_t` | 2 | float16 | 7 |
+
+The type number is `depth code + (channels − 1) · 8`: `CV_8UC3` = 0 + 2 · 8 = **16**, `CV_32FC1` = **5**. You see these numbers in error messages such as "Unsupported combination of source format (=16)". The lab below decodes them.
+
+## 4. Sharing and reference counting
+
+Step through a short C++ session. Watch the headers on the left and the buffers on the right.
+
+<MatLab caption="cv::Mat headers and pixel buffers. Step through assignment, clone, an ROI, writes and releases; then decode type numbers." />
+
+What to notice:
+
+- **`B = A`** copies the header only: instant, and B and A share pixels.
+- **`clone()`** (or `copyTo`) copies the pixels: slower, independent.
+- **An ROI** is a header with a different size and start pointer into the same buffer.
+- **The reference count** frees the buffer automatically when the last header is released or goes out of scope. There is no `delete` in normal OpenCV C++ code.
+
+## 5. ROI, step and continuity: a worked example
+
+`A` is 3 × 5, one byte per pixel, so `step` = 5. The ROI `cv::Rect(1, 1, 3, 2)` means x = 1, y = 1, width 3, height 2:
+
+<IndexedGrid
+  values={[[0, 1, 2, 3, 4], [5, 6, 7, 8, 9], [10, 11, 12, 13, 14]]}
+  shade={false}
+  region={{ r0: 1, r1: 2, c0: 1, c1: 3 }}
+  caption="The 3 × 5 image A; each cell shows its byte offset from A.data. The ROI Rect(1, 1, 3, 2) is highlighted: it starts at byte 6, and its second row starts at byte 6 + 5 = 11."
+/>
+
+- ROI data pointer: `A.data + 1 · 5 + 1 · 1` = **offset 6 bytes**.
+- ROI `rows` = 2, `cols` = 3, but `step` stays **5**: to go to the next ROI row, skip a whole row of A.
+- 3 bytes used per row, 5 bytes per step: the ROI is **not continuous**. Functions that need one flat block (some reshapes, raw memory copies) must first `clone()` it.
+
+`cv::Rect` takes **(x, y, width, height)**; NumPy slices take **[rows, columns]** (`A[1:3, 1:4]`). Mixing them up is the most common ROI bug (6.3).
+
+## 6. Accessing pixels in C++
+
+| Way | Example | Use |
+| --- | --- | --- |
+| `at<T>(y, x)` | `img.at<uchar>(y, x) = 255;` `img.at<cv::Vec3b>(y, x)[2]` | single pixels, readable, checked in debug builds |
+| `ptr<T>(y)` | `uchar* row = img.ptr<uchar>(y);` | fast loops: one pointer per row |
+| `forEach` | `img.forEach<uchar>([](uchar& p, const int*){ p = 255 - p; });` | parallel per-pixel lambda |
+| Whole-image operations | `cv::add`, `cv::threshold`, `img.setTo(0, mask)` | always prefer these: vectorised and threaded |
+
+`T` must match the type: `at<uchar>` on a `CV_8UC3` image reads the wrong bytes (in release builds without an error). Colour pixels are `cv::Vec3b` (three uchar in B, G, R order).
+
+## 7. C++ and Python side by side
+
+| C++ | Python (NumPy + cv2) |
+| --- | --- |
+| `cv::Mat A(480, 640, CV_8UC3, cv::Scalar(0, 0, 0));` | `A = np.zeros((480, 640, 3), np.uint8)` |
+| `cv::Mat B = A;` | `B = A` (same object) |
+| `cv::Mat C = A.clone();` | `C = A.copy()` |
+| `cv::Mat R = A(cv::Rect(x, y, w, h));` | `R = A[y:y+h, x:x+w]` (a view) |
+| `A.rows`, `A.cols`, `A.channels()` | `A.shape` |
+| `A.type() == CV_8UC3` | `A.dtype == np.uint8 and A.shape[2] == 3` |
+| `A.at<cv::Vec3b>(y, x)` | `A[y, x]` |
+| `A.setTo(cv::Scalar(255, 0, 0));` | `A[:] = (255, 0, 0)` |
+| `cv::GaussianBlur(A, D, cv::Size(5, 5), 0);` | `D = cv2.GaussianBlur(A, (5, 5), 0)` |
+| `A.empty()` | `A is None` after a failed `imread`, or `A.size == 0` |
+
+In C++, outputs are parameters (`D`); in Python they are return values. Most C++ functions allocate the output only if it does not already have the right size and type, so reusing an output Mat in a loop avoids allocations.
+
+## 8. Industrial example
+
+A camera SDK delivers each frame as a pointer to its own buffer plus width, height and stride. Copying 5 MP at 40 fps costs 200 MB/s of memory traffic for nothing. Instead the program wraps the buffer in a Mat header without copying:
+
+```cpp
+cv::Mat frame(height, width, CV_8UC1, sdkBufferPtr, strideBytes);   // no copy, no ownership
+cv::Mat roi = frame(cv::Rect(400, 300, 1200, 800));                 // still no copy
+cv::threshold(roi, binary, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+```
+
+The catch: such a Mat does **not** own the memory (no reference count). When the SDK reuses the buffer for the next frame, `frame` and `roi` silently show new pixels. Anything that must live longer (an image saved for a defect report, a frame handed to another thread) needs `frame.clone()` first.
+
+## What you should remember from 8.2
+
+<Takeaways>
+<Takeaway n={1} title="Two parts">A small header and a big, reference-counted pixel buffer.</Takeaway>
+<Takeaway n={2} title="Types">CV_&lt;bits&gt;&lt;U|S|F&gt;C&lt;channels&gt;; number = depth + (channels − 1) · 8.</Takeaway>
+<Takeaway n={3} title="Sharing">Assignment and ROI share pixels; clone/copyTo copy them.</Takeaway>
+<Takeaway n={4} title="Step">Bytes per row of the underlying buffer; an ROI keeps the parent's step and is usually not continuous.</Takeaway>
+<Takeaway n={5} title="Python">A NumPy array plays the role of Mat: views share, .copy() copies.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** What is the type number of `CV_16UC1`? And `CV_8UC4`?
+
+<Solution>
+
+`CV_16UC1` = 2 + 0 = **2**. `CV_8UC4` = 0 + 3 · 8 = **24**.
+
+</Solution>
+
+**Q2.** A `CV_8UC3` image is 1280 pixels wide. What is its `step`, and the offset of pixel (y = 10, x = 4)?
+
+<Solution>
+
+step = 1280 · 3 = **3840 bytes**. Offset = 10 · 3840 + 4 · 3 = **38 412 bytes**.
+
+</Solution>
+
+**Q3.** `cv::Mat B = A; B.setTo(0);` Is A still the original image?
+
+<Solution>
+
+No. B shares A's pixels, so A is now all zeros. Use `cv::Mat B = A.clone();` to keep A.
+
+</Solution>
+
+### Next: 8.3 Python bindings and data types
+
+How `cv2` turns NumPy arrays into Mats and back, and which dtypes and shapes each function accepts.
+
+## Code
+
+Three examples: the same sharing rules in NumPy, Mat types and in-place output in `cv2`, and the C++ program from the lab.
+
+### 1. From scratch: sharing in NumPy
+
+The lab's C++ session, line by line, in NumPy:
+
+```python
+import numpy as np
+import cv2
+
+A = np.zeros((3, 5), np.uint8)
+B = A                      # like cv::Mat B = A: same pixels
+B[0, 0] = 7
+C = A.copy()               # like A.clone()
+R = A[1:3, 1:4]            # like A(cv::Rect(1, 1, 3, 2)): a view
+R[:] = 9
+C[2, 4] = 5
+print(A)
+print(C)
+print("A is B:", A is B, "| R shares A:", np.shares_memory(A, R), "| C shares A:", np.shares_memory(A, C))
+print("R shape", R.shape, "strides", R.strides, "C-contiguous", R.flags["C_CONTIGUOUS"],
+      "offset", R.__array_interface__["data"][0] - A.__array_interface__["data"][0], "bytes")
+```
+
+Output:
+
+```text
+[[7 0 0 0 0]
+ [0 9 9 9 0]
+ [0 9 9 9 0]]
+[[7 0 0 0 0]
+ [0 0 0 0 0]
+ [0 0 0 0 5]]
+A is B: True | R shares A: True | C shares A: False
+R shape (2, 3) strides (5, 1) C-contiguous False offset 6 bytes
+```
+
+- `strides (5, 1)`: the first number is the Mat's `step` (5 bytes), the second the bytes per pixel.
+- The offset 6 is the same as the ROI data pointer in C++.
+
+### 2. OpenCV: type numbers and writing into an ROI
+
+```python
+import numpy as np
+import cv2
+
+print("CV_8UC3 =", cv2.CV_8UC3, "| CV_32FC1 =", cv2.CV_32FC1, "| CV_16UC3 =", cv2.CV_16UC3)
+for depth, name in [(cv2.CV_8U, "8U"), (cv2.CV_16U, "16U"), (cv2.CV_32F, "32F"), (cv2.CV_64F, "64F")]:
+    print(name, "depth code", depth, "-> 3 channels:", cv2.CV_MAKETYPE(depth, 3), "=", depth + (3 - 1) * 8)
+
+img = np.full((6, 8), 100, np.uint8)
+roi = img[2:5, 3:7]                                  # a view into img
+cv2.add(roi, 50, dst=roi)                            # dst= writes into the existing view
+print(img[1:6, 2:8])
+out = cv2.GaussianBlur(roi, (3, 3), 0)               # without dst: a new array
+print("new array shares img:", np.shares_memory(out, img))
+m = cv2.Mat(np.zeros((2, 3, 3), np.uint8))
+print(type(m).__name__, m.shape, isinstance(m, np.ndarray))
+```
+
+Output:
+
+```text
+CV_8UC3 = 16 | CV_32FC1 = 5 | CV_16UC3 = 18
+8U depth code 0 -> 3 channels: 16 = 16
+16U depth code 2 -> 3 channels: 18 = 18
+32F depth code 5 -> 3 channels: 21 = 21
+64F depth code 6 -> 3 channels: 22 = 22
+[[100 100 100 100 100 100]
+ [100 150 150 150 150 100]
+ [100 150 150 150 150 100]
+ [100 150 150 150 150 100]
+ [100 100 100 100 100 100]]
+new array shares img: False
+Mat (2, 3, 3) True
+```
+
+- `dst=roi` is the Python form of the C++ output parameter: when the view already has the right size and type, OpenCV writes into it, so only the ROI of `img` changes.
+- `cv2.Mat` is a thin NumPy subclass that exists for type hints and a few special cases; plain NumPy arrays work everywhere.
+
+### 3. The C++ program
+
+The lab's session as a complete program. Build it with CMake (`find_package(OpenCV REQUIRED)`, `target_link_libraries(app ${OpenCV_LIBS})`) or directly with `g++ -std=c++17 mat.cpp $(pkg-config --cflags --libs opencv4)`.
+
+```cpp
+#include <opencv2/core.hpp>
+#include <iostream>
+
+int main() {
+    cv::Mat A(3, 5, CV_8UC1, cv::Scalar(0));     // 3 rows, 5 columns, 8-bit, 1 channel, all 0
+    cv::Mat B = A;                               // copies the header only: B shares A's pixels
+    B.at<uchar>(0, 0) = 7;
+    cv::Mat C = A.clone();                       // deep copy: new pixel buffer
+    cv::Mat R = A(cv::Rect(1, 1, 3, 2));         // ROI: x=1, y=1, width 3, height 2 (shares pixels)
+    R.setTo(9);
+    C.at<uchar>(2, 4) = 5;
+
+    std::cout << "A =\n" << A << "\nC =\n" << C << "\n";
+    std::cout << "A(0,0) = " << int(A.at<uchar>(0, 0))
+              << " | same data A,B: " << (A.data == B.data)
+              << " | same data A,C: " << (A.data == C.data) << "\n";
+    std::cout << "R: " << R.rows << "x" << R.cols << " step " << R.step
+              << " continuous " << R.isContinuous()
+              << " offset " << (R.data - A.data) << " bytes\n";
+    std::cout << "type CV_8UC3 = " << CV_8UC3 << ", CV_32FC1 = " << CV_32FC1
+              << ", elemSize(CV_16UC3) = " << cv::Mat(1, 1, CV_16UC3).elemSize() << "\n";
+    return 0;
+}
+```
+
+Output of the C++ program:
+
+```text
+A =
+[  7,   0,   0,   0,   0;
+   0,   9,   9,   9,   0;
+   0,   9,   9,   9,   0]
+C =
+[  7,   0,   0,   0,   0;
+   0,   0,   0,   0,   0;
+   0,   0,   0,   0,   5]
+A(0,0) = 7 | same data A,B: 1 | same data A,C: 0
+R: 2x3 step 5 continuous 0 offset 6 bytes
+type CV_8UC3 = 16, CV_32FC1 = 5, elemSize(CV_16UC3) = 6
+```
+
+- The Python and C++ results are identical: same memory model.
+- `std::cout << A` prints a Mat in this bracketed format; useful for small debugging matrices.
+
+## OpenCV API notes
+
+**Construction**: `cv::Mat(rows, cols, type)`, `cv::Mat(rows, cols, type, cv::Scalar)`, `cv::Mat(rows, cols, type, void* data, size_t step)` (wraps external memory, no ownership), `cv::Mat::zeros`, `cv::Mat::ones`, `cv::Mat::eye`.
+
+**Copying**: `clone()`, `copyTo(dst)`, `copyTo(dst, mask)`; `convertTo(dst, rtype, alpha, beta)` changes depth with scaling; `reshape(cn, rows)` (no copy, needs continuous data).
+
+**Sub-matrices (all share data)**: `operator()(cv::Rect)`, `operator()(cv::Range rows, cv::Range cols)`, `row(i)`, `col(j)`, `rowRange`, `colRange`.
+
+**Information**: `rows`, `cols`, `dims`, `size()`, `type()`, `depth()`, `channels()`, `elemSize()`, `elemSize1()`, `step`, `total()`, `isContinuous()`, `empty()`.
+
+**Memory**: `release()`, `create(rows, cols, type)` (allocates only if size or type differ). Related classes: `cv::Mat_<T>` (typed), `cv::Matx` / `cv::Vec` (small fixed-size, on the stack), `cv::UMat` (OpenCL, 8.6), `cv::cuda::GpuMat` (CUDA, 8.5). Functions accept any of them through `cv::InputArray` / `cv::OutputArray`.
+
+## Where it fails
+
+- **External memory**: a Mat wrapping a camera or SDK buffer has no reference count; it becomes invalid when the owner frees or reuses the buffer.
+- **Threads**: the reference count is thread-safe, the pixels are not. Two threads writing to shared pixels (or one writing while another reads) need a clone or a lock.
+- **Wrong `at<T>` type**: no error in release builds, just wrong values or a crash.
+- **Very large images**: `step` and sizes are `size_t`, but `rows` and `cols` are `int`; images beyond 2³¹ pixels per side are not supported.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **`B = A` expecting a copy**: use `A.clone()` (C++) or `A.copy()` (Python).
+- **`cv::Rect(row, col, …)`**: it is `(x, y, width, height)`.
+- **Keeping an ROI or a wrapped SDK frame** after the source changed or was freed.
+- **`at<uchar>` on a colour image**: use `at<cv::Vec3b>`.
+- **Allocating a new output Mat in every loop iteration** when it could be reused.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### InputArray and OutputArray
+
+Function signatures use `cv::InputArray`, `cv::OutputArray` and `cv::InputOutputArray`. They are lightweight proxies that accept `Mat`, `UMat`, `GpuMat`, `std::vector`, `Matx` and more, so one function serves all of them. `OutputArray::create()` reallocates only when the size or type differ; this is why passing a correctly sized output reuses memory, and why an ROI passed as output is written in place [1].
+
+### Copy-on-write? No.
+
+Some libraries copy shared data automatically before a write (copy-on-write). OpenCV does not: writes through any header are visible to all headers of the buffer. This keeps the class simple and fast, and makes ROI processing possible, at the price of the "my original changed" surprise [1], [2].
+
+### Multi-dimensional Mats
+
+`cv::Mat` supports more than two dimensions (`dims > 2`, for example a 3-D volume or a DNN blob of shape N × C × H × W). Then `rows` and `cols` are −1 and the size is in `size[i]`, the steps in `step[i]` (8.7).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "cv::Mat B = A; What is copied?",
+      options: ["All pixels", "Only the header; the pixels are shared", "Nothing; B is empty", "Only the first row"],
+      answer: 1,
+      explanation: "Assignment copies the header and increments the reference count.",
+    },
+    {
+      question: "What is CV_8UC3 as a number?",
+      options: ["3", "8", "16", "24"],
+      answer: 2,
+      explanation: "0 + (3 − 1) · 8 = 16.",
+    },
+    {
+      question: "An ROI of a 640-wide CV_8UC1 image is 100 pixels wide. Its step is…",
+      options: ["100 bytes", "640 bytes", "740 bytes", "It depends on the height"],
+      answer: 1,
+      explanation: "The ROI keeps the parent's row length in memory.",
+    },
+    {
+      question: "When is a Mat's pixel buffer freed?",
+      options: ["When any header is released", "When the last header using it is released or destroyed", "Never; call delete", "At the end of main()"],
+      answer: 1,
+      explanation: "Reference counting frees it with the last user.",
+    },
+    {
+      question: "The Python equivalent of A.clone() is…",
+      options: ["B = A", "A[:]", "A.copy()", "A.view()"],
+      answer: 2,
+      explanation: "A[:] and A.view() are views; copy() allocates new memory.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A `CV_16UC1` image is 2448 × 2048 (width × height). Give `elemSize()`, `step`, the total bytes, and the offset of the ROI `cv::Rect(100, 50, 400, 300)`.
+
+<Solution>
+
+elemSize = **2 B**; step = 2448 · 2 = **4896 B**; total = 4896 · 2048 = **10 027 008 B** (≈ 10 MB); ROI offset = 50 · 4896 + 100 · 2 = **245 000 B**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Write `roi_info(parent, x, y, w, h)` in Python that takes a NumPy image and a rectangle in OpenCV order and prints the ROI shape, the step (first stride), whether it is contiguous and the byte offset from the parent. Check it on a 4 × 6 `uint8` colour image with the rectangle (2, 1, 3, 2).
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+def roi_info(parent, x, y, w, h):
+    roi = parent[y:y + h, x:x + w]                    # OpenCV (x, y, w, h) -> NumPy [rows, cols]
+    off = roi.__array_interface__["data"][0] - parent.__array_interface__["data"][0]
+    print(f"shape {roi.shape} | step {roi.strides[0]} | contiguous {roi.flags['C_CONTIGUOUS']} | offset {off} B")
+    return roi
+
+img = np.zeros((4, 6, 3), np.uint8)
+r = roi_info(img, 2, 1, 3, 2)
+print("expected offset:", 1 * img.strides[0] + 2 * img.strides[1])
+```
+
+Output:
+
+```text
+shape (2, 3, 3) | step 18 | contiguous False | offset 24 B
+expected offset: 24
+```
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A C++ inspection keeps the last 10 frames in a `std::deque<cv::Mat>` to save them when a defect appears. Each frame comes from `cap >> frame;` with the same `frame` variable. When a defect is found, all 10 saved images are identical. Why, and what is the fix?
+
+<Solution>
+
+`deque.push_back(frame)` stores a header that shares `frame`'s buffer. `cap >> frame` may write the next image into the **same** buffer (it reuses the allocation when the size and type match), so all stored headers show the latest pixels. Fix: `history.push_back(frame.clone());`.
+
+</Solution>
+
+## References
+
+1. OpenCV 4.13.0 documentation, core module: "Mat – The Basic Image Container" tutorial and the `cv::Mat` class reference. https://docs.opencv.org/4.13.0/
+2. A. Kaehler, G. Bradski, *Learning OpenCV 3*, O'Reilly, 2016: Chapter 4 (images and large array types).
+3. OpenCV 4.13.0 documentation, "Operations with images" tutorial (pixel access, ROI). https://docs.opencv.org/4.13.0/
+4. NumPy documentation, "Copies and views" and `ndarray.strides`. https://numpy.org/doc/stable/

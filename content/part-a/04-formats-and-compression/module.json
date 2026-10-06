@@ -1,0 +1,13 @@
+{
+  "number": 4,
+  "title": "Formats and compression",
+  "summary": "How images and video are stored and sent: bytes, lossless and lossy compression, JPEG, PNG/TIFF/raw, video streams and metadata.",
+  "chapters": [
+    { "number": "4.1", "slug": "4.1-image-size-in-bytes", "title": "Image size in bytes" },
+    { "number": "4.2", "slug": "4.2-lossless-vs-lossy", "title": "Lossless vs lossy" },
+    { "number": "4.3", "slug": "4.3-how-jpeg-works", "title": "How JPEG works" },
+    { "number": "4.4", "slug": "4.4-png-tiff-16-bit-and-raw", "title": "PNG, TIFF, 16-bit and raw" },
+    { "number": "4.5", "slug": "4.5-video-codecs-and-streams", "title": "Video codecs and streams" },
+    { "number": "4.6", "slug": "4.6-metadata-and-watermarking", "title": "Metadata and watermarking" }
+  ]
+}

@@ -1,0 +1,287 @@
+export const meta = {
+  number: "14.4",
+  title: "Blending",
+  minutes: 20,
+  objectives: [
+    "Mix two images with cv2.addWeighted and explain α, β and γ",
+    "Composite through a per-pixel alpha mask and soften its edge",
+    "Overlay results (heat maps, masks) on an image for display",
+    "Know why blending in linear light looks different from blending sRGB values",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 14.4 (Module 14 plan).
+  New lab: BlendLab (lib/blend-ops.ts; addWeighted tested against recorded cv2 values).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 14.4 Blending
+
+<Definition term="Blending">mixing two images pixel by pixel with weights: out = α · A + (1 − α) · B. With one α for the whole image it is a cross-fade; with an α per pixel (an alpha mask) it is compositing.</Definition>
+
+14.2 pasted a logo with a hard binary mask: every pixel is either A or B. Blending allows anything in between. That gives smooth transitions, semi-transparent overlays of results on camera images, and invisible seams when images are combined. It is also the operation behind every "show the mask on top of the image" display in an inspection HMI.
+
+## 1. An analogy
+
+Two slide projectors pointed at the same screen, each with a dimmer. Turning one down while turning the other up fades from one picture to the other. Putting a soft-edged card in front of one projector lets its picture show only in a region, fading out at the card's edge.
+
+## 2. One weight for the whole image
+
+<Flow
+  steps={[
+    { label: "Images A and B, same size and type", tone: "data" },
+    { label: "out = α·A + β·B + γ (float), then round and saturate", tone: "process" },
+    { label: "Cross-fade: β = 1 − α, γ = 0", tone: "result" },
+  ]}
+/>
+
+<Equation terms={[{ value: "out" }, { op: "=", value: "saturate( α · A + β · B + γ )", result: true }]} />
+
+Real numbers at one pixel with α = 0.3: A (red disc) = (0, 0, 220), B (bright grey) = (249, 249, 249). out = 0.3 · A + 0.7 · B = (174.3, 174.3, 240.3) → **(174, 174, 240)**: a pale red.
+
+- α + β = 1 keeps the overall brightness; α + β > 1 brightens, and the result can saturate.
+- γ adds a constant (an offset), as in `convertScaleAbs`.
+
+<BlendLab caption="A cross-fade between the colour shapes (A) and the grey scene (B), or a circle of A placed into B through a mask. Increase the edge softness to hide the seam, and switch on linear light to see how mixtures of bright and dark become lighter." />
+
+## 3. One weight per pixel: alpha masks
+
+A grey-level mask gives each pixel its own α (0 = all B, 255 = all A). A hard 0/255 mask gives a visible step at the edge; blurring the mask (feathering) turns the step into a ramp. Along one row across the circle's edge, the green channel of the result:
+
+| Mask | Values along 20 pixels across the edge |
+| --- | --- |
+| Hard (0/255) | 246, 250, 244, …, 233, **0, 0, 0** … (a jump) |
+| Blurred, σ = 3 | … 221, 192, 157, 133, 102, 74, 45, 27, 15 … (about 10 px ramp) |
+| Blurred, σ = 8 | … 154, 135, 129, 118, 109, 92, 80, 71 … (a wide ramp) |
+
+Overlays of results use the same idea: colour the defect mask red, then `addWeighted(img, 0.6, red_overlay, 0.4, 0)` only where the mask is set, so the operator sees both the defect and the image under it.
+
+## 4. Linear light
+
+Pixel values are gamma-encoded (sRGB, 11.3): value 128 is not half the light of 255, but about 22 %. Averaging encoded values therefore darkens mixtures: a 50 % blend of black (0) and white (255) gives 128 in sRGB arithmetic, but the true half-intensity mix is **188** when you decode to linear light, mix, and encode again. A 50 % mix of pure red and pure green gives (0, 128, 128) in sRGB arithmetic (a dark olive) and (0, 188, 188) in linear light (a bright yellow, as when two lights overlap). For display overlays this rarely matters; for physically correct compositing, resizing and anti-aliasing it does.
+
+## 5. Industrial example
+
+A weld-seam inspection station shows the operator the camera image with three overlays: the seam region found by the locator (thin green outline), the measured width as a heat map, and rejected spots in red. The heat map is blended with α = 0.35 so the weld texture stays visible under it; the red spots use a feathered mask so they look like highlights, not stickers. The blended display is computed on a copy: the measurement itself always runs on the untouched image.
+
+## What you should remember from 14.4
+
+<Takeaways>
+<Takeaway n={1} title="addWeighted">out = α·A + β·B + γ, rounded and saturated; β = 1 − α for a cross-fade.</Takeaway>
+<Takeaway n={2} title="Alpha masks">Per-pixel α from a grey mask; blur the mask for soft edges.</Takeaway>
+<Takeaway n={3} title="Overlays">Blend results onto a copy for display; measure on the original.</Takeaway>
+<Takeaway n={4} title="Linear light">sRGB averages are darker than physical mixtures; decode, mix, encode when it matters.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A = 200, B = 50, α = 0.25, β = 0.75, γ = 10. What does addWeighted return?
+
+<Solution>
+
+0.25 · 200 + 0.75 · 50 + 10 = 50 + 37.5 + 10 = 97.5 → rounded half to even: **98**.
+
+</Solution>
+
+**Q2.** Why can `addWeighted(A, 0.8, B, 0.8, 0)` produce large white areas?
+
+<Solution>
+
+α + β = 1.6: bright pixels in both images sum above 255 and **saturate**.
+
+</Solution>
+
+### Next: 14.5 Frame differencing
+
+Subtracting consecutive frames to find what moved.
+
+## Code
+
+Two examples: addWeighted and alpha compositing with a feathered mask, then linear-light blending.
+
+### 1. Cross-fade and alpha compositing
+
+```python
+import numpy as np
+import cv2
+
+A = cv2.imread("sample-color.png")
+B = cv2.cvtColor(cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE), cv2.COLOR_GRAY2BGR)   # same size, 3 channels
+out = cv2.addWeighted(A, 0.3, B, 0.7, 0)
+print("A", A[95, 70].tolist(), "+ B", B[95, 70].tolist(), "-> 0.3 A + 0.7 B =", out[95, 70].tolist())
+
+mask = np.zeros(A.shape[:2], np.uint8)
+cv2.circle(mask, (160, 100), 70, 255, -1)
+for sigma in (0, 3, 8):
+    alpha = (cv2.GaussianBlur(mask, (0, 0), sigma) if sigma else mask).astype(np.float32) / 255
+    comp = alpha[..., None] * A + (1 - alpha[..., None]) * B             # per-pixel weights, broadcast over channels
+    comp = np.clip(np.rint(comp), 0, 255).astype(np.uint8)
+    print(f"sigma {sigma}: green along row 100, x 80..99:", comp[100, 80:100, 1].tolist())
+```
+
+Output:
+
+```text
+A [0, 0, 220] + B [249, 249, 249] -> 0.3 A + 0.7 B = [174, 174, 240]
+sigma 0: green along row 100, x 80..99: [246, 250, 244, 244, 252, 245, 247, 255, 245, 233, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+sigma 3: green along row 100, x 80..99: [246, 250, 244, 243, 247, 236, 229, 221, 192, 157, 133, 102, 74, 45, 27, 15, 7, 4, 1, 0]
+sigma 8: green along row 100, x 80..99: [224, 222, 210, 203, 201, 186, 178, 172, 154, 135, 129, 118, 109, 92, 80, 71, 61, 52, 45, 36]
+```
+
+- `alpha[..., None]` adds a channel axis so one α per pixel multiplies all three channels (broadcasting, 6.4).
+- `GaussianBlur(mask, (0, 0), sigma)` chooses the kernel size from σ; the ramp is roughly 3σ wide on each side of the edge.
+
+### 2. Blending in linear light
+
+```python
+import numpy as np
+import cv2
+
+def decode(v):                                         # sRGB -> linear light, 0..1
+    c = v / 255.0
+    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+def encode(x):                                         # linear light -> sRGB, 0..255
+    return 255 * np.where(x <= 0.0031308, 12.92 * x, 1.055 * np.power(x, 1 / 2.4) - 0.055)
+
+black, white = np.uint8([[0]]), np.uint8([[255]])
+print("black/white 50 %: sRGB arithmetic", cv2.addWeighted(black, 0.5, white, 0.5, 0)[0, 0],
+      "| linear light", round(float(encode(0.5 * decode(0.0) + 0.5 * decode(255.0))), 1))
+red, green = np.array([0, 0, 255.0]), np.array([0, 255, 0.0])
+print("red/green 50 %: sRGB arithmetic", np.round(0.5 * red + 0.5 * green).tolist(),
+      "| linear light", np.round(encode(0.5 * decode(red) + 0.5 * decode(green))).tolist())
+```
+
+Output:
+
+```text
+black/white 50 %: sRGB arithmetic 128 | linear light 187.5
+red/green 50 %: sRGB arithmetic [0.0, 128.0, 128.0] | linear light [0.0, 188.0, 188.0]
+```
+
+- Half the light of white is encoded as about 188 in sRGB, not 128. That is why naive blends and naive downscaling look too dark at fine black-and-white detail.
+
+## OpenCV API notes
+
+**`cv2.addWeighted(src1, alpha, src2, beta, gamma, dst=None, dtype=-1)`**: same size and channels; computed in floating point, rounded half to even and saturated to the output type.
+
+**Per-pixel alpha**: no single OpenCV call for 8-bit images; use float32 NumPy as above, or `cv2.blendLinear(src1, src2, weights1, weights2)` (float32 weight maps, one per image).
+
+**Feathering**: `cv2.GaussianBlur(mask, (0, 0), sigma)` or `cv2.blur`; for distance-based ramps `cv2.distanceTransform` on the mask (Module 16).
+
+**Colour overlays**: `cv2.applyColorMap(gray, cv2.COLORMAP_VIRIDIS)` (9.4) then `addWeighted`; draw outlines with `cv2.drawContours` on the blended copy.
+
+## Where it fails
+
+- **Different sizes or channel counts**: resize or convert first (`cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)`).
+- **Misaligned images**: a cross-fade of two views that are not aligned shows double edges (ghosting); register first (Module 23).
+- **Brightness differences**: blending images with different exposure shows the seam even with feathering; match their histograms or gains first (12.4).
+- **sRGB arithmetic** darkens mixtures of bright and dark.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **α + β ≠ 1 by accident** (brightness changes or saturation).
+- **Blending a grey image with a colour image** without converting.
+- **Measuring on the display image** that has overlays blended in.
+- **Using `+` on uint8 images** to "blend" (wraps, 14.3).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The over operator
+
+Porter and Duff (1984) defined compositing with alpha channels: "A over B" = α_A·A + (1 − α_A)·α_B·B for the colour, with premultiplied alpha simplifying the algebra and avoiding dark fringes at soft edges. PNG images with an alpha channel (`cv2.IMREAD_UNCHANGED` gives 4 channels) use this model [2].
+
+### Multi-band blending
+
+Burt and Adelson (1983) blended images by mixing each level of a Laplacian pyramid with a correspondingly blurred mask: coarse structures transition over a wide zone, fine detail over a narrow one. This hides seams far better than one feathered mask and is used in panorama stitching (`cv2.detail.MultiBandBlender`) [3].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "addWeighted(A, 0.7, B, 0.3, 0) with A = 100, B = 200 gives…",
+      options: ["130", "150", "170", "300"],
+      answer: 0,
+      explanation: "0.7 · 100 + 0.3 · 200 = 70 + 60 = 130.",
+    },
+    {
+      question: "How do you get a soft edge when compositing through a mask?",
+      options: ["Use a bigger mask", "Blur the mask to make α a ramp", "Use XOR", "Threshold the result"],
+      answer: 1,
+      explanation: "A blurred mask gives intermediate α values near the edge.",
+    },
+    {
+      question: "A 50 % mix of black and white in linear light encodes to about…",
+      options: ["64", "128", "188", "255"],
+      answer: 2,
+      explanation: "Half the light is about 188 in sRGB encoding.",
+    },
+    {
+      question: "Why blend overlays on a copy of the image?",
+      options: ["It is faster", "So measurements run on unmodified pixel values", "OpenCV requires it", "To save memory"],
+      answer: 1,
+      explanation: "Overlays change grey values; measurement must not see them.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A pixel of a red overlay (0, 0, 255) is blended over an image pixel (100, 100, 100) with α = 0.4 for the overlay. Compute the result.
+
+<Solution>
+
+0.4 · (0, 0, 255) + 0.6 · (100, 100, 100) = (60, 60, 162).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Overlay the true text mask of `sample-print-uneven.png` in red at 40 % on the image, only where the mask is set. Print the colour of one text pixel before and after, and check that non-text pixels are unchanged.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.cvtColor(cv2.imread("sample-print-uneven.png", cv2.IMREAD_GRAYSCALE), cv2.COLOR_GRAY2BGR)
+text = cv2.imread("sample-print-uneven-gt.png", cv2.IMREAD_GRAYSCALE) > 0
+red = np.zeros_like(img)
+red[:] = (0, 0, 255)
+shown = img.copy()
+shown[text] = cv2.addWeighted(img, 0.6, red, 0.4, 0)[text]
+y, x = np.argwhere(text)[0]
+print("text pixel:", img[y, x].tolist(), "->", shown[y, x].tolist())
+print("non-text unchanged:", np.array_equal(shown[~text], img[~text]))
+```
+
+Output:
+
+```text
+text pixel: [53, 53, 53] -> [32, 32, 134]
+non-text unchanged: True
+```
+
+0.6 · 53 = 31.8 → 32, and 0.6 · 53 + 0.4 · 255 = 133.8 → 134: the text turns reddish while its brightness pattern stays visible.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 2.6 (arithmetic operations).
+2. T. Porter, T. Duff, "Compositing digital images", *Computer Graphics (Proc. SIGGRAPH)* 18(3), 253–259, 1984.
+3. P. J. Burt, E. H. Adelson, "A multiresolution spline with application to image mosaics", *ACM Transactions on Graphics* 2(4), 217–236, 1983.
+4. OpenCV 4.13.0 documentation: `addWeighted`, `blendLinear`, `GaussianBlur`; tutorial "Adding (blending) two images using OpenCV". https://docs.opencv.org/4.13.0/

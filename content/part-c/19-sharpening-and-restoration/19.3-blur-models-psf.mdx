@@ -1,0 +1,322 @@
+export const meta = {
+  number: "19.3",
+  title: "Blur models (PSF)",
+  minutes: 25,
+  objectives: [
+    "Describe blur as convolution with a point spread function (PSF) plus noise: g = h * f + n",
+    "Build Gaussian, defocus (disk) and motion PSFs and apply them",
+    "Measure a PSF from a point source or from an edge (edge and line spread functions)",
+    "Explain from the transfer function why some blurs destroy information completely",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 19.3 (Module 19).
+  Lab: RestoreLab (mode restore, no restoration: blur types and PSF view).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 19.3 Blur models (PSF)
+
+<Definition term="Point spread function (PSF)">the image that an imaging system makes of a single point of light. A perfect system would give one bright pixel; a real one spreads the light into a small blob, disk or streak. If the PSF is the same everywhere, every blurred image is the sharp image convolved with the PSF.</Definition>
+
+Sharpening (19.1, 19.2) does not need to know how the image was blurred, and it cannot restore what was lost. Restoration (19.4, 19.5) can do better, but it needs a model of the blur. This chapter builds that model: what the PSF is, the three shapes that appear most often, how to measure one, and which blurs can be undone at all.
+
+## 1. An analogy
+
+A stamp pressed onto every point of a drawing. Each point of the sharp image is replaced by a copy of the stamp, scaled by the point's brightness, and all copies are added up. The stamp is the PSF. A round soft stamp gives a soft blur, a ring-shaped stamp a defocus blur, a line-shaped stamp a motion streak.
+
+## 2. The blur model
+
+<Flow
+  steps={[
+    { label: "Sharp image f", tone: "world" },
+    { label: "Convolution with the PSF h (17.2)", tone: "process" },
+    { label: "Noise n (18.1)", tone: "process" },
+    { label: "Observed image g = h * f + n", tone: "result" },
+  ]}
+/>
+
+This is the same convolution as in Module 17; only the point of view changes. There, we chose a kernel to filter an image. Here, the optics or the motion chose it, and we want to know it so we can undo it. The model assumes the blur is the same everywhere (shift-invariant) and linear in light; Go deeper covers what to do when it is not.
+
+| PSF | Cause | Shape | Parameter |
+| --- | --- | --- | --- |
+| Gaussian | lens aberrations, slight defocus, atmosphere, anti-aliasing filters, pixel area | soft blob | σ |
+| Disk (pillbox) | defocus with a round aperture (2.2, 2.3: the blur circle) | uniform disk | radius r |
+| Motion | object or camera moving during the exposure (2.6) | line segment | length L, angle |
+
+A motion PSF of length L is L pixels in a row with weight 1/L each; a defocus disk of radius 4 covers 49 pixels with weight 1/49 each. The length follows from the motion: speed in pixels per second × exposure time (2.6).
+
+## 3. Blur in the frequency domain
+
+Convolution in the image is multiplication in the frequency domain (30.5): the spectrum of the blurred image is the spectrum of the sharp image times the PSF's transfer function H (the optical transfer function, OTF). |H| says how much of each spatial frequency survives:
+
+| Cycles per 64 pixels | 0 | 2 | 4 | 6 | **7** | 8 | 10 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Motion, L = 9 | 1.00 | 0.88 | 0.56 | 0.18 | **0.02** | 0.11 | 0.23 |
+| Disk, r = 4 | 1.00 | 0.93 | 0.73 | 0.46 | 0.33 | 0.20 | **0.00** |
+
+The motion PSF passes almost nothing at 64/9 ≈ 7 cycles per 64 pixels (a period of 9 pixels, exactly the blur length: a pattern with period L averages to a constant over the streak). The disk has its first zero near 10 cycles. After the zero, |H| rises again, but with a sign flip: patterns at those frequencies come out inverted, just like the box filter in 18.2. A Gaussian's H never reaches zero; it just gets very small.
+
+**Where H is zero, the information is gone.** No restoration can recover a frequency that was multiplied by zero, and where H is small, noise overwhelms what is left. This is the central difficulty of deconvolution (19.4).
+
+Real effects on the test image: a horizontal motion blur of 15 pixels turns the vertical 4-pixel bars into a faint *inverted* ripple (149, 149, 141, 141 where the clean bars are 80, 80, 210, 210) but leaves the horizontal thin lines perfectly sharp, because they lie along the motion. Motion blur is directional.
+
+<RestoreLab mode="restore" initial="none" initialNoise={0} caption="Choose a PSF and its size; the PSF is shown at the bottom right, enlarged. Compare the Gaussian blob, the defocus disk and the motion line. With motion blur, turn the angle: details along the motion survive, details across it are smeared. Keep the restoration on 'none' for now; 19.4 uses the same lab to undo the blur."/>
+
+## 4. Measuring the PSF
+
+A restoration is only as good as its PSF. Three ways to get it:
+
+1. **Point source**: image a tiny bright dot (a pinhole with a light behind it, a star, a small reflective bead) smaller than one pixel. The image *is* the PSF, after subtracting the background and normalising the sum to 1.
+2. **Edge**: image a sharp straight edge. The profile across it is the edge spread function (ESF); its derivative is the line spread function (LSF), the PSF summed along the edge. For a Gaussian PSF, the LSF's standard deviation is σ: measured 1.00, 2.00 and 3.00 for blurs of σ = 1, 2 and 3. Tilting the edge by a few degrees (the slanted-edge method) gives sub-pixel sampling and is the standard way to measure MTF (50.4).
+3. **From physics**: motion length from speed × exposure (2.6), defocus radius from the thin-lens blur circle (2.2), with no calibration target at all.
+
+When none of these is possible, blind deconvolution estimates the PSF and the image together (19.5).
+
+## 5. Industrial example
+
+On a conveyor, the motion PSF is known exactly: a line along the belt direction with length = belt speed × exposure / (mm per pixel). This is why inspection systems specify exposure from the allowed blur (2.6, MotionLab), and why a known motion blur can sometimes be removed in software when more light is not available. Lens PSFs are measured once with a slanted-edge or dot target during system qualification; the resulting MTF decides whether a lens can resolve the smallest defect, and the PSF is stored for later deconvolution or for simulating images.
+
+## What you should remember from 19.3
+
+<Takeaways>
+<Takeaway n={1} title="Model">g = h * f + n: blur is convolution with the PSF, plus noise.</Takeaway>
+<Takeaway n={2} title="Shapes">Gaussian (optics), disk (defocus), line (motion).</Takeaway>
+<Takeaway n={3} title="Frequencies">Blur multiplies the spectrum by H; zeros of H destroy information.</Takeaway>
+<Takeaway n={4} title="Measure">Point source, edge (ESF → LSF), or physics (speed × exposure, blur circle).</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A belt moves at 0.5 m/s, exposure 200 µs, 0.05 mm per pixel. Motion PSF length?
+
+<Solution>
+
+0.5 m/s × 200 µs = 0.1 mm; 0.1 / 0.05 = **2 pixels**, a line of length 2 along the belt.
+
+</Solution>
+
+**Q2.** Which pattern period disappears completely under a horizontal motion blur of 12 pixels?
+
+<Solution>
+
+A horizontal period of **12 pixels** (and 6, 4, 3, …: 12/k): each streak averages exactly whole periods. Vertical detail is not affected.
+
+</Solution>
+
+### Next: 19.4 Wiener filter
+
+Undoing a known blur in the frequency domain without blowing up the noise.
+
+## Code
+
+Two examples: building and applying PSFs with their transfer functions, then measuring a PSF from an edge.
+
+### 1. PSFs and transfer functions
+
+```python
+import numpy as np
+import cv2
+
+def motion_psf(length, angle=0):
+    size = length + (1 - length % 2)                                 # odd size
+    k = np.zeros((size, size), np.float32)
+    c, a = size // 2, np.deg2rad(angle)
+    dx, dy = (length - 1) / 2 * np.cos(a), (length - 1) / 2 * np.sin(a)
+    cv2.line(k, (round(c - dx), round(c - dy)), (round(c + dx), round(c + dy)), 1.0, 1)
+    return k / k.sum()
+
+def disk_psf(r):
+    k = np.zeros((2 * r + 1, 2 * r + 1), np.float32)
+    cv2.circle(k, (r, r), r, 1.0, -1)
+    return k / k.sum()
+
+def otf_row(k, n=64):                                                # |H| along the horizontal frequency axis
+    P = np.zeros((n, n))
+    s = k.shape[0]
+    P[:s, :s] = k
+    P = np.roll(P, (-(s // 2), -(s // 2)), (0, 1))                   # PSF centre at (0, 0)
+    return np.abs(np.fft.fft2(P))[0]
+
+m, d = motion_psf(9), disk_psf(4)
+print("motion 9: nonzero", int((m > 0).sum()), "| disk 4: nonzero", int((d > 0).sum()))
+print("|H| motion:", otf_row(m)[[0, 2, 4, 6, 7, 8, 10]].round(2).tolist())
+print("|H| disk:  ", otf_row(d)[[0, 2, 4, 6, 7, 8, 10]].round(2).tolist())
+
+img = cv2.imread("sample-clean.png", cv2.IMREAD_GRAYSCALE)
+moved = cv2.filter2D(img, -1, motion_psf(15))                        # horizontal motion blur
+print("vertical bars:", img[150, 30:38].tolist(), "->", moved[150, 30:38].tolist())
+print("horizontal lines:", img[17:24, 260].tolist(), "->", moved[17:24, 260].tolist())
+```
+
+Output:
+
+```text
+motion 9: nonzero 9 | disk 4: nonzero 49
+|H| motion: [1.0, 0.88, 0.56, 0.18, 0.02, 0.11, 0.23]
+|H| disk:   [1.0, 0.93, 0.73, 0.46, 0.33, 0.2, 0.0]
+vertical bars: [80, 80, 210, 210, 80, 80, 210, 210] -> [149, 149, 141, 141, 149, 149, 141, 141]
+horizontal lines: [166, 166, 166, 20, 166, 166, 166] -> [166, 166, 166, 20, 166, 166, 166]
+```
+
+- `cv2.filter2D` computes correlation; for symmetric PSFs (all three here) that equals convolution. For an asymmetric PSF, flip it first (17.6).
+
+### 2. PSF from an edge
+
+```python
+import numpy as np
+import cv2
+
+step = np.zeros((50, 100), np.float32)
+step[:, 50:] = 200                                                   # a perfect vertical edge
+for sigma in (1, 2, 3):
+    esf = cv2.GaussianBlur(step, (0, 0), sigma)[25]                  # edge spread function (one row)
+    lsf = np.diff(esf)                                               # line spread function
+    x = np.arange(len(lsf)) + 0.5                                    # diff sits between pixels
+    mu = (lsf * x).sum() / lsf.sum()
+    sd = np.sqrt((lsf * (x - mu) ** 2).sum() / lsf.sum())
+    print(f"blur sigma {sigma}: LSF centre {mu:.2f}, LSF std {sd:.2f}")
+```
+
+Output:
+
+```text
+blur sigma 1: LSF centre 49.50, LSF std 1.00
+blur sigma 2: LSF centre 49.50, LSF std 2.00
+blur sigma 3: LSF centre 49.50, LSF std 3.00
+```
+
+- On real images, average many rows along the edge and subtract the background slope first; noise in the derivative is the main error source.
+
+## OpenCV API notes
+
+OpenCV has no PSF class; PSFs are small float32 arrays:
+
+- **Draw them**: `cv2.line` (motion), `cv2.circle` with thickness −1 (disk), `cv2.getGaussianKernel` and an outer product (Gaussian); normalise to sum 1.
+- **Apply them**: `cv2.filter2D(img, -1, psf)` (correlation, borders reflected); `cv2.dft` / `np.fft.fft2` for frequency-domain work (30).
+- **Supersampling**: for sub-pixel lengths and smooth edges, draw the PSF at 4–8 × the size and downscale with `INTER_AREA`, or use `cv2.LINE_AA`.
+
+## Where it fails
+
+- **Spatially varying blur**: lens blur grows towards the corners; depth changes defocus across the scene; rotating objects have different motion per pixel. One PSF does not fit; split the image into tiles or use a varying model.
+- **Non-linear effects**: saturated pixels, gamma-encoded images (4, 11) and compression break g = h * f + n. Work on linear, unsaturated raw data where possible.
+- **Unknown PSF**: estimates from noisy edges or points are themselves noisy.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **PSF not normalised to sum 1**: the image gets brighter or darker.
+- **Even-sized PSFs** without care for the centre: a half-pixel shift of the whole image.
+- **Modelling blur on gamma-encoded JPEGs**: the blur happened in linear light.
+- **Confusing correlation and convolution** for asymmetric PSFs (motion with acceleration, coma).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Diffraction
+
+Even a perfect lens has a PSF: the Airy pattern of a circular aperture, with its first dark ring at radius 1.22·λ·N (2.3). Its transfer function falls to zero at the cut-off frequency 1/(λN); nothing finer can be imaged at that f-number, whatever the pixel size.
+
+### Spatially varying PSFs
+
+Optical PSFs change across the field (aberrations, vignetting of the pupil). Common approaches: measure a grid of PSFs and deconvolve tiles with blending, or model the PSF as a weighted sum of a few basis PSFs whose weights vary smoothly (Nagy and O'Leary's method) [3].
+
+### The noise term
+
+g = h * f + n hides a choice: n is often treated as additive Gaussian, but at low light it is shot noise (18.1), which depends on h * f. Richardson–Lucy deconvolution (19.5) is derived exactly for that case.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The image of a single point through an imaging system is…",
+      options: ["The OTF", "The PSF", "The histogram", "The MTF"],
+      answer: 1,
+      explanation: "Point spread function: how a point spreads.",
+    },
+    {
+      question: "Which PSF models defocus with a round aperture?",
+      options: ["Gaussian", "Uniform disk", "Line segment", "Delta"],
+      answer: 1,
+      explanation: "The blur circle (pillbox).",
+    },
+    {
+      question: "Why can a horizontal motion blur of 9 px not be fully undone?",
+      options: ["It is not linear", "Its transfer function is zero at some frequencies", "It changes the brightness", "It is not a convolution"],
+      answer: 1,
+      explanation: "Periods of 9, 4.5, … px are averaged to a constant; that information is gone.",
+    },
+    {
+      question: "The derivative of the edge spread function is…",
+      options: ["The PSF itself", "The line spread function", "The MTF", "Noise"],
+      answer: 1,
+      explanation: "ESF → derivative → LSF; its Fourier transform magnitude is the MTF along that direction.",
+    },
+    {
+      question: "Horizontal motion blur affects which structures least?",
+      options: ["Vertical bars", "Horizontal lines", "Small dots", "Text"],
+      answer: 1,
+      explanation: "Smearing along a line changes nothing along that line.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 1-D signal 0, 0, 90, 0, 0, 0 (a bright point) is blurred with the motion PSF 1/3, 1/3, 1/3. What is the result, and what does it show?
+
+<Solution>
+
+0, 30, 30, 30, 0, 0. The blurred image of a point is a copy of the PSF scaled by the point's brightness: that is the definition of the PSF.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Blur the test image with a Gaussian (σ = 2), a disk (r = 3) and a horizontal motion PSF (L = 9), and compare their PSNR and their effect on the vertical bars (standard deviation of row 150, columns 22–104).
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+clean = img.astype(float)
+blurs = {"gaussian 2": cv2.GaussianBlur(img, (0, 0), 2), "disk 3": cv2.filter2D(img, -1, disk_psf(3)),
+         "motion 9": cv2.filter2D(img, -1, motion_psf(9))}
+print(f"clean       bars std {img[150, 22:105].std():5.1f}")
+for name, b in blurs.items():
+    psnr = 10 * np.log10(255 ** 2 / np.mean((b.astype(float) - clean) ** 2))
+    print(f"{name:11s} bars std {b[150, 22:105].std():5.1f} | PSNR {psnr:.2f} dB")
+```
+
+Output:
+
+```text
+clean       bars std  65.0
+gaussian 2  bars std   1.0 | PSNR 21.09 dB
+disk 3      bars std   7.0 | PSNR 20.63 dB
+motion 9    bars std   7.1 | PSNR 22.56 dB
+```
+
+All three remove most of the 4-pixel bars. The Gaussian removes them almost entirely. The disk and the motion line keep a ripple of about a tenth of the original contrast from the side lobes of their transfer functions; for the disk that ripple is inverted (correlation −1 with the clean bars), for the 9-pixel line it is not (9 pixels hold two full periods plus one bright pixel). The motion blur scores the best PSNR because it leaves all horizontal structure untouched.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 5 (degradation models, estimating the degradation function).
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022: Section 10.3 (image deblurring, PSF estimation).
+3. J. G. Nagy, D. P. O'Leary, "Restoring images degraded by spatially variant blur", *SIAM J. Scientific Computing* 19(4), 1063–1082, 1998.
+4. ISO 12233:2017, Photography: Electronic still picture imaging, Resolution and spatial frequency responses (slanted-edge method).
+5. OpenCV 4.13.0 documentation: `filter2D`, `line`, `circle`, `dft`. https://docs.opencv.org/4.13.0/

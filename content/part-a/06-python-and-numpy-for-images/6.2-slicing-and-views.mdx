@@ -1,0 +1,383 @@
+export const meta = {
+  number: "6.2",
+  title: "Slicing and views",
+  minutes: 30,
+  objectives: [
+    "Write slices with start, stop, step and negative values for rows, columns and channels",
+    "Know which indexing gives a view (shared memory) and which gives a copy",
+    "Use .copy(), np.shares_memory and np.ascontiguousarray deliberately",
+    "Use boolean masks and fancy indexing to read and write selected pixels",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 6.2 (Module 6 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 6.2 Slicing and views
+
+<Definition term="Slice and view">a slice picks a regular part of an array (rows a to b, every second column …). In NumPy most slices are **views**: windows onto the same memory, not copies.</Definition>
+
+Cutting out a region of interest (3.4), taking one channel, flipping, downsampling by 2: all are one line of slicing. They are also fast, because nothing is copied. The price: change the slice and you change the original image.
+
+## 1. An analogy
+
+A window in a wall. Looking through it, you see part of the garden; it is not a photo of the garden. If someone plants a flower in the part you see, the garden has a new flower. A **view** is the window; a **copy** is a photo you can scribble on without touching the garden.
+
+## 2. Slice syntax
+
+`start:stop:step` per axis, separated by commas: `img[rows, columns, channels]`.
+
+| Slice | Selects |
+| --- | --- |
+| `img[60:140, 20:120]` | rows 60 … 139, columns 20 … 119 (stop is excluded) |
+| `img[:, :100]` | all rows, the first 100 columns |
+| `img[-50:]` | the last 50 rows |
+| `img[::2, ::2]` | every second row and column (half size, no filtering) |
+| `img[::-1]` | rows in reverse order (upside down) |
+| `img[:, ::-1]` | columns reversed (mirror) |
+| `img[:, :, 0]` | the blue channel |
+| `img[..., ::-1]` | channels reversed: BGR → RGB |
+
+Empty start means "from the beginning", empty stop "to the end". Out-of-range bounds are clipped, not errors: `img[150:999]` is just shorter.
+
+## 3. Try it
+
+<SliceLab caption="A 6 × 8 array with values 10·row + column. Choose row and column slices, then write zeros into the result as a view or as a copy." />
+
+Things to try: rows with empty start and stop and step −1 (reversed order); cols start −3 (the last three columns); take a view and run `part[:] = 0`, then repeat with a copy.
+
+## 4. Views share memory
+
+`roi = img[60:140, 20:120]` copies nothing; `roi` is a new header (shape, strides) pointing into `img`'s memory *(Code example 1)*:
+
+<Flow
+  steps={[
+    { label: "img[100, 70] = (0, 0, 220)", tone: "data" },
+    { label: "roi = img[60:140, 20:120]; roi[:] = 0", tone: "process" },
+    { label: "img[100, 70] = (0, 0, 0): the original changed", tone: "result" },
+  ]}
+/>
+
+Usually this is exactly what you want: processing an ROI in place, or drawing a box inside it. When you need an independent piece (to store, to modify for display, to send to another thread), use **`.copy()`**.
+
+## 5. View or copy?
+
+| Expression | Result | View? | Contiguous? |
+| --- | --- | --- | --- |
+| `img[50:150, 100:200]` | (100, 100, 3) | yes | no |
+| `img[::2, ::2]` | (100, 160, 3) | yes | no |
+| `img[::-1]` | (200, 320, 3) | yes | no |
+| `img[:, :, 0]` | (200, 320) | yes | no |
+| `img[[10, 20, 30]]` (a list) | (3, 320, 3) | **no**, copy | yes |
+| `img[img[:, :, 2] > 200]` (a mask) | (11426, 3) | **no**, copy | yes |
+
+*(Code example 2.)* Basic slices (`:` with numbers) give views. **Fancy indexing** (lists or arrays of indices) and **boolean masks** give copies. `np.shares_memory(a, b)` tells you for sure.
+
+Even a full-width row range `img[50:150]` is contiguous; anything narrower skips bytes between rows and is **not** contiguous.
+
+## 6. Writing through masks and slices
+
+Reading with a mask gives a copy, but **assigning** with a mask or slice writes into the original:
+
+- `img[mask] = (0, 255, 0)`: recolour all selected pixels in place.
+- `img[60:140, 20:120] = 255`: fill a rectangle.
+- `img[:, :, 2] = 0`: remove the red channel.
+
+## 7. Views and OpenCV
+
+OpenCV functions that **return** a new image accept any view. Functions that **draw into** or **write into** an array need a layout OpenCV can describe: rows with a fixed step and pixels packed together. A rectangular ROI is fine, but a single channel `img[:, :, 0]` or a flipped `img[::-1]` is not: drawing on it raises a `cv2.error` *(Code example 3)*. Fix with `np.ascontiguousarray(...)` (a compact copy) and write the result back if needed.
+
+## 8. Industrial example
+
+Inspecting four fixed zones of a part on every frame:
+
+<Flow
+  steps={[
+    { label: "zones = [(y0, y1, x0, x1), …] from the recipe", tone: "data" },
+    { label: "for each zone: roi = frame[y0:y1, x0:x1] (views, no copies)", tone: "process" },
+    { label: "measure on roi; draw results into roi for the operator image", tone: "process" },
+    { label: "save frame[y0:y1, x0:x1].copy() only for NOK zones", tone: "result" },
+  ]}
+/>
+
+Views keep the per-frame cost low; `.copy()` is used only for data that must outlive the frame buffer (the camera SDK may reuse it for the next frame).
+
+## What you should remember from 6.2
+
+<Takeaways>
+<Takeaway n={1} title="Syntax">start:stop:step per axis; stop excluded; negatives from the end; step −1 reverses.</Takeaway>
+<Takeaway n={2} title="Views">Basic slices share memory: writing to them changes the original.</Takeaway>
+<Takeaway n={3} title="Copies">Fancy indexing, boolean masks (when reading) and .copy() make copies.</Takeaway>
+<Takeaway n={4} title="Check">np.shares_memory(a, b); a.flags["C_CONTIGUOUS"].</Takeaway>
+<Takeaway n={5} title="OpenCV">Drawing into channel or flipped views fails: use np.ascontiguousarray.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** `a = np.arange(10)`. What are `a[2:8:2]`, `a[-3:]` and `a[::-3]`?
+
+<Solution>
+
+`[2, 4, 6]`, `[7, 8, 9]`, `[9, 6, 3, 0]`.
+
+</Solution>
+
+**Q2.** Write the slice for the bottom-right 100 × 100 corner of an image.
+
+<Solution>
+
+`img[-100:, -100:]`.
+
+</Solution>
+
+**Q3.** `small = img[::2, ::2]; small[:] = 0`. What happens to `img`?
+
+<Solution>
+
+Every second pixel in every second row of `img` becomes 0 (a grid of black dots): `small` is a view.
+
+</Solution>
+
+### Next: 6.3 Overflow and type conversion
+
+What happens when values leave the range of their dtype, and how to convert safely.
+
+## Code
+
+Three examples: a view changes the original, which expressions are views, and views with OpenCV. Copy the sample images next to the script.
+
+### 1. NumPy: an ROI is a view
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+roi = img[60:140, 20:120]                              # rows 60..139, columns 20..119: a view, no copy
+print("roi shape:", roi.shape, "| shares memory with img:", np.shares_memory(roi, img))
+print("img[100, 70] before:", img[100, 70])
+roi[:] = 0                                             # writing into the view ...
+print("img[100, 70] after :", img[100, 70], "<- the original changed too")
+
+img = cv2.imread("sample-color.png")
+safe = img[60:140, 20:120].copy()                      # an independent copy
+safe[:] = 0
+print("with .copy(): img[100, 70] =", img[100, 70], "| shares memory:", np.shares_memory(safe, img))
+```
+
+Output:
+
+```text
+roi shape: (80, 100, 3) | shares memory with img: True
+img[100, 70] before: [  0   0 220]
+img[100, 70] after : [0 0 0] <- the original changed too
+with .copy(): img[100, 70] = [  0   0 220] | shares memory: False
+```
+
+- `roi[:] = 0` assigns into all elements of the existing array; `roi = 0` would only rebind the name.
+- Pixel (100, 70) of the image is pixel (40, 50) of the ROI: subtract the ROI's top-left corner.
+
+### 2. NumPy: which indexing gives a view?
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+for name, v in [("img[50:150, 100:200]", img[50:150, 100:200]), ("img[::2, ::2]", img[::2, ::2]),
+                ("img[::-1]", img[::-1]), ("img[:, :, 0]", img[:, :, 0]),
+                ("img[[10, 20, 30]]", img[[10, 20, 30]]), ("img[img[:, :, 2] > 200]", img[img[:, :, 2] > 200])]:
+    print(f"{name:24s} shape {str(v.shape):15s} view: {str(np.shares_memory(v, img)):5s} contiguous: {v.flags['C_CONTIGUOUS']}")
+```
+
+Output:
+
+```text
+img[50:150, 100:200]     shape (100, 100, 3)   view: True  contiguous: False
+img[::2, ::2]            shape (100, 160, 3)   view: True  contiguous: False
+img[::-1]                shape (200, 320, 3)   view: True  contiguous: False
+img[:, :, 0]             shape (200, 320)      view: True  contiguous: False
+img[[10, 20, 30]]        shape (3, 320, 3)     view: False contiguous: True
+img[img[:, :, 2] > 200]  shape (11426, 3)      view: False contiguous: True
+```
+
+- A boolean mask of shape (H, W) on an (H, W, 3) image returns one row per selected pixel: shape (count, 3).
+- `img[::-1]` has a **negative** row stride: it walks memory backwards.
+
+### 3. OpenCV: drawing into views
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+blue = img[:, :, 0]                                    # a non-contiguous view of one channel
+try:
+    cv2.rectangle(blue, (10, 10), (50, 50), 255, 2)    # drawing writes INTO the array
+except cv2.error:
+    print("drawing on img[:, :, 0] fails: layout incompatible with cv::Mat")
+blue = np.ascontiguousarray(img[:, :, 0])              # compact copy
+cv2.rectangle(blue, (10, 10), (50, 50), 255, 2)
+print("after np.ascontiguousarray: drawing works, but img is unchanged:", img[10, 30, 0] != 255)
+roi = img[60:140, 20:120]                              # a rectangular ROI is fine: rows are still strided normally
+cv2.rectangle(roi, (5, 5), (40, 40), (255, 255, 255), 2)
+print("drawing in a ROI view changes img:", img[65, 30].tolist())
+img = cv2.imread("sample-color.png")                   # fresh copy
+mask = img[:, :, 2] > 200                              # boolean mask (red pixels)
+img[mask] = (0, 255, 0)                                # assignment with a mask writes in place
+print("red pixels recoloured:", int(mask.sum()), "| img[100, 70] =", img[100, 70])
+```
+
+Output:
+
+```text
+drawing on img[:, :, 0] fails: layout incompatible with cv::Mat
+after np.ascontiguousarray: drawing works, but img is unchanged: True
+drawing in a ROI view changes img: [255, 255, 255]
+red pixels recoloured: 11426 | img[100, 70] = [  0 255   0]
+```
+
+- The full OpenCV message reads "Layout of the output array img is incompatible with cv::Mat".
+- `cv2.rectangle(roi, (5, 5), …)` uses ROI coordinates; on the full image that point is (25, 65).
+- The mask selects every pixel with R > 200: the red circle and the orange bar.
+
+## OpenCV API notes
+
+**ROIs**: OpenCV in Python has no separate ROI type: slicing the NumPy array is the ROI. In C++ the equivalent is `Mat(img, Rect(x, y, w, h))`, also a view.
+
+**Output arrays**: functions with a `dst` argument (`cv2.add(a, b, dst=roi)`) can write directly into an existing ROI view, avoiding a copy, when the view's layout is compatible.
+
+**Masks**: many functions take `mask=` (a uint8 array, non-zero = selected): `cv2.mean`, `cv2.meanStdDev`, `cv2.add`, `cv2.copyTo(src, mask, dst)`, `cv2.bitwise_and(a, a, mask=m)`.
+
+## Where it fails
+
+- **Lifetime**: a view keeps the whole original array alive in memory; a tiny ROI of a huge image prevents freeing it. `.copy()` small pieces you keep.
+- **Camera buffers** reused by an SDK change under your views; copy what you need to keep.
+- **Threads**: two threads writing views of the same array can overwrite each other's results.
+- `img[::2, ::2]` downsampling without filtering aliases (3.5); use `cv2.resize(…, interpolation=cv2.INTER_AREA)`.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Modifying an ROI for display and corrupting the image used for measurement**.
+- **Expecting `a[[1, 2]] = …` style reads to be views**; fancy indexing reads are copies (assignments still write in place).
+- **Off-by-one with stop**: `img[0:100]` has 100 rows, the last one is 99.
+- **Drawing on `img[:, :, 0]` or `img[::-1]`** and getting a cryptic layout error.
+- **Mixing (x, y) and [row, col]** in ROIs: `img[y0:y1, x0:x1]`.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Strides make views
+
+A view is a new (shape, strides, offset) on the same buffer. `img[::2]` doubles the row stride; `img[::-1]` makes it negative and starts at the last row; `img[:, :, 0]` keeps the pixel stride at 3 bytes while reading one byte. `np.lib.stride_tricks.sliding_window_view` uses the same trick to create overlapping windows without copying [1].
+
+### Copy-on-write in other tools
+
+Some libraries (pandas with copy-on-write, PyTorch tensors with `.contiguous()`) follow similar rules with their own details. When data crosses library boundaries (NumPy ↔ PyTorch with `torch.from_numpy`), memory is often shared too.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "How many rows does img[10:30] have?",
+      options: ["19", "20", "21", "30"],
+      answer: 1,
+      explanation: "Rows 10 … 29: stop is excluded.",
+    },
+    {
+      question: "Which gives a view?",
+      options: ["img[[0, 2, 4]]", "img[img > 100]", "img[0:100:2]", "img[np.array([1, 2])]"],
+      answer: 2,
+      explanation: "Basic slices (numbers and colons) are views; lists, arrays and masks make copies when reading.",
+    },
+    {
+      question: "roi = img[0:50, 0:50]; roi += 10. What happens to img?",
+      options: ["Nothing", "Its top-left 50 × 50 block becomes brighter", "Error", "All of img becomes brighter"],
+      answer: 1,
+      explanation: "roi is a view; += modifies it in place.",
+    },
+    {
+      question: "How do you reverse BGR to RGB with slicing?",
+      options: ["img[::-1]", "img[:, ::-1]", "img[..., ::-1]", "img.T"],
+      answer: 2,
+      explanation: "Reverse the last (channel) axis.",
+    },
+    {
+      question: "cv2.circle on img[:, :, 1] raises a layout error. Fix?",
+      options: ["Use img.T", "np.ascontiguousarray(img[:, :, 1]), draw, write back if needed", "Use float64", "It cannot be done"],
+      answer: 1,
+      explanation: "Make a compact copy that OpenCV can write into.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+For an image 480 rows × 640 columns, write slices for: (a) the central 200 × 200 square, (b) the left half, (c) every fourth pixel in both directions. Give each result's shape.
+
+<Solution>
+
+(a) `img[140:340, 220:420]` → (200, 200); (b) `img[:, :320]` → (480, 320); (c) `img[::4, ::4]` → (120, 160).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Split `sample-scene.png` (grayscale) into a 2 × 4 grid of tiles using slicing (no copies), print each tile's mean brightness, and confirm the tiles share memory with the image.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)        # 200 x 320
+th, tw = 200 // 2, 320 // 4
+for r in range(2):
+    means = []
+    for c in range(4):
+        tile = img[r * th:(r + 1) * th, c * tw:(c + 1) * tw]       # a view
+        means.append(f"{tile.mean():6.1f}")
+    print(f"row {r}:", " ".join(means))
+print("tiles are views:", np.shares_memory(img[0:th, 0:tw], img))
+```
+
+Output:
+
+```text
+row 0:   92.9  122.6   89.6  175.4
+row 1:  104.7  125.5   88.7  163.2
+tiles are views: True
+```
+
+The third column is darker (the dark rectangle) and the last brighter (the bright end of the gradient). Eight tile statistics, zero copies.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Your program stores `crops.append(frame[y0:y1, x0:x1])` for every defect, and later all stored crops look identical to the last frame. Why?
+
+<Solution>
+
+The crops are **views** into the frame buffer, and the camera SDK (or your loop) reuses the same buffer for every new frame. All stored views therefore show whatever is in the buffer now. Store `frame[y0:y1, x0:x1].copy()`.
+
+</Solution>
+
+## References
+
+1. NumPy documentation, *Indexing on ndarrays* and *Copies and views*: [numpy.org/doc/stable/user/basics.indexing.html](https://numpy.org/doc/stable/user/basics.indexing.html), [numpy.org/doc/stable/user/basics.copies.html](https://numpy.org/doc/stable/user/basics.copies.html).
+2. C. R. Harris et al., "Array programming with NumPy," *Nature*, vol. 585, pp. 357–362, 2020.
+3. OpenCV 4.13.0 documentation, *Basic operations with images* (ROI, pixel access): [docs.opencv.org/4.13.0/d5/d98/tutorial_mat_operations.html](https://docs.opencv.org/4.13.0/d5/d98/tutorial_mat_operations.html).

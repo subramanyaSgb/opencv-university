@@ -1,0 +1,288 @@
+export const meta = {
+  number: "23.3",
+  title: "Top-hat and black-hat",
+  minutes: 20,
+  objectives: [
+    "Define the top-hat (image minus opening) and black-hat (closing minus image) transforms",
+    "Extract small bright or dark details from an uneven background",
+    "Choose the element size from the width of the details to keep",
+    "Compare top-hat background removal with the illumination corrections of Module 15",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 23.3 (Module 23).
+  Lab: MorphLab (mode hat, on sample-print-uneven).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 23.3 Top-hat and black-hat
+
+<Definition term="Top-hat and black-hat">two grey-image transforms built from opening and closing. The top-hat (white top-hat) is the image minus its opening: it keeps bright details smaller than the structuring element and removes everything else, including a slowly varying background. The black-hat (bottom-hat) is the closing minus the image: it does the same for dark details.</Definition>
+
+Module 15 removed uneven illumination by dividing or subtracting an estimate of the background (15.3). Morphology offers another estimate: on a grey image, an opening with an element larger than the bright details removes them and leaves the background (23.6 explains grey opening in detail); the difference is the details alone. Meyer named it "top-hat" in 1979 [1] after the shape of the profile it extracts: a peak on a flat brim.
+
+## 1. An analogy
+
+Pour sand over a bumpy floor with a few nails sticking up, then drag a wide board over it. The board rests on the floor's broad bumps but cannot follow the thin nails: the sand surface is the "opening". The height of each point above the sand is the top-hat: only the nails stick out, whatever the floor's slope.
+
+## 2. Image minus background
+
+<Flow
+  steps={[
+    { label: "Grey image: small details on an uneven background", tone: "data" },
+    { label: "Opening (for bright details) or closing (for dark details) with an element wider than the details", tone: "process" },
+    { label: "That is a background estimate without the details", tone: "process" },
+    { label: "Top-hat = image − opening; black-hat = closing − image → details on a flat zero background", tone: "result" },
+  ]}
+/>
+
+A worked example on a row with a dark mark on a sloping background, closing with a 1 × 5 element:
+
+| Pixel | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Image | 100 | 110 | 120 | 40 | 45 | 150 | 160 | 170 |
+| Closing (background) | 120 | 120 | 120 | 120 | 120 | 150 | 160 | 170 |
+| Black-hat | 20 | 10 | 0 | **80** | **75** | 0 | 0 | 0 |
+
+The closing fills the 2-pixel dark mark with the level of its surroundings (120); subtracting gives the mark as a strong positive response. The small values at pixels 1–2 come from the slope at the left border (the closing cannot follow a ramp perfectly there), one reason to threshold the result rather than use it as is.
+
+On the unevenly lit print (dark text, light falling from 100 % to 35 % across the page; background values range from 65 to 223), measured against the ground-truth text mask:
+
+| Method | Precision | Recall | F1 |
+| --- | --- | --- | --- |
+| Otsu on the raw image | 0.26 | 1.00 | 0.41 |
+| Black-hat 5 × 5, then Otsu | 0.98 | 0.83 | 0.90 |
+| **Black-hat 9 × 9, then Otsu** | 0.98 | 0.97 | **0.975** |
+| Black-hat 21 × 21, then Otsu | 0.98 | 0.97 | 0.976 |
+
+A global threshold fails completely (the dark corner of the page is darker than the text in the bright corner). After the black-hat, one Otsu threshold separates text and paper almost perfectly. The element must be wider than the strokes (about 6 pixels here): at 5 × 5 the closing cannot fill the widest strokes, so their centres are lost (recall 0.83). Beyond that, the size hardly matters.
+
+<MorphLab mode="hat" caption="Black-hat on the unevenly lit print, then a threshold. Start with a small element (5) and grow it: the text appears on a flat dark background once the element is wider than the strokes. Lower and raise the threshold; then try the top-hat, which looks for bright details and finds almost nothing here, and the plain opening and closing that serve as background estimates."/>
+
+## 3. Practical rules
+
+- **Bright details → top-hat; dark details → black-hat.** Which is which depends on polarity, not on what is "object".
+- **Element larger than the details, smaller than the background variations.** If the background changes over distances similar to the details, no element separates them.
+- **Element shape**: a disc (ellipse) for round or arbitrary details; a line for scratches of known direction (a line element longer than the scratch is wide but along the background trend).
+- **Noise**: top-hats keep noise (it is a small detail too); smooth slightly first, or threshold with a margin.
+- **Compared with 15.3**: division by a smooth background model corrects gain (multiplicative) changes; top-hat subtracts, so text contrast still varies with illumination (fainter text in the dark corner). For thresholding a clear foreground, the top-hat is simple and robust; for photometric measurements, use flat-field correction.
+
+## 4. Industrial example
+
+Top-hat and black-hat transforms are standard for detecting small defects on large, unevenly lit surfaces: dark pits and inclusions on steel strip (black-hat), bright particles on a filter membrane or glass (top-hat), and scratches on painted parts (black-hat with a line element). They are also the usual pre-processing for reading dot-peen or laser-etched codes on curved metal, where lighting can never be perfectly uniform.
+
+## What you should remember from 23.3
+
+<Takeaways>
+<Takeaway n={1} title="Top-hat">Image − opening: small bright details on a flat background.</Takeaway>
+<Takeaway n={2} title="Black-hat">Closing − image: small dark details on a flat background.</Takeaway>
+<Takeaway n={3} title="Element">Wider than the details, narrower than the background changes.</Takeaway>
+<Takeaway n={4} title="Use">Before thresholding uneven images; detects pits, particles, scratches, print.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** You look for bright solder balls about 8 pixels wide on a board with uneven lighting. Which transform and element?
+
+<Solution>
+
+**Top-hat** with an element wider than the balls, e.g. an 11 × 11 or 15 × 15 ellipse.
+
+</Solution>
+
+**Q2.** Why does a black-hat on a flat background with no dark details give (nearly) zero?
+
+<Solution>
+
+The closing of a flat (or smoothly varying) image is the image itself, so closing − image ≈ 0. Only structures the element cannot enter (dark details smaller than it) give a response.
+
+</Solution>
+
+### Next: 23.4 Skeleton and thinning
+
+Reducing shapes to one-pixel-wide centre lines.
+
+## Code
+
+Two examples: black-hat thresholding of the uneven print, then top-hat for bright particles.
+
+### 1. Black-hat on uneven print
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-print-uneven.png", cv2.IMREAD_GRAYSCALE)
+truth = cv2.imread("sample-print-uneven-gt.png", cv2.IMREAD_GRAYSCALE) > 0
+
+def scores(mask):
+    tp = (mask & truth).sum()
+    p, r = tp / max(mask.sum(), 1), tp / truth.sum()
+    return round(float(p), 3), round(float(r), 3), round(float(2 * p * r / (p + r)), 3)
+
+_, raw = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+print("Otsu on raw (precision, recall, F1):", scores(raw > 0))
+for size in (5, 9, 21):
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+    bh = cv2.morphologyEx(img, cv2.MORPH_BLACKHAT, k)                # closing - image
+    t, m = cv2.threshold(bh, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    print(f"black-hat {size}x{size}, Otsu T={t:.0f}:", scores(m > 0))
+```
+
+Output:
+
+```text
+Otsu on raw (precision, recall, F1): (0.261, 1.0, 0.414)
+black-hat 5x5, Otsu T=45: (0.984, 0.828, 0.899)
+black-hat 9x9, Otsu T=57: (0.977, 0.972, 0.975)
+black-hat 21x21, Otsu T=60: (0.978, 0.973, 0.976)
+```
+
+### 2. Top-hat for bright particles
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(4)
+yy, xx = np.mgrid[0:200, 0:320]
+background = 60 + 120 * (xx / 320) + 30 * np.sin(yy / 40)            # strong uneven background
+particles = np.zeros((200, 320))
+for x, y in rng.integers(10, [310, 190], size=(25, 2)):
+    cv2.circle(particles, (int(x), int(y)), 3, 40, -1)                # 25 bright particles, +40 grey levels
+img2 = np.clip(background + particles + rng.normal(0, 3, (200, 320)), 0, 255).astype(np.uint8)
+th = cv2.morphologyEx(img2, cv2.MORPH_TOPHAT, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)))
+_, m = cv2.threshold(th, 20, 255, cv2.THRESH_BINARY)
+m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+n = cv2.connectedComponents(m)[0] - 1
+_, raw = cv2.threshold(img2, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+print("particles found with top-hat:", n, "| raw Otsu marks", int((raw > 0).mean() * 100), "% of the image")
+```
+
+Output:
+
+```text
+particles found with top-hat: 22 | raw Otsu marks 49 % of the image
+```
+
+- 22 blobs for 25 particles: the positions are random, so a few particles overlap and merge into one blob. 25.4 deals with counting touching objects. The raw image cannot be thresholded at all: Otsu splits it into the bright and the dark half of the background.
+
+## OpenCV API notes
+
+**`cv2.morphologyEx(src, cv2.MORPH_TOPHAT, kernel)`** = src − open(src); **`cv2.MORPH_BLACKHAT`** = close(src) − src. Both work on 8-bit, 16-bit and float images (results are non-negative for these definitions).
+
+**Element**: `cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))` with k larger than the detail width; for large k on large images, rectangular elements are much faster (separable).
+
+**After the transform**: `cv2.threshold` (often Otsu, 13.3) or a fixed threshold in grey levels above the background.
+
+## Where it fails
+
+- **Details as wide as the background structures**: no element separates them.
+- **Large defects**: anything bigger than the element is treated as background and vanishes.
+- **Noise and texture**: also small and bright/dark; they pass through.
+- **Multiplicative illumination**: subtraction leaves contrast differences; divide (15.3) if amplitudes must be comparable.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Top-hat for dark details** (or black-hat for bright ones): wrong polarity, nothing found.
+- **Element smaller than the details**: their centres disappear (recall drops).
+- **Huge elements "to be safe"**: slow and they flatten real background structure into the result.
+- **Thresholding the raw image afterwards** instead of the top-hat result.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Origin and theory
+
+Meyer [1] introduced the top-hat transform for detecting cell nuclei and grains in microscope images. In Serra's framework it is a residual: the part of the image removed by a morphological filter. The family of residuals over increasing element sizes (a granulometry) measures the size distribution of bright or dark structures, used for particle sizing and texture analysis [2].
+
+### Top-hat by reconstruction
+
+Using opening by reconstruction (23.2 Go deeper) instead of a plain opening keeps the outlines of large bright structures exact, so they cancel completely and only the truly small details remain, with fewer artefacts at the borders of large objects.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The top-hat transform is…",
+      options: ["Closing − image", "Image − opening", "Opening − closing", "Dilation − erosion"],
+      answer: 1,
+      explanation: "It keeps small bright details.",
+    },
+    {
+      question: "Dark text on unevenly lit paper. Which transform before thresholding?",
+      options: ["Top-hat", "Black-hat", "Dilation", "Morphological gradient"],
+      answer: 1,
+      explanation: "Dark details: closing − image.",
+    },
+    {
+      question: "Text strokes are 6 px wide. Which element works?",
+      options: ["3 × 3", "5 × 5", "9 × 9 or larger", "Any size"],
+      answer: 2,
+      explanation: "It must be wider than the strokes (5 × 5 gave recall 0.83).",
+    },
+    {
+      question: "What does the top-hat do to a slowly varying background?",
+      options: ["Doubles it", "Removes it (≈ 0)", "Inverts it", "Keeps it"],
+      answer: 1,
+      explanation: "The opening follows it, so the difference is near zero.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Row 50, 60, 70, 140, 90, 100, 110 (a bright spike on a ramp). Compute the opening with a 1 × 3 element and the top-hat.
+
+<Solution>
+
+Erosion (min of 3): 50, 50, 60, 70, 90, 90, 100. Dilation of that (max of 3): 50, 60, 70, 90, 90, 100, 100. Top-hat = image − opening: 0, 0, 0, **50**, 0, 0, 10. The spike stands out at 50; the last pixel's 10 comes from the border.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+How sensitive is the black-hat result to the threshold? For the 15 × 15 black-hat of the print, compute F1 for fixed thresholds 20, 40, 60, 80 and 100.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+bh = cv2.morphologyEx(img, cv2.MORPH_BLACKHAT, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)))
+for t in (20, 40, 60, 80, 100):
+    print(f"T={t:3d}: precision, recall, F1 = {scores(bh > t)}")
+```
+
+Output:
+
+```text
+T= 20: precision, recall, F1 = (0.794, 1.0, 0.885)
+T= 40: precision, recall, F1 = (0.912, 1.0, 0.954)
+T= 60: precision, recall, F1 = (0.98, 0.971, 0.976)
+T= 80: precision, recall, F1 = (0.999, 0.851, 0.919)
+T=100: precision, recall, F1 = (1.0, 0.602, 0.752)
+```
+
+F1 stays between 0.95 and 0.98 for thresholds from 40 to 60: a wide, stable range, unlike the raw image where no threshold works. At high thresholds the faint text in the dark corner drops out first, because subtraction does not equalise contrast.
+
+</Solution>
+
+## References
+
+1. F. Meyer, "Iterative image transformations for an automatic screening of cervical smears", *J. Histochemistry and Cytochemistry* 27(1), 128–135, 1979.
+2. P. Soille, *Morphological Image Analysis: Principles and Applications*, 2nd ed., Springer, 2003.
+3. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 9 (top-hat transformations).
+4. OpenCV 4.13.0 documentation: `morphologyEx` (MORPH_TOPHAT, MORPH_BLACKHAT). https://docs.opencv.org/4.13.0/

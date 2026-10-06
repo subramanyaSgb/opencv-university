@@ -1,0 +1,341 @@
+export const meta = {
+  number: "7.5",
+  title: "Drawing and text",
+  minutes: 30,
+  objectives: [
+    "Draw lines, rectangles, circles, polygons, contours, markers and text with OpenCV",
+    "Choose thickness, colour order and line type (LINE_8 vs LINE_AA), and draw on a copy",
+    "Place readable labels with getTextSize and background boxes, and use transparent overlays",
+    "Draw at sub-pixel positions with the shift parameter",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 7.5 (Module 7 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 7.5 Drawing and text
+
+<Definition term="Drawing functions">OpenCV functions that paint shapes and text directly into an image array: the way to show results to operators, mark defects in saved images, and create masks and test images.</Definition>
+
+Every inspection system shows its decisions on screen: a green box around a good part, a red outline around a defect, a measured value next to it. Drawing is also how you make masks (5.1) and synthetic test images. The functions are simple; the details (coordinates, colours, in-place changes, readable text) are what make results clear.
+
+## 1. An analogy
+
+Marking a printed photo with a felt pen. Whatever you draw is on the photo for good, so you mark a **copy**, not the original you still need to measure. A thick pen is easy to see, a fine pen is precise, and a label needs a white sticker behind it to be readable on a busy background.
+
+## 2. The functions
+
+| Function | Draws | Key arguments |
+| --- | --- | --- |
+| `cv2.line(img, p1, p2, color, thickness, lineType)` | a line segment | points (x, y) |
+| `cv2.arrowedLine(…, tipLength)` | an arrow | tip length as a fraction |
+| `cv2.rectangle(img, p1, p2, …)` or `(img, (x, y, w, h), …)` | axis-aligned box | two corners or a rect |
+| `cv2.circle(img, center, radius, …)` | circle or disc | radius in pixels |
+| `cv2.ellipse(img, center, axes, angle, start, end, …)` | ellipse or arc | half-axes, angles in degrees |
+| `cv2.polylines(img, [pts], isClosed, …)`, `cv2.fillPoly` | polygons | points as int32 (N, 1, 2) |
+| `cv2.drawContours(img, contours, idx, …)` | contours from `findContours` | idx −1 = all |
+| `cv2.drawMarker(img, pos, color, markerType, size)` | cross, star, diamond … | for points |
+| `cv2.putText(img, text, org, font, scale, color, thickness, lineType)` | text | `org` = bottom-left of the text |
+
+Common rules: points are **(x, y) integers** (floats raise an error); colours are **(B, G, R)** (7.3), or one number for gray images; **thickness = −1** (or `cv2.FILLED`) fills the shape.
+
+## 3. Drawing changes the array
+
+All drawing functions write **into** the image you pass. Draw on `img.copy()` when the original is still needed for measurement *(Code example 1)*. A view (an ROI, 6.2) can be drawn into; the drawing then appears in the full image.
+
+## 4. Line types
+
+- **`LINE_8`** (default): pure pixel steps, 8-connected (3.6). Only the colour you chose and the background: right for **masks** and label images.
+- **`LINE_4`**: 4-connected steps (no diagonal neighbours).
+- **`LINE_AA`**: anti-aliased: edge pixels are partly coloured, so lines look smooth. Right for **display**, wrong for masks (it creates in-between values).
+
+A line from (5, 10) to (95, 50) uses 2 grey levels and 91 pixels with `LINE_8`, but 26 grey levels and 275 pixels with `LINE_AA` *(Code example 1)*.
+
+## 5. Try it
+
+<DrawLab caption="A tiny 32 × 20 image, enlarged. Move the end point and compare OpenCV's LINE_8 pixels with anti-aliased drawing; try filled shapes." />
+
+## 6. Sub-pixel drawing: `shift`
+
+Coordinates are integers, but measurements are not (5.5). The `shift` argument says how many of the coordinate's bits are fractional: with `shift=4`, coordinates are multiplied by 16. A disc drawn at centre (20.25, 19.5) this way has its measured centre at (20.27, 19.53) *(Code example 1)*. Use it to draw measured edges and fitted circles (5.6) exactly where they were found.
+
+## 7. Text that can be read
+
+`cv2.putText` uses built-in **Hershey** vector fonts (ASCII only). For readable labels:
+
+- Measure the text with `cv2.getTextSize(text, font, scale, thickness)` → ((width, height), baseline).
+- Draw a filled **background box** first, then the text on top.
+- `org` is the **bottom-left** of the text: place it at `y - baseline`, not at the top.
+- Use `LINE_AA` for text; thickness 1–2; scale 0.4–1.0 for typical image sizes.
+- Non-ASCII text (ä, é, 中, हि) needs Pillow's `ImageDraw` with a TrueType font, then convert back (7.3).
+
+## 8. Transparent overlays
+
+To highlight regions without hiding the image: draw filled shapes on a copy and blend with `cv2.addWeighted(overlay, α, img, 1 − α, 0)` (5.1, 6.3). Then draw outlines and labels on top at full strength *(Code example 2)*:
+
+![The colour shapes with a light highlight, yellow outlines and black label boxes showing each shape's number and area](/images/sample-annotated.png)
+
+## 9. Industrial example
+
+The operator screen of a sorting station:
+
+<Flow
+  steps={[
+    { label: "Measure on the original frame (never on the drawn copy)", tone: "process" },
+    { label: "view = frame.copy()", tone: "process" },
+    { label: "Green boxes = OK, red outlines = NOK, value labels with background", tone: "process" },
+    { label: "Status bar: count, rate, last NOK reason (putText on a filled bar)", tone: "result" },
+  ]}
+/>
+
+Keep colours consistent across the plant (green = OK, red = NOK, yellow = warning) and draw thick enough to be seen from two metres away.
+
+## What you should remember from 7.5
+
+<Takeaways>
+<Takeaway n={1} title="In place">Drawing writes into the array: draw on a copy.</Takeaway>
+<Takeaway n={2} title="Arguments">Integer (x, y) points, (B, G, R) colours, thickness −1 = filled.</Takeaway>
+<Takeaway n={3} title="Line types">LINE_8 for masks (two values), LINE_AA for display (smooth).</Takeaway>
+<Takeaway n={4} title="Text">getTextSize + background box; org is bottom-left; Hershey fonts are ASCII only.</Takeaway>
+<Takeaway n={5} title="Precision">shift for sub-pixel positions; addWeighted for transparent overlays.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Write the call that draws a filled red disc of radius 10 at (50, 40).
+
+<Solution>
+
+`cv2.circle(img, (50, 40), 10, (0, 0, 255), -1)`.
+
+</Solution>
+
+**Q2.** Your mask, drawn with `LINE_AA`, contains values like 37 and 180. Why, and what should you use?
+
+<Solution>
+
+Anti-aliasing blends edge pixels. For masks use the default `LINE_8` (or `LINE_4`), which only writes the chosen value.
+
+</Solution>
+
+**Q3.** `cv2.putText(img, "OK", (10, 0), …)`: why is the text invisible?
+
+<Solution>
+
+`org` is the **bottom-left** corner: at y = 0 the text lies above the image. Use y ≥ text height (e.g. `(10, 20)`).
+
+</Solution>
+
+### Next: 7.6 Mouse and trackbars
+
+Interactive tools: clicking on pixels, drawing ROIs and tuning thresholds with sliders.
+
+## Code
+
+Two examples: in-place drawing, line types and sub-pixel shift; and an annotated result image. Copy the sample images next to the script.
+
+### 1. OpenCV: copies, line types and sub-pixel drawing
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+marked = img.copy()                                          # draw on a copy: drawing changes the array in place
+cv2.rectangle(marked, (20, 50), (115, 145), (0, 255, 255), 2)
+print("original untouched:", np.array_equal(img, cv2.imread("sample-color.png")), "| pixels changed in the copy:",
+      int(np.count_nonzero(np.any(marked != img, axis=2))))
+
+canvas8 = np.zeros((60, 100), np.uint8)
+canvasAA = np.zeros((60, 100), np.uint8)
+cv2.line(canvas8, (5, 10), (95, 50), 255, 1, cv2.LINE_8)
+cv2.line(canvasAA, (5, 10), (95, 50), 255, 1, cv2.LINE_AA)
+print("LINE_8 : grey levels used", np.unique(canvas8).size, "| lit pixels", int(np.count_nonzero(canvas8)))
+print("LINE_AA: grey levels used", np.unique(canvasAA).size, "| lit pixels", int(np.count_nonzero(canvasAA)))
+
+disc = np.zeros((40, 40), np.uint8)
+cv2.circle(disc, (round(20.25 * 16), round(19.5 * 16)), 8 * 16, 255, -1, cv2.LINE_AA, shift=4)   # centre (20.25, 19.5), r 8
+m = cv2.moments(disc)
+print(f"sub-pixel disc centre: ({m['m10'] / m['m00']:.2f}, {m['m01'] / m['m00']:.2f})")
+```
+
+Output:
+
+```text
+original untouched: True | pixels changed in the copy: 1136
+LINE_8 : grey levels used 2 | lit pixels 91
+LINE_AA: grey levels used 26 | lit pixels 275
+sub-pixel disc centre: (20.27, 19.53)
+```
+
+- `np.any(marked != img, axis=2)` is True where any of the three channels changed.
+- With `shift=4` every coordinate **and the radius** are given in 1/16 pixel.
+- The measured centre uses image moments (5.7): m10/m00 and m01/m00.
+
+### 2. OpenCV: labelled results with a transparent highlight
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+_, mask = cv2.threshold(gray, 60, 255, cv2.THRESH_BINARY)                 # the coloured shapes
+contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+contours = sorted(contours, key=lambda c: (cv2.boundingRect(c)[1] // 100, cv2.boundingRect(c)[0]))   # top row first, then left to right
+
+overlay = img.copy()
+cv2.drawContours(overlay, contours, -1, (255, 255, 255), -1)              # all shapes filled white
+out = cv2.addWeighted(overlay, 0.3, img, 0.7, 0)                          # 30 % transparent highlight
+cv2.drawContours(out, contours, -1, (0, 255, 255), 1, cv2.LINE_AA)        # yellow outlines on top
+for i, c in enumerate(contours):
+    x, y, w, h = cv2.boundingRect(c)
+    label = f"#{i + 1}: {int(cv2.contourArea(c))} px"
+    (tw, th), base = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)
+    cv2.rectangle(out, (x, y - th - base - 4), (x + tw + 4, y), (0, 0, 0), -1)  # text background box
+    cv2.putText(out, label, (x + 2, y - base - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+    print(f"{label:16s} box x={x:3d} y={y:3d} w={w:3d} h={h:3d} | label {tw} x {th} px, baseline {base}")
+cv2.imwrite("annotated.png", out)
+```
+
+Output:
+
+```text
+#1: 5406 px      box x= 28 y= 53 w= 85 h= 85 | label 81 x 9 px, baseline 4
+#2: 6000 px      box x=135 y= 45 w= 61 h=101 | label 81 x 9 px, baseline 4
+#3: 3500 px      box x=225 y= 45 w= 71 h=101 | label 81 x 9 px, baseline 4
+#4: 5600 px      box x= 20 y=165 w=281 h= 21 | label 81 x 9 px, baseline 4
+```
+
+- Thresholding and contours are covered in Part C; here they only provide shapes to annotate.
+- `cv2.boundingRect` returns (x, y, w, h); `cv2.contourArea` the area in pixels.
+- The label box is drawn from y − text height − baseline − 4 up to y, so the label sits just above the object.
+
+## OpenCV API notes
+
+**Shapes**: `line`, `arrowedLine`, `rectangle`, `circle`, `ellipse`, `ellipse2Poly`, `polylines`, `fillPoly`, `fillConvexPoly`, `drawContours`, `drawMarker` (`MARKER_CROSS`, `MARKER_TILTED_CROSS`, `MARKER_STAR`, `MARKER_DIAMOND`, `MARKER_SQUARE`, `MARKER_TRIANGLE_UP/DOWN`). Arguments: `color`, `thickness` (−1 = `FILLED`), `lineType` (`LINE_4`, `LINE_8`, `LINE_AA`), `shift`.
+
+**Text**: `putText(img, text, org, fontFace, fontScale, color, thickness, lineType, bottomLeftOrigin)`; `getTextSize`; fonts `FONT_HERSHEY_SIMPLEX`, `_PLAIN`, `_DUPLEX`, `_COMPLEX`, `_TRIPLEX`, `_SCRIPT_*`, plus `FONT_ITALIC` flag; `getFontScaleFromHeight` for a target pixel height.
+
+**Points**: int tuples, or int32 arrays of shape (N, 1, 2) for polygon functions; `np.round(pts).astype(np.int32)` from float results.
+
+## Where it fails
+
+- **Text scaling**: Hershey fonts at small scales become unreadable on large images; scale text with the image width.
+- **Unicode text** is not supported by `putText` (question marks or garbage).
+- **Drawing on the measured image** biases later measurements, thresholds and histograms.
+- **Clipping**: shapes partly outside the image are clipped silently; labels near borders may be cut off: clamp their position.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Float coordinates** (`(x, y)` from calculations) passed directly: "Can't parse 'pt1'" errors. Round and convert to int.
+- **(0, 0, 255) expected to be blue** (it is red: BGR).
+- **Drawing masks with LINE_AA**.
+- **`org` at the top of the text** instead of the bottom-left.
+- **Drawing on the original** before measuring it.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Rasterisation
+
+Turning a geometric line into pixels is rasterisation. OpenCV's LINE_8 lines follow a Bresenham-style integer algorithm (only additions and comparisons), and LINE_AA computes partial coverage of edge pixels [1]. The same ideas run in every graphics card.
+
+### Better text
+
+For production user interfaces, draw the camera image in a GUI toolkit (Qt, a web page) and let the toolkit render text, buttons and tables, keeping OpenCV for the image overlays.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does thickness = −1 do in cv2.rectangle?",
+      options: ["Draws nothing", "Fills the rectangle", "Draws a dashed outline", "Uses automatic thickness"],
+      answer: 1,
+      explanation: "−1 (cv2.FILLED) fills the shape.",
+    },
+    {
+      question: "Which line type should be used for drawing a binary mask?",
+      options: ["LINE_AA", "LINE_8", "Either, they are identical", "LINE_SMOOTH"],
+      answer: 1,
+      explanation: "LINE_8 writes only the chosen value; AA creates intermediate values.",
+    },
+    {
+      question: "In cv2.putText, org is…",
+      options: ["The text's centre", "The top-left corner", "The bottom-left corner of the text", "The baseline's right end"],
+      answer: 2,
+      explanation: "Unless bottomLeftOrigin is set, org is the bottom-left of the text string.",
+    },
+    {
+      question: "How do you draw a circle centred at (10.5, 20.25)?",
+      options: ["Pass floats directly", "Round to (10, 20)", "Use shift: multiply coordinates and radius by 2^shift", "Use cv2.ellipse"],
+      answer: 2,
+      explanation: "shift gives the number of fractional bits.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A label "NOK 12.4 mm" measures 98 × 13 px with baseline 5 (from getTextSize). You want it just above a box whose top-left corner is (200, 150), on a black background box with 3 px padding. Give the rectangle corners and the putText origin.
+
+<Solution>
+
+Background: from (200, 150 − 13 − 5 − 2·3) = **(200, 126)** to (200 + 98 + 6, 150) = **(304, 150)**. Text origin (bottom-left of the text, above the baseline): **(203, 150 − 3 − 5) = (203, 142)**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Make a 120 × 200 binary mask (uint8) containing a filled polygon with corners (20, 20), (180, 30), (150, 100), (40, 90), using `cv2.fillPoly`. Print the number of unique values and the area in pixels, and compare with `cv2.contourArea` of the polygon.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+pts = np.array([[20, 20], [180, 30], [150, 100], [40, 90]], np.int32).reshape(-1, 1, 2)
+mask = np.zeros((120, 200), np.uint8)
+cv2.fillPoly(mask, [pts], 255)                         # default LINE_8: only 0 and 255
+print("unique values:", np.unique(mask), "| filled pixels:", int(np.count_nonzero(mask)),
+      "| polygon area:", cv2.contourArea(pts))
+```
+
+Output:
+
+```text
+unique values: [  0 255] | filled pixels: 9711 | polygon area: 9500.0
+```
+
+The pixel count is a little larger than the exact polygon area because boundary pixels are counted fully (the outline belongs to the mask).
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Operators complain that defect labels on the screen are hard to read on the shiny, textured parts. What do you change?
+
+<Solution>
+
+Put a filled, contrasting background box behind each label (getTextSize), increase the font scale with the display size, use LINE_AA and thickness 1–2, keep consistent colours, and avoid drawing labels over the defect itself (place them outside, with a thin leader line).
+
+</Solution>
+
+## References
+
+1. J. E. Bresenham, "Algorithm for computer control of a digital plotter," *IBM Systems Journal*, vol. 4, no. 1, pp. 25–30, 1965.
+2. OpenCV 4.13.0 documentation, *Drawing functions*: [docs.opencv.org/4.13.0/d6/d6e/group__imgproc__draw.html](https://docs.opencv.org/4.13.0/d6/d6e/group__imgproc__draw.html).
+3. A. V. Hershey, *Calligraphy for computers*, U.S. Naval Weapons Laboratory, Report 2101, 1967 (origin of the Hershey fonts).

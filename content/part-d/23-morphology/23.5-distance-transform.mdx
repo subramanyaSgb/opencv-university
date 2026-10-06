@@ -1,0 +1,282 @@
+export const meta = {
+  number: "23.5",
+  title: "Distance transform",
+  minutes: 20,
+  objectives: [
+    "Compute, for every object pixel, the distance to the nearest background pixel",
+    "Compare city-block, chessboard and Euclidean distances and OpenCV's mask sizes",
+    "Use the distance transform to measure widths, find object centres and separate touching objects",
+    "Find the nearest feature for every pixel with the labels output",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 23.5 (Module 23).
+  Lab: MorphLab (mode distance).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 23.5 Distance transform
+
+<Definition term="Distance transform">an image in which every white pixel holds its distance to the nearest black pixel. Pixels on the outline get 1, pixels deep inside large shapes get large values, and the ridges of the distance image are the skeleton (23.4). Its maxima mark the centres of the thickest parts.</Definition>
+
+Erosion with a disc of radius r keeps exactly the pixels whose distance to the background is more than r. Doing that for every r at once gives the distance transform: one image that answers "how far inside the object am I?" for every pixel. Rosenfeld and Pfaltz described the two-pass algorithm in 1966 [1]; today exact Euclidean versions run in linear time [2, 3].
+
+## 1. An analogy
+
+A lake on a map, with contour lines showing how far each point of the water is from the nearest shore. Near the shore the numbers are small; in the middle of wide bays they are large; in a narrow channel they never get large. The deepest-looking points (the largest distances) are the centres of the widest parts of the lake.
+
+## 2. Three ways to measure distance
+
+<Flow
+  steps={[
+    { label: "Binary mask (objects white)", tone: "data" },
+    { label: "Forward pass: top-left to bottom-right, take the minimum of neighbours + step cost", tone: "process" },
+    { label: "Backward pass: bottom-right to top-left, the same", tone: "process" },
+    { label: "Distance image (float32): 0 on the background, growing inwards", tone: "result" },
+  ]}
+/>
+
+The distance between pixels depends on the metric. From one black pixel in the middle of a white area:
+
+| Metric | Steps allowed | Distance to a pixel 3 right and 3 down | Shape of "equal distance" |
+| --- | --- | --- | --- |
+| City block (L1) | horizontal and vertical, cost 1 | 6 | diamond |
+| Chessboard (C) | also diagonal, cost 1 | 3 | square |
+| Euclidean (L2) | straight line | 4.24 | circle |
+
+For measurements, Euclidean distances are the right ones. OpenCV computes L2 approximately with a 3 × 3 or 5 × 5 mask of step costs (chamfer distances), or exactly with `DIST_MASK_PRECISE`. On the cleaned test mask, against the exact result:
+
+| L2 mask | Largest error | Mean error | Time (this image, one test machine) |
+| --- | --- | --- | --- |
+| 3 × 3 | 1.35 px | 0.20 px | about 0.2 ms |
+| 5 × 5 | 0.45 px | 0.06 px | |
+| `DIST_MASK_PRECISE` | 0 | 0 | about 0.6 ms |
+
+The exact version is only a few times slower: use it unless every microsecond counts.
+
+<MorphLab mode="distance" caption="The distance transform of the test mask (dark red near the outline, yellow deep inside) and a threshold on it. Raising the threshold is the same as eroding with a disc (Euclidean), a diamond (city block) or a square (chessboard) of that radius: switch the metric to see the shapes change. At about 2 the bridge between the discs disappears; the discs survive until about 30, their radius."/>
+
+## 3. What it measures
+
+- **Width**: the maximum distance inside a shape is half its largest inscribed width. The discs (radius 30) reach 30.0; the rectangle (71 pixels high, with holes) reaches 18.8, because the holes and notch keep its interior close to a "shore". Along a skeleton, 2 × distance gives the local width of a crack or a stroke (23.4).
+- **Centres**: maxima of the distance transform are the centres of the thickest parts: the best points to grip, to place a label, or to start region growing.
+- **Separation of touching objects**: four touching coins form one white blob, but their distance transform has four separate peaks. Thresholding at 50 % of the maximum gives four markers, one per coin; they seed the watershed (27.4) that draws the borders between the coins.
+- **Nearest feature**: `cv2.distanceTransformWithLabels` also returns, for every pixel, the label of the nearest zero pixel (or connected zero region): a Voronoi partition, useful for "which hole is this point closest to".
+
+## 4. Industrial example
+
+Wall-thickness checks on castings and moulded parts threshold the cross-section image and compute its distance transform: twice the minimum of the distance values along the skeleton is the thinnest wall, compared with the specification. In pick-and-place, the maximum of the distance transform of each part's mask gives the point farthest from all edges, where a suction gripper holds best. Counting touching tablets, nuts or cells uses the distance-transform peaks as markers (25.4, 27.4).
+
+## What you should remember from 23.5
+
+<Takeaways>
+<Takeaway n={1} title="Definition">Each object pixel gets its distance to the nearest background pixel.</Takeaway>
+<Takeaway n={2} title="Metrics">L1 diamond, chessboard square, L2 circle; use exact L2 (DIST_MASK_PRECISE) for measurement.</Takeaway>
+<Takeaway n={3} title="Uses">Widths (2 × distance), centres (maxima), markers for separating touching objects.</Takeaway>
+<Takeaway n={4} title="Link">Threshold at r = erosion with a disc of radius r; ridges = skeleton.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A white strip is 9 pixels wide. What is the maximum of its Euclidean distance transform?
+
+<Solution>
+
+The centre pixel is 5 pixels from the nearest background pixel on either side (pixels 1…9, background at 0 and 10): **5**, i.e. (width + 1)/2 on a pixel grid.
+
+</Solution>
+
+**Q2.** Why do touching round objects give separate peaks in the distance transform?
+
+<Solution>
+
+The neck between two touching discs is narrow, so the distance there is small; each disc's centre is far from any background, so it is a local maximum. The peaks are separated by a valley at the neck.
+
+</Solution>
+
+### Next: 23.6 Grayscale morphology
+
+Erosion, dilation, opening and closing on grey images: minimum and maximum filters.
+
+## Code
+
+Two examples: metrics and precision, then separating touching coins.
+
+### 1. Metrics and masks
+
+```python
+import numpy as np
+import cv2
+
+point = np.ones((7, 7), np.uint8)
+point[3, 3] = 0                                                      # one background pixel in the middle
+for metric, name, mask in [(cv2.DIST_L1, "L1", 3), (cv2.DIST_C, "C ", 3), (cv2.DIST_L2, "L2", cv2.DIST_MASK_PRECISE)]:
+    d = cv2.distanceTransform(point, metric, mask)
+    print(f"{name}: corner {d[0, 0]:.2f} | first row {np.round(d[0].astype(float), 2).tolist()}")
+
+clean = cv2.morphologyEx(cv2.imread("sample-morph.png", cv2.IMREAD_GRAYSCALE), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+exact = cv2.distanceTransform(clean, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+for mask in (3, 5):
+    err = np.abs(cv2.distanceTransform(clean, cv2.DIST_L2, mask) - exact)
+    print(f"L2 mask {mask}x{mask}: max error {err.max():.2f} px, mean {err[clean > 0].mean():.3f} px")
+print(f"largest distance in a disc: {exact[25:86, 135:196].max():.1f} | in the rectangle: {exact[20:91, 20:111].max():.2f}")
+```
+
+Output:
+
+```text
+L1: corner 6.00 | first row [6.0, 5.0, 4.0, 3.0, 4.0, 5.0, 6.0]
+C : corner 3.00 | first row [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0]
+L2: corner 4.24 | first row [4.24, 3.61, 3.16, 3.0, 3.16, 3.61, 4.24]
+L2 mask 3x3: max error 1.35 px, mean 0.202 px
+L2 mask 5x5: max error 0.45 px, mean 0.055 px
+largest distance in a disc: 30.0 | in the rectangle: 18.79
+```
+
+- Output is float32; `distanceTransform` measures the distance to the nearest **zero** pixel, so objects must be white (non-zero).
+
+### 2. Separating touching coins
+
+```python
+import numpy as np
+import cv2
+
+coins = np.zeros((120, 300), np.uint8)
+for x in (50, 105, 160, 215):
+    cv2.circle(coins, (x, 60), 30, 255, -1)                          # radius 30, centres 55 px apart: they overlap
+print("connected components:", cv2.connectedComponents(coins)[0] - 1)
+D = cv2.distanceTransform(coins, cv2.DIST_L2, 5)
+markers = (D > 0.5 * D.max()).astype(np.uint8)
+n, labels, stats, centroids = cv2.connectedComponentsWithStats(markers)
+print("markers:", n - 1, "| centres:", np.round(centroids[1:, 0]).astype(int).tolist(), "| peak distance:", round(float(D.max()), 1))
+```
+
+Output:
+
+```text
+connected components: 1
+markers: 4 | centres: [51, 105, 160, 214] | peak distance: 29.8
+```
+
+- The outer two markers sit one pixel off the true centres because the 5 × 5 chamfer distance is approximate and the outer coins have only one neighbour; for seeds that does not matter. These markers are the seeds of the watershed in 27.4, which then assigns every coin pixel to its own coin.
+
+## OpenCV API notes
+
+**`cv2.distanceTransform(src, distanceType, maskSize, dstType=cv2.CV_32F)`**:
+- `src`: 8-bit single channel; distances are measured to the nearest zero pixel.
+- `distanceType`: `cv2.DIST_L1`, `cv2.DIST_L2`, `cv2.DIST_C` (and a few robust ones).
+- `maskSize`: 3, 5 or `cv2.DIST_MASK_PRECISE` (exact Euclidean; with DIST_L1 and DIST_C a 3 × 3 mask is already exact).
+- `dstType`: `CV_32F` (default) or `CV_8U` for DIST_L1/DIST_C (saturates at 255).
+
+**`cv2.distanceTransformWithLabels(src, distanceType, maskSize, labelType=cv2.DIST_LABEL_CCOMP)`** → (distances, labels): labels of the nearest zero region (`DIST_LABEL_CCOMP`) or nearest zero pixel (`DIST_LABEL_PIXEL`).
+
+## Where it fails
+
+- **Noisy masks**: holes and specks create spurious small distances and peaks; clean the mask first (23.2).
+- **Elongated objects touching**: several peaks per object, or one plateau along the object; markers need more than a simple threshold (h-maxima, size filters).
+- **Pixel-grid limits**: distances are measured between pixel centres; sub-pixel widths need edge-based methods (22.5).
+- **Anisotropic pixels**: if pixels are not square in physical units, scale before or use a weighted metric.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Black objects on white**: the transform measures distance to zero pixels; invert first.
+- **Using the 3 × 3 L2 mask for measurement**: errors up to 1.35 px in the example.
+- **Width = maximum distance**: it is about half the width (twice the distance, plus the pixel).
+- **Thresholding at a fixed distance for markers** across objects of different sizes: use a fraction of each object's own maximum, or local maxima.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Algorithms
+
+Rosenfeld and Pfaltz [1] introduced sequential (two-pass) distance transforms; Borgefors (1986) optimised the chamfer step costs (OpenCV's 3 × 3 L2 uses 0.955 and 1.3693, the 5 × 5 one adds a knight's-move cost). Exact Euclidean distance transforms in linear time came with Maurer et al. [2] and Felzenszwalb and Huttenlocher [3]; the latter computes 1-D lower envelopes of parabolas along rows and then columns (the MorphLab uses it).
+
+### Signed distance and level sets
+
+A signed distance (positive inside, negative outside) of a shape's outline is the standard representation for level-set methods (28.2), shape blending and collision checks.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "cv2.distanceTransform measures distance to…",
+      options: ["The image border", "The nearest zero (black) pixel", "The image centre", "The nearest white pixel"],
+      answer: 1,
+      explanation: "Objects must be non-zero.",
+    },
+    {
+      question: "Which metric gives a diamond-shaped equal-distance contour?",
+      options: ["Euclidean", "City block (L1)", "Chessboard", "Mahalanobis"],
+      answer: 1,
+      explanation: "Only horizontal and vertical steps.",
+    },
+    {
+      question: "Thresholding the Euclidean distance transform at r equals…",
+      options: ["Dilation with a disc of radius r", "Erosion with a disc of radius r", "Opening", "Nothing"],
+      answer: 1,
+      explanation: "Pixels farther than r from the background are exactly those that survive the erosion.",
+    },
+    {
+      question: "Why are distance-transform peaks used as watershed markers?",
+      options: ["They are bright", "Each touching object has its own central peak", "They are edges", "They are random"],
+      answer: 1,
+      explanation: "The necks between objects are valleys.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 5 × 5 white square surrounded by black. Write its city-block distance transform.
+
+<Solution>
+
+Rows: 1 1 1 1 1 / 1 2 2 2 1 / 1 2 3 2 1 / 1 2 2 2 1 / 1 1 1 1 1. The centre is 3 steps from the background.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Find the thinnest and thickest parts of the "A7" text in the test mask: compute the exact distance transform of the cleaned mask, take its values on the ridge (the local maxima, which lie on the skeleton) of the text region (columns 145–230, rows 120–185), and report 2 × min and 2 × max.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+region = clean[120:185, 145:230]
+d = cv2.distanceTransform(region, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+ridge = (d >= cv2.dilate(d, np.ones((3, 3), np.uint8)) - 1e-6) & (region > 0)   # local maxima = skeleton points
+widths = 2 * d[ridge]
+print(f"stroke width along the ridge: min {widths.min():.1f} px, max {widths.max():.1f} px, median {np.median(widths):.1f} px")
+```
+
+Output:
+
+```text
+stroke width along the ridge: min 6.3 px, max 10.2 px, median 7.2 px
+```
+
+The median, 7.2, is about one pixel more than the drawn thickness of 6: the distance is measured to the centre of the first background pixel, so 2 × d counts that half-pixel on each side. Subtract 1 for the stroke width in pixels (≈ 6.2). The maximum, 10.2, lies at junctions and corners where strokes meet and a larger disc fits; the minimum, 6.3, at the thinnest stroke parts.
+
+</Solution>
+
+## References
+
+1. A. Rosenfeld, J. L. Pfaltz, "Sequential operations in digital picture processing", *J. ACM* 13(4), 471–494, 1966.
+2. C. R. Maurer, R. Qi, V. Raghavan, "A linear time algorithm for computing exact Euclidean distance transforms of binary images in arbitrary dimensions", *IEEE Trans. PAMI* 25(2), 265–270, 2003.
+3. P. F. Felzenszwalb, D. P. Huttenlocher, "Distance transforms of sampled functions", *Theory of Computing* 8, 415–428, 2012.
+4. G. Borgefors, "Distance transformations in digital images", *Computer Vision, Graphics, and Image Processing* 34(3), 344–371, 1986.
+5. OpenCV 4.13.0 documentation: `distanceTransform`, `distanceTransformWithLabels`. https://docs.opencv.org/4.13.0/

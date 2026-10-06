@@ -1,0 +1,446 @@
+export const meta = {
+  number: "8.1",
+  title: "Architecture and modules",
+  minutes: 30,
+  objectives: [
+    "Describe the layers of OpenCV: Python bindings, C++ API, optimised kernels, third-party libraries",
+    "Name the main modules and know which one holds a given function",
+    "Tell the main repository from opencv_contrib and know what each pip package contains",
+    "Read cv2.getBuildInformation() to find out what your installation can do",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 8.1 (Module 8 plan).
+  Reference tail: Code examples 1 and 2 are compared automatically on opencv-python-headless 4.13.0.92;
+  example 3 prints CPU and threading details that depend on the machine.
+*/}
+
+# 8.1 Architecture and modules
+
+<Definition term="OpenCV architecture">the way the library is built in layers (Python on top, C++ in the middle, optimised code and third-party libraries underneath) and split into modules, each responsible for one kind of task.</Definition>
+
+Module 7 used OpenCV as a black box: `cv2.something(...)`. This module opens the box. Knowing how the library is organised tells you where to look in the documentation, which package to install, why a function is "missing", and where speed comes from.
+
+## 1. An analogy
+
+A large hardware store. You walk in through one entrance (`import cv2`), but the store has departments: fasteners, paint, electrical, garden. Each department has its own shelves and specialists. Behind the shop floor there is a warehouse and suppliers you never see. Some special items are not in the main store at all: they are in the annex next door (contrib), and you only find them if the annex is open (the right package is installed).
+
+## 2. Four layers
+
+<Flow
+  steps={[
+    { label: "Your Python code: import cv2", tone: "world" },
+    { label: "Python bindings: convert NumPy arrays ↔ cv::Mat, check arguments", tone: "data" },
+    { label: "C++ API: cv::GaussianBlur, cv::Mat, cv::VideoCapture …", tone: "process" },
+    { label: "Optimised kernels: SIMD, multi-threading, IPP; third-party libs (libjpeg-turbo, FFmpeg …)", tone: "result" },
+  ]}
+/>
+
+- **Python bindings** (`cv2`): generated automatically from the C++ headers. A call like `cv2.GaussianBlur(img, (5, 5), 0)` wraps the NumPy array as a `cv::Mat` (no copy when possible), calls C++, and wraps the result as a NumPy array (8.3).
+- **C++ API**: the real implementation. Everything is in the namespace `cv`; images are `cv::Mat` (8.2).
+- **Optimised kernels**: the same function has several code paths: plain C++, SIMD versions chosen at run time for your CPU (SSE4, AVX2, AVX-512, NEON on ARM), a parallel loop split over cores, and sometimes Intel IPP (a bundled subset called IPPICV).
+- **Third-party libraries**: image formats (libjpeg-turbo, libpng, libtiff, libwebp, OpenJPEG, OpenEXR), video (FFmpeg, GStreamer, Media Foundation on Windows), deep-learning model files (protobuf), linear algebra (LAPACK/OpenBLAS).
+
+This is why a single Python line can be fast: almost no time is spent in Python; the work happens in compiled, vectorised, multi-threaded C++.
+
+## 3. The main modules
+
+OpenCV's main repository is split into modules. In C++ each is a library (`opencv_imgproc`) with a header (`opencv2/imgproc.hpp`); in Python they are all merged into `cv2`, with a few sub-namespaces (`cv2.aruco`, `cv2.dnn`, `cv2.ml`, `cv2.cuda`, `cv2.ocl`, `cv2.gapi`).
+
+| Module | What it does | Typical functions | Course chapters |
+| --- | --- | --- | --- |
+| **core** | Mat, basic arithmetic, linear algebra, persistence (XML/YAML), parallel framework | `add`, `split`, `mean`, `norm`, `solve`, `FileStorage` | 5, 6, 8.2 |
+| **imgproc** | Image processing: filters, geometry, colour, histograms, thresholds, contours, drawing | `GaussianBlur`, `warpAffine`, `cvtColor`, `threshold`, `findContours`, `line` | Parts B–D |
+| **imgcodecs** | Read and write image files | `imread`, `imwrite`, `imencode` | 4, 7.2 |
+| **videoio** | Cameras and video files | `VideoCapture`, `VideoWriter` | 7.4 |
+| **highgui** | Simple windows, mouse, trackbars | `imshow`, `waitKey`, `createTrackbar` | 7.2, 7.6 |
+| **features2d** | Keypoints, descriptors, matching | `ORB_create`, `SIFT_create`, `BFMatcher` | Part E |
+| **calib3d** | Camera calibration, pose, stereo, homography | `calibrateCamera`, `solvePnP`, `findHomography` | Part F |
+| **objdetect** | Object detectors: ArUco, QR codes, barcodes, cascades, face detection | `aruco.ArucoDetector`, `QRCodeDetector` | Part E |
+| **dnn** | Run trained neural networks (ONNX, TensorFlow, Caffe …) | `dnn.readNet`, `blobFromImage` | 8.7, Part H |
+| **ml** | Classic machine learning: SVM, k-NN, decision trees (k-means itself is in core) | `ml.SVM_create` | Part G |
+| **photo** | Denoising, inpainting, HDR | `fastNlMeansDenoising`, `inpaint` | Part C |
+| **video** | Motion: optical flow, background subtraction, Kalman filter | `calcOpticalFlowPyrLK`, `createBackgroundSubtractorMOG2` | Part F |
+| **stitching** | Panoramas | `Stitcher_create` | Part F |
+| **flann** | Fast nearest-neighbour search | `FlannBasedMatcher` | Part E |
+| **gapi** | Graph API: describe a pipeline as a graph, run it efficiently | `cv2.GComputation` | 8.8 |
+
+You do not need to memorise the table. You need to know that it exists, so when the docs show `#include <opencv2/calib3d.hpp>` or a function is listed under "objdetect", you know where you are.
+
+<TaskSorter
+  kinds={[
+    { key: "core", label: "core" },
+    { key: "imgproc", label: "imgproc" },
+    { key: "io", label: "imgcodecs · videoio · highgui" },
+    { key: "geo", label: "features2d · calib3d" },
+    { key: "det", label: "objdetect · dnn" },
+    { key: "contrib", label: "contrib only" },
+  ]}
+  tasks={[
+    { task: "Read a 16-bit TIFF from disk", answer: "io", why: "Image files are imgcodecs (cv2.imread)." },
+    { task: "Grab frames from a USB camera", answer: "io", why: "Cameras and video files are videoio (cv2.VideoCapture)." },
+    { task: "Add two images with saturation and compute the mean", answer: "core", why: "Basic arithmetic and statistics on arrays live in core." },
+    { task: "Threshold an image and find the contours of the parts", answer: "imgproc", why: "Thresholds, contours, filters and geometric transforms are imgproc." },
+    { task: "Straighten a tilted label with warpPerspective", answer: "imgproc", why: "Geometric image transforms are imgproc; computing the homography from points is calib3d." },
+    { task: "Calibrate a camera with a chessboard", answer: "geo", why: "calibrateCamera and findChessboardCorners are calib3d." },
+    { task: "Match ORB or SIFT features between two photos", answer: "geo", why: "Keypoints and descriptors are features2d; SIFT moved there from contrib in 4.4.0." },
+    { task: "Detect ArUco markers", answer: "det", why: "ArUco moved from contrib into objdetect in 4.7.0 (cv2.aruco)." },
+    { task: "Run an ONNX classification model on the CPU", answer: "det", why: "The dnn module loads and runs trained networks." },
+    { task: "Use SURF features or the guided filter", answer: "contrib", why: "SURF is in xfeatures2d (non-free), the guided filter in ximgproc: both opencv_contrib." },
+  ]}
+  caption="Which module? Pick the department for each task. Modules hold the code; in Python everything is still reached through cv2."
+/>
+
+## 4. Main repository vs opencv_contrib
+
+OpenCV is developed in two repositories:
+
+- **opencv** (main): stable, well-tested modules listed above.
+- **opencv_contrib**: extra modules: newer algorithms, specialised topics, or code with patent or licence restrictions. Examples: `xfeatures2d` (SURF, and other descriptors), `ximgproc` (guided filter, edge-aware filters, thinning), `tracking` (extra trackers), `face`, `text`, `freetype` (TrueType text drawing), `cudaimgproc` and the other CUDA modules.
+
+Algorithms move between them over time: SIFT moved from contrib to main in 4.4.0 after its patent expired; ArUco moved to `objdetect` in 4.7.0. Chapter 8.4 covers contrib in detail.
+
+The pip packages map onto this:
+
+| pip package | Main modules | contrib | GUI (highgui windows) |
+| --- | --- | --- | --- |
+| `opencv-python` | yes | no | yes |
+| `opencv-python-headless` | yes | no | no (servers, Docker) |
+| `opencv-contrib-python` | yes | yes | yes |
+| `opencv-contrib-python-headless` | yes | yes | no |
+
+Install exactly **one** of them (7.1). Two installed at once overwrite each other's `cv2` folder.
+
+## 5. How a call travels through the layers
+
+Follow `cv2.GaussianBlur(img, (5, 5), 0)` on a 2448 × 2048 uint8 image:
+
+<Flow
+  steps={[
+    { label: "Python: img is a NumPy array (2048, 2448) uint8", tone: "world" },
+    { label: "Binding: wrap the array as cv::Mat (shares memory), parse (5, 5) → cv::Size", tone: "data" },
+    { label: "imgproc: build the 5-tap Gaussian kernel, choose the separable filter", tone: "process" },
+    { label: "Kernel: AVX2 code path, rows split over the CPU cores", tone: "process" },
+    { label: "Binding: wrap the output cv::Mat as a new NumPy array", tone: "result" },
+  ]}
+/>
+
+Practical consequences:
+
+- **One big call beats many small calls.** Each Python → C++ crossing costs microseconds; a loop over pixels in Python calls the binding millions of times (6.1).
+- **Data types matter.** Many kernels have fast paths only for uint8 and float32; float64 or odd channel counts may take a slower generic path.
+- **Memory layout matters.** A non-contiguous array (a slice with a step, 6.3) may be copied before the call.
+
+## 6. Build options: what is inside your cv2
+
+OpenCV is compiled with options (CMake flags) that decide which modules, third-party libraries and accelerations are included. The pip wheels are built by the opencv-python project with a fixed set of options; a custom build (8.5) can add CUDA, GStreamer, TBB or contrib modules.
+
+`cv2.getBuildInformation()` prints the whole configuration. The lines worth reading:
+
+| Line | Tells you |
+| --- | --- |
+| `To be built:` | The modules in this build |
+| `Non-free algorithms:` | Whether patented contrib code (SURF) is included |
+| `GUI:` | Window backend (NONE in headless builds) |
+| `Video I/O:` | FFmpeg, GStreamer, camera backends |
+| `CPU/HW features: Baseline / Dispatched` | SIMD always used vs chosen at run time |
+| `Parallel framework:` | pthreads, TBB, OpenMP, Concurrency … |
+| `NVIDIA CUDA:` / `OpenCL:` | GPU support (8.5, 8.6) |
+
+When a colleague says "it works on my PC", compare the two build information printouts first.
+
+## 7. Industrial example
+
+A vision PC on a packaging line uses ArUco markers to locate the tray and a small ONNX model to classify labels. The team pins `opencv-python-headless==4.13.0.92` in `requirements.txt` (no GUI needed on the line, operator screens are a separate web app). A developer's notebook uses `opencv-contrib-python` for experiments with the guided filter. Before deploying, the build check below runs in the CI pipeline and fails if `cv2.aruco` or `cv2.dnn` is missing, or if the version differs from the pinned one. This catches a wrong package in the Docker image before it reaches the line.
+
+## What you should remember from 8.1
+
+<Takeaways>
+<Takeaway n={1} title="Layers">Python bindings → C++ API → optimised kernels and third-party libraries. The work happens in C++.</Takeaway>
+<Takeaway n={2} title="Modules">core, imgproc, imgcodecs, videoio, highgui, features2d, calib3d, objdetect, dnn, ml, photo, video, stitching, flann, gapi.</Takeaway>
+<Takeaway n={3} title="Contrib">Extra modules in a second repository; in pip, only the opencv-contrib-python packages contain them.</Takeaway>
+<Takeaway n={4} title="Build">cv2.getBuildInformation() shows what your cv2 can do; compare it when results differ between PCs.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Which module holds `cv2.findContours`? And `cv2.imwrite`?
+
+<Solution>
+
+`findContours` is **imgproc**; `imwrite` is **imgcodecs**.
+
+</Solution>
+
+**Q2.** `cv2.ximgproc` raises `AttributeError`. Why, and what fixes it?
+
+<Solution>
+
+ximgproc is an **opencv_contrib** module; the installed package (for example `opencv-python`) does not contain it. Uninstall it and install the matching `opencv-contrib-python` version (only one OpenCV package at a time).
+
+</Solution>
+
+**Q3.** Why is `cv2.GaussianBlur` on a whole image much faster than a Python loop that averages each pixel's neighbours?
+
+<Solution>
+
+The OpenCV call crosses into C++ once and runs vectorised (SIMD), multi-threaded code. The Python loop runs the interpreter for every pixel.
+
+</Solution>
+
+### Next: 8.2 The C++ API and cv::Mat
+
+The C++ layer under `cv2`: how `cv::Mat` stores an image, shares data and counts references.
+
+## Code
+
+Three examples: what the installed build contains, one pipeline that touches several modules, and the acceleration details of your machine.
+
+### 1. What is in my cv2?
+
+NumPy is not needed for the build check itself, but every script in the course starts with the same two imports.
+
+```python
+import numpy as np
+import cv2
+
+info = cv2.getBuildInformation()
+line = next(l for l in info.splitlines() if "To be built:" in l)
+built = line.split(":", 1)[1].split()
+print("OpenCV", cv2.__version__, "|", len(built), "modules built")
+print(" ".join(built))
+for name in ["aruco", "dnn", "ml", "cuda", "ocl", "gapi", "xfeatures2d", "ximgproc", "freetype"]:
+    print(f"cv2.{name:12s} {'yes' if hasattr(cv2, name) else 'no'}")
+nonfree = next(l for l in info.splitlines() if "Non-free algorithms" in l).split(":")[1].strip()
+print("non-free algorithms:", nonfree)
+```
+
+Output:
+
+```text
+OpenCV 4.13.0 | 16 modules built
+calib3d core dnn features2d flann gapi highgui imgcodecs imgproc ml objdetect photo python3 stitching video videoio
+cv2.aruco        yes
+cv2.dnn          yes
+cv2.ml           yes
+cv2.cuda         yes
+cv2.ocl          yes
+cv2.gapi         yes
+cv2.xfeatures2d  no
+cv2.ximgproc     no
+cv2.freetype     no
+non-free algorithms: NO
+```
+
+- `python3` in the module list is the binding itself, not an image module.
+- `cv2.cuda` exists even without CUDA support: the namespace is there, but `cv2.cuda.getCudaEnabledDeviceCount()` returns 0 (8.5). Test for a feature by calling it, not by `hasattr` alone.
+- With `opencv-contrib-python` the last three lines say `yes` and the module list is much longer.
+
+### 2. One pipeline, several modules
+
+A small inspection that uses core, imgproc, imgcodecs and objdetect, all through `cv2`:
+
+```python
+import numpy as np
+import cv2
+
+img = np.zeros((60, 80), np.uint8)
+cv2.rectangle(img, (20, 15), (59, 44), 200, -1)              # imgproc (drawing)
+ok, buf = cv2.imencode(".png", img)                          # imgcodecs: to PNG bytes in memory
+back = cv2.imdecode(buf, cv2.IMREAD_GRAYSCALE)               # imgcodecs: and back
+blur = cv2.GaussianBlur(back, (5, 5), 0)                     # imgproc
+_, bw = cv2.threshold(blur, 100, 255, cv2.THRESH_BINARY)     # imgproc
+contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)   # imgproc
+x, y, w, h = cv2.boundingRect(contours[0])                   # imgproc
+mean = cv2.mean(back)[0]                                     # core
+print(f"PNG round trip identical: {np.array_equal(img, back)} | contours {len(contours)} | box {x},{y},{w},{h} | mean {mean:.1f}")
+
+d = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50) # objdetect (aruco sub-namespace)
+marker = cv2.aruco.generateImageMarker(d, 7, 60)              # marker id 7, 60 x 60 pixels
+canvas = cv2.copyMakeBorder(marker, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)   # core: white quiet zone
+corners, ids, _ = cv2.aruco.ArucoDetector(d).detectMarkers(canvas)
+print("aruco ids:", ids.ravel().tolist(), "| first corner:", corners[0][0][0].tolist())
+```
+
+Output:
+
+```text
+PNG round trip identical: True | contours 1 | box 20,15,40,30 | mean 50.0
+aruco ids: [7] | first corner: [20.0, 20.0]
+```
+
+- The mean is exact: 40 × 30 pixels of 200 in 80 × 60 → 200 · 1200 / 4800 = 50.
+- The ArUco detector needs a white border around the marker (the "quiet zone"); without `copyMakeBorder` it finds nothing.
+
+### 3. Acceleration on this machine
+
+```python
+import numpy as np
+import cv2
+
+info = cv2.getBuildInformation().splitlines()
+for key in ["Baseline:", "Parallel framework:"]:
+    print(next(l.strip() for l in info if key in l))
+print("CPU features at run time:", cv2.getCPUFeaturesLine())
+print("optimised code on:", cv2.useOptimized(), "| IPP on:", cv2.ipp.useIPP())
+print("CPUs:", cv2.getNumberOfCPUs(), "| OpenCV threads:", cv2.getNumThreads())
+```
+
+Typical output on our Linux test machine (other CPUs and the Windows wheels print different lines):
+
+```text
+Baseline:                    SSE SSE2 SSE3
+Parallel framework:            pthreads
+CPU features at run time: SSE SSE2 SSE3 *SSE4.1 *SSE4.2 *AVX *FP16 *AVX2 *AVX512-SKX
+optimised code on: True | IPP on: True
+CPUs: 2 | OpenCV threads: 2
+```
+
+- **Baseline** features are compiled into every function; features marked `*` are **dispatched**: extra code paths chosen at run time if the CPU supports them. A wheel built for SSE3 still uses AVX2 on a modern CPU.
+- `cv2.setUseOptimized(False)` switches the optimised paths off (useful only to compare results or speed).
+
+## OpenCV API notes
+
+**Build and version**: `cv2.__version__`, `cv2.getVersionString()`, `cv2.getBuildInformation()`.
+
+**CPU and threads**: `cv2.getCPUFeaturesLine()`, `cv2.checkHardwareSupport(feature_id)`, `cv2.getNumberOfCPUs()`, `cv2.setNumThreads(n)`, `cv2.getNumThreads()`.
+
+**Optimisation switches**: `cv2.setUseOptimized(bool)` / `cv2.useOptimized()`; `cv2.ipp.setUseIPP(bool)` / `cv2.ipp.useIPP()`.
+
+**Python sub-namespaces**: `cv2.aruco`, `cv2.dnn`, `cv2.ml`, `cv2.cuda`, `cv2.ocl`, `cv2.gapi`, `cv2.fisheye`, `cv2.barcode`; with contrib also `cv2.xfeatures2d`, `cv2.ximgproc`, `cv2.freetype` and others.
+
+**Documentation**: `https://docs.opencv.org/4.13.0/` → "Modules" lists every module, main and contrib; each function page names its module and header.
+
+## Where it fails
+
+- **Docs vs installed package**: the online docs include contrib modules; a function from the docs may not exist in your package.
+- **Version drift**: functions move (ArUco API changed in 4.7.0: `ArucoDetector` instead of `detectMarkers` as a free function), so old tutorials fail on new versions.
+- **Python names differ from C++**: overloaded C++ functions or classes with factories appear as `cv2.SIFT_create()` or `cv2.SIFT.create()`; check `help(cv2.xxx)`.
+- **Build information is static**: it shows what was compiled in, not whether the hardware (GPU, camera backend) actually works on this PC.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Installing two OpenCV packages** (for example `opencv-python` and `opencv-contrib-python`): they overwrite each other.
+- **Assuming `hasattr(cv2, "cuda")` means a GPU is used**: the namespace exists in every wheel.
+- **Following a tutorial for another major version** without checking the module and function names.
+- **Looking for SURF in the pip wheels**: it is non-free and not included in the pip packages; use ORB, SIFT or AKAZE.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Where the bindings come from
+
+The Python (and Java, JavaScript) bindings are generated: a script parses the C++ headers and reads export macros such as `CV_EXPORTS_W` (export to wrappers) and `CV_WRAP` on methods. `CV_OUT` / `CV_IN_OUT` mark output arguments, which in Python become return values. That is why `cv2.threshold` returns `(retval, dst)` while in C++ `dst` is a parameter [3].
+
+### Universal intrinsics and HAL
+
+OpenCV writes SIMD code once using "universal intrinsics" (types like `v_uint8` and operations like `v_add`) that compile to SSE/AVX on x86, NEON on ARM, RVV on RISC-V and others. A Hardware Acceleration Layer (HAL) lets vendors plug in their own optimised implementations (IPP on Intel, Carotene on ARM) for selected functions [1].
+
+### Algorithm hints
+
+Recent 4.x builds print an `Algorithm Hint` line (here `ALGO_HINT_ACCURATE`), and `cv2.ALGO_HINT_DEFAULT`, `cv2.ALGO_HINT_ACCURATE` and `cv2.ALGO_HINT_APPROX` exist in Python. Some functions accept a hint to allow a faster, approximate implementation (for example a fixed-point GaussianBlur). By default results stay bit-exact between platforms for most functions. TODO: verify the version that introduced it and the list of functions that take an `AlgorithmHint` in 4.13.0.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which module would you look in for camera calibration?",
+      options: ["imgproc", "calib3d", "videoio", "core"],
+      answer: 1,
+      explanation: "calibrateCamera, solvePnP and stereo functions are in calib3d.",
+    },
+    {
+      question: "Which pip package contains the ximgproc module?",
+      options: ["opencv-python", "opencv-python-headless", "opencv-contrib-python", "numpy"],
+      answer: 2,
+      explanation: "Only the contrib packages contain opencv_contrib modules.",
+    },
+    {
+      question: "Where does most of the time go in cv2.GaussianBlur on a large image?",
+      options: ["In the Python interpreter", "In the compiled C++ kernel", "In converting to a list", "In reading the file"],
+      answer: 1,
+      explanation: "The binding call is cheap; the vectorised, threaded C++ kernel does the work.",
+    },
+    {
+      question: "The build information shows 'GUI: NONE'. What does that mean?",
+      options: ["Images cannot be read", "cv2.imshow windows are not available (headless build)", "No GPU", "OpenCV is broken"],
+      answer: 1,
+      explanation: "Headless builds have no window backend; everything else works.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+For each function, name the module: `cv2.VideoWriter`, `cv2.cvtColor`, `cv2.solvePnP`, `cv2.fastNlMeansDenoising`, `cv2.calcOpticalFlowPyrLK`, `cv2.dnn.blobFromImage`.
+
+<Solution>
+
+videoio, imgproc, calib3d, photo, video, dnn.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Write a function `require(features)` that raises a clear error at program start if the installed OpenCV is not version 4.13.x or misses any of the named sub-namespaces. Test it with `["aruco", "dnn"]` (passes) and `["ximgproc"]` (fails with the pinned headless package).
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+def require(features):
+    if not cv2.__version__.startswith("4.13."):
+        raise RuntimeError(f"need OpenCV 4.13.x, found {cv2.__version__}")
+    missing = [f for f in features if not hasattr(cv2, f)]
+    if missing:
+        raise RuntimeError(f"missing cv2 modules: {missing} (install the matching opencv-contrib-python?)")
+    return True
+
+print(require(["aruco", "dnn"]))
+try:
+    require(["ximgproc"])
+except RuntimeError as e:
+    print("error:", e)
+```
+
+Output:
+
+```text
+True
+error: missing cv2 modules: ['ximgproc'] (install the matching opencv-contrib-python?)
+```
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A script works on your laptop but on the line PC fails with `cv2.error: ... The function is not implemented. Rebuild the library with Windows, GTK+ 2.x or Cocoa support` when calling `cv2.imshow`. What is the cause, and what are the two possible fixes?
+
+<Solution>
+
+The line PC has a **headless** package (no GUI backend). Either install `opencv-python` instead (only one package), or, better for a production line, remove `imshow` from the inspection code and show results another way (save images, a web page, the HMI).
+
+</Solution>
+
+## References
+
+1. OpenCV 4.13.0 documentation, "Modules" overview and the core module (universal intrinsics, HAL). https://docs.opencv.org/4.13.0/
+2. opencv_contrib repository: list and description of extra modules. https://github.com/opencv/opencv_contrib
+3. OpenCV 4.13.0 documentation, "How OpenCV-Python Bindings Works" (Python tutorials, bindings section). https://docs.opencv.org/4.13.0/
+4. OpenCV ChangeLog (versions 4.4.0: SIFT in features2d; 4.7.0: ArUco in objdetect). https://github.com/opencv/opencv/wiki/ChangeLog
+5. opencv-python project (pip packages and their build options). https://github.com/opencv/opencv-python
+6. G. Bradski, "The OpenCV Library", *Dr. Dobb's Journal of Software Tools*, 2000.
+7. A. Kaehler, G. Bradski, *Learning OpenCV 3*, O'Reilly, 2016: Chapter 1 (overview and modules).

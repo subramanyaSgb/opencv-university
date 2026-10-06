@@ -1,0 +1,401 @@
+export const meta = {
+  number: "8.10",
+  title: "Versions 4.x and 5.x",
+  minutes: 25,
+  objectives: [
+    "Read OpenCV and opencv-python version numbers and know what changes between releases",
+    "Name the main changes in OpenCV 5.0 and what they mean for existing 4.x code",
+    "Write code that checks the version and the available modules at start-up",
+    "Plan an upgrade with pinned versions and reference-image regression tests",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 8.10 (Module 8 plan).
+  Facts about 5.0 were checked by installing opencv-python-headless and opencv-contrib-python-headless 5.0.0.93
+  from PyPI (October 2026) and probing them; release dates are PyPI upload dates. The course itself stays pinned
+  to 4.13.0 (CLAUDE.md). Reference tail: examples 1 and 2 are compared automatically on 4.13.0; the 5.0 outputs
+  were produced the same way with the 5.0.0.93 wheel and are shown as text.
+*/}
+
+# 8.10 Versions 4.x and 5.x
+
+<Definition term="OpenCV version">the release of the library your program runs with, written major.minor.patch (for example 4.13.0); the pip package adds a fourth number for its own build (4.13.0.92). Major versions may remove or move things; minor versions add features and sometimes change APIs.</Definition>
+
+This course is pinned to OpenCV 4.13.0. Since then, 4.14.0 and the new major version **5.0.0** have been released. This chapter explains how versions work, what 5.0 changes, and how to upgrade a running system without surprises.
+
+## 1. An analogy
+
+Updating the operating system of a production machine. A minor update (4.13 → 4.14) usually brings fixes and new features; most things keep working. A major update (4 → 5) reorganises the system: some programs move to another menu, some old ones are removed, and you test everything before the line runs on it. Nobody updates a production machine on a Friday afternoon without a rollback plan.
+
+## 2. Reading version numbers
+
+<Flow
+  steps={[
+    { label: "opencv-python-headless==4.13.0.92", tone: "world" },
+    { label: "4 = major: big changes, removals possible", tone: "data" },
+    { label: "13 = minor: new features, occasional API changes", tone: "process" },
+    { label: "0 = patch, 92 = pip package build number", tone: "result" },
+  ]}
+/>
+
+| Release | pip package | On PyPI |
+| --- | --- | --- |
+| 4.12.0 | 4.12.0.88 | July 2025 |
+| 4.13.0 (this course) | 4.13.0.90, 4.13.0.92 | January / February 2026 |
+| 5.0.0 | 5.0.0.93 | July 2026 |
+| 4.14.0 | 4.14.0.94 | July 2026 |
+
+- OpenCV does not follow strict semantic versioning: minor 4.x releases have changed APIs (ArUco in 4.7.0, 8.4).
+- The 4.x line continues after 5.0 (4.14.0 came out after 5.0.0), so existing systems are not forced to move at once.
+- The pip build number can change without a library change (packaging fixes): 4.13.0.90 and 4.13.0.92 are the same OpenCV.
+
+## 3. A short history
+
+| Version | Year | Highlights |
+| --- | --- | --- |
+| 1.x | 2006 | C API (`IplImage`, `cvCreateImage`) |
+| 2.x | 2009 | C++ API with `cv::Mat`, Python `cv2` |
+| 3.x | 2015 | Modules reorganised, contrib split off, transparent API (UMat), DNN module |
+| 4.x | 2018 | C++11, G-API, ONNX import, most of the old C API removed, SIFT back in main (4.4), Apache 2 licence (4.5) |
+| 5.x | 2026 | New DNN engine, more data types, calib3d split, some modules moved to contrib, C++17 |
+
+## 4. What changes in OpenCV 5.0
+
+**Deep learning**: a rewritten DNN engine with a typed operation graph, shape inference, constant folding and operator fusion, and much wider ONNX operator coverage (reported as over 80 % of operators, against roughly 13–22 % for the 4.x engine depending on the source). `readNet` gets an `engine` argument: `ENGINE_AUTO` (default: new engine, falls back to the classic one), `ENGINE_NEW`, `ENGINE_CLASSIC` (needed for GPU backends, because the new engine is CPU-only for now) and `ENGINE_ORT` (a bundled ONNX Runtime wrapper). Language and vision-language models can run through the DNN module.
+
+**Core**: new element types (FP16, BF16, bool, 64-bit integers), real N-dimensional and scalar Mats, and broadcasting.
+
+**Modules**: `calib3d` is split into `calib`, `geometry` and `stereo`; `features2d` is renamed `features`; a new `ptcloud` module handles point clouds. In the main pip package of 5.0.0.93, `ml`, `gapi` and the classic object detectors (`CascadeClassifier`, `HOGDescriptor`) are **no longer present**: they are in the contrib package. The Python function names of the remaining modules did not change.
+
+**Build**: C++17 is required; the legacy C API is removed. Hardware acceleration adds or extends Arm KleidiCV, Qualcomm FastCV and RISC-V vector support alongside Intel IPP.
+
+The lab shows what this means for typical code. It was filled in by installing both 5.0.0.93 wheels and checking each feature.
+
+<VersionLab caption="Tick what your code uses, choose the target version and package. Moved modules need the contrib package; 'check' means it works but defaults or build requirements changed." />
+
+## 5. How to upgrade safely
+
+<Flow
+  steps={[
+    { label: "Pin: requirements.txt with exact versions (==)", tone: "world" },
+    { label: "Inventory: which modules and functions does the code use?", tone: "data" },
+    { label: "New environment with the new version; run start-up checks", tone: "process" },
+    { label: "Regression test: reference images → compare outputs and decisions", tone: "process" },
+    { label: "Pilot on one station, keep the old version for rollback", tone: "result" },
+  ]}
+/>
+
+- **Pin everything** (OpenCV, NumPy, Python) in production. "Latest" is not a version.
+- **Read the change log** for every version you skip, not just the last one.
+- **Reference images with stored results** (checksums of intermediate images, measured values, OK/NOK decisions) are the cheapest insurance: example 3 shows the idea.
+- **Upgrade minor versions regularly** (security and bug fixes, smaller steps); plan major upgrades as projects.
+
+## 6. Industrial example
+
+A plant runs 40 inspection stations on `opencv-python-headless==4.13.0.92`. Some stations use Haar cascades for a legacy "is a part present" check and `cv2.ml.SVM` for a small classifier. The team evaluates 5.0 for the new DNN engine. The inventory (VersionLab) shows the cascades and `cv2.ml` need the contrib package in 5.0, and the DNN code must pass `engine=cv2.dnn.ENGINE_CLASSIC` where it uses CUDA. They decide: move the 30 stations without legacy features to `opencv-python-headless==5.0.0.93` after a two-week pilot with reference-image tests; keep the other 10 on 4.x (and its 4.14 fixes) until the legacy checks are replaced by a small DNN model.
+
+## What you should remember from 8.10
+
+<Takeaways>
+<Takeaway n={1} title="Numbers">major.minor.patch (+ pip build); minor releases can change APIs too.</Takeaway>
+<Takeaway n={2} title="5.0">New DNN engine, more data types, calib3d split, ml/gapi/cascades moved to contrib, C++17.</Takeaway>
+<Takeaway n={3} title="4.x continues">4.14 was released after 5.0; you can plan the move.</Takeaway>
+<Takeaway n={4} title="Check at start-up">Version and module checks fail fast with a clear message.</Takeaway>
+<Takeaway n={5} title="Upgrade">Pin, inventory, regression-test with reference images, pilot, keep a rollback.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** What is the OpenCV library version inside `opencv-contrib-python==4.14.0.94`?
+
+<Solution>
+
+**4.14.0**; 94 is the pip package build number.
+
+</Solution>
+
+**Q2.** Your code uses `cv2.CascadeClassifier` and you install `opencv-python-headless==5.0.0.93`. What happens, and what are the options?
+
+<Solution>
+
+`AttributeError`: cascades are not in the 5.0 main package. Options: install `opencv-contrib-python-headless==5.0.0.93` instead, stay on 4.x, or replace the cascade with a DNN detector.
+
+</Solution>
+
+### Next: Module 9, Human vision and perception
+
+Part A ends with the other camera in every vision system: the human eye, and what it means for displays, colour maps and operator screens.
+
+## Code
+
+Three examples: comparing version numbers correctly, a start-up check that works on 4.x and 5.x, and a regression fingerprint of reference outputs.
+
+### 1. From scratch: comparing versions
+
+Version strings must be compared as numbers, not as text:
+
+```python
+import numpy as np
+import cv2
+
+def parse(v):
+    return tuple(int(p) for p in v.split(".")[:3])
+
+versions = ["4.9.0", "4.13.0", "4.14.0", "5.0.0", "4.7.0"]
+print("as text   :", sorted(versions))
+print("as numbers:", sorted(versions, key=parse))
+print("'4.13.0' > '4.9.0' as text?", "4.13.0" > "4.9.0", "| as numbers?", parse("4.13.0") > parse("4.9.0"))
+print("this cv2:", parse(cv2.__version__), "| NumPy:", tuple(int(p) for p in np.__version__.split(".")[:2]))
+```
+
+Output:
+
+```text
+as text   : ['4.13.0', '4.14.0', '4.7.0', '4.9.0', '5.0.0']
+as numbers: ['4.7.0', '4.9.0', '4.13.0', '4.14.0', '5.0.0']
+'4.13.0' > '4.9.0' as text? False | as numbers? True
+this cv2: (4, 13, 0) | NumPy: (2, 5)
+```
+
+- Text comparison goes character by character: "1" < "9", so "4.13" sorts before "4.9". Always compare tuples of integers (or use `packaging.version.Version`).
+
+### 2. OpenCV: one start-up check for 4.x and 5.x
+
+```python
+import numpy as np
+import cv2
+
+def version():
+    return tuple(int(p) for p in cv2.__version__.split(".")[:3])
+
+def make_aruco_detector(dict_id=cv2.aruco.DICT_4X4_50):
+    """ArUco detection on OpenCV < 4.7 (free functions) and >= 4.7 (ArucoDetector class)."""
+    d = cv2.aruco.getPredefinedDictionary(dict_id)
+    if hasattr(cv2.aruco, "ArucoDetector"):
+        det = cv2.aruco.ArucoDetector(d, cv2.aruco.DetectorParameters())
+        return det.detectMarkers
+    params = cv2.aruco.DetectorParameters_create()            # old API (4.6 and earlier)
+    return lambda img: cv2.aruco.detectMarkers(img, d, parameters=params)
+
+def read_net(path):
+    """OpenCV 5 adds an engine argument; GPU backends need the classic engine there."""
+    if hasattr(cv2.dnn, "ENGINE_CLASSIC"):
+        return cv2.dnn.readNet(path, engine=cv2.dnn.ENGINE_CLASSIC)
+    return cv2.dnn.readNet(path)
+
+print("OpenCV", cv2.__version__, "| at least 4.7:", version() >= (4, 7, 0), "| major:", version()[0])
+for name in ["ml", "gapi", "CascadeClassifier", "HOGDescriptor", "aruco", "UMat"]:
+    print(f"  cv2.{name:18s} {'yes' if hasattr(cv2, name) else 'no (install opencv-contrib-python)'}")
+marker = cv2.aruco.generateImageMarker(cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50), 3, 60)
+img = cv2.copyMakeBorder(marker, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
+corners, ids, _ = make_aruco_detector()(img)
+print("aruco ids:", ids.ravel().tolist(), "| dnn engine argument:", hasattr(cv2.dnn, "ENGINE_CLASSIC"))
+```
+
+Output:
+
+```text
+OpenCV 4.13.0 | at least 4.7: True | major: 4
+  cv2.ml                 yes
+  cv2.gapi               yes
+  cv2.CascadeClassifier  yes
+  cv2.HOGDescriptor      yes
+  cv2.aruco              yes
+  cv2.UMat               yes
+aruco ids: [3] | dnn engine argument: False
+```
+
+The same script with `opencv-python-headless==5.0.0.93`:
+
+```text
+OpenCV 5.0.0 | at least 4.7: True | major: 5
+  cv2.ml                 no (install opencv-contrib-python)
+  cv2.gapi               no (install opencv-contrib-python)
+  cv2.CascadeClassifier  no (install opencv-contrib-python)
+  cv2.HOGDescriptor      no (install opencv-contrib-python)
+  cv2.aruco              yes
+  cv2.UMat               yes
+aruco ids: [3] | dnn engine argument: True
+```
+
+- Feature checks (`hasattr`) are more robust than version checks: they also catch the wrong package (main vs contrib).
+- `read_net` is defined but not called here (it needs a model file); it shows the pattern for an argument that exists only in newer versions.
+
+### 3. OpenCV: a regression fingerprint
+
+Store a fingerprint of reference outputs with each release of your software; after an upgrade, the same script tells you exactly which steps changed.
+
+```python
+import hashlib
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png")
+steps = {
+    "gray":   lambda: cv2.cvtColor(img, cv2.COLOR_BGR2GRAY),
+    "blur":   lambda: cv2.GaussianBlur(img, (5, 5), 1.2),
+    "resize": lambda: cv2.resize(img, (123, 77), interpolation=cv2.INTER_LINEAR),
+    "canny":  lambda: cv2.Canny(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), 50, 150),
+    "otsu":   lambda: cv2.threshold(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1],
+}
+for name, fn in steps.items():
+    out = fn()
+    print(f"{name:7s} {hashlib.sha256(np.ascontiguousarray(out).tobytes()).hexdigest()[:12]}  sum={int(out.astype(np.int64).sum())}")
+```
+
+Output:
+
+```text
+gray    b33fed8b65e8  sum=7701277
+blur    46936ae4b1bd  sum=23103939
+resize  be6ba882f47f  sum=3417105
+canny   be996bde87e0  sum=379950
+otsu    11f497d30322  sum=7285605
+```
+
+- With 5.0.0.93 on the same machine, all five lines were identical: these basic functions are bit-exact across the two versions.
+- A changed hash does not automatically mean a bug (algorithms improve); it means "look at this step and re-validate thresholds and decisions".
+- Fingerprints can differ between CPU types for a few functions with platform-specific optimisations; record them on the target hardware.
+
+## OpenCV API notes
+
+**Version**: `cv2.__version__`, `cv2.getVersionString()`, `cv2.getVersionMajor()`, `cv2.getVersionMinor()`, `cv2.getVersionRevision()`, `cv2.getBuildInformation()`.
+
+**Feature checks**: `hasattr(cv2, "name")`, `hasattr(cv2.dnn, "ENGINE_CLASSIC")`.
+
+**OpenCV 5 DNN engine**: `cv2.dnn.readNet(model[, config[, framework[, engine]]])` with `cv2.dnn.ENGINE_AUTO`, `ENGINE_NEW`, `ENGINE_CLASSIC`, `ENGINE_ORT`.
+
+**Packaging**: `pip install "opencv-python-headless==X.Y.Z.B"`; `pip index versions opencv-python` lists what exists; `pip show opencv-python-headless` shows what is installed.
+
+## Where it fails
+
+- **Unpinned dependencies**: a rebuild of a Docker image silently installs a new major version.
+- **Feature checks miss behaviour changes**: a function can exist and still give different results; only regression tests catch that.
+- **Mixed versions** between development and production (laptop on 5.0, line on 4.13).
+- **Old tutorials and answers online**: they rarely say which version they were written for.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **`pip install opencv-python` without a version** in production.
+- **Comparing version strings as text**.
+- **Upgrading OpenCV and NumPy and Python at the same time**: when something breaks, you do not know which one caused it.
+- **Skipping the change logs** of the versions in between.
+- **No rollback plan** (old wheel files, old image) for the line.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why major versions move modules to contrib
+
+The main repository is what the OpenCV team promises to maintain, test on many platforms and keep fast. Modules with few maintainers or outdated methods (Haar cascades from 2001, the classic `ml` algorithms) cost effort to keep in that state, so a major release is the moment to move them to contrib, where they stay available without the same guarantees [1], [2].
+
+### Bit-exactness
+
+Since the 3.4/4.x era, OpenCV has made many core functions bit-exact across platforms (fixed-point implementations for 8-bit filters and resizing), which is what makes fingerprints like example 3 useful. Floating-point paths, some DNN layers and algorithms with platform-specific optimisations are not guaranteed to be bit-exact; compare those with a tolerance [1].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which is newer: OpenCV 4.9.0 or 4.13.0?",
+      options: ["4.9.0, because 9 > 1", "4.13.0", "They are the same", "It cannot be told"],
+      answer: 1,
+      explanation: "Compare as numbers: minor 13 > 9.",
+    },
+    {
+      question: "In the opencv-python 5.0.0.93 main package, where is cv2.ml?",
+      options: ["In the main package", "In the contrib package", "Removed completely", "Renamed to cv2.learn"],
+      answer: 1,
+      explanation: "ml moved to contrib in 5.0.",
+    },
+    {
+      question: "Which DNN engine supports GPU backends in OpenCV 5.0?",
+      options: ["ENGINE_NEW", "ENGINE_CLASSIC", "None", "ENGINE_AUTO only"],
+      answer: 1,
+      explanation: "The new engine is CPU-only for now.",
+    },
+    {
+      question: "What is the best protection against silent changes after an upgrade?",
+      options: ["Reading the README", "Regression tests with reference images and stored results", "Using the newest version always", "hasattr checks"],
+      answer: 1,
+      explanation: "Only comparing outputs catches behaviour changes.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Sort these pip versions from oldest to newest: `4.13.0.90`, `5.0.0.93`, `4.9.0.80`, `4.13.0.92`, `4.14.0.94`.
+
+<Solution>
+
+4.9.0.80 → 4.13.0.90 → 4.13.0.92 → 4.14.0.94 → 5.0.0.93 (by version number; by release date 5.0.0.93 came before 4.14.0.94).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Extend the fingerprint of example 3 so it writes the results to a JSON file the first time and compares with it on later runs, printing `same` or `CHANGED` per step. Run it twice.
+
+<Solution>
+
+```python
+import json
+import os
+import hashlib
+import numpy as np
+import cv2
+
+def fingerprint(steps):
+    return {n: hashlib.sha256(np.ascontiguousarray(f()).tobytes()).hexdigest()[:12] for n, f in steps.items()}
+
+path = "fingerprint.json"
+if os.path.exists(path):
+    os.remove(path)                                   # start fresh for this demonstration
+for run in [1, 2]:
+    now = fingerprint(steps)
+    if not os.path.exists(path):
+        json.dump({"opencv": cv2.__version__, "steps": now}, open(path, "w"), indent=1)
+        print(f"run {run}: reference written for OpenCV {cv2.__version__}")
+    else:
+        ref = json.load(open(path))
+        print(f"run {run}: vs {ref['opencv']}:", ", ".join(f"{n} {'same' if now[n] == h else 'CHANGED'}" for n, h in ref["steps"].items()))
+```
+
+Output:
+
+```text
+run 1: reference written for OpenCV 4.13.0
+run 2: vs 4.13.0: gray same, blur same, resize same, canny same, otsu same
+```
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Your manager asks: "OpenCV 5 is out, should we upgrade all lines next month?" Write the three questions you answer before giving a recommendation.
+
+<Solution>
+
+(1) What do we gain? (New DNN engine and ONNX coverage, speed on our hardware, needed features; measured, not assumed.) (2) What breaks or changes? (Inventory: modules moved to contrib, DNN engine and GPU backends, C++17 for C++ parts; regression tests on reference images.) (3) What does it cost and how do we roll back? (Testing effort, pilot station, keeping 4.x wheels and images, the 4.x line still receiving releases such as 4.14.) Usually: pilot first, then a staged roll-out, not all lines at once.
+
+</Solution>
+
+## References
+
+1. OpenCV, "OpenCV 5 Deep Dive: A New Foundation for Computer Vision". https://opencv.org/opencv-5/
+2. CNX Software, "OpenCV 5 release – New DNN engine with enhanced ONNX and LLM/VLM support …", 10 June 2026. https://www.cnx-software.com/2026/06/10/opencv-5-release-new-dnn-engine-with-enhanced-onnx-and-llm-vlm-support-intel-arm-and-risc-v-hardware-optimizations/
+3. opencv-python on PyPI (release history of the pip packages). https://pypi.org/project/opencv-python/
+4. OpenCV ChangeLog. https://github.com/opencv/opencv/wiki/ChangeLog
+5. OpenCV 4.13.0 documentation. https://docs.opencv.org/4.13.0/

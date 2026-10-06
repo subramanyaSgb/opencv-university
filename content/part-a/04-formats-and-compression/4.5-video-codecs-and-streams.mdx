@@ -1,0 +1,457 @@
+export const meta = {
+  number: "4.5",
+  title: "Video codecs and streams",
+  minutes: 40,
+  objectives: [
+    "Tell a codec from a container and read a FourCC",
+    "Explain intra (I) and inter (P, B) frames and motion compensation",
+    "Predict the effect of the GOP on size, seeking and packet loss",
+    "Read and write video with OpenCV and know which codecs the pip wheel supports",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 4.5 (Module 4 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3 (FFmpeg backend bundled in the wheel).
+  Frame types and packet sizes in Sections 5 and 9 were read with ffprobe (FFmpeg command-line tool) from the files written by Code example 2.
+*/}
+
+# 4.5 Video codecs and streams
+
+<Definition term="Video codec">a method that compresses a sequence of frames, mostly by sending what **changed** since earlier frames instead of every frame in full.</Definition>
+
+A video is a series of images (4.1). Uncompressed, a 1920 × 1080 colour stream at 30 fps is **187 MB/s**: a 1 TB disk is full in 90 minutes. Video codecs bring this down 100× or more, because consecutive frames are almost the same.
+
+## 1. An analogy
+
+A flip-book of a car driving across a page. To send it by post you could copy every page (**intra**: each frame alone). Or you send the first page in full and, for the next pages, a note: "same as before, but the car moved 2 mm to the right" (**inter**: only the change). The notes are tiny. If one note gets lost, every page after it is wrong until the next full page.
+
+## 2. Codec and container
+
+Two different things, often confused:
+
+<Columns>
+<Panel title="Codec: how frames are compressed" tone="a">
+
+MJPEG, MPEG-4 Part 2 (mp4v, XVID), **H.264/AVC**, **H.265/HEVC**, VP9, AV1, and lossless FFV1. Named in OpenCV by a four-character code, the **FourCC** (`"MJPG"`, `"mp4v"`, `"avc1"` …).
+
+</Panel>
+<Panel title="Container: the file or stream around it" tone="b">
+
+MP4, MKV, AVI, WebM, MOV. Holds one or more streams (video, audio), **timestamps**, an index for seeking, and metadata. Chosen by the file **extension**.
+
+</Panel>
+</Columns>
+
+Not every codec fits every container: H.264 in MP4 or MKV is common; MJPEG usually goes in AVI.
+
+<Flow
+  steps={[
+    { label: "Frames (BGR)", tone: "world" },
+    { label: "Codec: compress (I, P, B frames)", tone: "process" },
+    { label: "Container: packets + timestamps", tone: "data" },
+    { label: "File (.mp4) or network stream (RTSP)", tone: "result" },
+  ]}
+/>
+
+## 3. Intra frames: each picture alone
+
+An **intra** (I) frame is coded on its own, like a JPEG (4.3). **Motion JPEG** (MJPEG) uses only intra frames: simple, every frame independent, easy to cut and seek, but large.
+
+## 4. Inter frames: send the change
+
+Most of a frame is the same as, or a **moved copy** of, the previous one. An encoder splits the frame into blocks, finds where each block came from in an earlier frame (a **motion vector**), and sends only the vector plus the small **residual** (what the moved copy still gets wrong).
+
+Our test chart moving 2 px to the right between two noisy frames *(Code example 1)*:
+
+| What is sent | Mean absolute value | Pixels with \|value\| > 10 |
+| --- | --- | --- |
+| Frame 2 itself | 62.7 | 100.0 % |
+| Frame 2 − frame 1 | 21.9 | 12.1 % |
+| Frame 2 − frame 1 moved by (2, 0) | **3.4** | **1.4 %** |
+
+With the right motion vector, almost nothing is left but noise. Small residuals quantize to zero and cost almost nothing (4.3).
+
+## 5. I, P and B frames, and the GOP
+
+<VsTable
+  left="Frame type"
+  right="Predicted from"
+  rows={[
+    ["I (intra)", "nothing: a full picture"],
+    ["P (predicted)", "the previous I or P frame"],
+    ["B (bi-directional)", "the previous and the next I or P frame"],
+  ]}
+/>
+
+The **GOP** (group of pictures) is the pattern from one I-frame to the next. The mp4v writer in OpenCV's wheel produces an I-frame every **12** frames and no B-frames: `I P P P P P P P P P P P I …`. Measured packet sizes: I-frames 7–10 kB, P-frames 0.6–1.5 kB.
+
+B-frames need the **next** anchor frame first, so the encoder sends frames out of order and the decoder must wait: they save bits but add **delay**. Live inspection streams usually avoid them.
+
+## 6. Try it
+
+<GopLab caption="Click a frame. 'Lose it': which frames can no longer be decoded correctly. 'Jump to it': which frames the decoder must decode first. Sizes are illustrative." />
+
+Things to try:
+
+- **I-frame every 1** = all-intra (MJPEG-like): highest bitrate, but a lost frame damages only itself.
+- **Long GOP (30)**: low bitrate, but one lost P-frame early in the GOP damages up to 29 frames (over a second at 25 fps).
+- **B-frames**: a lost B-frame damages only itself; a lost P-frame also damages the B-frames before it.
+
+## 7. What it costs in size and quality
+
+60 frames, 320 × 200, chart moving 2 px per frame, noise σ = 3 *(Code example 2)*:
+
+| Codec (FourCC) | Type | File size | Ratio | Mean PSNR |
+| --- | --- | --- | --- | --- |
+| Raw BGR | – | 11 520 000 B | 1× | exact |
+| FFV1 | lossless | 6 066 867 B | 1.9× | exact |
+| MJPG | intra only | 470 842 B | 24.5× | 37.1 dB |
+| mp4v | inter (I + P) | 85 823 B | 134.2× | 36.1 dB |
+
+Inter coding is **5.5× smaller** than intra at similar quality here. Lossless video, like lossless images, is held back by noise (4.2).
+
+## 8. What video compression means for vision
+
+<Columns>
+<Panel title="Problems" tone="warn">
+
+- **Every frame is lossy** (except FFV1 and similar): the measurement problems of 4.2 apply to every frame.
+- **Quality changes over time**: I-frames are sharper, P/B frames softer; artefacts "pump" with the GOP.
+- **Moving fine detail** suffers most: motion vectors are found per block, small objects smear.
+- **Seeking** jumps to the previous I-frame and decodes forward: slow with long GOPs.
+
+</Panel>
+<Panel title="Good uses" tone="good">
+
+- Recording for **people** to review: 100× or more smaller.
+- Long-term **archives** of a line, traffic, a yard.
+- Training **detectors** on large objects (but train on the same codec as production).
+- Remote **monitoring** over limited networks.
+
+</Panel>
+</Columns>
+
+## 9. Streams: how cameras deliver video
+
+| Camera type | What arrives | Typical use |
+| --- | --- | --- |
+| Machine-vision (GigE Vision, USB3 Vision) | **Uncompressed** frames (Mono8, Mono12p, Bayer …, 4.4) via the vendor SDK | Inspection, measurement |
+| IP / CCTV camera | **H.264 / H.265** over RTSP (sometimes MJPEG over HTTP) | Monitoring, safety, traffic |
+| USB webcam | MJPEG or raw YUV | Prototypes, low-cost stations |
+
+OpenCV opens files, RTSP URLs and webcams with the same class: `cv2.VideoCapture("rtsp://camera-address/stream")`.
+
+**Latency and buffering**: a network stream is buffered. If your processing is slower than the frame rate, `read()` returns older and older frames: the system reacts to the past. Read continuously in a separate thread and process only the newest frame, or lower the camera's frame rate.
+
+## 10. Industrial example
+
+A steel-billet yard with 8 IP cameras and one inspection camera:
+
+<Flow
+  steps={[
+    { label: "8 IP cameras: H.265, 1080p, 15 fps", tone: "world" },
+    { label: "24/7 recording for review (lossy, ~100× smaller)", tone: "data" },
+    { label: "Inspection camera: raw Mono12p frames", tone: "world" },
+    { label: "Measure on raw frames; save defects as 16-bit PNG", tone: "process" },
+    { label: "Evidence clip around each defect: H.264 for people", tone: "result" },
+  ]}
+/>
+
+Video for **people**, raw frames for **measurement**.
+
+## What you should remember from 4.5
+
+<Takeaways>
+<Takeaway n={1} title="Codec vs container">The codec compresses (H.264, MJPEG …); the container holds the streams (MP4, AVI …).</Takeaway>
+<Takeaway n={2} title="Inter coding">Motion vectors + small residuals: why video is 100× smaller than raw.</Takeaway>
+<Takeaway n={3} title="I, P, B">I alone; P from the past; B from past and future (more delay).</Takeaway>
+<Takeaway n={4} title="GOP">Long GOP = smaller, but lost frames and seeking cost more.</Takeaway>
+<Takeaway n={5} title="Vision">Measure on raw frames; use video for people, archives and monitoring.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A video has an I-frame every 25 frames at 25 fps, no B-frames. Frame 3 of a GOP is lost. How long is the picture wrong?
+
+<Solution>
+
+Frames 3 … 24 of that GOP: **22 frames = 0.88 s**, until the next I-frame.
+
+</Solution>
+
+**Q2.** You change the extension from .avi to .mp4 but keep the FourCC "MJPG". What changed?
+
+<Solution>
+
+Only the **container**. The frames are still MJPEG (if the container accepts that codec; otherwise the writer fails to open).
+
+</Solution>
+
+**Q3.** Why do live inspection streams avoid B-frames?
+
+<Solution>
+
+A B-frame needs the **next** anchor frame, so frames are delayed and reordered: extra latency.
+
+</Solution>
+
+### Next: 4.6 Metadata and watermarking
+
+Information stored next to the pixels: EXIF, orientation, timestamps, and marks hidden in the image itself.
+
+## Code
+
+Three examples: motion-compensated prediction, writing the same clip with three codecs, and reading video properties and seeking. Copy the sample images next to the script.
+
+### 1. From scratch: why inter frames are small
+
+```python
+import numpy as np
+import cv2
+
+base = cv2.imread("sample-pinhole-scene.png", cv2.IMREAD_GRAYSCALE)
+rng = np.random.default_rng(seed=3)
+f1 = np.clip(base + rng.normal(0, 3, base.shape), 0, 255).astype(np.int16)
+f2 = np.clip(np.roll(base, 2, axis=1) + rng.normal(0, 3, base.shape), 0, 255).astype(np.int16)  # content moved 2 px right
+
+def describe(name, a):
+    print(f"{name:22s}: mean |value| {np.abs(a).mean():5.1f}, pixels with |value| > 10: {100 * np.mean(np.abs(a) > 10):5.1f} %")
+
+describe("frame 2 (send all)", f2)
+describe("f2 - f1", f2 - f1)
+describe("f2 - f1 moved by 2 px", f2 - np.roll(f1, 2, axis=1))   # motion-compensated prediction
+```
+
+Output:
+
+```text
+frame 2 (send all)    : mean |value|  62.7, pixels with |value| > 10: 100.0 %
+f2 - f1               : mean |value|  21.9, pixels with |value| > 10:  12.1 %
+f2 - f1 moved by 2 px : mean |value|   3.4, pixels with |value| > 10:   1.4 %
+```
+
+- `int16` allows negative differences (3.2).
+- Real encoders search a motion vector **per block** (for example 16 × 16) within a search window; here the whole image moves by one known vector.
+
+### 2. OpenCV: the same clip with three codecs
+
+```python
+import os
+import numpy as np
+import cv2
+
+base = cv2.imread("sample-pinhole-scene.png")
+rng = np.random.default_rng(seed=3)
+frames = [np.clip(np.roll(base, 2 * i, axis=1) + rng.normal(0, 3, base.shape), 0, 255).astype(np.uint8)
+          for i in range(60)]                                        # 60 frames: chart moving 2 px per frame, noise
+raw = sum(f.nbytes for f in frames)
+print(f"raw BGR          : {raw:8d} B")
+for name, fourcc, path in [("MJPG (intra)", "MJPG", "clip.avi"), ("mp4v (inter)", "mp4v", "clip.mp4"),
+                           ("FFV1 (lossless)", "FFV1", "clip.mkv")]:
+    writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*fourcc), 25, (320, 200))
+    for f in frames:
+        writer.write(f)
+    writer.release()
+    cap = cv2.VideoCapture(path)
+    back = [cap.read()[1] for _ in range(60)]
+    psnr = np.mean([cv2.PSNR(a, b) for a, b in zip(frames, back)])
+    exact = all(np.array_equal(a, b) for a, b in zip(frames, back))
+    size = os.path.getsize(path)
+    print(f"{name:17s}: {size:8d} B ({raw / size:5.1f}x), mean PSNR {'exact' if exact else f'{psnr:.1f} dB'}")
+```
+
+Output:
+
+```text
+raw BGR          : 11520000 B
+MJPG (intra)     :   470842 B ( 24.5x), mean PSNR 37.1 dB
+mp4v (inter)     :    85823 B (134.2x), mean PSNR 36.1 dB
+FFV1 (lossless)  :  6066867 B (  1.9x), mean PSNR exact
+```
+
+- `cv2.VideoWriter(path, fourcc, fps, (width, height))`: the size is **(width, height)**, and every frame must have exactly that size and 3 channels (or pass `isColor=False` for gray).
+- `writer.release()` finishes the file; without it the file may be unreadable.
+- Check `writer.isOpened()`: an unsupported FourCC/container combination does not raise an error, it just writes nothing.
+
+### 3. OpenCV: reading properties and seeking
+
+```python
+import numpy as np
+import cv2
+
+cap = cv2.VideoCapture("clip.mp4")                         # from Code example 2
+print("opened     :", cap.isOpened())
+print("frames     :", int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))
+print("fps        :", cap.get(cv2.CAP_PROP_FPS))
+print("size       :", int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), "x", int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+print("codec      :", int(cap.get(cv2.CAP_PROP_FOURCC)).to_bytes(4, "little").decode())
+cap.set(cv2.CAP_PROP_POS_FRAMES, 30)                       # jump to frame 30
+ok, frame = cap.read()
+print("frame 30   :", ok, frame.shape, "| next position:", int(cap.get(cv2.CAP_PROP_POS_FRAMES)))
+cap.release()
+```
+
+Output:
+
+```text
+opened     : True
+frames     : 60
+fps        : 25.0
+size       : 320 x 200
+codec      : FMP4
+frame 30   : True (200, 320, 3) | next position: 31
+```
+
+- The FourCC is stored as a number; `.to_bytes(4, "little").decode()` turns it back into text. FFmpeg reports MPEG-4 Part 2 as `FMP4`, even though we asked for `mp4v`.
+- `CAP_PROP_FRAME_COUNT` comes from the container and can be wrong or 0 for streams and some files; count frames by reading if it matters.
+- Seeking decodes from the previous I-frame internally; on long-GOP files it is slow, and with some files it can land a few frames off. Read sequentially when exact frame numbers matter.
+
+## OpenCV API notes
+
+**`cv2.VideoCapture(source[, apiPreference])`**: a file path, a URL (`rtsp://`, `http://`), an image sequence (`"img_%04d.png"`) or a camera index (`0`). `read() → ok, frame` (BGR `uint8`); `ok` is False at the end or on error. `get`/`set` with `CAP_PROP_*`: `FPS`, `FRAME_COUNT`, `POS_FRAMES`, `POS_MSEC`, `FRAME_WIDTH/HEIGHT`, `FOURCC`, `BUFFERSIZE` (supported by some backends only).
+
+**`cv2.VideoWriter(path, fourcc, fps, frameSize[, isColor])`** and **`cv2.VideoWriter_fourcc(*"MJPG")`**. In the `opencv-python` 4.13.0 wheel (FFmpeg backend), writing works with `MJPG`, `mp4v`, `XVID` and lossless `FFV1`/`HFYU`; `avc1`/`H264` (H.264), `hev1` (H.265) and `AV01` could **not** be opened for writing (checked). Reading H.264 files works. For H.264/H.265 output, use the FFmpeg command line, PyAV, or an OpenCV build with an H.264 encoder.
+
+**Speed**: decoding 1080p H.264 on a CPU costs milliseconds per frame; `CAP_PROP_HW_ACCELERATION` can request hardware decoding where the backend supports it.
+
+## Where it fails
+
+- **Variable frame rate** files (phones, some recorders): `CAP_PROP_FPS` is an average; use `CAP_PROP_POS_MSEC` timestamps.
+- **Network streams** stall, drop or reconnect; `read()` can block. Add timeouts and reconnect logic.
+- **Container metadata** (frame count, duration) can be missing or wrong, especially for streams and files cut while recording.
+- **Licensing**: H.264/H.265 are patent-encumbered codecs; this is why some builds leave out the encoders. AV1 and VP9 were designed to be royalty-free.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Passing (height, width)** to `VideoWriter` instead of (width, height): the file is empty, no error.
+- **Not checking `isOpened()`** after creating a `VideoWriter` or `VideoCapture`.
+- **Forgetting `release()`**: an unplayable or truncated file.
+- **Measuring on decoded H.264 frames** and expecting the accuracy of raw frames.
+- **Processing slower than the stream** without dropping frames: latency grows and the system reacts to old images.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Block-based motion compensation
+
+H.264 [1] predicts each block (down to 4 × 4) from one or more reference frames with quarter-pixel motion vectors, codes the residual with an integer DCT-like transform, and applies an in-loop **deblocking filter**. H.265/HEVC [2] uses larger, flexible blocks (coding tree units up to 64 × 64) and typically needs about half the bitrate of H.264 for similar quality [3].
+
+### Rate control
+
+Encoders target either a **constant bitrate** (CBR, for networks), a **constant quality** (CRF in x264), or a variable bitrate. With constant quality, a busy or noisy scene produces a much bigger file than a calm one; sensor noise and vibration cost bitrate.
+
+### Inspecting a stream
+
+`ffprobe -show_frames file.mp4` lists every frame's type and size. The same 60-frame clip encoded with H.264 (x264, default settings) via the FFmpeg command line was 18 287 bytes, with a single I-frame and many B-frames: modern codecs are far more efficient than MPEG-4 Part 2.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "MP4 is…",
+      options: ["A codec", "A container", "A colour space", "A camera interface"],
+      answer: 1,
+      explanation: "MP4 holds streams; the codec inside may be H.264, H.265, MPEG-4 Part 2 …",
+    },
+    {
+      question: "A P-frame is predicted from…",
+      options: ["Nothing", "The previous I or P frame", "The next frame only", "A JPEG file"],
+      answer: 1,
+      explanation: "P = predicted from the past anchor; B uses past and future.",
+    },
+    {
+      question: "Why is a lost P-frame worse than a lost B-frame?",
+      options: ["P-frames are bigger", "Later frames are predicted from the P-frame", "B-frames are never decoded", "It isn't"],
+      answer: 1,
+      explanation: "Errors propagate through every frame that references it, until the next I-frame.",
+    },
+    {
+      question: "Which codec gives exact pixels back?",
+      options: ["MJPEG", "H.264 (default settings)", "FFV1", "mp4v"],
+      answer: 2,
+      explanation: "FFV1 is lossless; the others are lossy.",
+    },
+    {
+      question: "Your processing takes 80 ms per frame on a 25 fps RTSP stream. What happens if you just call read() in a loop?",
+      options: ["Nothing", "Frames get older and older (growing latency)", "The camera slows down", "OpenCV skips frames for you automatically"],
+      answer: 1,
+      explanation: "Frames arrive every 40 ms but are consumed every 80 ms; the buffer fills and you process the past.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+I-frames are 120 kB, P-frames 15 kB, an I-frame every 30 frames at 30 fps, no B-frames. Average bitrate in Mbit/s? And all-intra?
+
+<Solution>
+
+Per GOP: 120 + 29 × 15 = 555 kB per second (30 frames = 1 s) = 555 × 8 / 1000 ≈ **4.4 Mbit/s**. All-intra: 120 × 30 = 3600 kB/s ≈ **28.8 Mbit/s**, 6.5× more. Check with GopLab (I-frame size 120 kB, P = 20 % there, so slightly different).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Write the 60 frames from Code example 2 to `small.avi` with MJPG at **half** the size (160 × 100), then read it back and print the frame count and the shape of the first frame.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+writer = cv2.VideoWriter("small.avi", cv2.VideoWriter_fourcc(*"MJPG"), 25, (160, 100))   # (width, height)
+print("writer opened:", writer.isOpened())
+for f in frames:                                            # frames from Code example 2
+    writer.write(cv2.resize(f, (160, 100), interpolation=cv2.INTER_AREA))
+writer.release()
+cap = cv2.VideoCapture("small.avi")
+count, first = 0, None
+while True:
+    ok, frame = cap.read()
+    if not ok:
+        break
+    first = frame if first is None else first
+    count += 1
+print("frames read:", count, "| first frame shape:", first.shape)
+```
+
+Output:
+
+```text
+writer opened: True
+frames read: 60 | first frame shape: (100, 160, 3)
+```
+
+`cv2.resize` and `VideoWriter` both take (width, height); NumPy shapes are (height, width, channels).
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A customer wants a camera on a fast production line to "record everything as video" and later use the recordings to measure part dimensions. What do you advise?
+
+<Solution>
+
+Measure **live on raw frames**; store the measurements for every part. Recorded H.264/H.265 video is lossy, softer on P/B frames and smears moving fine detail, so measurements from it are biased and noisy. If images are needed for audits, save lossless frames (16-bit PNG or FFV1) for out-of-tolerance parts and a sample of good ones, plus lossy video for people to review.
+
+</Solution>
+
+## References
+
+1. ITU-T Recommendation H.264 / ISO/IEC 14496-10, *Advanced video coding for generic audiovisual services*.
+2. ITU-T Recommendation H.265 / ISO/IEC 23008-2, *High efficiency video coding*.
+3. G. J. Sullivan, J.-R. Ohm, W.-J. Han and T. Wiegand, "Overview of the High Efficiency Video Coding (HEVC) standard," *IEEE Transactions on Circuits and Systems for Video Technology*, vol. 22, no. 12, pp. 1649–1668, 2012.
+4. T. Wiegand, G. J. Sullivan, G. Bjøntegaard and A. Luthra, "Overview of the H.264/AVC video coding standard," *IEEE Transactions on Circuits and Systems for Video Technology*, vol. 13, no. 7, pp. 560–576, 2003.
+5. OpenCV 4.13.0 documentation, *Video I/O* (`VideoCapture`, `VideoWriter`, `VideoCaptureProperties`): [docs.opencv.org/4.13.0/dd/de7/group__videoio.html](https://docs.opencv.org/4.13.0/dd/de7/group__videoio.html).

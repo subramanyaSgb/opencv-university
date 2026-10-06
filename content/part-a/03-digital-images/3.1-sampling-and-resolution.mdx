@@ -1,0 +1,426 @@
+export const meta = {
+  number: "3.1",
+  title: "Sampling and resolution",
+  minutes: 40,
+  objectives: [
+    "Explain sampling: turning a continuous scene into a grid of pixel values",
+    "Tell apart pixel count, spatial resolution and optical resolution",
+    "Predict what detail survives a given sampling step",
+    "Explain why enlarging an image cannot add detail",
+    "Estimate image sizes in memory",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 3.1 (Module 3 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 3.1 Sampling and resolution
+
+<Definition term="Sampling">measuring a continuous scene at a regular grid of points, one value per pixel.</Definition>
+
+The real world is **continuous**: brightness changes smoothly from place to place, at every scale. A digital image is **discrete**: a finite grid of numbers. **Sampling** is the step between them, and **resolution** says how fine that grid is.
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Continuous scene", tone: "world" },
+    { label: "Sampling grid (pixels)", tone: "process" },
+    { label: "One number per pixel", tone: "data" },
+    { label: "Digital image", tone: "result" },
+  ]}
+/>
+
+## 1. From smooth to grid
+
+Imagine measuring the temperature along a road with a thermometer every 10 metres. You get a list of numbers, not the full temperature curve. Anything that happens **between** your measurement points is invisible to you.
+
+A camera does the same with brightness: it measures it at a grid of **pixels**. Module 2 showed how; this chapter is about **what the grid can and cannot capture**.
+
+## 2. A pixel is a small area, not a point
+
+A camera pixel does not measure an infinitely small point. It collects light over its whole area (2.5), so its value is roughly the **average brightness over a small square** of the scene.
+
+<PixelMatrix values={[[30, 30, 200, 200], [30, 115, 200, 200], [30, 30, 200, 200]]} highlight={[[1, 1]]} caption="The outlined pixel straddles a dark-to-bright edge: it records the average, 115." />
+
+That is why edges are rarely a perfect jump from one value to another: pixels on the edge get **in-between** values.
+
+## 3. A 1D example
+
+A pattern of stripes whose brightness follows a wave with a **2 mm** period. Sample it at three different steps:
+
+| Step (mm per pixel) | Samples over 4 mm | Values |
+| --- | --- | --- |
+| 0.25 | 16 | 128 199 228 199 128 57 28 57 … |
+| 0.5 | 8 | 128 228 128 28 128 228 128 28 |
+| 1.0 | 4 | 128 128 128 128 |
+
+*(From Code example 1.)* With a fine step we see the wave clearly. At 0.5 mm we still see it, just barely (2 samples per period). At 1 mm, every sample lands on the same point of the wave and the stripes **disappear completely**. Chapter 3.5 explains this exactly.
+
+## 4. Resolution: three meanings
+
+"Resolution" is used for three different things. Keep them apart:
+
+<Glossary
+  items={[
+    { term: "Pixel count", desc: "How many pixels the image has.", example: "2448 × 2048 (5 MP)" },
+    { term: "Spatial resolution", desc: "How much of the object one pixel covers (2.4).", example: "0.2 mm/px" },
+    { term: "Optical resolution", desc: "The finest detail the lens can deliver to the sensor (2.2, 2.3).", example: "line pairs per mm" },
+  ]}
+/>
+
+A 20 MP camera behind a blurry lens, or far from the object, can still have **poor spatial resolution** on the part you care about.
+
+## 5. Line pairs
+
+Optical people measure detail in **line pairs**: one dark line plus one bright line. To show a line pair you need at least **two pixels**: one for the dark line, one for the bright. So a sensor with 3.45 µm pixels can at best show 1 / (2 × 0.00345 mm) ≈ **145 line pairs per mm** on the sensor.
+
+## 6. Coarser sampling loses detail
+
+**Try it.** Sample the test chart with fewer and fewer pixels.
+
+<SamplingLab caption="Each displayed block is one sample: the average of the scene area it covers. Turn on smoothing to see that interpolation hides the blocks but does not restore the bars." />
+
+The thin bars go first: their contrast is 205 at half the pixels in each direction, 103 at a quarter and 52 at an eighth (Code example 2).
+
+## 7. Enlarging does not add detail
+
+Making an image **bigger** in software (upsampling) only **interpolates** between existing pixels. It can look smoother, but it cannot show anything that was not sampled. Code example 3 shrinks the chart 4× and enlarges it back with three methods: all three are far from the original (about 18 dB PSNR).
+
+<Callout kind="mistake">
+
+"We'll capture at low resolution and upscale later" does not work for inspection. The detail must be **captured**: right pixels, right optics, right distance.
+
+</Callout>
+
+## 8. How the value of a pixel is formed
+
+Three things blur the scene before sampling, and all three set how much detail survives:
+
+<Flow direction="right" steps={["Lens blur (2.2, 2.3)", "Pixel area averaging", "Motion during exposure (2.6)", { label: "Pixel value", tone: "result" }]} />
+
+## 9. Sampling in time
+
+A video samples **time** as well as space. At 25 frames per second, anything that happens between two frames (40 ms apart) is missed. Fast rotating wheels can even appear to turn backwards: the **wagon-wheel effect**, a time version of the problem in section 3.
+
+## 10. Memory and data
+
+More samples cost more memory and processing:
+
+| Resolution | 8-bit gray | 8-bit colour | 16-bit gray |
+| --- | --- | --- | --- |
+| 640 × 480 | 0.31 MB | 0.92 MB | 0.61 MB |
+| 1920 × 1080 | 2.07 MB | 6.22 MB | 4.15 MB |
+| 2448 × 2048 | 5.01 MB | 15.04 MB | 10.03 MB |
+| 4096 × 3000 | 12.29 MB | 36.86 MB | 24.58 MB |
+
+*(Code example 4.)* At 30 frames per second, a 2448 × 2048 colour stream is about **450 MB/s**. Choose the resolution the task **needs**, not the highest available.
+
+## 11. Choosing the sampling
+
+The design rule from 2.4 still applies, now with a reason: the smallest feature you care about needs **several samples** across it, at least two and preferably three or more.
+
+<Flow
+  steps={[
+    { label: "Smallest feature (mm)", tone: "world" },
+    { label: "÷ samples needed (≥ 2–3)", tone: "process" },
+    { label: "= required mm per pixel", tone: "data" },
+    { label: "→ pixels, lens, distance (2.4)", tone: "result" },
+  ]}
+/>
+
+## 12. Industrial example
+
+Cracks on a hot slab surface are about **0.5 mm** wide. A camera covering a 1600 mm wide slab with 2448 pixels gives 0.65 mm/px: a crack is **less than one pixel** wide and shows up only as a slightly darker pixel, if at all. Options: more pixels across (line-scan, 2.10), several cameras each covering part of the width, or accepting that only larger cracks will be found.
+
+## What you should remember from 3.1
+
+<Takeaways>
+<Takeaway n={1} title="Sampling">A continuous scene becomes a grid of values; anything between the samples is lost.</Takeaway>
+<Takeaway n={2} title="Pixels average">Each pixel is the average brightness over its small area.</Takeaway>
+<Takeaway n={3} title="Three resolutions">Pixel count, spatial resolution (mm/px) and optical resolution are different.</Takeaway>
+<Takeaway n={4} title="Two samples minimum">A detail needs at least two pixels (preferably more) to be seen.</Takeaway>
+<Takeaway n={5} title="No free detail">Upsampling interpolates; it never adds detail that was not captured.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A pixel covers half of a black area (value 0) and half of a white area (value 240). What value does it record (ideally)?
+
+<Solution>
+
+The average: **120**.
+
+</Solution>
+
+**Q2.** Stripes repeat every 1 mm. What is the largest sampling step that can still show them?
+
+<Solution>
+
+Two samples per period: **0.5 mm per pixel** (and in practice somewhat less).
+
+</Solution>
+
+**Q3.** A 4096 × 3000 camera sends 8-bit gray images at 20 fps. Data rate?
+
+<Solution>
+
+12.29 MB × 20 ≈ **246 MB/s**.
+
+</Solution>
+
+**Q4.** Why does a "4K" camera not guarantee that you can see 0.1 mm scratches?
+
+<Solution>
+
+Pixel count is not spatial resolution: the scratch's visibility depends on mm per pixel (field of view ÷ pixels), focus, lens quality and lighting.
+
+</Solution>
+
+### Next: 3.2 Quantization and bit depth
+
+Sampling decides **where** we measure. Quantization decides **how finely we write down** each measurement: 256 levels, 4096 levels or more.
+
+## Code
+
+Four experiments: sampling a 1D wave, what coarse sampling does to fine detail, why upsampling cannot restore it, and image sizes in memory.
+
+### 1. From scratch: sampling a stripe pattern
+
+```python
+import numpy as np
+
+# a continuous scene: brightness along a 10 mm line, b(x) = 128 + 100 sin(2 pi x / 2 mm)
+def scene(x_mm):
+    return 128 + 100 * np.sin(2 * np.pi * x_mm / 2.0)
+
+for step in [0.25, 0.5, 1.0]:                      # sampling step (mm per pixel)
+    x = np.arange(0, 4, step)
+    print(f"step {step:4.2f} mm: {len(x)} samples ->", np.round(scene(x)).astype(int))
+```
+
+Output:
+
+```text
+step 0.25 mm: 16 samples -> [128 199 228 199 128  57  28  57 128 199 228 199 128  57  28  57]
+step 0.50 mm: 8 samples -> [128 228 128  28 128 228 128  28]
+step 1.00 mm: 4 samples -> [128 128 128 128]
+```
+
+- These are **point** samples (the value exactly at each x), the simplest model. Real pixels average over their width, which matters in 3.5.
+- At a 1 mm step every sample falls on a zero crossing of the 2 mm wave: the pattern vanishes.
+
+### 2. OpenCV: shrink the image, measure what survives
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-pinhole-scene.png", cv2.IMREAD_GRAYSCALE)   # 320 x 200
+for factor in [2, 4, 8]:
+    small = cv2.resize(img, None, fx=1 / factor, fy=1 / factor, interpolation=cv2.INTER_AREA)
+    back = cv2.resize(small, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_NEAREST)
+    thin = back[40:90, 230:245]                   # the 3-px bars
+    print(f"1/{factor}: {small.shape[1]} x {small.shape[0]} px, {small.size:6d} pixels, thin-bar contrast {int(thin.max()) - int(thin.min()):3d}")
+```
+
+Output:
+
+```text
+1/2: 160 x 100 px,  16000 pixels, thin-bar contrast 205
+1/4: 80 x 50 px,   4000 pixels, thin-bar contrast 103
+1/8: 40 x 25 px,   1000 pixels, thin-bar contrast  52
+```
+
+- `cv2.INTER_AREA` averages the source pixels that fall into each new pixel: a good model of a coarser sensor.
+- `fx`, `fy` scale factors can replace the size argument (pass `None` as `dsize`).
+- The contrast of the 3-pixel bars halves with each halving of the resolution, then they are gone.
+
+### 3. OpenCV: enlarging cannot restore detail
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-pinhole-scene.png", cv2.IMREAD_GRAYSCALE)
+small = cv2.resize(img, (80, 50), interpolation=cv2.INTER_AREA)          # 1/4 in each direction
+for name, interp in [("nearest", cv2.INTER_NEAREST), ("bilinear", cv2.INTER_LINEAR), ("bicubic", cv2.INTER_CUBIC)]:
+    big = cv2.resize(small, (320, 200), interpolation=interp)
+    print(f"{name:8s}: PSNR vs original {cv2.PSNR(img, big):5.2f} dB")
+```
+
+Output:
+
+```text
+nearest : PSNR vs original 17.66 dB
+bilinear: PSNR vs original 17.71 dB
+bicubic : PSNR vs original 18.42 dB
+```
+
+- Bicubic looks smoothest and scores best, but all three are far from the original. The detail was lost at the shrinking step.
+- Interpolation methods matter for geometry (Chapter 21); they cannot replace sampling.
+
+### 4. From scratch: image sizes in memory
+
+```python
+import numpy as np
+
+print("resolution    8-bit gray   8-bit colour   16-bit gray")
+for w, h in [(640, 480), (1920, 1080), (2448, 2048), (4096, 3000)]:
+    sizes = [w * h * ch * bits // 8 / 1e6 for bits, ch in [(8, 1), (8, 3), (16, 1)]]
+    print(f"{w:4d} x {h:4d}  " + "  ".join(f"{s:9.2f} MB" for s in sizes))
+```
+
+Output:
+
+```text
+resolution    8-bit gray   8-bit colour   16-bit gray
+ 640 x  480       0.31 MB       0.92 MB       0.61 MB
+1920 x 1080       2.07 MB       6.22 MB       4.15 MB
+2448 x 2048       5.01 MB      15.04 MB      10.03 MB
+4096 x 3000      12.29 MB      36.86 MB      24.58 MB
+```
+
+- Bytes = width × height × channels × bytes per value. In NumPy, `img.nbytes` gives it directly.
+- These are uncompressed sizes; files on disk may be smaller (Module 4).
+
+## OpenCV API notes
+
+**`cv2.resize(src, dsize[, dst, fx, fy, interpolation])`**: `dsize = (width, height)`; or `dsize = None` with `fx`, `fy`. Interpolation:
+
+- `INTER_AREA`: averages; best for **shrinking**.
+- `INTER_NEAREST`: copies the nearest pixel; keeps exact values (labels, masks).
+- `INTER_LINEAR` (default), `INTER_CUBIC`, `INTER_LANCZOS4`: smooth enlarging.
+
+**`img.nbytes`, `img.shape`, `img.dtype`** tell you the memory size, dimensions and data type of any image (Chapter 6.1).
+
+**`cv2.pyrDown` / `cv2.pyrUp`** halve or double the size with Gaussian smoothing (image pyramids, Chapter 21).
+
+## Where it fails
+
+- **The "pixel = area average" model** is approximate: pixels have gaps, microlenses and different sensitivity across their area.
+- **Downsampling without averaging** (taking every n-th pixel, or `INTER_NEAREST` when shrinking) causes aliasing (3.5).
+- **Rules of thumb** ("2–3 pixels per feature") depend on contrast and noise; low-contrast features need more.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Confusing megapixels with spatial resolution.**
+- **Upscaling images and expecting new detail.**
+- **Shrinking with `INTER_NEAREST`**: jagged results and aliasing; use `INTER_AREA`.
+- **Passing (rows, cols) to `cv2.resize`**: it wants (width, height).
+- **Choosing the maximum resolution by default**, then struggling with data rates and processing time.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Sampling as multiplication by a comb
+
+Mathematically, point sampling multiplies the continuous image by a grid of impulses. In the frequency domain that copies the image's spectrum around multiples of the sampling frequency; if the copies overlap, aliasing results (3.5, Chapter 20) [1][2].
+
+### Pixel aperture
+
+Real pixels integrate over their area, which is a convolution with a small box before sampling. That box acts as a weak low-pass filter, reducing (but not removing) aliasing. Its size relative to the pixel pitch is the *fill factor* [2].
+
+### Super-resolution
+
+Combining several images shifted by fractions of a pixel, or using learned priors, can recover some detail beyond one frame's sampling. It relies on extra information (more frames or strong assumptions), not on interpolation alone [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does one pixel's value represent, approximately?",
+      options: ["The brightness at one exact point", "The average brightness over the pixel's small area", "The brightest point in the area", "The colour of the lens"],
+      answer: 1,
+      explanation: "A pixel collects light over its area during the exposure.",
+    },
+    {
+      question: "How many pixels are needed, at minimum, to show one line pair?",
+      options: ["1", "2", "4", "10"],
+      answer: 1,
+      explanation: "One for the dark line and one for the bright line.",
+    },
+    {
+      question: "You shrink an image 4× and enlarge it back with bicubic interpolation. Is the detail restored?",
+      options: ["Yes, fully", "Yes, if you use Lanczos", "No, detail lost when shrinking is gone", "Only for colour images"],
+      answer: 2,
+      explanation: "Interpolation only fills in between existing samples.",
+    },
+    {
+      question: "Which interpolation is best for shrinking images?",
+      options: ["INTER_NEAREST", "INTER_AREA", "INTER_CUBIC", "INTER_LANCZOS4"],
+      answer: 1,
+      explanation: "INTER_AREA averages source pixels, like a coarser sensor.",
+    },
+    {
+      question: "How many bytes is a 1920 × 1080 8-bit colour image (uncompressed)?",
+      options: ["2.07 MB", "6.22 MB", "4.15 MB", "16.6 MB"],
+      answer: 1,
+      explanation: "1920 × 1080 × 3 bytes = 6,220,800 bytes.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 1D row of pixels covers a scene where the left 2.5 pixels are black (0) and the rest white (200). The pixels are 1 unit wide, starting at 0. What are the first four pixel values?
+
+<Solution>
+
+Pixels 0 and 1 are fully black: **0, 0**. Pixel 2 is half black, half white: **100**. Pixel 3 is white: **200**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Make a 1D signal of stripes with a period of 4 pixels (`np.tile([0, 0, 200, 200], 50)`). Shrink it by 2 and by 4 with `cv2.resize(..., interpolation=cv2.INTER_AREA)` and print the first values and the contrast (max − min) each time.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+row = np.tile(np.array([0, 0, 200, 200], np.uint8), 50)[None, :]   # 1 x 200
+for f in [2, 4]:
+    small = cv2.resize(row, (row.shape[1] // f, 1), interpolation=cv2.INTER_AREA)
+    print(f"1/{f}: {small[0, :6]}  contrast {int(small.max()) - int(small.min())}")
+```
+
+Output:
+
+```text
+1/2: [  0 200   0 200   0 200]  contrast 200
+1/4: [100 100 100 100 100 100]  contrast 0
+```
+
+At 1/2 there are still 2 samples per period and the stripes survive. At 1/4 each new pixel averages a whole period: the stripes vanish into flat gray.
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+A billet ID is painted with strokes 4 mm wide. The camera covers 1200 mm with 1920 pixels. How many pixels wide is a stroke? Is that enough for reliable OCR?
+
+<Solution>
+
+1200 / 1920 = 0.625 mm/px; 4 / 0.625 = **6.4 pixels** per stroke. That is comfortably above the 2–3 pixel minimum and usually enough for OCR, provided focus and contrast are good.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed. Pearson, 2018. Sec. 2.4 (image sampling and quantization) and Sec. 4.5 (sampling and the Fourier transform of sampled functions).
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. Springer, 2022. Sec. 2.3 (the digital camera: sampling and aliasing). Free online edition: [szeliski.org/Book](https://szeliski.org/Book/).
+3. OpenCV 4.13.0 documentation, *Geometric Image Transformations* (`resize`): [docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html](https://docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html).

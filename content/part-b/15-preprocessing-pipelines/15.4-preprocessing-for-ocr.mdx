@@ -1,0 +1,322 @@
+export const meta = {
+  number: "15.4",
+  title: "Preprocessing for OCR",
+  minutes: 25,
+  objectives: [
+    "Prepare text images the way OCR engines expect: dark text on white, clean, upright, large enough",
+    "Binarise unevenly lit text and remove specks",
+    "Measure and correct skew with projection profiles or minAreaRect",
+    "Check character size and add margins before recognition",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 15.4 (Module 15 plan).
+  New lab: OcrLab (lib/ocr-ops.ts). OCR engine calls are marked "# Needs …" (no Tesseract in the verification environment).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 15.4 Preprocessing for OCR
+
+<Definition term="OCR preprocessing">the steps that turn a camera image of text into the kind of image an optical character recognition engine reads best: high contrast dark text on a light, even background, horizontal lines, characters of a sensible size, no specks, and a margin around the text.</Definition>
+
+OCR engines such as Tesseract were designed for scanned pages: black print on white paper at 300 dpi, perfectly flat and upright. Industrial text (lot numbers, dates, serials on labels, parts and packaging) rarely looks like that. Most OCR failures in practice are preprocessing failures: the engine never had a clean image to read. This chapter puts together the steps from this module and Module 13 into an OCR-ready pipeline.
+
+## 1. An analogy
+
+Handing a document to a fast typist: they type perfectly from a clean, straight, well-lit copy at a normal font size. Give them a crumpled, tilted photocopy with coffee stains and tiny print, and errors appear, not because they cannot type, but because they cannot see.
+
+## 2. What the engine wants
+
+<Flow
+  steps={[
+    { label: "Camera image of text", tone: "data" },
+    { label: "Even the light, binarise: dark text on white (15.3, 13.5)", tone: "process" },
+    { label: "Remove specks, check polarity", tone: "process" },
+    { label: "Deskew: text lines horizontal", tone: "process" },
+    { label: "Scale to a good character height, add a white margin", tone: "process" },
+    { label: "OCR engine", tone: "result" },
+  ]}
+/>
+
+| Requirement | Why | How |
+| --- | --- | --- |
+| Dark text on a light background | Tesseract 4 and later expect it (its documentation notes that 3.05 handled inverted images, 4.x needs dark on light) | `THRESH_BINARY_INV` logic or `cv2.bitwise_not` |
+| Even background, sharp edges | binarisation inside the engine is global | illumination correction, Sauvola |
+| Horizontal lines | line finding uses horizontal projections | deskew |
+| Sensible character size | too small: features lost; too large: slower, sometimes worse | rescale (see below) |
+| A margin around the text | characters touching the border are often missed | `cv2.copyMakeBorder` with white |
+| Few specks | specks become false characters (".", ",", "'") | connected components with a minimum area |
+
+The Tesseract documentation ("Improving the quality of the output") recommends images of at least 300 dpi and lists rescaling, binarisation, noise removal, deskewing, border handling and inversion as the main steps [2]. It suggests a border of about 10 pixels around the text, and points to separate research on the best capital-letter height in pixels; rather than relying on one number, measure the read rate of your engine on your own text at a few scales.
+
+## 3. Deskewing
+
+A tilted label makes text lines run diagonally: horizontal projections (row sums of the text mask) smear out. Two ways to measure the angle:
+
+- **Projection profile**: rotate the mask by trial angles and keep the angle with the sharpest profile (highest variance of row sums): lines then produce tall peaks with empty gaps between them.
+- **minAreaRect**: the minimum-area rectangle around all text pixels (`cv2.minAreaRect(cv2.findNonZero(mask))`) has the text's orientation, provided the text block is wider than it is tall.
+
+On the label rotated by 4°, both find the correction: the profile search gives −4.0°, minAreaRect −3.98°.
+
+<OcrLab caption="Tilt the label and watch the row profile on the right of the binarised image smear out. Press the button to search for the angle with the sharpest profile; the deskewed profile shows four clean peaks, one per text line." />
+
+## 4. Size and margins
+
+On the (upright) label, the median height of the character components is 21 pixels (capitals and digits). Tesseract reads this size well (example 2); a label with 8-pixel characters should be upscaled (with `INTER_CUBIC` or `INTER_LINEAR`, before binarising) by about 3. Add a white margin of about 10 pixels so no character touches the image border.
+
+## 5. Industrial example
+
+A dairy reads best-before dates printed by an inkjet on curved yoghurt cups. The pipeline: crop the date region found by a template match; correct the light with a closing-based background (the print is dark, the cup bright); Sauvola binarisation; remove components smaller than 15 pixels (ink spray); deskew with minAreaRect (cups rotate slightly on the conveyor); upscale to a 28-pixel character height; add a 10-pixel white border; OCR restricted to the characters `0123456789./` (Tesseract's character whitelist) and a date-format check on the result. Each step was added only after its failure showed up in the labelled test set.
+
+## What you should remember from 15.4
+
+<Takeaways>
+<Takeaway n={1} title="Target image">Dark text on white, even, horizontal, clean, sensible size, with a margin.</Takeaway>
+<Takeaway n={2} title="Binarise well">Illumination correction + Otsu, or Sauvola; then remove specks by area.</Takeaway>
+<Takeaway n={3} title="Deskew">Sharpest projection profile, or minAreaRect on the text pixels.</Takeaway>
+<Takeaway n={4} title="Help the engine">Restrict the character set and check the format of the result.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Characters are 9 pixels tall. By what factor would you upscale to reach about 27 pixels, and before or after binarising?
+
+<Solution>
+
+A factor of **3**, **before** binarising: interpolation on the grey image keeps smooth edges; upscaling a binary image gives blocky characters.
+
+</Solution>
+
+**Q2.** The text is white on a dark background. What single step fixes it for Tesseract 4?
+
+<Solution>
+
+**Invert** the image (`cv2.bitwise_not`), so the text becomes dark on light.
+
+</Solution>
+
+### Next: 15.5 Preprocessing for deep learning
+
+What neural networks expect: size, layout, normalisation and the exact preprocessing they were trained with.
+
+## Code
+
+Two examples: binarisation, specks and character size; then deskewing two ways, with the OCR call itself shown for completeness.
+
+### 1. Binarise, clean, measure
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-print-uneven.png", cv2.IMREAD_GRAYSCALE)
+
+def binarize(im):                                        # text = 255 (white on black, for analysis)
+    k = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+    bg = cv2.GaussianBlur(cv2.morphologyEx(im, cv2.MORPH_CLOSE, k), (0, 0), 5).astype(np.float32)
+    flat = np.clip(im / np.maximum(bg, 1) * bg.mean(), 0, 255).astype(np.uint8)
+    return cv2.threshold(flat, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+
+mask = binarize(img)
+noisy = mask.copy()
+rng = np.random.default_rng(3)
+ys, xs = rng.integers(0, 200, 40), rng.integers(0, 320, 40)
+noisy[ys, xs] = 255                                      # simulate 40 ink specks
+
+n, labels, stats, _ = cv2.connectedComponentsWithStats(noisy, connectivity=8)
+area = stats[1:, cv2.CC_STAT_AREA]
+height = stats[1:, cv2.CC_STAT_HEIGHT]
+keep = np.flatnonzero(area >= 10) + 1                     # label ids of components with at least 10 pixels
+clean = np.isin(labels, keep).astype(np.uint8) * 255
+print(f"components: {n - 1} with specks, {len(keep)} kept | median character height {np.median(height[area >= 10]):.0f} px")
+
+ocr_ready = cv2.copyMakeBorder(cv2.bitwise_not(clean), 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
+print("OCR-ready image:", ocr_ready.shape, "| text dark:", ocr_ready[clean.nonzero()[0][0] + 10, clean.nonzero()[1][0] + 10] == 0)
+```
+
+Output:
+
+```text
+components: 83 with specks, 51 kept | median character height 21 px
+OCR-ready image: (220, 340) | text dark: True
+```
+
+- 32 of the 40 specks form separate one-pixel components (the others landed on or next to characters); the area filter removes them and keeps all 51 character components (some characters such as "/" or digits with holes are one component each; separate dots would need a smaller limit).
+- `copyMakeBorder` adds the 10-pixel white margin; `bitwise_not` gives dark text on white.
+
+### 2. Deskew, then OCR
+
+```python
+import numpy as np
+import cv2
+
+h, w = img.shape
+M = cv2.getRotationMatrix2D((w / 2, h / 2), 4.0, 1.0)                  # tilt the label by 4 degrees
+skewed = cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+m = binarize(skewed)
+
+def profile_variance(mask, deg):
+    R = cv2.getRotationMatrix2D((w / 2, h / 2), deg, 1.0)
+    return np.var(cv2.warpAffine(mask, R, (w, h)).sum(axis=1).astype(float))
+
+angles = np.arange(-10, 10.01, 0.25)
+best = angles[np.argmax([profile_variance(m, a) for a in angles])]
+(cx, cy), (rw, rh), rect_angle = cv2.minAreaRect(cv2.findNonZero(m))
+print(f"projection profile: rotate by {best:.2f} deg | minAreaRect angle {rect_angle:.2f} deg ({rw:.0f} x {rh:.0f})")
+```
+
+Output:
+
+```text
+projection profile: rotate by -4.00 deg | minAreaRect angle -3.98 deg (300 x 159)
+```
+
+- `minAreaRect` returns (centre, (width, height), angle); its angle convention changed between OpenCV versions, so check which side is the long one before using the angle.
+
+```python
+# Needs Tesseract (the tesseract program and pytesseract); checked with Tesseract 5.3.4 outside the pinned environment
+import pytesseract
+upright = cv2.warpAffine(m, cv2.getRotationMatrix2D((w / 2, h / 2), best, 1.0), (w, h))
+page = cv2.copyMakeBorder(cv2.bitwise_not(upright), 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
+print("raw, skewed:", repr(pytesseract.image_to_string(skewed, config="--psm 6")))
+print("raw, upright:", repr(pytesseract.image_to_string(img, config="--psm 6")))
+print("preprocessed:", repr(pytesseract.image_to_string(page, config="--psm 6")))
+```
+
+Output with Tesseract 5.3.4:
+
+```text
+raw, skewed: '1471-B QTY 120\n027-03 PASS\n, Shift B OK\n'
+raw, upright: '4471-B aQqy 120\n} 2027-03 PASS\n3 Shift B OK\n'
+preprocessed: 'Lot 4471-—B QTY 120\nEXP 2027-03 PASS\nLine 3 Shift B OK\nBatch 0912 / 77\n'
+```
+
+- On the raw image, Tesseract loses the text in the dark corner (the first words of every line, and the whole last line) even when the label is upright. After light correction, binarisation, deskew and margin, all four lines are read; the one error ("—" read inside "4471-B") is the kind a format check catches.
+
+## OpenCV API notes
+
+**Deskew**: `cv2.getRotationMatrix2D(center, angle_deg, scale)` (positive = counter-clockwise) + `cv2.warpAffine(img, M, (w, h), flags, borderMode, borderValue)`; `cv2.minAreaRect(points)`.
+
+**Specks**: `cv2.connectedComponentsWithStats(mask, connectivity=8)`: `stats[:, cv2.CC_STAT_AREA]`, `CC_STAT_HEIGHT`, etc.; label 0 is the background.
+
+**Margins**: `cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=255)`.
+
+**OCR in OpenCV**: the `dnn` module has `cv2.dnn_TextRecognitionModel` and `TextDetectionModel_EAST`/`_DB` for deep-learning OCR with downloaded models; contrib `text` can wrap Tesseract when built with it. Most projects call Tesseract (`pytesseract`) or a deep OCR library directly.
+
+## Where it fails
+
+- **Curved or perspective-distorted text**: rotation is not enough; rectify with a perspective or cylindrical warp (Part D).
+- **Dot-matrix and inkjet print**: characters are made of separate dots; dilate or blur first so each character is connected (Module 16).
+- **Touching characters**: OCR may read two as one; better binarisation, slight erosion, or a deep OCR model.
+- **Reflective and embossed text**: no contrast in grey values; change the lighting (dark-field, low angle).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Feeding white-on-black text** to Tesseract 4+.
+- **Binarising before upscaling** (blocky characters).
+- **Cropping too tight** (characters touching the border).
+- **Letting the engine guess** the character set and layout when you know them (whitelists, page segmentation mode).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Skew detection methods
+
+Besides projection profiles and bounding rectangles, the Hough transform on text baselines or character centres and Fourier-domain methods are used for skew detection; surveys of document analysis compare their accuracy and speed [3]. For short industrial strings, minAreaRect on the binarised characters is usually enough.
+
+### From classical OCR to deep models
+
+Tesseract 4 replaced its classical character classifier with an LSTM line recogniser. Modern scene-text systems detect text regions (EAST, DB) and recognise them with CNN-RNN or transformer models, which tolerate much more variation; but on regular industrial print, a well-preprocessed classical pipeline with format checks is still common because it is fast and explainable.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which polarity does Tesseract 4+ expect?",
+      options: ["White text on black", "Dark text on a light background", "Either", "Colour text"],
+      answer: 1,
+      explanation: "Invert light-on-dark text first.",
+    },
+    {
+      question: "A projection-profile deskew chooses the angle where…",
+      options: ["The image is brightest", "The row sums have the highest variance (sharp line peaks)", "The text is smallest", "minAreaRect is square"],
+      answer: 1,
+      explanation: "Horizontal lines give tall peaks and empty gaps in the row profile.",
+    },
+    {
+      question: "How do you remove small specks from a binary text image?",
+      options: ["Equalize", "Remove connected components below a minimum area", "Blur the result", "Increase the threshold"],
+      answer: 1,
+      explanation: "connectedComponentsWithStats gives each component's area.",
+    },
+    {
+      question: "Why add a white border before OCR?",
+      options: ["To change the size", "Characters touching the image border are often missed", "To deskew", "To invert"],
+      answer: 1,
+      explanation: "Engines expect some margin around the text.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A text block's minimum-area rectangle is 300 × 40 pixels with an angle of −6°. Characters are 12 pixels high. List the steps (with values) to make it OCR-ready.
+
+<Solution>
+
+Rotate by **+6°** to level it (sign depends on the convention, check the result), upscale by about **2** to 24-pixel characters (grey image, before binarising), binarise (dark text on white), remove specks, add a **10-pixel** white border.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+For skews from −8° to 8° in steps of 2°, tilt the label, binarise it, and estimate the angle with the projection-profile method. Print the estimate and its error.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+for s in range(-8, 9, 2):
+    R = cv2.getRotationMatrix2D((w / 2, h / 2), float(s), 1.0)
+    m = binarize(cv2.warpAffine(img, R, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE))
+    est = angles[np.argmax([profile_variance(m, a) for a in angles])]
+    print(f"skew {s:+d}: correction {est:+.2f}, error {est + s:+.2f}")
+```
+
+Output:
+
+```text
+skew -8: correction +8.00, error +0.00
+skew -6: correction +6.00, error +0.00
+skew -4: correction +4.00, error +0.00
+skew -2: correction +2.00, error +0.00
+skew +0: correction +0.00, error +0.00
+skew +2: correction -2.00, error +0.00
+skew +4: correction -4.00, error +0.00
+skew +6: correction -6.00, error +0.00
+skew +8: correction -8.00, error +0.00
+```
+
+The search recovers every skew to within its 0.25° step on this clean, multi-line label. Single short lines give flatter profiles and less precise angles.
+
+</Solution>
+
+## References
+
+1. R. Smith, "An overview of the Tesseract OCR engine", *Proc. ICDAR*, 629–633, 2007.
+2. Tesseract documentation: "Improving the quality of the output". https://tesseract-ocr.github.io/tessdoc/ImproveQuality.html
+3. A. Amin, S. Fischer, "A document skew detection method using the Hough transform", *Pattern Analysis & Applications* 3(3), 243–253, 2000.
+4. OpenCV 4.13.0 documentation: `minAreaRect`, `warpAffine`, `getRotationMatrix2D`, `connectedComponentsWithStats`, `copyMakeBorder`, `dnn::TextRecognitionModel`. https://docs.opencv.org/4.13.0/

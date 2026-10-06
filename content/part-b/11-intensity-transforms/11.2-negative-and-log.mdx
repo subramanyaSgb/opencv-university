@@ -1,0 +1,266 @@
+export const meta = {
+  number: "11.2",
+  title: "Negative and log",
+  minutes: 20,
+  objectives: [
+    "Apply the negative transform and know when inverted images are easier to read or process",
+    "Apply the log transform to compress a large dynamic range",
+    "Display Fourier spectra and other high-range data with log scaling",
+    "Know the inverse (exponential) transform and its use",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 11.2 (Module 11 plan).
+  Uses CurveLab with the linear Fourier spectrum sample (assets/images/generate_samples.py).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 11.2 Negative and log
+
+<Definition term="Negative and log transforms">two classic point operations: the negative s = 255 − r turns dark into bright and bright into dark; the log transform s = c · log(1 + r) expands dark values and compresses bright ones, so that data spanning many orders of magnitude fits on a screen.</Definition>
+
+Both are fixed curves with no parameters to tune (apart from scaling). The negative is about reading images more easily; the log is about showing data whose range is far larger than 256 levels, such as Fourier spectra, thermal radiance or X-ray transmission.
+
+## 1. An analogy
+
+The negative is a photo negative: the same information, colours reversed; sometimes a detail jumps out more on the inverse. The log is like the Richter scale for earthquakes or decibels for sound: magnitude 6 is ten times magnitude 5. A log scale lets small and huge values share one readable scale.
+
+## 2. The two curves
+
+<Flow
+  steps={[
+    { label: "Negative: s = 255 − r (a straight line going down)", tone: "process" },
+    { label: "Log: s = c · log(1 + r), c = 255 / log(256)", tone: "process" },
+    { label: "Log: each doubling of r adds about the same amount to s", tone: "result" },
+  ]}
+/>
+
+| r | 0 | 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 255 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| negative | 255 | 254 | 253 | 251 | 247 | 239 | 223 | 191 | 127 | 0 |
+| log | 0 | 32 | 51 | 74 | 101 | 130 | 161 | 192 | 223 | 255 |
+
+The log curve gives the first 8 input values (0–8) almost 40 % of the output range, while the top half of the inputs (128–255) gets only 32 output levels: perfect for data where the interesting detail is in small values.
+
+<CurveLab kinds={["identity", "negative", "log"]} initial="log" src="/images/sample-spectrum-linear.png" caption="A Fourier magnitude spectrum stored with a linear scale: almost everything is black. The log transform reveals the structure; the negative inverts it." />
+
+## 3. Where they are used
+
+| Transform | Typical use |
+| --- | --- |
+| Negative | X-ray and radiography (traditionally dark = dense, inverted for reading), dark text on light background for OCR engines expecting the opposite, making dark defects bright so that "bright = interesting" is consistent in a pipeline |
+| Log | Fourier spectra (Part E), radiometric thermal data, light-intensity measurements over a large range, histograms with huge counts (log y-axis) |
+| Exponential (inverse log) | undo a log encoding (some cameras and sensors output log-encoded data) |
+
+In OpenCV, the negative of an 8-bit image is `cv2.bitwise_not(img)` (= 255 − v); for other depths, `max_value − img`. The log needs floats: `cv2.log(img.astype(np.float32) + 1)` then scale.
+
+## 4. Industrial example
+
+A vibration-analysis station takes images of a machined surface and computes the 2D Fourier spectrum to detect chatter marks: periodic patterns that appear as bright peaks away from the centre. Displayed linearly, the spectrum is a single white dot in the centre (the image mean is millions of times larger than the chatter peaks). With a log transform the peaks become clearly visible, and the operator can see their direction and spacing; the inspection itself measures the peaks numerically on the float spectrum, the log image is only for display.
+
+## What you should remember from 11.2
+
+<Takeaways>
+<Takeaway n={1} title="Negative">s = 255 − r; cv2.bitwise_not for 8-bit; nothing lost, only inverted.</Takeaway>
+<Takeaway n={2} title="Log">s = c·log(1 + r): expands small values, compresses large ones.</Takeaway>
+<Takeaway n={3} title="Ratios">On a log scale each doubling adds about the same step.</Takeaway>
+<Takeaway n={4} title="Use">Show high-dynamic-range data (spectra, radiometry); compute on the original values.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** What is the negative of the pixel values 0, 100, 255?
+
+<Solution>
+
+**255, 155, 0**.
+
+</Solution>
+
+**Q2.** With c = 255/log(256), what does the log transform give for r = 15?
+
+<Solution>
+
+c ≈ 45.99; log(16) ≈ 2.773 → s ≈ **127.5**: the value 15 already reaches the middle of the output range.
+
+</Solution>
+
+### Next: 11.3 Gamma
+
+The power-law curve: the most used point operation, for display, measurement and contrast.
+
+## Code
+
+Two examples: the curves from scratch, and log display of a Fourier spectrum in OpenCV.
+
+### 1. From scratch: negative and log tables
+
+```python
+import numpy as np
+import cv2
+
+v = np.array([0, 1, 2, 4, 8, 16, 32, 64, 128, 255], np.float64)
+neg = 255 - v
+c = 255 / np.log(1 + 255)                                   # scale so that 255 maps to 255
+log = c * np.log1p(v)
+print("input   :", v.astype(int).tolist())
+print("negative:", neg.astype(int).tolist())
+print("log     :", np.round(log).astype(int).tolist())
+print("log step per doubling:", np.round(np.diff(log[2:]), 1).tolist())
+```
+
+Output:
+
+```text
+input   : [0, 1, 2, 4, 8, 16, 32, 64, 128, 255]
+negative: [255, 254, 253, 251, 247, 239, 223, 191, 127, 0]
+log     : [0, 32, 51, 74, 101, 130, 161, 192, 223, 255]
+log step per doubling: [23.5, 27.0, 29.2, 30.5, 31.2, 31.5, 31.5]
+```
+
+- Each doubling of the input adds about 31 output levels once r is above a few: the log turns ratios into equal steps (9.2).
+- `np.log1p(v)` computes log(1 + v) accurately; the "+ 1" avoids log(0).
+
+### 2. OpenCV: showing a Fourier spectrum
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+dft = cv2.dft(img, flags=cv2.DFT_COMPLEX_OUTPUT)
+mag = cv2.magnitude(dft[..., 0], dft[..., 1])
+mag = np.fft.fftshift(mag)                                  # zero frequency in the centre
+print(f"magnitude range: {mag.min():.1f} .. {mag.max():.3g} (ratio about {mag.max() / np.median(mag):.0f} x the median)")
+
+linear = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+logged = cv2.normalize(cv2.log(mag + 1), None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+for name, im in [("linear", linear), ("log", logged)]:
+    print(f"{name:6s}: pixels brighter than 20: {np.mean(im > 20):6.1%} | median grey {int(np.median(im))}")
+
+neg = cv2.bitwise_not(img.astype(np.uint8))                 # negative of an 8-bit image: 255 - v
+print("negative equals 255 - v:", np.array_equal(neg, 255 - img.astype(np.uint8)))
+```
+
+Output:
+
+```text
+magnitude range: 5.9 .. 7.7e+06 (ratio about 3220 x the median)
+linear: pixels brighter than 20:   0.0% | median grey 0
+log   : pixels brighter than 20: 100.0% | median grey 107
+negative equals 255 - v: True
+```
+
+- The largest magnitude (the image mean, at the centre) is thousands of times the typical value: shown linearly, everything else is black.
+- After the log, every pixel is visible (median grey 107). Chapter 30 explains what the spectrum means.
+
+## OpenCV API notes
+
+**Negative**: `cv2.bitwise_not(img)` (8-bit); `cv2.subtract(max_value, img)` or `max_value - img` for other depths.
+
+**Log and exp**: `cv2.log(src)` and `cv2.exp(src)` on float32/float64 (natural log; `cv2.log(0)` gives a large negative number, so add 1 first); `np.log1p`, `np.expm1`.
+
+**Scaling for display**: `cv2.normalize(src, None, 0, 255, cv2.NORM_MINMAX)` then `astype(np.uint8)`; or a fixed scale for comparable displays.
+
+## Where it fails
+
+- **Log of zero**: undefined; always use log(1 + r) or a small offset.
+- **Noise in dark values** is amplified by the log (the curve is steep near 0).
+- **Measurement**: log-scaled images are for display; ratios and differences on them mean something different (a difference of logs is a ratio).
+- **Fixed curve**: for data that is not spread over decades, gamma (11.3) or stretching (11.4) is more suitable.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **cv2.log on uint8 images** (needs float).
+- **Forgetting the +1** and getting −∞ or huge negative values.
+- **Normalising each frame separately** for video (brightness jumps); use a fixed scale.
+- **Measuring on the display image** instead of the original data.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why spectra need logs
+
+For natural images the Fourier magnitude falls roughly as 1/f with spatial frequency f (the "1/f" statistics of natural scenes), so magnitudes span several orders of magnitude between low and high frequencies. A log maps this power law onto an approximately linear ramp, which is why log-magnitude is the standard way to display spectra [1], [2].
+
+### Log images and illumination
+
+In a simple image model, intensity = illumination × reflectance. Taking the log turns the product into a sum: log I = log L + log R. Slow illumination changes and fine reflectance detail then separate cleanly with linear filters; this is the basis of homomorphic filtering (30.x) [1].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The negative of an 8-bit pixel with value 30 is…",
+      options: ["30", "225", "-30", "128"],
+      answer: 1,
+      explanation: "255 − 30.",
+    },
+    {
+      question: "The log transform is most useful for…",
+      options: ["Binary images", "Data spanning several orders of magnitude, like Fourier spectra", "Removing noise", "Rotating images"],
+      answer: 1,
+      explanation: "It compresses large values and expands small ones.",
+    },
+    {
+      question: "Why use log(1 + r) instead of log(r)?",
+      options: ["It is faster", "log(0) is undefined", "It is brighter", "OpenCV requires it"],
+      answer: 1,
+      explanation: "The +1 keeps r = 0 at 0.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A thermal sensor's raw values range from 1000 to 64 000. After a log transform, roughly how many "doublings" fit into the range, and how many output levels per doubling if mapped to 0–255?
+
+<Solution>
+
+64 000 / 1000 = 64 = 2⁶: **6 doublings**. 256 / 6 ≈ **43 levels per doubling**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Apply the log transform with a LUT (8-bit) to `sample-scene.png` and print the mean grey before and after, and the output for input values 5, 50 and 250.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+c = 255 / np.log(256)
+table = np.clip(np.round(c * np.log1p(np.arange(256))), 0, 255).astype(np.uint8)
+out = cv2.LUT(img, table)
+print(f"mean before {img.mean():.1f} | after {out.mean():.1f} | 5 -> {table[5]}, 50 -> {table[50]}, 250 -> {table[250]}")
+```
+
+Output:
+
+```text
+mean before 120.3 | after 208.3 | 5 -> 82, 50 -> 181, 250 -> 254
+```
+
+The log brightens almost everything; for an ordinary photo-like image, gamma (11.3) gives more control.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 3.2 (image negatives, log transformations).
+2. D. J. Field, "Relations between the statistics of natural images and the response properties of cortical cells", *Journal of the Optical Society of America A* 4(12), 1987.
+3. OpenCV 4.13.0 documentation: `bitwise_not`, `log`, `dft`, `magnitude`, `normalize`. https://docs.opencv.org/4.13.0/

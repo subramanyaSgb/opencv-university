@@ -1,0 +1,390 @@
+export const meta = {
+  number: "8.5",
+  title: "Building with CUDA, and cv2.cuda",
+  minutes: 30,
+  objectives: [
+    "Explain when an NVIDIA GPU speeds up image processing and when transfers eat the gain",
+    "Know that pip wheels have no CUDA and what a CUDA build needs (toolkit, contrib, CMake options)",
+    "Use the cv2.cuda API: GpuMat, upload/download, filters, streams",
+    "Write code that uses the GPU when present and falls back to the CPU",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 8.5 (Module 8 plan).
+  The course test machine has no GPU. Examples 1 and 2 run on the CPU package and are compared automatically;
+  example 3 starts with "# Needs a CUDA build" and is skipped by the verifier (no output is claimed for it).
+*/}
+
+# 8.5 Building with CUDA, and cv2.cuda
+
+<Definition term="cv2.cuda">OpenCV's GPU path for NVIDIA graphics cards: images are copied to the card as GpuMat objects, processed there by CUDA versions of OpenCV functions, and copied back. It exists only in OpenCV builds compiled with CUDA.</Definition>
+
+When a pipeline is too slow on the CPU (7.7), "use the GPU" is a common suggestion. Sometimes it gives a 10× speed-up; sometimes the program gets slower. This chapter explains the difference and how OpenCV's CUDA support is built and used.
+
+## 1. An analogy
+
+A factory with a second, very fast workshop across the street. The workshop has hundreds of workers who are fast at simple, repetitive jobs. But every job must be carried across the street and back. For one small job, carrying takes longer than doing it yourself. For a big batch of jobs done one after another in the other workshop, the carrying is paid once and the speed wins.
+
+## 2. Why GPUs are fast, and where the cost is
+
+<Flow
+  steps={[
+    { label: "Image in CPU memory (NumPy array)", tone: "world" },
+    { label: "Upload over PCIe to GPU memory (GpuMat)", tone: "data" },
+    { label: "GPU kernels: thousands of threads, one per pixel", tone: "process" },
+    { label: "Download the result to CPU memory", tone: "result" },
+  ]}
+/>
+
+- A GPU has thousands of simple cores and very high memory bandwidth. Per-pixel operations (colour conversion, filters, warps, resizing) and neural networks map perfectly onto it.
+- The GPU has **its own memory**. Data crosses the PCIe bus: in practice about 3–6 GB/s on a PCIe 3.0 x4 link and roughly 12 GB/s on PCIe 3.0 x16. A 5 MP colour frame (15 MB) takes over a millisecond each way.
+- Each GPU call also has a small fixed cost (kernel launch, synchronisation).
+
+So: **one cheap operation** per frame → the CPU usually wins. **A chain of heavy operations** kept on the GPU, with only a small result coming back → the GPU wins.
+
+## 3. Transfers vs compute
+
+<GpuLab caption="CPU time vs GPU time including upload and download. Chain more operations on the GPU, or bring back only a small result, and see where the GPU starts to pay off." />
+
+Things to try:
+
+- Default: one 2 ms operation on a 5 MP colour image at 12 GB/s. The transfers alone (2.5 ms) exceed the CPU time: the CPU wins.
+- Set **operations chained** to 2: 4 ms on the CPU vs 3 ms on the GPU, the GPU wins.
+- Switch to **a small result** (a count, a bounding box): the download disappears.
+- Set the speed-up to 1×: the GPU never wins, whatever the chain.
+
+## 4. Getting a CUDA build
+
+The pip wheels (`opencv-python`, `opencv-contrib-python` …) are **built without CUDA**: `cv2.cuda` exists as a namespace, but `cv2.cuda.getCudaEnabledDeviceCount()` returns 0 and any GPU call raises "The library is compiled without CUDA support". Options:
+
+| Way | Effort | Notes |
+| --- | --- | --- |
+| Build from source with CUDA | high (an hour of compiling) | full control; the usual way on PCs |
+| NVIDIA Jetson images (JetPack) | low | ships an OpenCV build; check whether it includes CUDA (TODO: verify for the current JetPack) |
+| Container images with OpenCV + CUDA | medium | match the CUDA version with the host driver |
+| Use the GPU only for deep learning (another framework) | low | often the real need; OpenCV stays on the CPU |
+
+A source build needs the NVIDIA driver, the CUDA toolkit (and cuDNN for the DNN module), the **opencv_contrib** repository (all `cuda*` modules live there, 8.4), and these CMake options:
+
+```text
+cmake -S opencv -B build \
+  -D OPENCV_EXTRA_MODULES_PATH=../opencv_contrib/modules \
+  -D WITH_CUDA=ON -D WITH_CUBLAS=ON \
+  -D CUDA_ARCH_BIN=8.6 \
+  -D OPENCV_DNN_CUDA=ON \
+  -D BUILD_opencv_python3=ON
+cmake --build build --parallel
+```
+
+`CUDA_ARCH_BIN` is the compute capability of your GPU (8.6 for RTX 30-series, 8.9 for RTX 40-series, 8.7 for Jetson Orin); compiling only for your GPU makes the build much faster. Supported CUDA and cuDNN versions change with each OpenCV release (TODO: verify the tested versions for 4.13.0). After building, `cv2.getBuildInformation()` shows an `NVIDIA CUDA: YES` section.
+
+## 5. The cv2.cuda API
+
+| CPU | CUDA |
+| --- | --- |
+| NumPy array | `cv2.cuda_GpuMat` (`upload(img)`, `download()`) |
+| `cv2.cvtColor(img, code)` | `cv2.cuda.cvtColor(gpu, code)` |
+| `cv2.resize(img, size)` | `cv2.cuda.resize(gpu, size)` |
+| `cv2.GaussianBlur(img, k, s)` | `f = cv2.cuda.createGaussianFilter(type, type, k, s)`; `f.apply(gpu)` |
+| `cv2.threshold(img, t, m, type)` | `cv2.cuda.threshold(gpu, t, m, type)` |
+| `cv2.Canny(img, a, b)` | `d = cv2.cuda.createCannyEdgeDetector(a, b)`; `d.detect(gpu)` |
+| `cv2.add`, `cv2.absdiff` | `cv2.cuda.add`, `cv2.cuda.absdiff` |
+| DNN on CPU | `net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)`, `net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)` (8.7) |
+
+Two patterns matter more than any single function:
+
+- **Filters are objects**: create them once (outside the loop) and `apply` them every frame. Creating a filter allocates GPU resources.
+- **Streams** (`cv2.cuda.Stream()`) let uploads, kernels and downloads of different frames overlap; pass `stream=` to the calls and `stream.waitForCompletion()` before using the result.
+
+Not every CPU function has a CUDA version, and some (contours, most of calib3d) never will, because they are sequential. A typical GPU pipeline does the heavy per-pixel part on the GPU and the decision logic on the CPU.
+
+## 6. Industrial example
+
+A web-inspection line streams 8 MP mono images at 60 fps: about 480 MB/s. Each frame needs flat-field correction, a 15 × 15 background estimate, subtraction, thresholding and a morphological opening before blob analysis. On a 16-core CPU this takes 22 ms per frame, too slow for 16.7 ms. With a CUDA build, the five per-pixel steps stay on the GPU (8 MB up per frame, about 0.7 ms at 12 GB/s), and only the binary defect mask comes back, which is then downsampled on the GPU to a small map before download. Blob analysis on the few defect regions runs on the CPU. Frame time drops to about 6 ms, and two streams overlap the upload of frame n + 1 with the processing of frame n. (Numbers are an illustrative design calculation; measure on your hardware, 7.7.)
+
+## What you should remember from 8.5
+
+<Takeaways>
+<Takeaway n={1} title="Transfers">The GPU has its own memory; uploads and downloads cost time over PCIe.</Takeaway>
+<Takeaway n={2} title="When it pays">Chains of heavy per-pixel work, small results back; not one cheap call per frame.</Takeaway>
+<Takeaway n={3} title="Builds">Pip wheels have no CUDA; build from source with contrib and WITH_CUDA=ON, or use a platform build.</Takeaway>
+<Takeaway n={4} title="API">GpuMat upload/download, filter objects created once, streams for overlap.</Takeaway>
+<Takeaway n={5} title="Fallback">Check getCudaEnabledDeviceCount() and keep a CPU path.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 12 MP mono image goes over a 12 GB/s link. How long does the upload take?
+
+<Solution>
+
+12 MB / 12 GB/s = **1 ms**.
+
+</Solution>
+
+**Q2.** One `cv2.cvtColor` per frame takes 1.5 ms on the CPU and would take 0.1 ms on the GPU. Transfers are 2 ms in total. GPU or CPU?
+
+<Solution>
+
+GPU: 2 + 0.1 = 2.1 ms > 1.5 ms. **CPU**. Only if more work stays on the GPU does it pay off.
+
+</Solution>
+
+**Q3.** `pip install opencv-contrib-python` on a PC with an RTX GPU. Does `cv2.cuda` use the GPU?
+
+<Solution>
+
+No. The pip wheels are built without CUDA; `getCudaEnabledDeviceCount()` returns 0.
+
+</Solution>
+
+### Next: 8.6 UMat and OpenCL
+
+A second GPU path that works with pip wheels and many vendors' GPUs: the transparent API with `cv2.UMat`.
+
+## Code
+
+Three examples: the offload model in NumPy, a GPU-or-CPU function that runs anywhere, and a full CUDA pipeline for a CUDA build.
+
+### 1. From scratch: does offloading pay?
+
+The model behind the lab: transfers once per frame, plus GPU kernels for each chained operation.
+
+```python
+import numpy as np
+import cv2
+
+def offload_ms(mp, channels, bw_gbs, cpu_ms, speedup, ops, small_result, launch_ms=0.05):
+    nbytes = mp * 1e6 * channels
+    up = nbytes / (bw_gbs * 1e9) * 1000
+    down = 0.02 if small_result else up
+    gpu = up + ops * (cpu_ms / speedup + launch_ms) + down
+    return ops * cpu_ms, gpu, up + down
+
+print(" ops | CPU ms | GPU ms (incl. transfers) | winner")
+for ops in [1, 2, 3, 5, 10]:
+    cpu, gpu, tr = offload_ms(mp=5, channels=3, bw_gbs=6, cpu_ms=2.0, speedup=10, ops=ops, small_result=False)
+    print(f"{ops:4d} | {cpu:6.2f} | {gpu:6.2f} (transfers {tr:.2f}) | {'GPU' if gpu < cpu else 'CPU'}")
+```
+
+Output:
+
+```text
+ ops | CPU ms | GPU ms (incl. transfers) | winner
+   1 |   2.00 |   5.25 (transfers 5.00) | CPU
+   2 |   4.00 |   5.50 (transfers 5.00) | CPU
+   3 |   6.00 |   5.75 (transfers 5.00) | GPU
+   5 |  10.00 |   6.25 (transfers 5.00) | GPU
+  10 |  20.00 |   7.50 (transfers 5.00) | GPU
+```
+
+- At 6 GB/s the 15 MB frame costs 2.5 ms each way. Each operation saves 2 − 0.25 = 1.75 ms, so 3 operations are needed to pay for 5 ms of transfers.
+- The model is simple on purpose: real speed-ups differ per function and GPU. Use it to decide whether a test is worth doing, then measure.
+
+### 2. OpenCV: GPU if available, otherwise CPU
+
+```python
+import numpy as np
+import cv2
+
+def blur(img):
+    """GaussianBlur on the GPU when OpenCV was built with CUDA and a device exists, otherwise on the CPU."""
+    if cv2.cuda.getCudaEnabledDeviceCount() > 0:
+        g = cv2.cuda_GpuMat()
+        g.upload(img)
+        f = cv2.cuda.createGaussianFilter(cv2.CV_8UC1, cv2.CV_8UC1, (7, 7), 1.5)
+        return f.apply(g).download(), "cuda"
+    return cv2.GaussianBlur(img, (7, 7), 1.5), "cpu"
+
+img = np.zeros((480, 640), np.uint8)
+cv2.circle(img, (320, 240), 100, 255, -1)
+out, path = blur(img)
+print("CUDA devices:", cv2.cuda.getCudaEnabledDeviceCount(), "| path:", path, "| out", out.shape, out.dtype, "| centre", out[240, 320])
+try:
+    cv2.cuda_GpuMat().upload(img)
+except cv2.error as e:
+    print("upload without CUDA:", str(e).split("error: ")[1].split(" in function")[0])
+```
+
+Output:
+
+```text
+CUDA devices: 0 | path: cpu | out (480, 640) uint8 | centre 255
+upload without CUDA: (-216:No CUDA support) The library is compiled without CUDA support
+```
+
+- This is the output of the pip package. `getCudaEnabledDeviceCount()` returns 0 when OpenCV was built without CUDA or no device is found, and −1 when the CUDA driver is missing or incompatible; `> 0` covers both, so the CPU path is taken.
+- In a real program, create the CUDA filter once and reuse it (see example 3).
+
+### 3. CUDA build: a pipeline that stays on the GPU
+
+```python
+# Needs a CUDA build of OpenCV (WITH_CUDA=ON, contrib) and an NVIDIA GPU
+import time
+import numpy as np
+import cv2
+
+frame = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+frame = cv2.resize(frame, (3264, 2448))                          # 8 MP
+gpu_in, gpu_bg = cv2.cuda_GpuMat(), cv2.cuda_GpuMat()
+stream = cv2.cuda.Stream()
+background = cv2.cuda.createBoxFilter(cv2.CV_8UC1, cv2.CV_8UC1, (15, 15))   # create filters once
+opening = cv2.cuda.createMorphologyFilter(cv2.MORPH_OPEN, cv2.CV_8UC1, np.ones((3, 3), np.uint8))
+
+def inspect(img):
+    gpu_in.upload(img, stream)
+    bg = background.apply(gpu_in, stream=stream)
+    diff = cv2.cuda.absdiff(gpu_in, bg, stream=stream)
+    _, mask = cv2.cuda.threshold(diff, 25, 255, cv2.THRESH_BINARY, stream=stream)
+    mask = opening.apply(mask, stream=stream)
+    small = cv2.cuda.resize(mask, (408, 306), interpolation=cv2.INTER_AREA, stream=stream)   # 1/8 size map
+    result = small.download(stream)
+    stream.waitForCompletion()
+    return result
+
+inspect(frame)                                                       # warm-up: CUDA context, kernels
+t0 = time.perf_counter()
+for _ in range(50):
+    defect_map = inspect(frame)
+print(f"GPU pipeline: {1000 * (time.perf_counter() - t0) / 50:.2f} ms per frame, map {defect_map.shape}")
+```
+
+No output is shown: the time depends entirely on your GPU, bus and driver. Compare it with the same pipeline on the CPU (`cv2.blur`, `cv2.absdiff`, `cv2.threshold`, `cv2.morphologyEx`, `cv2.resize`) using the timing method of 7.7.
+
+- The first CUDA call in a process initialises the CUDA context and can take hundreds of milliseconds: always warm up.
+- Only the 1/8-size map is downloaded: 125 kB instead of 8 MB.
+
+## OpenCV API notes
+
+**Device**: `cv2.cuda.getCudaEnabledDeviceCount()`, `cv2.cuda.setDevice(i)`, `cv2.cuda.printCudaDeviceInfo(i)`, `cv2.cuda.DeviceInfo(i)`.
+
+**Memory**: `cv2.cuda_GpuMat()`, `GpuMat(rows, cols, type)`, `upload(arr[, stream])`, `download([stream])`, `size()`, `type()`, `cv2.cuda.HostMem` / `cv2.cuda.registerPageLocked(arr)` (page-locked host memory for faster, asynchronous transfers).
+
+**Functions** (from contrib `cudaarithm`, `cudafilters`, `cudaimgproc`, `cudawarping`, `cudafeatures2d`, `cudaoptflow`, `cudabgsegm`, `cudastereo`, `cudaobjdetect`, `cudacodec`): names follow the CPU ones in `cv2.cuda.*`; filters and detectors are objects from `cv2.cuda.create…`.
+
+**Streams**: `cv2.cuda.Stream()`, `stream=` arguments, `waitForCompletion()`, `cv2.cuda.Event` for timing.
+
+**DNN**: `DNN_BACKEND_CUDA` with `DNN_TARGET_CUDA` or `DNN_TARGET_CUDA_FP16` (needs `OPENCV_DNN_CUDA=ON` and cuDNN).
+
+## Where it fails
+
+- **No NVIDIA GPU**: CUDA is NVIDIA-only; use OpenCL (8.6) or vendor toolkits for other GPUs.
+- **Small images or single operations**: transfers and launch overhead dominate.
+- **Sequential algorithms**: contour tracing, connected-component logic with irregular data, most of calib3d stay on the CPU.
+- **Deployment**: driver, CUDA toolkit and OpenCV build versions must match; a build is tied to the compute capabilities it was compiled for.
+- **Bit-exactness**: GPU results can differ slightly from CPU results (rounding, border handling); re-validate thresholds.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Expecting pip OpenCV to use the GPU**.
+- **Creating CUDA filters inside the frame loop**.
+- **Downloading after every operation** instead of chaining on the GPU.
+- **Timing without warm-up** (the CUDA context initialisation is counted).
+- **Building for all architectures** (very long builds) or for the wrong one (the code does not run or is JIT-compiled at start-up).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Asynchronous transfers and pinned memory
+
+Normal (pageable) host memory must be copied to a page-locked buffer by the driver before DMA to the GPU, which makes transfers slower and synchronous. Page-locked ("pinned") memory (`cv2.cuda.HostMem` with `PAGE_LOCKED`, or `registerPageLocked`) allows the copy engine to run in parallel with kernels on another stream. With two or three streams, upload of frame n + 1, processing of frame n and download of frame n − 1 overlap, and the transfers are partly hidden [1], [2].
+
+### Integrated GPUs and Jetson
+
+On NVIDIA Jetson modules the CPU and GPU share the same physical memory; "transfers" are cheaper or avoidable with shared/unified memory (`HostMem` with `SHARED`). The trade-offs of the lab change: offloading small operations can pay off there [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does cv2.cuda.getCudaEnabledDeviceCount() return with the pip package?",
+      options: ["The number of NVIDIA GPUs", "0", "An error", "1 always"],
+      answer: 1,
+      explanation: "The pip wheels are built without CUDA.",
+    },
+    {
+      question: "Where are OpenCV's CUDA modules (cudafilters, cudaimgproc …)?",
+      options: ["In the main repository", "In opencv_contrib", "In NumPy", "In the NVIDIA driver"],
+      answer: 1,
+      explanation: "A CUDA build needs opencv_contrib.",
+    },
+    {
+      question: "Which pattern usually makes the GPU worthwhile?",
+      options: ["One cheap operation per frame, full image back", "Several heavy operations chained on the GPU, small result back", "Many tiny images, one at a time", "Calling cudaDeviceSynchronize after each call"],
+      answer: 1,
+      explanation: "Transfers are paid once; the work saved grows with the chain.",
+    },
+    {
+      question: "Why create cv2.cuda filters outside the loop?",
+      options: ["They are not thread-safe", "Creating them allocates GPU resources; reuse avoids that cost every frame", "The API requires it", "It changes the result"],
+      answer: 1,
+      explanation: "Create once, apply many times.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 20 MP mono image, link 12 GB/s, launch cost 0.05 ms per operation. Each operation takes 8 ms on the CPU and is 20× faster on the GPU. Only a small result comes back. How many chained operations until the GPU wins?
+
+<Solution>
+
+Upload 20 MB / 12 GB/s ≈ 1.67 ms; download ≈ 0. Gain per operation: 8 − (0.4 + 0.05) = 7.55 ms. **One** operation already wins: 1.67 + 0.45 = 2.12 ms < 8 ms.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Extend `offload_ms` from example 1 to print, for image sizes 0.3, 2, 5 and 12 MP (colour, 6 GB/s, 2 ms per MP of CPU time per operation, 10× speed-up, 2 chained operations, full image back), the CPU and GPU times and the winner. What pattern do you see?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+for mp in [0.3, 2, 5, 12]:
+    cpu, gpu, tr = offload_ms(mp=mp, channels=3, bw_gbs=6, cpu_ms=2.0 * mp, speedup=10, ops=2, small_result=False)
+    print(f"{mp:5.1f} MP | CPU {cpu:6.2f} ms | GPU {gpu:6.2f} ms | {'GPU' if gpu < cpu else 'CPU'}")
+```
+
+Output:
+
+```text
+  0.3 MP | CPU   1.20 ms | GPU   0.52 ms | GPU
+  2.0 MP | CPU   8.00 ms | GPU   2.90 ms | GPU
+  5.0 MP | CPU  20.00 ms | GPU   7.10 ms | GPU
+ 12.0 MP | CPU  48.00 ms | GPU  16.90 ms | GPU
+```
+
+When the CPU time grows with the image size as fast as the transfer time does, the ratio stays roughly constant (about 2.8× here, 2.3× at 0.3 MP); the fixed launch cost matters only for very small images. Whether the GPU wins is decided by the work per byte transferred, not by the image size.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Your team has a GPU in every line PC for a deep-learning classifier (running in another framework). Someone proposes moving all OpenCV preprocessing to `cv2.cuda` as well. What do you check before agreeing?
+
+<Solution>
+
+(1) Measure where the time goes (7.7): is preprocessing a bottleneck at all? (2) Can the preprocessing output stay on the GPU and be handed to the classifier without a download/upload round trip? If not, the extra transfers may cancel the gain. (3) The cost of maintaining a custom CUDA build of OpenCV (versions, drivers, CI) versus the pip package. (4) GPU memory and compute already used by the classifier. (5) Whether a CPU optimisation (ROI, smaller image, threads) is enough.
+
+</Solution>
+
+## References
+
+1. OpenCV 4.13.0 documentation, CUDA modules (core CUDA: GpuMat, Stream, HostMem; cudaarithm, cudafilters, cudaimgproc). https://docs.opencv.org/4.13.0/
+2. NVIDIA, *CUDA C++ Programming Guide* (memory, page-locked host memory, streams, compute capabilities). https://docs.nvidia.com/cuda/
+3. NVIDIA, CUDA GPUs: compute capability list. https://developer.nvidia.com/cuda-gpus
+4. K. Pulli, A. Baksheev, K. Kornyakov, V. Eruhimov, "Real-time computer vision with OpenCV", *Communications of the ACM* 55(6), 2012.

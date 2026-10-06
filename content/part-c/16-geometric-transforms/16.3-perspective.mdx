@@ -1,0 +1,279 @@
+export const meta = {
+  number: "16.3",
+  title: "Perspective",
+  minutes: 25,
+  objectives: [
+    "Explain the perspective (projective) transform and its 8 degrees of freedom",
+    "Rectify a tilted planar object with getPerspectiveTransform and warpPerspective",
+    "Map points with perspectiveTransform, including the divide by w",
+    "Know when an affine approximation is not enough, and how corner errors propagate",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 16.3 (Module 16 plan).
+  New lab: RectifyLab (draggable corners; uses lib/homography-ops from 5.3 and lib/warp-ops).
+  Uses sample-label-tilted.png from 5.3.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 16.3 Perspective
+
+<Definition term="Perspective transform (homography)">the map between two views of a flat surface: a 3 × 3 matrix H applied to (x, y, 1), followed by division by the third coordinate. Straight lines stay straight, but parallel lines may meet, which is what a tilted camera does to a flat object.</Definition>
+
+A label photographed at an angle is a trapezium, not a rectangle. No affine transform (16.2) can undo that, because affine maps keep parallel lines parallel and the label's edges are no longer parallel in the image. The homography can: four point pairs define it, and `warpPerspective` produces the straight-on view. It was introduced with homogeneous coordinates in 5.3; this chapter uses it on images.
+
+## 1. An analogy
+
+A slide projector aimed at a wall from the side throws a trapezium. Tilting the screen until it faces the projector straightens it again. Rectification is tilting the "screen" in software.
+
+## 2. Four corners, eight numbers
+
+<Flow
+  steps={[
+    { label: "Four points on the plane in the image (corners of the label)", tone: "data" },
+    { label: "Their target positions (a 240 × 120 rectangle)", tone: "data" },
+    { label: "H = getPerspectiveTransform(src4, dst4), 8 unknowns (h₃₃ = 1)", tone: "process" },
+    { label: "warpPerspective(img, H, (240, 120))", tone: "result" },
+  ]}
+/>
+
+For `sample-label-tilted.png` (corners (70, 40), (270, 62), (255, 170), (52, 140)) to a 240 × 120 rectangle:
+
+<Equation terms={[{ value: "H" }, { op: "=", value: "[[1.308, 0.235, −101.0], [−0.137, 1.243, −40.15], [0.00035, 0.00027, 1]]", result: true }]} />
+
+The last row is what makes it a perspective transform: for the image point (160, 100), H · (160, 100, 1) = (131.86, 62.28, **1.083**), and dividing by w = 1.083 gives (121.70, 57.48). The divisor changes across the image, so distances shrink more on one side than the other.
+
+<RectifyLab caption="Drag the four corners onto the label's corners and watch the rectified result. Then switch to the affine model: with only three corners it cannot straighten the fourth side." />
+
+## 3. Affine is not enough
+
+An affine transform fitted to the first three corners sends the fourth corner (52, 140) to (−4.9, 111.6) instead of (0, 120): about 10 pixels off in a 240 × 120 output. The label's top and bottom edges, extended, meet at about (−2647, −259): far away, but not at infinity, so the edges are not parallel and only a homography models them.
+
+| | Affine | Perspective |
+| --- | --- | --- |
+| Matrix | 2 × 3 | 3 × 3 (h₃₃ = 1) |
+| Degrees of freedom | 6 | 8 |
+| Point pairs needed | 3 | 4 (no three on a line) |
+| Parallel lines | stay parallel | may meet (vanishing points) |
+| Use when | object small or far, camera nearly perpendicular | tilted planes: labels, documents, floors, screens |
+
+## 4. Industrial example
+
+A logistics station reads shipping labels on parcels passing under a camera at varying tilt. The label's four corners are found from its outer contour (`approxPolyDP` on the largest quadrilateral, Part D), sorted (top-left, top-right, bottom-right, bottom-left), and mapped to a fixed 600 × 400 rectangle. Every rectified label then has the same layout, so the barcode, address and weight fields are cropped at fixed positions. A one-pixel error in a corner moves the far edge of the rectified label by about two pixels here, so the corners are refined to sub-pixel accuracy (`cornerSubPix`) before computing H.
+
+## What you should remember from 16.3
+
+<Takeaways>
+<Takeaway n={1} title="Homography">3 × 3 H, 8 parameters; divide by w after multiplying.</Takeaway>
+<Takeaway n={2} title="Four points">getPerspectiveTransform (exact), findHomography (many, robust).</Takeaway>
+<Takeaway n={3} title="Apply">warpPerspective for images, perspectiveTransform for points.</Takeaway>
+<Takeaway n={4} title="Planes only">Exact for flat objects (or pure camera rotation); corner accuracy matters.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** H · (x, y, 1) = (300, 150, 1.5). Where does the point go?
+
+<Solution>
+
+Divide by w: (300/1.5, 150/1.5) = **(200, 100)**.
+
+</Solution>
+
+**Q2.** Why can't four points on one line define a homography?
+
+<Solution>
+
+Collinear points give dependent equations: the 8 × 8 system is singular. You need four points with no three on a line (a quadrilateral).
+
+</Solution>
+
+### Next: 16.4 Interpolation
+
+How the value of each output pixel is computed when its source lies between input pixels.
+
+## Code
+
+Two examples: rectifying the label and mapping points; then the affine error and the effect of corner errors.
+
+### 1. Rectify and map points
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-label-tilted.png", cv2.IMREAD_GRAYSCALE)
+src = np.float32([[70, 40], [270, 62], [255, 170], [52, 140]])      # TL, TR, BR, BL in the image
+dst = np.float32([[0, 0], [240, 0], [240, 120], [0, 120]])
+H = cv2.getPerspectiveTransform(src, dst)
+print("H =", np.round(H, 5).tolist())
+flat = cv2.warpPerspective(img, H, (240, 120))
+print("rectified:", flat.shape)
+
+p = np.float32([[[160, 100]]])
+print("perspectiveTransform:", cv2.perspectiveTransform(p, H).astype(float).round(2).tolist())
+u = H @ np.array([160, 100, 1.0])
+print("by hand: H x =", u.round(3).tolist(), "-> divide by w:", (u[:2] / u[2]).round(2).tolist())
+```
+
+Output:
+
+```text
+H = [[1.30815, 0.23547, -100.98932], [-0.13674, 1.24313, -40.15316], [0.00035, 0.00027, 1.0]]
+rectified: (120, 240)
+perspectiveTransform: [[[121.7, 57.48]]]
+by hand: H x = [131.862, 62.281, 1.083] -> divide by w: [121.7, 57.48]
+```
+
+- `perspectiveTransform` expects points shaped (1, N, 2) (or (N, 1, 2)), float32 or float64, and does the division for you.
+- The points must be in the same order in `src` and `dst`; a swapped pair produces a twisted (bow-tie) result.
+
+### 2. Affine error and corner sensitivity
+
+```python
+import numpy as np
+import cv2
+
+A = cv2.getAffineTransform(src[:3], dst[:3])                      # uses only TL, TR, BR
+fourth = cv2.transform(src[None], A)[0][3]
+print("affine sends BL to", fourth.astype(float).round(1).tolist(), "instead of [0, 120]")
+
+def meet(p, q, r, s):                                             # intersection of lines pq and rs
+    l1, l2 = np.cross([*p, 1], [*q, 1]), np.cross([*r, 1], [*s, 1])
+    v = np.cross(l1, l2)
+    return (v[:2] / v[2]).round(0).tolist()
+print("top and bottom edges meet at", meet(src[0], src[1], src[3], src[2]))
+
+rng = np.random.default_rng(0)
+noisy = src + rng.normal(0, 1, src.shape).astype(np.float32)        # corners found with ~1 px error
+Hn = cv2.getPerspectiveTransform(noisy, dst)
+print("largest error of the true corners after rectification:", round(float(np.abs(cv2.perspectiveTransform(src[None], Hn)[0] - dst).max()), 2), "px")
+```
+
+Output:
+
+```text
+affine sends BL to [-4.9, 111.6] instead of [0, 120]
+top and bottom edges meet at [-2647.0, -259.0]
+largest error of the true corners after rectification: 1.82 px
+```
+
+- A cross product of two homogeneous points gives the line through them, and a cross product of two lines gives their intersection (5.3).
+- Corner errors of about 1 pixel grow to almost 2 pixels in the output, because the label is magnified when rectified; refine corners before computing H.
+
+## OpenCV API notes
+
+**`cv2.getPerspectiveTransform(src, dst)`**: exactly 4 float32 point pairs. **`cv2.findHomography(src, dst, method=cv2.RANSAC, ransacReprojThreshold=3)`** → (H, mask) for many, noisy pairs (Part F, 34.5).
+
+**`cv2.warpPerspective(src, H, dsize, flags=INTER_LINEAR, borderMode, borderValue)`**; `flags | cv2.WARP_INVERSE_MAP` if H maps output to input.
+
+**`cv2.perspectiveTransform(points, H)`**: points shaped (1, N, 2) or (N, 1, 2).
+
+## Where it fails
+
+- **Non-planar objects**: a homography is exact only for a plane (or a camera that only rotates); curved labels need a cylinder model or remap (16.5).
+- **Lens distortion**: straight edges are curved in the raw image; undistort first (Part H).
+- **Extreme tilt**: the far side is sampled with few pixels; rectification enlarges it but cannot add detail.
+- **Wrong corner order**: twisted output.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Forgetting the divide by w** when applying H by hand.
+- **Points with the wrong shape** for `perspectiveTransform` (needs a 3-D array).
+- **Inconsistent corner order** between source and target.
+- **Using an affine model** for strongly tilted planes.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why a plane gives a homography
+
+A pinhole camera maps a 3-D point X to x = K [R | t] X (Part H). For points on a plane Z = 0, the third column of [R | t] multiplies zero, leaving a 3 × 3 matrix K [r₁ r₂ t]: a homography between plane coordinates and the image. Two images of the same plane are therefore related by a homography too [1].
+
+### The direct linear transform
+
+Each point pair gives two linear equations in the nine entries of H; with four or more pairs they are solved (up to scale) by SVD. Normalising the points first (Hartley normalisation: centre them and scale to mean distance √2) greatly improves numerical accuracy; `findHomography` does this internally [1].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "How many point pairs define a homography?",
+      options: ["2", "3", "4", "8"],
+      answer: 2,
+      explanation: "8 unknowns, 2 equations per pair.",
+    },
+    {
+      question: "What does a perspective transform not keep, that affine does?",
+      options: ["Straight lines", "Parallelism", "The number of pixels", "Colours"],
+      answer: 1,
+      explanation: "Parallel lines can meet at a vanishing point.",
+    },
+    {
+      question: "After computing H·(x, y, 1) = (X, Y, w), the image point is…",
+      options: ["(X, Y)", "(X/w, Y/w)", "(X·w, Y·w)", "(w, w)"],
+      answer: 1,
+      explanation: "Divide by the third (homogeneous) coordinate.",
+    },
+    {
+      question: "When is a homography exact between two images?",
+      options: ["Always", "For a planar scene, or a camera that only rotates", "Only for small images", "Only for colour images"],
+      answer: 1,
+      explanation: "Otherwise depth differences create parallax.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+H = [[1, 0, 0], [0, 1, 0], [0.001, 0, 1]]. Where do (0, 0), (100, 0) and (500, 0) go?
+
+<Solution>
+
+w = 1 + 0.001·x: (0, 0) → **(0, 0)**; (100, 0) → (100/1.1, 0) = **(90.9, 0)**; (500, 0) → (500/1.5, 0) = **(333.3, 0)**. Equal steps in x become shorter further right: perspective foreshortening.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Rectify the label with `findHomography` using the four corners plus the label's centre point (as a fifth pair) and compare H with the four-point result.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+centre_img = cv2.perspectiveTransform(np.float32([[[120, 60]]]), np.linalg.inv(H))[0]   # where the label centre is in the image
+src5 = np.vstack([src, centre_img]).astype(np.float32)
+dst5 = np.vstack([dst, [[120, 60]]]).astype(np.float32)
+H5, mask = cv2.findHomography(src5, dst5)
+print(f"max |H5 - H|: {np.abs(H5 - H).max():.1e} | inliers: {int(mask.sum())}")
+```
+
+Output:
+
+```text
+max |H5 - H|: 1.7e-06 | inliers: 5
+```
+
+The fifth point is consistent with the same plane, so the least-squares solution is the same matrix up to rounding (differences of about 10⁻⁶). With real, noisy points, more pairs average out errors; RANSAC (`method=cv2.RANSAC`) also rejects wrong ones.
+
+</Solution>
+
+## References
+
+1. R. Hartley, A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004: Chapter 2 (projective geometry) and Chapter 4 (estimation of 2D projective transformations).
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022: Section 2.1 (2D transformations).
+3. OpenCV 4.13.0 documentation: `getPerspectiveTransform`, `warpPerspective`, `perspectiveTransform`, `findHomography`. https://docs.opencv.org/4.13.0/

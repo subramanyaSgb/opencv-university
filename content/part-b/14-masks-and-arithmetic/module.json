@@ -1,0 +1,12 @@
+{
+  "number": 14,
+  "title": "Masks and arithmetic",
+  "summary": "Masks, bitwise operations, saturating vs wrapping arithmetic, blending and frame differencing.",
+  "chapters": [
+    { "number": "14.1", "slug": "14.1-masks", "title": "Masks" },
+    { "number": "14.2", "slug": "14.2-bitwise-operations", "title": "Bitwise operations" },
+    { "number": "14.3", "slug": "14.3-saturating-vs-wrapping-arithmetic", "title": "Saturating vs wrapping arithmetic" },
+    { "number": "14.4", "slug": "14.4-blending", "title": "Blending" },
+    { "number": "14.5", "slug": "14.5-frame-differencing", "title": "Frame differencing" }
+  ]
+}

@@ -1,0 +1,334 @@
+export const meta = {
+  number: "18.2",
+  title: "Box and Gaussian",
+  minutes: 25,
+  objectives: [
+    "Smooth an image with a box filter and a Gaussian filter, by hand and with cv2.blur and cv2.GaussianBlur",
+    "Predict how much Gaussian noise each filter removes (σ/k for a box, about σ/(2√π·σg) for a Gaussian)",
+    "Explain why a box filter can invert fine patterns and a Gaussian cannot",
+    "Choose ksize and sigma, and know how OpenCV fills in the missing one",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 18.2 (Module 18).
+  Lab: DenoiseLab (box and Gaussian only).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 18.2 Box and Gaussian
+
+<Definition term="Linear smoothing filter">replaces every pixel by a weighted average of its neighbours. A box filter gives all neighbours the same weight; a Gaussian filter gives close neighbours more weight than distant ones. Averaging cancels random noise, but it also averages across edges and fine detail.</Definition>
+
+These are the two most used filters in image processing. Almost every pipeline starts with one: before thresholding (13), before edge detection (22), before a pyramid level (20). They are fast, predictable and work well on Gaussian noise. Their price is blur, and the two filters pay it differently.
+
+## 1. An analogy
+
+Estimating the temperature of a room from many cheap thermometers. Each one is a few degrees off at random; the average of nine is much closer to the truth. But if three of the thermometers stand next to the window, the average is pulled towards the outside temperature. The box filter trusts all nine equally; the Gaussian trusts the ones closest to the spot it is measuring more.
+
+## 2. Averaging a neighbourhood
+
+<Flow
+  steps={[
+    { label: "Noisy image", tone: "data" },
+    { label: "Box: mean of the k × k neighbours (all weights 1/k²)", tone: "process" },
+    { label: "Gaussian: weights exp(−r²/2σ²), normalised to sum 1", tone: "process" },
+    { label: "Smoother image: less noise, softer edges", tone: "result" },
+  ]}
+/>
+
+A worked example on one 3 × 3 neighbourhood (centre value 71):
+
+<PixelMatrix values={[[52, 47, 60], [44, 71, 49], [55, 50, 46]]} />
+
+- **Box 3 × 3**: (52 + 47 + 60 + 44 + 71 + 49 + 55 + 50 + 46) / 9 = 474 / 9 = **52.7**.
+- **Gaussian 3 × 3** (OpenCV's default for ksize 3: weights 1-2-1 in each direction, divided by 16):
+
+<KernelGrid cells={[["1", "2", "1"], ["2", "4", "2"], ["1", "2", "1"]]} label="× 1/16" />
+
+(52 + 2·47 + 60 + 2·44 + 4·71 + 2·49 + 55 + 2·50 + 46) / 16 = 877 / 16 = **54.8**. The centre counts four times as much as a corner, so the result stays closer to the original 71.
+
+Both are convolutions (17.2) with kernels that sum to 1, so a flat area keeps its brightness, and both are separable (17.4): two 1-D passes instead of one 2-D pass.
+
+## 3. How much noise is removed
+
+Averaging n independent noisy values divides the noise standard deviation by √n. A k × k box averages k² pixels, so:
+
+```text
+box k × k:     σ_out = σ / k
+Gaussian σg:   σ_out ≈ σ / (2·√π·σg)        (exact: σ · √(sum of squared weights))
+```
+
+Measured on a flat grey image with Gaussian noise σ = 20:
+
+| Filter | Predicted noise | Measured noise |
+| --- | --- | --- |
+| Box 3 × 3 | 6.67 | 6.61 |
+| Box 5 × 5 | 4.00 | 3.96 |
+| Box 7 × 7 | 2.86 | 2.82 |
+| Gaussian σg = 1 | 5.64 | 5.59 |
+| Gaussian σg = 1.5 | 3.76 | 3.72 |
+| Gaussian σg = 2 | 2.82 | 2.78 |
+
+So a Gaussian with σg ≈ k / 3.5 removes about as much noise as a k × k box: box 5 ↔ σg 1.5, box 7 ↔ σg 2.
+
+## 4. The same noise reduction, different damage
+
+Box 5 × 5 and Gaussian σg = 1.5 remove nearly the same noise and widen a sharp edge to the same 4 pixels (10 %–90 % rise). The difference shows on fine periodic detail. The test image has vertical bars with a period of 4 pixels (two pixels at 210, two at 80):
+
+| Pixels 30–37 of row 150 | Values |
+| --- | --- |
+| Clean | 80, 80, 210, 210, 80, 80, 210, 210 |
+| Box 5 × 5 | 158, 158, 132, 132, 158, 158, 132, 132 |
+| Gaussian σg = 1.5 | 141, 141, 149, 149, 141, 141, 149, 149 |
+
+The box output is **inverted**: bright where the bars were dark. A 5-pixel window over a 4-pixel period always contains three pixels of one bar and two of the other, and which one wins alternates the wrong way. The Gaussian reduces the bars to a faint ripple with the right polarity. In frequency terms (Part E), the box filter's response has negative lobes and the Gaussian's never does; a Gaussian also never creates new ripples (Go deeper).
+
+<DenoiseLab filters={["none", "box", "gauss"]} initialFilter="box" caption="Gaussian noise σ = 20 on the test image. Compare the box filter (size k) and the Gaussian filter (σ in pixels): k = 5 and σ = 1.5 give similar PSNR. Look at the zoom on the thin lines and small text, and at the bar pattern at the bottom left with k = 5 (inverted) against σ = 1.5 (faded). Then try salt-and-pepper noise: neither linear filter removes it, they only smear the dots."/>
+
+On this image, PSNR gets *worse* with stronger smoothing (22.2 dB noisy, 23.0 dB after box 3, 20.0 dB after box 5): the image is full of thin lines, small text and bars, and the blur error there outweighs the noise removed. Smoothing pays off on large flat areas and costs on detail; 18.6 measures this trade-off.
+
+## 5. Industrial example
+
+A Gaussian blur with σ of 1 to 2 pixels before Otsu thresholding (13.3) or Canny (22.4) is a standard first step in inspection pipelines: it suppresses sensor noise that would otherwise create speckled masks or broken edges. When the parts have fine regular textures (woven fabric, machined grooves, printed screens), a box filter of the wrong size can turn the texture into a false pattern; the Gaussian is the safer default, and the blur is kept smaller than the smallest defect that must stay visible.
+
+## What you should remember from 18.2
+
+<Takeaways>
+<Takeaway n={1} title="Weights">Box: equal weights. Gaussian: weights fall off with distance.</Takeaway>
+<Takeaway n={2} title="Noise">Box k: σ/k. Gaussian σg: about σ/(2√π·σg); σg ≈ k/3.5 matches a k-box.</Takeaway>
+<Takeaway n={3} title="Artefacts">A box can invert fine periodic detail; a Gaussian only fades it.</Takeaway>
+<Takeaway n={4} title="Limits">Both blur edges and do nothing useful against salt-and-pepper noise.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Gaussian noise with σ = 12. Which box size brings it below 3?
+
+<Solution>
+
+σ/k < 3 → k > 4, so the smallest odd size is **5** (12 / 5 = 2.4).
+
+</Solution>
+
+**Q2.** Why does the 3 × 3 Gaussian give 54.8 and not 52.7 in the worked example?
+
+<Solution>
+
+The centre (71) has weight 4/16 instead of 1/9, so the output stays closer to the centre value.
+
+</Solution>
+
+### Next: 18.3 Median
+
+A non-linear filter that removes salt-and-pepper noise completely and keeps edges sharp.
+
+## Code
+
+Two examples: a box filter from scratch with its noise reduction, then box against Gaussian on fine bars.
+
+### 1. Box filter from scratch and noise reduction
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(1)
+flat = 128 + rng.normal(0, 20, (400, 400))                  # flat grey + Gaussian noise, float64
+
+def box3(img):                                              # mean of the 9 shifted copies (interior only)
+    h, w = img.shape
+    return sum(img[1 + dy:h - 1 + dy, 1 + dx:w - 1 + dx] for dy in (-1, 0, 1) for dx in (-1, 0, 1)) / 9
+
+print("from scratch == cv2.blur:", bool(np.allclose(box3(flat), cv2.blur(flat, (3, 3))[1:-1, 1:-1])))
+print(f"noise before: {flat.std():.2f}")
+for k in (3, 5, 7):
+    print(f"box {k}x{k}: {cv2.blur(flat, (k, k))[10:-10, 10:-10].std():.2f} (predicted {20 / k:.2f})")
+for s in (1, 1.5, 2):
+    print(f"Gaussian sigma {s}: {cv2.GaussianBlur(flat, (0, 0), s)[10:-10, 10:-10].std():.2f} (predicted {20 / (2 * np.sqrt(np.pi) * s):.2f})")
+```
+
+Output:
+
+```text
+from scratch == cv2.blur: True
+noise before: 19.98
+box 3x3: 6.61 (predicted 6.67)
+box 5x5: 3.96 (predicted 4.00)
+box 7x7: 2.82 (predicted 2.86)
+Gaussian sigma 1: 5.59 (predicted 5.64)
+Gaussian sigma 1.5: 3.72 (predicted 3.76)
+Gaussian sigma 2: 2.78 (predicted 2.82)
+```
+
+- The image is float64, so no rounding hides the effect; the 10-pixel border is cut so that border handling (17.3) does not affect the measurement.
+
+### 2. Box against Gaussian on fine bars
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-clean.png", cv2.IMREAD_GRAYSCALE)
+box = cv2.blur(img, (5, 5))
+gau = cv2.GaussianBlur(img, (0, 0), 1.5)                    # ksize (0, 0): computed from sigma
+print("clean   ", img[150, 30:38].tolist())
+print("box 5   ", box[150, 30:38].tolist())
+print("gauss1.5", gau[150, 30:38].tolist())
+r = img[150, 22:105].astype(float)
+print("correlation with clean bars: box", round(float(np.corrcoef(box[150, 22:105], r)[0, 1]), 2),
+      "| gauss", round(float(np.corrcoef(gau[150, 22:105], r)[0, 1]), 2))
+print("ksize 9 and 11 give the same 8-bit result:",
+      np.array_equal(cv2.GaussianBlur(img, (9, 9), 1.5), cv2.GaussianBlur(img, (11, 11), 1.5)))
+print("default 5-tap kernel:", cv2.getGaussianKernel(5, 0).ravel().tolist())
+```
+
+Output:
+
+```text
+clean    [80, 80, 210, 210, 80, 80, 210, 210]
+box 5    [158, 158, 132, 132, 158, 158, 132, 132]
+gauss1.5 [141, 141, 149, 149, 141, 141, 149, 149]
+correlation with clean bars: box -1.0 | gauss 1.0
+ksize 9 and 11 give the same 8-bit result: True
+default 5-tap kernel: [0.0625, 0.25, 0.375, 0.25, 0.0625]
+```
+
+- Correlation −1: the box output is a perfect negative of the bar pattern. The Gaussian keeps the polarity, at 6 % of the original contrast.
+- With sigma = 0 and ksize up to 7, OpenCV uses fixed binomial weights (here 1-4-6-4-1 / 16) instead of sampling the bell; the formula would give σ = 1.1.
+
+## OpenCV API notes
+
+**`cv2.blur(src, ksize, anchor=(-1, -1), borderType=cv2.BORDER_DEFAULT)`**: normalised box filter; `ksize` is (width, height) and may be even or non-square.
+
+**`cv2.boxFilter(src, ddepth, ksize, normalize=True)`**: the same with an output depth; `normalize=False` gives plain sums (e.g. counts of mask pixels).
+
+**`cv2.GaussianBlur(src, ksize, sigmaX, sigmaY=0, borderType=...)`**:
+- `ksize` must be odd and positive, or (0, 0) to compute it from sigma (for 8-bit images about 6σ + 1, rounded up to odd).
+- `sigmaX = 0` computes σ from ksize: σ = 0.3·((ksize − 1)/2 − 1) + 0.8.
+- `sigmaY = 0` means sigmaY = sigmaX. Different values give an elongated blur along one axis.
+- Give one of the two (usually sigma) and let OpenCV derive the other; giving both is fine, but a ksize much smaller than 6σ cuts the bell short and acts partly like a box.
+
+**`cv2.getGaussianKernel(ksize, sigma)`**: the 1-D kernel, for `sepFilter2D` or for inspection.
+
+**Speed**: both are separable; `blur` uses running sums, so its cost does not grow with k. Gaussian cost grows with ksize; for very large σ, downscale first (20.1) or use repeated box filters.
+
+## Where it fails
+
+- **Impulse noise**: salt-and-pepper dots are spread into grey blotches, not removed. Use a median (18.3).
+- **Edges and fine detail**: both blur them; use edge-preserving filters (18.4 bilateral, 18.5 non-local means).
+- **Signal-dependent noise** (shot, speckle): a fixed blur over-smooths dark areas or under-smooths bright ones.
+- **Periodic textures**: a box of the wrong size can invert them; prefer a Gaussian.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Even ksize for GaussianBlur** (an error) or ksize much smaller than 6σ (a truncated bell).
+- **Confusing ksize and sigma**: `GaussianBlur(img, (5, 5), 5)` is almost a box filter, not "a 5-pixel Gaussian".
+- **Smoothing in uint8 repeatedly**: each pass rounds; chain the filters in float32 if precision matters.
+- **Blurring the mask instead of the image**, or blurring after thresholding when the aim was to reduce noise before it.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Frequency responses
+
+A 1-D box of width k has the frequency response sin(πkf) / (k·sin(πf)): it has zeros and negative lobes. At f = 1/4 (period 4) and k = 5 it is −0.2, which is the inverted bars at 20 % contrast. A Gaussian's response is exp(−2π²σ²f²): always positive, decreasing smoothly. At f = 1/4 and σ = 1.5 it is 0.06, the faint 6 % ripple in the example. Chapter 30.3 treats these filters as low-pass filters.
+
+### Why the Gaussian is special
+
+The Gaussian is the only kernel that is both separable and rotationally symmetric, and the only one that never creates new local extrema when σ grows (the scale-space axioms of Koenderink and Lindeberg [3]). Two Gaussians in a row give a Gaussian with σ² = σ1² + σ2², which is why pyramids (20) and difference of Gaussians (20.4) use it.
+
+### Repeated box filters
+
+Three box filters in a row are very close to a Gaussian (central limit theorem) and each costs O(1) per pixel with running sums: a fast approximation for large σ.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A 7 × 7 box filter on Gaussian noise with σ = 14 leaves noise of about…",
+      options: ["14", "7", "2", "0.29"],
+      answer: 2,
+      explanation: "σ/k = 14/7 = 2.",
+    },
+    {
+      question: "Which Gaussian σg removes about as much noise as a 5 × 5 box?",
+      options: ["0.5", "1.5", "5", "25"],
+      answer: 1,
+      explanation: "σg ≈ k/3.5 ≈ 1.4.",
+    },
+    {
+      question: "Why can a box filter invert a fine bar pattern?",
+      options: ["It is not normalised", "Its frequency response has negative lobes", "It uses integer weights", "It ignores borders"],
+      answer: 1,
+      explanation: "At some frequencies the response is negative, so the pattern comes out with reversed polarity.",
+    },
+    {
+      question: "cv2.GaussianBlur(img, (0, 0), 2) means…",
+      options: ["No blur", "σ = 2, ksize computed from σ", "ksize = 2", "An error"],
+      answer: 1,
+      explanation: "ksize (0, 0) is derived from sigma.",
+    },
+    {
+      question: "Which noise do box and Gaussian filters handle worst?",
+      options: ["Gaussian", "Salt and pepper", "Low-level sensor noise", "Quantization noise"],
+      answer: 1,
+      explanation: "Impulses are spread, not removed; use a median.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Smooth the 1-D signal 10, 10, 10, 100, 10, 10, 10 (one spike) with a 3-tap box and with the 3-tap Gaussian 1-2-1 / 4. What happens to the spike?
+
+<Solution>
+
+Box: 10, 10, 40, 40, 40, 10, 10 (around the spike). Gaussian: 10, 10, 32.5, 55, 32.5, 10, 10. Both spread the spike over three pixels instead of removing it; the Gaussian keeps more of it in the centre. A median of 3 would give 10 everywhere (18.3).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Find the Gaussian σg whose noise reduction matches a 7 × 7 box, first from the formula, then by measurement on the flat noisy image of example 1.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+target = cv2.blur(flat, (7, 7))[10:-10, 10:-10].std()
+print(f"formula: sigma = {7 / (2 * np.sqrt(np.pi)):.2f}")
+sigmas = np.arange(1.5, 2.5, 0.05)
+errs = [abs(cv2.GaussianBlur(flat, (0, 0), s)[10:-10, 10:-10].std() - target) for s in sigmas]
+print(f"measured: sigma = {sigmas[int(np.argmin(errs))]:.2f}")
+```
+
+Output:
+
+```text
+formula: sigma = 1.97
+measured: sigma = 1.95
+```
+
+Formula and measurement agree within a few hundredths: a Gaussian with σg ≈ 2 matches a 7 × 7 box. (The small difference comes from sampling the bell and from the noise estimate on one image.)
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 3 (smoothing spatial filters).
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022: Section 3.2 (linear filtering).
+3. T. Lindeberg, *Scale-Space Theory in Computer Vision*, Springer, 1994.
+4. OpenCV 4.13.0 documentation: `blur`, `boxFilter`, `GaussianBlur`, `getGaussianKernel`. https://docs.opencv.org/4.13.0/

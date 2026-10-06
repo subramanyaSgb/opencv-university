@@ -1,0 +1,529 @@
+export const meta = {
+  number: "2.5",
+  title: "The sensor and noise",
+  minutes: 50,
+  objectives: [
+    "Follow light through the sensor: photons → electrons → voltage → digital number",
+    "Explain quantum efficiency, full well and saturation",
+    "Name the main noise sources: shot, read, dark and fixed-pattern noise",
+    "Compute signal-to-noise ratio and dynamic range",
+    "Explain why gain does not improve SNR and why more light does",
+    "Reduce noise by averaging frames and measure it with OpenCV",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 2.5 (Module 2 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+  Sensor numbers (QE 0.6, read noise 6 e-, full well 10 000 e-) are illustrative, not a real datasheet.
+*/}
+
+# 2.5 The sensor and noise
+
+<Definition term="Image sensor">a grid of tiny light detectors that count light during the exposure and turn the count into numbers.</Definition>
+
+In 2.1 we said a camera **measures light**. Now we open the sensor and see **how** it measures, and why every measurement comes with **noise**: small random errors that change from frame to frame.
+
+<CameraChain
+  direction="right"
+  steps={[
+    { icon: "light", label: "Photons", note: "light particles" },
+    { icon: "sensor", label: "Electrons", note: "collected in each pixel" },
+    { icon: "electronics", label: "Voltage", note: "read out, amplified" },
+    { icon: "numbers", label: "Digital number", note: "ADC: 0 … 255" },
+  ]}
+/>
+
+## 1. Light comes in packets
+
+Light arrives as tiny packets of energy called **photons**. A bright scene sends many photons to a pixel during the exposure; a dark scene sends few. The sensor's job is to **count them**.
+
+## 2. Pixels are buckets in the rain
+
+Picture a field of **buckets in the rain**. Each bucket collects the drops that fall on it. Afterwards, you measure how much water is in each bucket.
+
+<BucketSketch caption="Each pixel (photosite) collects light like a bucket collects rain. A full bucket overflows: that pixel is saturated." />
+
+Each pixel of the sensor is a bucket. The "water" is **electric charge**: electrons freed by the photons.
+
+## 3. Quantum efficiency
+
+Not every photon is caught. **Quantum efficiency (QE)** is the fraction of photons that become electrons.
+
+<Equation terms={[{ value: "1000 photons", label: "arrive" }, { op: "×", value: "0.6", label: "QE (60 %)" }, { op: "=", value: "600 electrons", label: "collected", result: true }]} />
+
+QE depends on the **wavelength** (colour) of the light. Datasheets show it as a curve; it usually falls off in deep blue and in the near infrared.
+
+## 4. Full well: the bucket's size
+
+A pixel can hold only so many electrons: its **full well capacity**, for example 10 000 electrons. More light than that and the bucket overflows: the pixel **saturates** and reads the maximum value (255 in an 8-bit image), no matter how much brighter the scene really is.
+
+<Callout kind="mistake">
+
+Saturated pixels have **lost information**. A white-hot billet edge, a reflection or a lamp that reads 255 cannot be measured. Reduce exposure, aperture or gain until the important areas stay below the maximum.
+
+</Callout>
+
+## 5. From electrons to numbers
+
+After the exposure, each pixel's charge is turned into a **voltage**, amplified by the **gain**, and converted by the **ADC** (analog-to-digital converter) into a **digital number (DN)**: 0–255 for 8 bits, 0–4095 for 12 bits (Chapter 3.2).
+
+<Flow direction="right" steps={["electrons", "× conversion (µV per e⁻)", "× gain", "ADC", { label: "DN", tone: "result" }]} />
+
+## 6. CCD and CMOS
+
+Two families of sensors do this:
+
+<VsTable
+  left="CCD"
+  right="CMOS"
+  rows={[
+    ["Moves the charge across the chip to one output amplifier", "Each pixel has its own amplifier; read out row by row"],
+    ["Historically very uniform, low noise", "Today low noise, fast, low power"],
+    ["Now rare in new industrial cameras", "Most industrial cameras today"],
+  ]}
+/>
+
+For this course the important point is the same for both: **light → electrons → numbers**, with noise added along the way.
+
+## 7. What is noise?
+
+Point a camera at a **perfectly uniform gray card** and look at the numbers. They are not all equal, and they change every frame:
+
+<PixelMatrix values={[[127, 131, 124, 129], [133, 126, 128, 122], [125, 130, 134, 127]]} caption="A 'flat' gray patch from a real-looking sensor: same light everywhere, yet the values scatter around 128." />
+
+That scatter is **noise**. It is not a fault; it is part of every measurement. The question is **how big** it is compared with the signal.
+
+## 8. Shot noise: light itself is random
+
+Even perfect light does not arrive at an exact rate. Photons arrive **randomly**, like raindrops. If a pixel collects on average N electrons, the actual number varies by about **√N** (a Poisson process).
+
+| Average electrons | Shot noise √N | Relative noise |
+| --- | --- | --- |
+| 100 | ±10 | 10 % |
+| 10 000 | ±100 | 1 % |
+
+More light means more noise in electrons, but **less noise relative to the signal**. Shot noise is the reason **bright images look clean and dark images look grainy**.
+
+## 9. Read noise: the electronics
+
+Reading out a pixel adds a little random error from the amplifier and ADC: **read noise**, a few electrons on modern sensors. It is the same whether the pixel is bright or dark, so it matters most **in the dark**.
+
+## 10. Dark current: heat makes electrons too
+
+Even with no light, heat slowly frees electrons in the silicon: **dark current**. It grows with **exposure time** and rises steeply with **temperature**. Its randomness is **dark noise**.
+
+<Callout kind="key">
+
+In steel plants the camera may sit near very hot material. A hot sensor is a **noisy sensor**. Cooling housings, air purging and short exposures are part of the vision design, not just protection.
+
+</Callout>
+
+## 11. Fixed-pattern noise
+
+Some differences do **not** change from frame to frame:
+
+- **DSNU** (dark signal non-uniformity): some pixels are a little brighter in the dark; a few **hot pixels** are much brighter.
+- **PRNU** (photo-response non-uniformity): pixels differ slightly in sensitivity, so a flat bright scene shows a faint pattern.
+
+Because they are fixed, they can be **calibrated out**: subtract a dark frame and divide by a flat-field frame (Code example 4 shows the idea).
+
+## 12. Quantization noise
+
+The ADC rounds to whole numbers. That rounding adds a small error of about **1/√12 ≈ 0.29 DN**. It only matters when the real noise is smaller than one step, for example a very dark image at low gain.
+
+## 13. Signal-to-noise ratio
+
+The key quality number is the **signal-to-noise ratio (SNR)**:
+
+```text
+SNR = signal / noise = e / √( e + read² + dark )
+```
+
+| Signal | Noise | SNR | What it looks like |
+| --- | --- | --- | --- |
+| 7200 e⁻ | ≈ 85 e⁻ | ≈ 85 | clean |
+| 450 e⁻ | ≈ 22 e⁻ | ≈ 20 | grainy |
+| 20 e⁻ | ≈ 7 e⁻ | ≈ 3 | barely visible |
+
+## 14. Dynamic range
+
+**Dynamic range** = the brightest level a pixel can hold ÷ the darkest level it can tell from noise ≈ full well ÷ read noise. With 10 000 e⁻ and 6 e⁻ read noise:
+
+<Equation terms={[{ value: "10 000", label: "full well (e⁻)" }, { op: "÷", value: "6", label: "read noise (e⁻)" }, { op: "≈", value: "1667", label: "ratio" }, { op: "=", value: "64.4 dB", label: "20·log₁₀", result: true }]} />
+
+A scene with very bright and very dark parts (glowing steel next to a dark floor) can exceed the sensor's dynamic range: then something is either saturated or lost in noise.
+
+## 15. Gain: brighter numbers, not better data
+
+**Gain** multiplies the signal **and the noise** by the same factor. A dark image with high gain looks bright, but the SNR stays the same as the dark image (or a little worse).
+
+<ImageCompare
+  before={{ src: "/images/sample-noise-bright.png", label: "Bright light, gain ×1" }}
+  after={{ src: "/images/sample-noise-dark-gain.png", label: "1/16 light, gain ×16" }}
+  width={320}
+  height={200}
+  alt="The test chart exposed with plenty of light, clean, and with one sixteenth of the light and sixteen times the gain, equally bright but much noisier"
+  caption="Simulated. Both images have about the same brightness. The right one collected 16× fewer photons, so its SNR is about 4× worse (√16)."
+/>
+
+<Callout kind="key">
+
+**More light improves SNR. Gain does not.** Gain only helps when the signal is so small that ADC rounding would hide it.
+
+</Callout>
+
+## 16. Try it
+
+Change the light reaching the sensor and the gain. Watch the image, the noise and the SNR.
+
+<SensorLab caption="Illustrative sensor: QE 0.6, full well 10 000 e⁻ (= 255 DN at gain ×1). Shot noise is simulated per pixel; the image uses the test chart, with white areas receiving the chosen photon count." />
+
+## 17. Averaging frames
+
+Noise is random, so it **averages out**. Averaging N frames of a still scene reduces random noise by **√N**: 4 frames → half the noise, 16 frames → a quarter.
+
+<Equation terms={[{ value: "11.5", label: "1 frame (std)" }, { op: "→", value: "5.8", label: "4 frames" }, { op: "→", value: "3.0", label: "16 frames", result: true }]} />
+
+This only works if **nothing moves**. For moving steel on a roller table, use more light instead.
+
+## 18. Bigger pixels collect more light
+
+With the same lens and light, a **larger pixel** covers more area and collects more photons, so it has a better SNR. A 5.86 µm pixel has about **2.9×** the area of a 3.45 µm pixel. More megapixels on the same sensor size means **smaller pixels** and, in low light, **more noise per pixel**.
+
+## 19. Why noise matters to algorithms
+
+Noise is not just ugly. It breaks algorithms:
+
+<Chips items={["Thresholds flicker at the boundary", "False edges and false defects", "Edge positions jitter → measurement scatter", "OCR misreads", "Unstable counts"]} />
+
+Smoothing (Part C) can reduce noise, but it also blurs detail. The best fix is upstream: **light, exposure, cooling, pixel size**.
+
+## 20. Measuring a camera's noise
+
+You can measure noise yourself: point the camera at a flat, evenly lit target, grab frames, and compute the **standard deviation** of a patch (spatial) or of one pixel over many frames (temporal). The **EMVA 1288** standard defines exactly how to measure and report QE, read noise, dark current, full well, SNR and dynamic range, so cameras can be compared fairly.
+
+## What you should remember from 2.5
+
+<Takeaways>
+<Takeaway n={1} title="Sensor chain">Photons → electrons (QE) → voltage → gain → ADC → digital number.</Takeaway>
+<Takeaway n={2} title="Full well">Each pixel holds a limited charge; beyond it the pixel saturates and information is lost.</Takeaway>
+<Takeaway n={3} title="Shot noise">√N: more light → better SNR. Dark images are grainy because few photons arrived.</Takeaway>
+<Takeaway n={4} title="Other noise">Read noise (electronics), dark noise (heat, exposure time), fixed pattern (calibrate out).</Takeaway>
+<Takeaway n={5} title="Gain is not light">Gain scales signal and noise together. To improve SNR: more light, longer exposure, bigger pixels, averaging.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A pixel collects 400 electrons on average. What is its shot noise and SNR (ignore other noise)?
+
+<Solution>
+
+√400 = **20 e⁻**; SNR = 400 / 20 = **20**.
+
+</Solution>
+
+**Q2.** You need twice the SNR in a shot-noise-limited image. How much more light?
+
+<Solution>
+
+SNR = √N, so twice the SNR needs **4×** the light.
+
+</Solution>
+
+**Q3.** A colleague says: *"The image is too dark, just turn the gain up to ×16."* What happens?
+
+<Solution>
+
+The image gets 16× brighter, but the noise is amplified by the same factor: the SNR does not improve and the image looks grainy. Better: more light, a larger aperture (if DOF allows) or a longer exposure (if motion allows).
+
+</Solution>
+
+**Q4.** Why do cameras near hot steel need cooling for good images?
+
+<Solution>
+
+Dark current, and so dark noise and hot pixels, rise steeply with sensor temperature. A cooler sensor gives cleaner images.
+
+</Solution>
+
+**Q5.** Which noise can be removed by calibration: shot noise or fixed-pattern noise?
+
+<Solution>
+
+**Fixed-pattern noise**, because it is the same every frame (dark-frame subtraction, flat-field correction). Shot noise is random and can only be reduced by collecting more light or averaging.
+
+</Solution>
+
+### Next: 2.6 Exposure and motion blur
+
+Exposure time controls how many photons we collect, so it is the main way to raise the SNR. But a moving billet keeps moving while the shutter is open. We'll balance **light, exposure and motion blur**.
+
+## Code
+
+Four experiments: shot noise as a Poisson process, a complete small sensor model, averaging frames with OpenCV, and fixed-pattern correction.
+
+### 1. From scratch: shot noise is √N
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=1)
+for mean_e in [100, 10_000]:
+    samples = rng.poisson(mean_e, size=100_000)   # electrons collected by one pixel, many exposures
+    print(f"mean {samples.mean():8.1f} e-, std {samples.std():6.1f} e- (sqrt = {np.sqrt(mean_e):5.1f}), SNR {samples.mean() / samples.std():5.1f}")
+```
+
+Output:
+
+```text
+mean    100.0 e-, std   10.0 e- (sqrt =  10.0), SNR  10.0
+mean  10000.0 e-, std  100.1 e- (sqrt = 100.0), SNR  99.9
+```
+
+- `rng.poisson(mean, size)` draws photon-like counts. The spread is √mean, exactly as section 8 says.
+- 100× more light → 10× better SNR.
+
+### 2. From scratch: a small sensor model, and why gain does not help
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=2)
+qe, read_noise, full_well = 0.6, 6.0, 10_000      # electrons; typical-looking numbers for illustration
+e_per_dn = full_well / 255                          # gain 1: full well -> 255
+
+def capture(photons, gain=1.0, n=50_000):
+    e = rng.poisson(photons * qe, size=n).astype(np.float64)      # shot noise
+    e += rng.normal(0, read_noise, size=n)                         # read noise
+    dn = np.clip(np.rint(e * gain / e_per_dn), 0, 255)            # amplify, digitize, clip
+    return dn
+
+for label, photons, gain in [("bright, gain 1", 12_000, 1), ("dark,   gain 1", 750, 1), ("dark,   gain 16", 750, 16)]:
+    dn = capture(photons, gain)
+    print(f"{label}: mean {dn.mean():6.1f} DN, std {dn.std():5.2f} DN, SNR {dn.mean() / dn.std():5.1f}")
+```
+
+Output:
+
+```text
+bright, gain 1: mean  183.6 DN, std  2.20 DN, SNR  83.6
+dark,   gain 1: mean   11.5 DN, std  0.63 DN, SNR  18.1
+dark,   gain 16: mean  183.6 DN, std  8.96 DN, SNR  20.5
+```
+
+- The dark capture with gain 16 is **as bright** as the bright capture (183.6 DN) but its SNR is **4× worse**: 16× fewer photons → √16 = 4.
+- Gain 16 gives a slightly better SNR (20.5) than gain 1 (18.1) in the dark: at gain 1 the noise is under one DN step and the ADC rounding adds error. That is the one thing gain helps with.
+- The physics limit for 450 e⁻ with 6 e⁻ read noise is 450 / √(450 + 36) ≈ 20.4. Gain cannot beat it.
+
+### 3. OpenCV: average frames, measure the noise
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(seed=3)
+clean = cv2.imread("sample-pinhole-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+
+def noisy_frame():
+    return np.clip(clean + rng.normal(0, 12, clean.shape), 0, 255).astype(np.uint8)
+
+acc = np.zeros(clean.shape, np.float32)
+flat = (slice(150, 190), slice(250, 280))          # a flat background patch (value 25)
+for n in range(1, 17):
+    cv2.accumulate(noisy_frame(), acc)
+    if n in (1, 4, 16):
+        avg = acc / n
+        _, std = cv2.meanStdDev(avg[flat])
+        print(f"{n:2d} frames: noise std {std[0, 0]:5.2f}")
+```
+
+Output:
+
+```text
+ 1 frames: noise std 11.54
+ 4 frames: noise std  5.75
+16 frames: noise std  2.95
+```
+
+- `cv2.accumulate(src, dst)` adds each frame into a **float32** (or float64) accumulator; 8-bit sums would overflow.
+- `cv2.meanStdDev(img)` returns the mean and standard deviation as 1 × 1 arrays (one per channel). The std of a **flat** patch is the noise.
+- Noise falls by √N: 11.5 → 5.8 → 3.0. (The first value is a little under 12 because noise below 0 is clipped.)
+
+### 4. Fixed-pattern noise: dark-frame and flat-field correction
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=4)
+h, w = 50, 50
+offset = rng.normal(5, 2, (h, w))          # DSNU: each pixel's dark level (fixed)
+sensitivity = rng.normal(1, 0.03, (h, w))  # PRNU: each pixel's gain (fixed)
+
+def grab(light):                           # one frame, plus a little random noise
+    return light * sensitivity + offset + rng.normal(0, 1, (h, w))
+
+dark = np.mean([grab(0) for _ in range(32)], axis=0)        # average dark frames
+flat = np.mean([grab(150) for _ in range(32)], axis=0)      # average flat-field frames
+raw = grab(100)
+corrected = (raw - dark) / (flat - dark) * 150      # back to the flat level's scale
+print(f"raw:       mean {raw.mean():6.2f}, spatial std {raw.std():.2f}")
+print(f"corrected: mean {corrected.mean():6.2f}, spatial std {corrected.std():.2f}")
+```
+
+Output:
+
+```text
+raw:       mean 105.09, spatial std 3.71
+corrected: mean 100.01, spatial std 1.01
+```
+
+- Averaging 32 dark frames gives each pixel's **offset**; averaging 32 flat frames gives its **sensitivity**.
+- After correction only the random noise (std ≈ 1) is left; the fixed pattern is gone.
+- Cameras often do this internally ("defect pixel correction", "flat-field correction"); check the camera settings before doing it twice.
+
+## OpenCV API notes
+
+**`cv2.accumulate(src, dst[, mask])`** adds `src` to the float accumulator `dst` in place. Related: `cv2.accumulateWeighted(src, dst, alpha)` for a running average of a live stream (useful for background models, Chapter 14.5).
+
+**`cv2.meanStdDev(src[, mask]) → mean, stddev`** returns per-channel mean and standard deviation as arrays of shape (channels, 1). Use a `mask` to measure only a region.
+
+**Noise and dtypes.** Simulate or average in float32/float64, then clip and convert back with `np.clip(...).astype(np.uint8)`. Adding noise directly to `uint8` wraps around (Chapter 1.5).
+
+**Camera settings are not OpenCV settings.** Gain, exposure, black level and on-camera corrections are set through the camera's SDK (GenICam / vendor API). `cv2.VideoCapture` properties exist for some webcams, but industrial cameras normally use their own SDK.
+
+## Where it fails
+
+- **The simple model** (shot + read noise, Poisson + Gaussian) ignores non-linearity, dark current, fixed pattern and on-camera processing. Real cameras are characterized with EMVA 1288.
+- **Averaging** needs a still scene and a stable light; flickering lamps (Chapter 2.9) or vibration ruin it.
+- **Flat-field correction** is only as good as the flat target and lighting used to make it; redo it when the lens, aperture or lighting changes.
+- **"8-bit" images from cameras** may already be gamma-corrected or denoised by the camera (Chapter 2.8), so the √N relationship no longer holds exactly in DN.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using gain instead of light.** Bright but noisy; algorithms suffer.
+- **Letting important areas saturate.** 255 means "unknown", not "very bright".
+- **Ignoring temperature.** The same camera is noisier on a hot afternoon or near the furnace.
+- **Accumulating in uint8.** Sums overflow; use a float accumulator.
+- **Judging noise by eye on a small preview.** Measure the standard deviation of a flat patch.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The photon transfer curve
+
+Plot the noise variance (in DN²) against the mean signal (in DN) for flat images at many light levels. In the shot-noise region the points lie on a straight line whose slope is the camera's **gain in DN per electron**; the intercept gives the read noise. This "photon transfer" method is the core of EMVA 1288 [1][2].
+
+### Why √N
+
+Photon arrivals in a fixed time follow a Poisson distribution, whose variance equals its mean. So the standard deviation is √mean. Read noise is independent, so variances add: σ² = e + σ_read² (+ dark) [2][3].
+
+### Quantization noise
+
+Rounding a continuous value to the nearest integer adds an error uniformly spread over ±0.5, whose standard deviation is 1/√12 ≈ 0.289 of one step. It is negligible once the other noise exceeds about one step.
+
+### Pixel binning
+
+Some cameras can add neighbouring pixels (for example 2 × 2) before or after readout. Charge-domain binning (CCD) adds the signal before read noise; digital binning on CMOS adds read noise for each pixel. Either way you trade resolution for SNR.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A pixel collects 2500 electrons. What is the shot-noise SNR?",
+      options: ["2500", "50", "25", "500"],
+      answer: 1,
+      explanation: "Noise = √2500 = 50, so SNR = 2500 / 50 = 50.",
+    },
+    {
+      question: "You raise the gain from ×1 to ×8 on a dark image. What happens to the SNR?",
+      options: ["8× better", "√8 better", "About the same", "8× worse"],
+      answer: 2,
+      explanation: "Gain multiplies signal and noise equally. Only ADC rounding is reduced.",
+    },
+    {
+      question: "Which noise source rises strongly with sensor temperature?",
+      options: ["Shot noise", "Dark current noise", "Quantization noise", "PRNU"],
+      answer: 1,
+      explanation: "Heat frees electrons without light: dark current, and its noise, grow with temperature and exposure time.",
+    },
+    {
+      question: "How many frames must you average to cut random noise to one third?",
+      options: ["3", "6", "9", "27"],
+      answer: 2,
+      explanation: "Noise falls with √N; √9 = 3.",
+    },
+    {
+      question: "Full well 20 000 e⁻, read noise 4 e⁻. Dynamic range?",
+      options: ["5000:1 ≈ 74 dB", "20 000:1 ≈ 86 dB", "5000:1 ≈ 37 dB", "80 000:1"],
+      answer: 0,
+      explanation: "20 000 / 4 = 5000; 20·log₁₀(5000) ≈ 74 dB.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A camera has QE 0.5, read noise 5 e⁻ and full well 12 000 e⁻. A pixel receives 8000 photons. (a) Electrons? (b) Total noise? (c) SNR? (d) Dynamic range in dB?
+
+<Solution>
+
+(a) 8000 × 0.5 = **4000 e⁻**. (b) √(4000 + 25) ≈ **63.4 e⁻**. (c) 4000 / 63.4 ≈ **63**. (d) 12 000 / 5 = 2400 → 20·log₁₀(2400) ≈ **67.6 dB**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Simulate a pixel that receives on average 200 electrons, with read noise 8 e⁻, for 100 000 exposures. Print the measured SNR and compare it with the formula e / √(e + read²).
+
+<Solution>
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=7)
+e_mean, read = 200, 8.0
+e = rng.poisson(e_mean, 100_000) + rng.normal(0, read, 100_000)
+print(f"measured SNR {e.mean() / e.std():.2f}, formula {e_mean / np.sqrt(e_mean + read ** 2):.2f}")
+```
+
+Output:
+
+```text
+measured SNR 12.35, formula 12.31
+```
+
+At 200 e⁻ the read noise (8 e⁻, variance 64) is a large part of the total (variance 264). In darker scenes read noise dominates.
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+An inspection image is grainy. The current settings are f/8, exposure 200 µs, gain ×8. The part moves slowly and the depth of field needed is small. Suggest two changes, in order of preference, and say what each does to the SNR.
+
+<Solution>
+
+1. **Open the aperture** to f/4 (DOF allows it): 4× more light → SNR about 2× better; then reduce gain to ×2.
+2. **Longer exposure**, for example 400 µs (motion is slow): 2× more light → SNR about 1.4× better; reduce gain further.
+
+(Or add lighting: same effect as more exposure without motion blur.) Gain itself should go **down**, not up, once the light increases.
+
+</Solution>
+
+## References
+
+1. European Machine Vision Association, *EMVA Standard 1288: Standard for Characterization of Image Sensors and Cameras*.
+2. J. R. Janesick, *Photon Transfer: DN → λ*. SPIE Press, 2007.
+3. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed. Pearson, 2018. Sec. 2.3 (image sensing and acquisition) and Sec. 5.2 (noise models).
+4. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. Springer, 2022. Sec. 2.3 (the digital camera: sampling and noise). Free online edition: [szeliski.org/Book](https://szeliski.org/Book/).
+5. OpenCV 4.13.0 documentation, *Operations on arrays* (`meanStdDev`): [docs.opencv.org/4.13.0/d2/de8/group__core__array.html](https://docs.opencv.org/4.13.0/d2/de8/group__core__array.html); *Motion Analysis* (`accumulate`): [docs.opencv.org/4.13.0/d7/df3/group__imgproc__motion.html](https://docs.opencv.org/4.13.0/d7/df3/group__imgproc__motion.html).

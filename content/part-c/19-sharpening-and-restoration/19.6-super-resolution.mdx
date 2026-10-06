@@ -1,0 +1,338 @@
+export const meta = {
+  number: "19.6",
+  title: "Super-resolution",
+  minutes: 25,
+  objectives: [
+    "Distinguish interpolation, multi-frame super-resolution and learned single-image super-resolution",
+    "Explain why sub-pixel shifts between frames contain real new information",
+    "Reconstruct a 2× image from four shifted low-resolution frames (shift and add)",
+    "Know when super-resolution may and may not be used for measurement and inspection",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 19.6 (last chapter of Module 19).
+  Lab: InterpLab (enlarging: what interpolation can and cannot do).
+  Reference tail: all examples are deterministic and compared automatically; the dnn_superres block needs contrib and a model download.
+*/}
+
+# 19.6 Super-resolution
+
+<Definition term="Super-resolution (SR)">producing an image with more detail than one recorded frame contains. Interpolation only adds pixels, not detail. Multi-frame super-resolution combines several frames shifted by fractions of a pixel, which together really do contain finer detail. Learned super-resolution guesses plausible detail from training data.</Definition>
+
+Sensors have a fixed pixel count, and each pixel averages the light over its area (2.4). 16.4 showed that resizing with nearest, linear or cubic interpolation makes an image bigger without making it sharper. This chapter asks when "more resolution than the sensor" is possible at all, and what it costs.
+
+## 1. An analogy
+
+Measuring a coastline with a 1-metre stick: you miss every detail smaller than a metre. Measuring it again with the stick shifted by half a metre fills in points between the first measurements. Four measurements shifted by half a stick in each direction give a grid twice as fine. That is multi-frame super-resolution. Learned super-resolution is like an expert who has seen many coastlines and draws in the bays they expect to be there: often right, sometimes invented.
+
+## 2. Three kinds of "more pixels"
+
+<Flow
+  steps={[
+    { label: "Low-resolution frame(s)", tone: "data" },
+    { label: "Interpolation (16.4): smooth guesses between known pixels", tone: "process" },
+    { label: "Multi-frame SR: several frames with sub-pixel shifts → real samples in between", tone: "process" },
+    { label: "Learned SR: a network predicts plausible fine detail", tone: "result" },
+  ]}
+/>
+
+| Method | New information? | Main risk |
+| --- | --- | --- |
+| Interpolation (nearest, linear, cubic, Lanczos) | none | blur, staircase edges |
+| Multi-frame SR | yes, from the shifts | needs precise shifts; motion blur and noise |
+| Learned single-image SR | no real information; prior knowledge | plausible but false detail ("hallucination") |
+
+## 3. Shift and add
+
+A camera with pixels twice as large as needed records frame A. Moving the camera (or the part) by exactly half a pixel to the right records frame B; half a pixel down, C; both, D. Each frame samples the scene at different positions. Interleaving the four frames gives a grid twice as fine in each direction:
+
+<Columns>
+<Panel title="Four low-resolution frames" tone="a">
+<IndexedGrid values={[[220, 220], [220, 220]]} text={[["A", "A"], ["A", "A"]]} caption="Frame A; B, C, D are the same grid shifted by half a pixel" />
+</Panel>
+<Panel title="Interleaved 2× grid" tone="c">
+<IndexedGrid values={[[220, 170, 220, 170], [120, 70, 120, 70], [220, 170, 220, 170], [120, 70, 120, 70]]} text={[["A", "B", "A", "B"], ["C", "D", "C", "D"], ["A", "B", "A", "B"], ["C", "D", "C", "D"]]} />
+</Panel>
+</Columns>
+
+The interleaved image is sampled finely enough, but every sample is still the average over a large pixel: it equals the high-resolution image blurred by a 2 × 2 box. A mild sharpening or deconvolution (19.1–19.5) afterwards removes much of that blur.
+
+Real numbers: high-resolution images were reduced to four 2 × 2-binned frames with half-pixel shifts. PSNR against the original:
+
+| Image | One frame, cubic 2× | Four frames interleaved | + mild unsharp mask |
+| --- | --- | --- | --- |
+| Zone plate (all frequencies) | 12.4 dB | 14.3 dB | **18.0 dB** |
+| Scene | 28.0 dB | 28.9 dB | **30.7 dB** |
+
+On the zone plate, one low-resolution frame shows moiré rings where the frequency passes the low-resolution Nyquist limit (5.4): that detail is aliased into false patterns, and no interpolation can undo it. The four frames together sample above that limit, so the rings come out at the right frequencies.
+
+<InterpLab initial="up" caption="Interpolation only: enlarge a crop with nearest, linear and cubic and compare the row profile. However smooth the result, no new detail appears between the original samples. Multi-frame super-resolution is the only way to get real samples in between."/>
+
+## 4. In practice: shifts, noise, learned models
+
+Real multi-frame SR needs three things the clean example took for granted:
+
+1. **Known sub-pixel shifts**. They come from a piezo stage that moves the sensor (pixel-shift cameras), from known part motion, or are measured by registration (21): `cv2.phaseCorrelate` gives a fast first estimate and `cv2.findTransformECC` refines it to a few hundredths of a pixel (Code, example 2).
+2. **Shifts that are not whole pixels**. A shift of exactly 1 low-resolution pixel gives no new samples; the useful shifts are fractions (0.5 for 2×).
+3. **No other changes**: the same lighting and no motion blur during each exposure; noise in each frame is averaged by the combination, which partly makes up for it.
+
+Learned single-image SR (SRCNN 2014 [2], ESPCN, EDSR, Real-ESRGAN) is trained on pairs of high-resolution images and their downscaled versions. OpenCV contrib has `cv2.dnn_superres` with pre-trained EDSR, ESPCN, FSRCNN and LapSRN models (2×, 3×, 4×). The output looks sharp because the network has learned what edges and textures usually look like. It does not know what *your* object looks like.
+
+## 5. Industrial example
+
+Pixel-shift cameras for inspection and documentation move the sensor by half or one pixel between exposures (one-pixel shifts give full colour at every pixel of a Bayer sensor, 3.4; half-pixel shifts raise resolution), and require a static scene and a rigid mount. Line-scan systems use a related trick: two staggered sensor lines offset by half a pixel. Learned super-resolution is popular for viewing (zooming into archived images) but is not accepted for measurement or defect decisions: a network can sharpen a scratch that is not there or smooth one that is. For dimensional measurement, the rule is to buy the resolution in the optics and sensor, or to use multi-frame methods whose output can be validated.
+
+## What you should remember from 19.6
+
+<Takeaways>
+<Takeaway n={1} title="Interpolation">More pixels, no new detail.</Takeaway>
+<Takeaway n={2} title="Multi-frame">Sub-pixel shifts give real new samples; interleave, then deblur the pixel area.</Takeaway>
+<Takeaway n={3} title="Learned">Plausible detail from training data; good for viewing, risky for measurement.</Takeaway>
+<Takeaway n={4} title="Requirements">Known fractional shifts, static scene, no motion blur.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** For 3× multi-frame super-resolution with shifts on a regular grid, how many frames and which shifts are needed?
+
+<Solution>
+
+**9 frames**, shifted by 0, 1/3 and 2/3 of a low-resolution pixel in x and in y (all combinations).
+
+</Solution>
+
+**Q2.** Why does a shift of exactly one low-resolution pixel not help?
+
+<Solution>
+
+The new frame samples the scene at the same positions as the old one, only moved by one index: no sample falls in between.
+
+</Solution>
+
+### Next: Module 20, Pyramids and scale-space
+
+Representing an image at many resolutions at once: Gaussian and Laplacian pyramids, blending, and differences of Gaussians.
+
+## Code
+
+Two examples: shift-and-add super-resolution on the zone plate, then measuring the shifts. A third block shows OpenCV's learned SR (contrib, needs a model file).
+
+### 1. Shift and add
+
+```python
+import numpy as np
+import cv2
+
+hi = cv2.imread("sample-zoneplate.png", cv2.IMREAD_GRAYSCALE).astype(np.float64)
+H, W = hi.shape
+
+def low_res_frame(dy, dx):                                          # 2x2 binning after a shift of (dy, dx) hi-res pixels
+    shifted = np.roll(hi, (-dy, -dx), (0, 1))
+    return shifted.reshape(H // 2, 2, W // 2, 2).mean(axis=(1, 3))
+
+psnr = lambda a: 10 * np.log10(255 ** 2 / np.mean((np.clip(np.rint(a), 0, 255) - hi)[4:-4, 4:-4] ** 2))
+
+cubic = cv2.resize(low_res_frame(0, 0), (W, H), interpolation=cv2.INTER_CUBIC)
+sr = np.zeros_like(hi)
+for dy in (0, 1):
+    for dx in (0, 1):
+        sr[dy::2, dx::2] = low_res_frame(dy, dx)                    # interleave the four frames
+# each sample is the mean of hi[y:y+2, x:x+2], centred half a pixel down-right: move it back
+sr = cv2.warpAffine(sr, np.float32([[1, 0, 0.5], [0, 1, 0.5]]), (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+sharp = sr + 1.0 * (sr - cv2.GaussianBlur(sr, (0, 0), 1))           # mild unsharp mask (19.1)
+print(f"one frame + cubic: {psnr(cubic):.2f} dB")
+print(f"four frames:       {psnr(sr):.2f} dB")
+print(f"four frames + USM: {psnr(sharp):.2f} dB")
+```
+
+Output:
+
+```text
+one frame + cubic: 12.43 dB
+four frames:       14.34 dB
+four frames + USM: 18.01 dB
+```
+
+- `np.roll` shifts circularly; the 4-pixel border is excluded from the PSNR.
+- With real frames, the shifts are never exactly half a pixel: the samples are placed on the fine grid at their measured positions and the gaps are filled by interpolation or by an iterative reconstruction.
+
+### 2. Measuring the shifts
+
+```python
+import numpy as np
+import cv2
+
+scene = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float64)
+sh, sw = scene.shape
+scene_frame = lambda dy, dx: np.roll(scene, (-dy, -dx), (0, 1)).reshape(sh // 2, 2, sw // 2, 2).mean(axis=(1, 3)).astype(np.float32)
+a = scene_frame(0, 0)
+criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 100, 1e-6)
+for dy, dx in [(0, 1), (1, 0), (1, 1)]:
+    b = scene_frame(dy, dx)
+    (px, py), _ = cv2.phaseCorrelate(a, b)
+    _, warp = cv2.findTransformECC(a, b, np.eye(2, 3, dtype=np.float32), cv2.MOTION_TRANSLATION, criteria, None, 1)
+    print(f"true ({0.5 * dx:.2f}, {0.5 * dy:.2f}) | phaseCorrelate ({-px:.2f}, {-py:.2f}) | ECC ({-warp[0, 2]:.2f}, {-warp[1, 2]:.2f})")
+```
+
+Output:
+
+```text
+true (0.50, 0.00) | phaseCorrelate (0.70, 0.01) | ECC (0.50, -0.01)
+true (0.00, 0.50) | phaseCorrelate (-0.01, 0.51) | ECC (-0.01, 0.50)
+true (0.50, 0.50) | phaseCorrelate (0.29, 0.51) | ECC (0.51, 0.51)
+```
+
+- Phase correlation finds the shift quickly but its sub-pixel estimate is off by up to 0.2 pixel here, too much for super-resolution. ECC (21.3) refines it to about 0.02 pixel. Signs: both report the motion from the first to the second image with their own conventions; they were checked here against the known shifts.
+
+### 3. Learned super-resolution (contrib)
+
+```python
+# Needs a model file (ESPCN_x2.pb from the dnn_superres model list) and opencv-contrib
+import cv2
+
+sr = cv2.dnn_superres.DnnSuperResImpl_create()
+sr.readModel("ESPCN_x2.pb")
+sr.setModel("espcn", 2)
+big = sr.upsample(cv2.imread("sample-scene.png"))
+print(big.shape)
+```
+
+Typical output:
+
+```text
+(400, 640, 3)
+```
+
+## OpenCV API notes
+
+- **`cv2.resize(src, dsize, interpolation=...)`**: interpolation only (16.4); `INTER_CUBIC`, `INTER_LANCZOS4` for enlarging.
+- **`cv2.phaseCorrelate(src1, src2, window=None)`** → ((dx, dy), response): sub-pixel translation between two float32/float64 images (21.2).
+- **`cv2.dnn_superres.DnnSuperResImpl_create()`** (contrib): `readModel(path)`, `setModel(name, scale)` with name "edsr", "espcn", "fsrcnn" or "lapsrn", then `upsample(img)`. Models are downloaded separately.
+- OpenCV's older multi-frame `superres` module moved to the contrib repository in OpenCV 4; it is mostly CUDA-based and not used in this course.
+
+## Where it fails
+
+- **Unknown or inaccurate shifts**: errors of a tenth of a pixel already blur the result.
+- **Moving or deforming scenes**: frames disagree; ghosting.
+- **Motion blur within each exposure**: lowers the detail every frame carries.
+- **Beyond the optics**: if the lens PSF (diffraction, 2.3) already removes the fine detail before the sensor, no number of frames brings it back.
+- **Learned SR on unfamiliar content**: invented textures, wrong text, removed or added defects.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Calling interpolation "super-resolution"**.
+- **Using learned SR before measurement or inspection decisions** without validation.
+- **Whole-pixel shifts** between frames (no gain) or shifts measured on noisy, blurred frames without checking.
+- **Forgetting the half-pixel offset** of binned samples when placing them on the fine grid.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Iterative back-projection and MAP methods
+
+Irani and Peleg (1991) [1] reconstruct the high-resolution image iteratively: simulate the low-resolution frames from the current estimate, compare with the real frames, and back-project the differences, much like Richardson–Lucy (19.5). Later methods add priors (smoothness, total variation) and handle arbitrary shifts and rotations. Park, Park and Kang give a survey [3].
+
+### Limits
+
+Multi-frame SR is limited by the pixel aperture (the 2 × 2 box above has zeros in its transfer function), by registration accuracy and by noise. In practice, gains beyond about 2× are hard to achieve; the optics' transfer function sets a hard limit whatever the sampling.
+
+### Learned SR and perception
+
+Networks trained to minimise pixel error (SRCNN, EDSR) give smooth results with high PSNR; networks trained with adversarial and perceptual losses (SRGAN, ESRGAN) give sharper-looking textures with lower PSNR. This "perception–distortion trade-off" (Blau and Michaeli, 2018) is why a sharper-looking result is not necessarily more correct.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Bicubic enlargement of one frame adds…",
+      options: ["Real new detail", "Pixels but no new information", "Noise only", "Colour"],
+      answer: 1,
+      explanation: "It interpolates between the existing samples.",
+    },
+    {
+      question: "Why can multi-frame SR recover real detail?",
+      options: ["It uses a neural network", "Sub-pixel shifts sample the scene at new positions", "It sharpens", "It uses more bits"],
+      answer: 1,
+      explanation: "The frames together sample a finer grid.",
+    },
+    {
+      question: "For 2× SR from four frames, the shifts should be…",
+      options: ["Whole pixels", "Half a pixel in x, y and both", "Random large shifts", "Rotations only"],
+      answer: 1,
+      explanation: "0 and 0.5 low-resolution pixels in each direction.",
+    },
+    {
+      question: "Learned single-image SR is risky for defect inspection because…",
+      options: ["It is slow", "It can invent or remove fine detail", "It changes the colour space", "It needs four frames"],
+      answer: 1,
+      explanation: "Detail comes from training data, not from the object.",
+    },
+    {
+      question: "Which OpenCV function measures sub-pixel shifts between frames?",
+      options: ["cv2.resize", "cv2.phaseCorrelate", "cv2.medianBlur", "cv2.equalizeHist"],
+      answer: 1,
+      explanation: "Phase correlation (21.2).",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 1-D scene 10, 50, 90, 50, 10, 50, 90, 50 is recorded by pixels covering two scene samples each. Frame A starts at sample 0, frame B at sample 1. Write both frames and the interleaved result. What does a single frame miss?
+
+<Solution>
+
+Frame A (pairs 0–1, 2–3, …): 30, 70, 30, 70. Frame B (pairs 1–2, 3–4, 5–6, and 7 with 0 wrapping round): 70, 30, 70, 30. Interleaved: 30, 70, 70, 30, 30, 70, 70, …: a pattern with the scene's period of 4 samples. Frame A alone (30, 70, 30, 70) suggests a period of 2 low-resolution pixels at the wrong positions; it cannot tell where the peaks at 90 lie.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Repeat the shift-and-add experiment on the grey version of `sample-scene.png` and compare it with cubic interpolation of one frame.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+hi = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float64)
+H, W = hi.shape
+cubic = cv2.resize(low_res_frame(0, 0), (W, H), interpolation=cv2.INTER_CUBIC)
+sr = np.zeros_like(hi)
+for dy in (0, 1):
+    for dx in (0, 1):
+        sr[dy::2, dx::2] = low_res_frame(dy, dx)
+sr = cv2.warpAffine(sr, np.float32([[1, 0, 0.5], [0, 1, 0.5]]), (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+sharp = sr + 1.0 * (sr - cv2.GaussianBlur(sr, (0, 0), 1))
+print(f"cubic {psnr(cubic):.2f} dB | four frames {psnr(sr):.2f} dB | + USM {psnr(sharp):.2f} dB")
+```
+
+Output:
+
+```text
+cubic 28.01 dB | four frames 28.92 dB | + USM 30.66 dB
+```
+
+The gain is smaller than on the zone plate (2.7 dB against 5.6 dB), because the scene has less detail near the low-resolution Nyquist limit. `low_res_frame` and `psnr` read the global `hi`, `H` and `W`, which this block replaces.
+
+</Solution>
+
+## References
+
+1. M. Irani, S. Peleg, "Improving resolution by image registration", *CVGIP: Graphical Models and Image Processing* 53(3), 231–239, 1991.
+2. C. Dong, C. C. Loy, K. He, X. Tang, "Learning a deep convolutional network for image super-resolution", *Proc. ECCV*, 184–199, 2014.
+3. S. C. Park, M. K. Park, M. G. Kang, "Super-resolution image reconstruction: a technical overview", *IEEE Signal Processing Magazine* 20(3), 21–36, 2003.
+4. Y. Blau, T. Michaeli, "The perception-distortion tradeoff", *Proc. CVPR*, 6228–6237, 2018.
+5. OpenCV 4.13.0 documentation: `resize`, `phaseCorrelate`, `dnn_superres` (contrib). https://docs.opencv.org/4.13.0/

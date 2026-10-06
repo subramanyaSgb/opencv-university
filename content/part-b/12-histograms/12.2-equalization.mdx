@@ -1,0 +1,276 @@
+export const meta = {
+  number: "12.2",
+  title: "Equalization",
+  minutes: 25,
+  objectives: [
+    "Derive histogram equalization from the cumulative histogram",
+    "Reproduce cv2.equalizeHist exactly from scratch",
+    "Predict when equalization helps and when it amplifies noise or hides features",
+    "Equalize colour images without shifting colours",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 12.2 (Module 12 plan).
+  The from-scratch formula reproduces cv2.equalizeHist exactly (also unit-tested in lib/hist-ops.test.ts).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 12.2 Equalization
+
+<Definition term="Histogram equalization">a point operation that uses the image's own cumulative histogram as the transfer curve. Values where many pixels are crowded get spread apart, rare values get squeezed, and the output histogram becomes as flat as the 256 levels allow.</Definition>
+
+Contrast stretching (11.4) moves two limits. Equalization goes further: it reshapes the whole curve automatically, giving more output levels to the grey values that occur most. It is one line in OpenCV, often very effective for viewing, and often harmful for measuring. Knowing why is the point of this chapter.
+
+## 1. An analogy
+
+Seating a crowd evenly in a stadium. If everyone arrives at the same few gates, the sections near them get packed. Equalization gives each section the same number of people: crowded groups are spread over many seats, small groups get few seats. Nobody changes their order (who sits left of whom), only how far apart they are.
+
+## 2. The cumulative histogram as a curve
+
+<Flow
+  steps={[
+    { label: "Histogram h[v]", tone: "data" },
+    { label: "Cumulative histogram c[v] (rises from 0 to N)", tone: "process" },
+    { label: "Scale to 0…255: T(v) = round((c[v] − c_min) · 255 / (N − c_min))", tone: "process" },
+    { label: "Apply T as a LUT", tone: "result" },
+  ]}
+/>
+
+- Where the histogram is high, c rises steeply, so T is steep: those values are pushed apart (more contrast).
+- Where the histogram is low, T is flat: those values are squeezed together.
+- The darkest occupied value maps to 0 and the brightest to 255.
+- The order of values never changes (T increases), so edges and shapes stay; only their contrast changes.
+
+<HistLab ops={["none", "equalize"]} initial="equalize" caption="The low-contrast plate before and after equalization. The cumulative histogram (line) becomes nearly straight; the histogram spreads over the full range with gaps between the used levels." />
+
+## 3. When equalization helps, and when it hurts
+
+| Helps | Hurts |
+| --- | --- |
+| Viewing low-contrast images (medical, X-ray, dark scenes) | Images with large flat areas: their noise gets stretched to full range |
+| Quick look at what is in an image | Measurement: grey values lose their physical meaning |
+| Normalising images before some classical feature extractors | Comparing images: each one gets a different curve |
+| Images whose interesting detail is in the dominant grey range | Small features in a large background: background levels take most of the output range |
+
+Equalization **cannot create levels**: an image using 111 grey levels still uses at most 111 after equalization (often fewer, because rounding merges some), with gaps between them.
+
+## 4. Colour images
+
+Equalizing B, G and R separately gives each channel a different curve: colours shift strongly. Equalize **brightness only**: convert to YCrCb (or Lab), equalize Y (or L), convert back (10.4).
+
+## 5. Industrial example
+
+A food line used equalization on every image "to make the algorithm independent of lighting". It worked on busy images, but trays that were almost empty (mostly uniform background) came out with a grainy, high-contrast background, and the crumb detector fired on noise. The fix was to remove equalization from the measurement path, stabilise the lighting, and use a fixed contrast stretch; equalization stayed only in the operator's "enhanced view" button.
+
+## What you should remember from 12.2
+
+<Takeaways>
+<Takeaway n={1} title="Curve">T(v) = scaled cumulative histogram; steep where values are common.</Takeaway>
+<Takeaway n={2} title="Exact">cv2.equalizeHist = round((c[v] − c_min)·255 / (N − c_min)).</Takeaway>
+<Takeaway n={3} title="Order kept">Monotone curve: shapes and edges stay, contrast changes.</Takeaway>
+<Takeaway n={4} title="Risks">Noise in flat areas explodes; grey values lose meaning; each image gets its own curve.</Takeaway>
+<Takeaway n={5} title="Colour">Equalize Y or L only.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** An image of 100 pixels: 50 at value 10, 30 at 20, 20 at 30. Compute the equalized values.
+
+<Solution>
+
+c = 50, 80, 100; c_min = 50, N − c_min = 50. T(10) = 0, T(20) = round(30·255/50) = **153**, T(30) = **255**.
+
+</Solution>
+
+**Q2.** Why does equalization make the noise of a uniform grey wall clearly visible?
+
+<Solution>
+
+Almost all pixels are in a few values around the wall's grey; the cumulative histogram rises from 0 to N across those few values, so they are spread over the whole 0–255 range: noise of ±2 becomes differences of tens of levels.
+
+</Solution>
+
+### Next: 12.3 CLAHE
+
+Local equalization with a clip limit: the standard fix for both problems.
+
+## Code
+
+Two examples: equalization from scratch (identical to OpenCV), and its side effects on flat images and colour.
+
+### 1. From scratch: equalizeHist
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-plate-poor.png", cv2.IMREAD_GRAYSCALE)
+h = np.bincount(img.ravel(), minlength=256)
+cdf = np.cumsum(h)
+cdf_min = cdf[np.nonzero(h)[0][0]]                                   # count of the darkest occupied value
+lut = np.clip(np.round((cdf - cdf_min) * 255 / (img.size - cdf_min)), 0, 255).astype(np.uint8)
+ours = lut[img]
+cv = cv2.equalizeHist(img)
+print("identical to cv2.equalizeHist:", np.array_equal(ours, cv))
+print(f"before: range {img.min()}..{img.max()}, std {img.std():.1f} | after: range {cv.min()}..{cv.max()}, std {cv.std():.1f}")
+print("levels used:", len(np.unique(img)), "->", len(np.unique(cv)), "| darkest value", int(img.min()), "->", int(lut[img.min()]))
+```
+
+Output:
+
+```text
+identical to cv2.equalizeHist: True
+before: range 69..183, std 17.0 | after: range 0..255, std 73.6
+levels used: 111 -> 78 | darkest value 69 -> 0
+```
+
+- The contrast (std) more than quadruples. The number of used levels drops from 111 to 78: rare values at the ends are merged by rounding.
+
+### 2. OpenCV: noise in flat images, and colour
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(0)
+flat = np.full((100, 200), 120, np.float64) + rng.normal(0, 2, (100, 200))   # a flat, slightly noisy surface
+flat[40:60, 80:120] += 25                                                      # one brighter feature
+flat = np.clip(flat, 0, 255).astype(np.uint8)
+eq = cv2.equalizeHist(flat)
+bg, fe = (slice(0, 30), slice(0, 60)), (slice(40, 60), slice(80, 120))
+def cnr(im):                                                                   # contrast-to-noise ratio
+    return (im[fe].mean() - im[bg].mean()) / im[bg].std()
+print(f"background noise std: {flat[bg].std():.1f} -> {eq[bg].std():.1f} | feature contrast (means): {flat[fe].mean() - flat[bg].mean():.1f} -> {eq[fe].mean() - eq[bg].mean():.1f} | CNR: {cnr(flat):.1f} -> {cnr(eq):.1f}")
+
+color = cv2.imread("sample-color.png")
+ycc = cv2.cvtColor(color, cv2.COLOR_BGR2YCrCb)
+ycc[..., 0] = cv2.equalizeHist(ycc[..., 0])                                     # equalize brightness only
+good = cv2.cvtColor(ycc, cv2.COLOR_YCrCb2BGR)
+bad = cv2.merge([cv2.equalizeHist(c) for c in cv2.split(color)])               # each channel separately
+print("orange pixel BGR", color[180, 100].tolist(), "| Y only ->", good[180, 100].tolist(), "| per channel ->", bad[180, 100].tolist())
+```
+
+Output:
+
+```text
+background noise std: 2.0 -> 70.0 | feature contrast (means): 25.0 -> 108.9 | CNR: 12.2 -> 1.6
+orange pixel BGR [40, 150, 255] | Y only -> [126, 237, 255] | per channel -> [237, 228, 255]
+```
+
+- The feature's contrast grows about 4×, but the background noise grows 35×: the contrast-to-noise ratio (CNR) falls from 12.2 to 1.6. The background occupies 96 % of the pixels, so its few crowded values take almost the whole output range and the noise becomes as large as the feature.
+- Per-channel equalization turns the orange bar almost white-pink (B jumps from 40 to 237). Equalizing Y keeps it orange, though brighter (Y-only also changes saturation somewhat).
+
+## OpenCV API notes
+
+**`cv2.equalizeHist(src)`**: 8-bit single-channel only; returns the equalized image.
+
+**Colour**: convert with `COLOR_BGR2YCrCb` (or `COLOR_BGR2Lab`), equalize channel 0, convert back.
+
+**Masks / ROIs**: `equalizeHist` has no mask; build the LUT from the histogram of an ROI (`cv2.calcHist(..., mask, ...)`) and apply it with `cv2.LUT`.
+
+**16-bit**: not supported by `equalizeHist`; build a 65 536-entry LUT with NumPy.
+
+## Where it fails
+
+- **Flat areas**: noise amplification (example 2).
+- **Dominant background**: features in a minority grey range get compressed.
+- **Inconsistency**: every image gets a different curve; absolute thresholds become meaningless.
+- **Bimodal images**: equalization may squeeze the gap between two peaks into few levels.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Equalizing before measuring** or thresholding with fixed thresholds.
+- **Equalizing B, G, R separately**.
+- **Expecting more detail**: equalization cannot add grey levels.
+- **Equalizing video frame by frame** for display (flicker); use a fixed or smoothed curve.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why the cumulative histogram flattens the histogram
+
+If v is a continuous random variable with density p(v) and cumulative distribution F(v), then F(v) is uniformly distributed on [0, 1] (the probability integral transform). Equalization applies F scaled to 0–255. With discrete values, ties cannot be split, so the result is only approximately flat: bins with many pixels stay large, with empty bins between them [1].
+
+### Exact histogram specification
+
+To get a truly flat histogram, ties must be broken by a secondary key (for example a local mean around each pixel), ordering pixels with the same value and then assigning output levels in equal shares. This "exact histogram equalization" (Coltuc, Bolon & Chassery, 2006) is rarely needed in practice but explains why ordinary equalization never reaches flatness [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Equalization uses which function as the transfer curve?",
+      options: ["A gamma curve", "The cumulative histogram, scaled to 0–255", "The histogram itself", "A straight line"],
+      answer: 1,
+      explanation: "T(v) ∝ c[v].",
+    },
+    {
+      question: "What happens to noise in a large uniform area after equalization?",
+      options: ["It disappears", "It is strongly amplified", "Unchanged", "It becomes coloured"],
+      answer: 1,
+      explanation: "The few crowded values are spread over the whole range.",
+    },
+    {
+      question: "How should a colour image be equalized?",
+      options: ["Each of B, G, R separately", "Only the luminance channel (Y or L)", "Only the R channel", "It cannot be"],
+      answer: 1,
+      explanation: "Equal curves on all channels or brightness only keep colours.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 3 × 3 image has values 50, 50, 50, 50, 60, 60, 70, 90, 90. Compute the equalized image values.
+
+<Solution>
+
+h: 50→4, 60→2, 70→1, 90→2; c: 4, 6, 7, 9; c_min = 4, N − c_min = 5. T(50) = 0, T(60) = round(2·255/5) = **102**, T(70) = round(3·51) = **153**, T(90) = **255**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Equalize the flat image from example 2 using a LUT built **only from the histogram of the feature's neighbourhood** (rows 30–70, columns 60–140). Print the background noise std and the CNR (use `cnr` from example 2).
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+roi = flat[30:70, 60:140]
+h = np.bincount(roi.ravel(), minlength=256)
+c = np.cumsum(h)
+c_min = c[np.nonzero(h)[0][0]]
+lut = np.clip(np.round((c - c_min) * 255 / (roi.size - c_min)), 0, 255).astype(np.uint8)
+eq2 = cv2.LUT(flat, lut)
+print(f"background noise std: {eq2[bg].std():.1f} | CNR: {cnr(eq2):.1f}")
+```
+
+Output:
+
+```text
+background noise std: 54.6 | CNR: 2.1
+```
+
+The ROI contains a larger share of feature pixels (25 % instead of 4 %), so the curve gives the feature's range more of the output and the background noise less: CNR 2.1 instead of 1.6. It is still far below the original 12.2: a global curve only redistributes grey levels, it cannot remove noise. CLAHE (12.3) limits this noise growth with a clip limit.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 3.3 (histogram equalization).
+2. D. Coltuc, P. Bolon, J.-M. Chassery, "Exact histogram specification", *IEEE Transactions on Image Processing* 15(5), 2006.
+3. OpenCV 4.13.0 documentation: `equalizeHist`, "Histogram Equalization" tutorial. https://docs.opencv.org/4.13.0/

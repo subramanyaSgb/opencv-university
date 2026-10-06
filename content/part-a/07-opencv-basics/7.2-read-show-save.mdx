@@ -1,0 +1,404 @@
+export const meta = {
+  number: "7.2",
+  title: "Read, show, save",
+  minutes: 30,
+  objectives: [
+    "Read images with the right imread flag and always check the result",
+    "Show images in windows with imshow and waitKey, and handle keys and window sizes",
+    "Save images with imwrite and the right format parameters",
+    "Encode and decode images in memory (imencode/imdecode), also for non-ASCII paths",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 7.2 (Module 7 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 (headless build) with NumPy 2.5.3.
+  The imshow example needs a desktop and opencv-python with GUI; its output is described, not compared.
+*/}
+
+# 7.2 Read, show, save
+
+<Definition term="imread / imshow / imwrite">the three functions you call more than any others: load a file into a NumPy array, display an array in a window, and store an array as a file.</Definition>
+
+They look trivial, and they mostly are. But their defaults convert data silently, they report errors by returning `None` or `False` instead of raising, and showing an image needs a small event loop. This chapter collects what you need to use them safely.
+
+## 1. An analogy
+
+A photocopier. "Read" scans a page into the machine, "show" puts it on the little preview screen, "save" prints it. The default scan setting is "colour, 8-bit": fine for most pages, but if you feed it a fine technical drawing (16-bit data) or a transparent foil (alpha channel), the default quietly throws part of it away. Choose the setting for the page.
+
+## 2. Reading: `cv2.imread(path, flags)`
+
+| Flag | Result | Use for |
+| --- | --- | --- |
+| `IMREAD_COLOR` (default) | 3 channels BGR, uint8, EXIF orientation applied | ordinary photos |
+| `IMREAD_GRAYSCALE` | 1 channel, uint8 | gray processing |
+| `IMREAD_UNCHANGED` | as stored: 16-bit, alpha, float; **no** EXIF rotation | measurement data, PNG with alpha |
+| `IMREAD_ANYDEPTH` | keeps 16/32-bit depth, gray | 16-bit gray images |
+| `IMREAD_REDUCED_COLOR_2/4/8` | decoded at 1/2, 1/4, 1/8 size | fast previews of large JPEGs |
+| `… \| IMREAD_IGNORE_ORIENTATION` | skips EXIF rotation | consistent geometry (4.6) |
+
+Measured on three test files *(Code example 1)*:
+
+| File | default | GRAYSCALE | UNCHANGED |
+| --- | --- | --- | --- |
+| 16-bit gray PNG (12-bit data) | (200, 320, 3) uint8, max **15** | (200, 320) uint8, max 15 | (200, 320) **uint16**, max 4085 |
+| PNG with alpha | (200, 320, 3): alpha lost | (200, 320) | (200, 320, **4**) |
+| JPEG, EXIF orientation 6 | (**320, 200**, 3): rotated | (320, 200) | (200, 320, 3): not rotated |
+
+## 3. Try it
+
+<ImreadLab caption="Pick a file and a flag: what cv2.imread returns. Values measured with OpenCV 4.13.0." />
+
+## 4. Errors are silent
+
+- A missing or unreadable file gives **`None`**, not an exception (only a warning on the console). The next line then fails with a confusing error such as `'NoneType' object has no attribute 'shape'`. **Always check**: `if img is None: raise FileNotFoundError(path)`.
+- `cv2.imwrite` returns **True/False**; an unknown extension raises `cv2.error` *(Code example 2)*.
+- Relative paths are relative to the **current working directory** of the program, not the script's folder: use `pathlib.Path(__file__).parent / "image.png"` in scripts.
+
+## 5. Showing: `imshow` + `waitKey`
+
+<Flow
+  steps={[
+    { label: "cv2.namedWindow(\"view\", cv2.WINDOW_NORMAL)  (optional: resizable)", tone: "process" },
+    { label: "cv2.imshow(\"view\", img)", tone: "process" },
+    { label: "key = cv2.waitKey(0) & 0xFF  (window is drawn here)", tone: "process" },
+    { label: "cv2.destroyAllWindows()", tone: "result" },
+  ]}
+/>
+
+- `imshow` only queues the image; the window is painted while **`waitKey`** runs. Without `waitKey` you see nothing (or a frozen window).
+- `waitKey(0)` waits for a key; `waitKey(1)` waits 1 ms (for video loops, 7.4). It returns the key code, or −1 if no key was pressed.
+- Windows are identified by their **name**: calling `imshow` with the same name replaces the picture.
+- `imshow` expects **BGR uint8**. uint16 is divided by 256; float images are shown as 0 … 1 (×255); anything else may look black or white. Scale first (6.3).
+- `WINDOW_NORMAL` lets the user resize; the default `WINDOW_AUTOSIZE` shows 1 pixel per screen pixel, so a 5 MP image may not fit the screen.
+- Headless packages, servers and notebooks have no windows (7.1): use matplotlib (6.5) or save files.
+
+## 6. Saving: `cv2.imwrite(path, img, params)`
+
+The **extension** chooses the format (4.1–4.4):
+
+| Extension | Typical parameters |
+| --- | --- |
+| `.png` | `IMWRITE_PNG_COMPRESSION` 0–9 (lossless; 8/16-bit, 1/3/4 channels) |
+| `.jpg` | `IMWRITE_JPEG_QUALITY` 0–100 (default 95), `IMWRITE_JPEG_SAMPLING_FACTOR` |
+| `.tiff` | `IMWRITE_TIFF_COMPRESSION` (16-bit, float, multi-page) |
+| `.webp`, `.avif`, `.jp2` | quality parameters; lossless WebP above 100 |
+
+`imwrite` writes what you give it: a BGR array is saved correctly as an RGB file (the codec swaps for you); a float array is converted to 8-bit with only a warning (4.4).
+
+## 7. In memory: `imencode` / `imdecode`
+
+To send images over a network, store them in a database or handle unusual paths, work with bytes:
+
+- `ok, buf = cv2.imencode(".png", img)` → a 1-D uint8 array with the file's bytes.
+- `img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)` → back to an image.
+- On Windows, `cv2.imread` / `cv2.imwrite` can fail on paths with non-ASCII characters (ä, ö, ü, Chinese, Hindi …). The robust workaround reads and writes the bytes with NumPy and decodes/encodes with OpenCV *(Code example 2)*.
+
+## 8. Industrial example
+
+The image-saving part of an inspection program:
+
+<Flow
+  steps={[
+    { label: "frame (BGR uint8) + result", tone: "world" },
+    { label: "name = f\"{line}_{utc}_{part_id}_{result}.png\"", tone: "data" },
+    { label: "ok = cv2.imwrite(path, frame); if not ok: log error, alert", tone: "process" },
+    { label: "NOK → PNG (lossless); OK samples → JPEG q90", tone: "result" },
+  ]}
+/>
+
+Checking the return value matters: a full disk or a lost network share makes `imwrite` return False, and without the check the line runs for days without saving evidence.
+
+## What you should remember from 7.2
+
+<Takeaways>
+<Takeaway n={1} title="Flags">Default imread = 8-bit BGR, alpha dropped, EXIF rotated; IMREAD_UNCHANGED keeps everything as stored.</Takeaway>
+<Takeaway n={2} title="Check">imread returns None and imwrite False on failure: check both.</Takeaway>
+<Takeaway n={3} title="Show">imshow draws only during waitKey; waitKey(0) waits, waitKey(1) for video.</Takeaway>
+<Takeaway n={4} title="Save">Extension picks the format; set quality/compression parameters.</Takeaway>
+<Takeaway n={5} title="Bytes">imencode/imdecode for networks, databases and non-ASCII paths.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** `img = cv2.imread("part.png"); print(img.shape)` raises `AttributeError: 'NoneType' object has no attribute 'shape'`. Why?
+
+<Solution>
+
+The file could not be read (wrong path, wrong working directory, unsupported file, or a non-ASCII path on Windows) and `imread` returned `None`.
+
+</Solution>
+
+**Q2.** You need the alpha channel of a logo PNG. Which flag?
+
+<Solution>
+
+`cv2.IMREAD_UNCHANGED` → shape (H, W, 4), channels B, G, R, A.
+
+</Solution>
+
+**Q3.** `cv2.imshow("img", img)` runs but no window appears in your script. What is missing?
+
+<Solution>
+
+`cv2.waitKey(…)`: the window is drawn and kept responsive only while `waitKey` runs.
+
+</Solution>
+
+### Next: 7.3 BGR vs RGB
+
+Why OpenCV uses blue-green-red order, and where the conversion is needed.
+
+## Code
+
+Three examples: imread flags on test files, safe reading and writing with bytes, and a display loop. Copy the sample images next to the script.
+
+### 1. OpenCV: what the flags return
+
+```python
+import struct
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+gray = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+cv2.imwrite("gray16.png", gray.astype(np.uint16) * 16 + 5)           # 12-bit data in a 16-bit PNG
+bgra = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
+bgra[:, :160, 3] = 0                                                  # left half transparent
+cv2.imwrite("alpha.png", bgra)
+exif = np.frombuffer(b"II*\0" + struct.pack("<IHHHIHHI", 8, 1, 0x0112, 3, 1, 6, 0, 0), np.uint8)   # Orientation = 6
+cv2.imwriteWithMetadata("rotated.jpg", img, [cv2.IMAGE_METADATA_EXIF], [exif])
+
+flags = {"default": cv2.IMREAD_COLOR, "GRAYSCALE": cv2.IMREAD_GRAYSCALE, "UNCHANGED": cv2.IMREAD_UNCHANGED}
+for name in ["gray16.png", "alpha.png", "rotated.jpg"]:
+    parts = []
+    for fname, flag in flags.items():
+        a = cv2.imread(name, flag)
+        parts.append(f"{fname}: {str(a.shape):14s} {str(a.dtype):6s} max {a.max():4d}")
+    print(f"{name:11s} | " + " | ".join(parts))
+```
+
+Output:
+
+```text
+gray16.png  | default: (200, 320, 3)  uint8  max   15 | GRAYSCALE: (200, 320)     uint8  max   15 | UNCHANGED: (200, 320)     uint16 max 4085
+alpha.png   | default: (200, 320, 3)  uint8  max  255 | GRAYSCALE: (200, 320)     uint8  max  168 | UNCHANGED: (200, 320, 4)  uint8  max  255
+rotated.jpg | default: (320, 200, 3)  uint8  max  255 | GRAYSCALE: (320, 200)     uint8  max  173 | UNCHANGED: (200, 320, 3)  uint8  max  255
+```
+
+- The EXIF block is the minimal one from 4.6, packed in one `struct.pack` call: TIFF header, one entry (tag 0x0112, type SHORT, value 6), end marker.
+- `cv2.COLOR_BGR2BGRA` adds an alpha channel (all 255); setting part of it to 0 makes that part transparent.
+- Note that `IMREAD_UNCHANGED` does **not** apply the EXIF orientation, while `GRAYSCALE` does.
+
+### 2. OpenCV and NumPy: safe reading and writing
+
+```python
+import os
+import numpy as np
+import cv2
+
+img = cv2.imread("does-not-exist.png")
+print("missing file ->", img, "(no exception: always check for None)")
+
+img = cv2.imread("sample-color.png")
+ok = cv2.imwrite("out_q90.jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+print("imwrite returned", ok, "|", os.path.getsize("out_q90.jpg"), "bytes")
+try:
+    cv2.imwrite("out.xyz", img)
+except cv2.error:
+    print("unknown extension -> cv2.error: could not find a writer")
+
+name = "teil_größe.png"                                   # non-ASCII file name
+ok, buf = cv2.imencode(".png", img)                       # encode in memory ...
+buf.tofile(name)                                          # ... and write the bytes with NumPy
+back = cv2.imdecode(np.fromfile(name, np.uint8), cv2.IMREAD_COLOR)   # read bytes with NumPy, decode with OpenCV
+print("round trip via bytes:", np.array_equal(back, img), "| bytes in memory:", buf.size)
+```
+
+Output:
+
+```text
+missing file -> None (no exception: always check for None)
+imwrite returned True | 7549 bytes
+unknown extension -> cv2.error: could not find a writer
+round trip via bytes: True | bytes in memory: 3272
+```
+
+- `imwrite` parameters are a flat list `[flag1, value1, flag2, value2, …]`.
+- `np.fromfile` / `ndarray.tofile` read and write raw bytes using Python's own (Unicode-safe) file handling.
+- `cv2.imdecode` returns `None` for corrupt data, like `imread`.
+
+### 3. OpenCV: a display loop (needs a desktop)
+
+```python
+# Needs a desktop (opencv-python with GUI): not run by the automatic checks
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+if img is None:
+    raise FileNotFoundError("sample-color.png")
+cv2.namedWindow("view", cv2.WINDOW_NORMAL)                 # resizable window
+cv2.resizeWindow("view", 640, 400)
+while True:
+    cv2.imshow("view", img)
+    key = cv2.waitKey(0) & 0xFF                            # wait for a key; window is drawn here
+    if key in (ord("q"), 27):                              # q or Esc: quit
+        break
+    if key == ord("g"):                                    # g: toggle gray view
+        img = cv2.cvtColor(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+    if key == ord("s"):                                    # s: save what is shown
+        cv2.imwrite("shown.png", img)
+cv2.destroyAllWindows()
+```
+
+What happens (not run automatically, it needs a screen): a resizable window opens; **g** turns the picture gray, **s** saves it, **q** or **Esc** closes it.
+
+- `& 0xFF` keeps the low 8 bits of the key code, so comparisons with `ord("q")` work on all platforms.
+- Closing the window with the mouse does not end `waitKey(0)` on every platform; check `cv2.getWindowProperty("view", cv2.WND_PROP_VISIBLE) < 1` in loops with a timeout.
+
+## OpenCV API notes
+
+**`cv2.imread(filename, flags=cv2.IMREAD_COLOR)`** → array or None. Also `cv2.imreadmulti`, `cv2.imcount`, `cv2.haveImageReader(filename)`.
+
+**`cv2.imwrite(filename, img, params)`** → bool; `cv2.haveImageWriter(filename)` checks if an extension is supported. `cv2.imwritemulti` for TIFF stacks.
+
+**`cv2.imencode(ext, img, params)`** → (ok, buf); **`cv2.imdecode(buf, flags)`** → array or None.
+
+**Windows**: `cv2.namedWindow(name, flags)`, `cv2.imshow`, `cv2.waitKey(ms)`, `cv2.waitKeyEx` (full key codes, e.g. arrow keys), `cv2.resizeWindow`, `cv2.moveWindow`, `cv2.setWindowTitle`, `cv2.getWindowProperty`, `cv2.destroyWindow(name)`, `cv2.destroyAllWindows()`.
+
+## Where it fails
+
+- **Large images** in `WINDOW_AUTOSIZE` windows extend beyond the screen; use `WINDOW_NORMAL` or resize a copy for display.
+- **High-DPI screens** may scale windows; what you see is not 1 image pixel per screen pixel.
+- **Formats**: some files (camera raw, unusual TIFFs, HEIC) are not readable by OpenCV (4.4).
+- **Threads**: HighGUI functions should be called from the main thread on most platforms.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Not checking `img is None`** after `imread`.
+- **Reading 16-bit or alpha images with the default flag**.
+- **`imshow` without `waitKey`**.
+- **Ignoring the return value of `imwrite`**.
+- **Relying on the working directory** for relative paths in scheduled scripts.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Codecs behind imread
+
+OpenCV's `imgcodecs` module wraps libjpeg-turbo, libpng, libtiff, libwebp, OpenJPEG, libavif and others; which ones are present is listed in `cv2.getBuildInformation()` under "Media I/O" (7.1). The format is detected from the file's **content** (magic bytes) when reading and from the **extension** when writing [1].
+
+### HighGUI back-ends
+
+Windows are drawn by a platform back-end (Win32, Cocoa, GTK, Qt). The Qt back-end adds a toolbar with zoom and pixel-value display, useful when inspecting images, but is not in the pip wheels.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "cv2.imread on a missing file…",
+      options: ["Raises FileNotFoundError", "Returns None", "Returns an empty black image", "Crashes Python"],
+      answer: 1,
+      explanation: "It returns None (and prints a warning).",
+    },
+    {
+      question: "Which flag keeps a 16-bit PNG as uint16?",
+      options: ["IMREAD_COLOR", "IMREAD_GRAYSCALE", "IMREAD_UNCHANGED", "IMREAD_REDUCED_COLOR_2"],
+      answer: 2,
+      explanation: "UNCHANGED (or ANYDEPTH for gray) keeps the stored depth.",
+    },
+    {
+      question: "What does cv2.waitKey(1) do in a video loop?",
+      options: ["Waits 1 second", "Waits 1 ms, lets the window redraw, returns a key or −1", "Waits for key '1'", "Closes the window"],
+      answer: 1,
+      explanation: "It processes window events for about 1 ms.",
+    },
+    {
+      question: "How does imwrite decide the file format?",
+      options: ["From the array dtype", "From the file extension", "Always PNG", "From a format parameter"],
+      answer: 1,
+      explanation: "The extension (.png, .jpg, .tiff …) selects the codec.",
+    },
+    {
+      question: "Robust way to read a file whose name contains 'ü' on Windows?",
+      options: ["cv2.imread with a raw string", "cv2.imdecode(np.fromfile(path, np.uint8), flags)", "Rename it", "It cannot be read"],
+      answer: 1,
+      explanation: "NumPy reads the bytes with Unicode-safe file handling; OpenCV decodes them.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+For each task, pick the imread flag: (a) a thumbnail preview of a 24 MP JPEG; (b) a 12-bit height map PNG; (c) gray processing of a colour photo; (d) a logo with transparency.
+
+<Solution>
+
+(a) `IMREAD_REDUCED_COLOR_4` (or 8); (b) `IMREAD_UNCHANGED` (or `IMREAD_ANYDEPTH`); (c) `IMREAD_GRAYSCALE`; (d) `IMREAD_UNCHANGED`.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Write `safe_imread(path, flags=cv2.IMREAD_COLOR)` that works with any path (including non-ASCII), raises `FileNotFoundError` when the file is missing and `ValueError` when it cannot be decoded. Test it on `sample-color.png`, a missing file and a text file.
+
+<Solution>
+
+```python
+from pathlib import Path
+import numpy as np
+import cv2
+
+def safe_imread(path, flags=cv2.IMREAD_COLOR):
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(p)
+    img = cv2.imdecode(np.fromfile(p, np.uint8), flags)
+    if img is None:
+        raise ValueError(f"cannot decode {p}")
+    return img
+
+Path("notes.txt").write_text("not an image")
+for path in ["sample-color.png", "missing.png", "notes.txt"]:
+    try:
+        print(path, "->", safe_imread(path).shape)
+    except (FileNotFoundError, ValueError) as e:
+        print(path, "->", type(e).__name__)
+```
+
+Output:
+
+```text
+sample-color.png -> (200, 320, 3)
+missing.png -> FileNotFoundError
+notes.txt -> ValueError
+```
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A scheduled script on the line PC saves NOK images with `cv2.imwrite("nok/" + name, img)`. It works when started by hand but saves nothing when started by the task scheduler. Why, and how do you make it robust?
+
+<Solution>
+
+The scheduler starts the script with a different **working directory**, so the relative path "nok/" points elsewhere (or does not exist), and `imwrite` returns False, which nobody checks. Use an absolute path built from the script's location or a configured folder (`Path(__file__).parent / "nok"`), create it with `mkdir(parents=True, exist_ok=True)`, and check the return value and log failures.
+
+</Solution>
+
+## References
+
+1. OpenCV 4.13.0 documentation, *Image file reading and writing* (`imread`, `imwrite`, `imencode`, `imdecode`, `ImreadModes`, `ImwriteFlags`): [docs.opencv.org/4.13.0/d4/da8/group__imgcodecs.html](https://docs.opencv.org/4.13.0/d4/da8/group__imgcodecs.html).
+2. OpenCV 4.13.0 documentation, *High-level GUI* (`imshow`, `waitKey`, `namedWindow`): [docs.opencv.org/4.13.0/d7/dfc/group__highgui.html](https://docs.opencv.org/4.13.0/d7/dfc/group__highgui.html).
+3. OpenCV 4.13.0 tutorial, *Getting Started with Images*: [docs.opencv.org/4.13.0/db/deb/tutorial_display_image.html](https://docs.opencv.org/4.13.0/db/deb/tutorial_display_image.html).

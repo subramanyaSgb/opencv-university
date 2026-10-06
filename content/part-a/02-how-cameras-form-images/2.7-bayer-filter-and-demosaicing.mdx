@@ -1,0 +1,512 @@
+export const meta = {
+  number: "2.7",
+  title: "Bayer filter and demosaicing",
+  minutes: 40,
+  objectives: [
+    "Explain why a sensor pixel cannot see colour on its own",
+    "Describe the Bayer colour filter array and its four patterns",
+    "Explain demosaicing and the artefacts it causes",
+    "Convert raw Bayer data with OpenCV using the correct conversion code",
+    "Decide when a monochrome camera is the better choice",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 2.7 (Module 2 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+  The Bayer pattern-to-code mapping was checked by experiment on OpenCV 4.13.0 (Code example 2).
+*/}
+
+# 2.7 Bayer filter and demosaicing
+
+<Definition term="Bayer filter">a checkerboard of tiny red, green and blue filters over the sensor, so that each pixel measures one colour.</Definition>
+
+In 2.5 each pixel was a bucket counting photons. A bucket does not care what **colour** the rain is. So how does a camera make a **colour** image? It puts a tiny **colour filter** on every pixel, and then **guesses** the missing colours.
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Scene (full colour)", tone: "world" },
+    { label: "Colour filter on each pixel", tone: "process" },
+    { label: "Mosaic: one colour per pixel", tone: "data" },
+    { label: "Demosaicing (interpolation)", tone: "process" },
+    { label: "Colour image: B, G, R per pixel", tone: "result" },
+  ]}
+/>
+
+## 1. A pixel is colour-blind
+
+A photodetector counts photons of many wavelengths. Red, green and blue light all free electrons. One pixel therefore gives **one number**: how much light, not which colour. Without filters, a sensor is a **monochrome** (black-and-white) sensor.
+
+## 2. Filters choose the colour
+
+Put a **red filter** in front of a pixel and only red light reaches it: the pixel now measures **red**. Do the same with green and blue filters on other pixels, and different pixels measure different colours.
+
+## 3. The Bayer pattern
+
+The most common arrangement repeats a **2 × 2 block**: one red, two green, one blue. It was invented by Bryce Bayer at Kodak (US patent 3,971,065, 1976).
+
+<BayerPattern caption="An RGGB Bayer pattern: every 2 × 2 block has one red, two green and one blue filter." />
+
+## 4. Why two greens?
+
+Human vision is **most sensitive to green** and gets most of its sense of **detail** (luminance) from it. Two greens per block give the luminance more samples. Recall the gray conversion from 1.3: green has the largest weight (0.587).
+
+<Equation terms={[{ value: "25 %", label: "red pixels" }, { op: "+", value: "50 %", label: "green pixels" }, { op: "+", value: "25 %", label: "blue pixels" }, { op: "=", value: "100 %", result: true }]} />
+
+## 5. Four arrangements
+
+The same 2 × 2 block can start at any corner, so there are four patterns, named by the **top-left 2 × 2 block, row by row**:
+
+<Chips items={["RGGB", "BGGR", "GRBG", "GBRG"]} />
+
+The camera datasheet (or its pixel format, for example `BayerRG8`) tells you which one you have. Cropping the image by one row or column **changes the pattern**.
+
+## 6. What the sensor really records
+
+Each pixel stores **one** number. A flat orange-red patch (R = 200, G = 50, B = 30) gives:
+
+<BayerPattern values={[[200, 50, 200, 50], [50, 30, 50, 30], [200, 50, 200, 50], [50, 30, 50, 30]]} caption="The raw mosaic of a flat colour: one number per pixel, each from a different filter. As a gray image it looks like a checkerboard." />
+
+This **raw Bayer image** has one channel. Two-thirds of the colour information is missing.
+
+## 7. Demosaicing: filling in the gaps
+
+**Demosaicing** estimates the two missing colours at every pixel from **neighbours** that measured them. The simplest method, **bilinear interpolation**, averages the nearest same-colour neighbours.
+
+At a red pixel, for example:
+
+- **R** is measured.
+- **G** = average of the 4 green neighbours (up, down, left, right).
+- **B** = average of the 4 blue neighbours (diagonals).
+
+<Flow direction="right" steps={["Raw mosaic: 1 value per pixel", "Average same-colour neighbours", { label: "3 values per pixel", tone: "result" }]} />
+
+**Try it.** Choose a scene and see what the sensor records and what demosaicing makes of it. Click a pixel to see measured and guessed values.
+
+<BayerLab caption="8 × 8 pixels. 'What the sensor records' shows each pixel in its filter's colour. 'Demosaiced' uses simple bilinear interpolation." />
+
+## 8. Flat areas: perfect. Edges: trouble.
+
+In a **flat** area, the neighbours have the same colour, so the guess is exact. At an **edge**, the neighbours on two sides have **different** colours, and the average mixes them. Try the "Red / blue edge" scene in the lab.
+
+<ImageCompare
+  before={{ src: "/images/sample-bayer-true.png", label: "True colour" }}
+  after={{ src: "/images/sample-bayer-demosaic.png", label: "Demosaiced" }}
+  width={240}
+  height={240}
+  alt="An enlarged crop of a blue triangle's edge: the true colours and the demosaiced version with a softer, slightly coloured edge"
+  caption="Enlarged 6× (each square is one pixel). Demosaicing softens the edge and adds faint colour fringes."
+/>
+
+## 9. False colour and zippering
+
+Fine detail near the size of the 2 × 2 block confuses the interpolation badly. Thin black and white stripes, which have **no colour at all**, can come out **bright red and yellow**:
+
+<ImageCompare
+  before={{ src: "/images/sample-bayer-stripes.png", label: "Gray stripes" }}
+  after={{ src: "/images/sample-bayer-stripes-demosaic.png", label: "After demosaicing" }}
+  width={240}
+  height={240}
+  alt="One-pixel black and white stripes, and the demosaiced result full of red and yellow false colour"
+  caption="1-pixel stripes: the red pixels all landed on white, the blue pixels all on black. The result is pure false colour."
+/>
+
+These artefacts are called **false colour** (colour moiré) and **zippering** (alternating patterns along edges). Better algorithms reduce them, but cannot remove them completely.
+
+## 10. Better demosaicing
+
+Smarter methods look at the **direction** of edges and interpolate **along** them, not across. OpenCV offers three:
+
+<VsTable
+  left="OpenCV option"
+  right="Method"
+  rows={[
+    ["COLOR_BayerRGGB2BGR", "Bilinear: fast, softest edges"],
+    ["COLOR_BayerRGGB2BGR_VNG", "Variable Number of Gradients: uses edge directions; slower"],
+    ["COLOR_BayerRGGB2BGR_EA", "Edge-aware: interpolates along edges"],
+  ]}
+/>
+
+Cameras with an on-board image processor (2.8) often use their own, more advanced method.
+
+## 11. Colour costs resolution
+
+A 5-megapixel colour camera has 5 million pixels, but only **1.25 million red** and **1.25 million blue** measurements. Fine detail, especially in red and blue, is **less sharp** than in a monochrome camera of the same pixel count.
+
+## 12. Colour costs light
+
+Each filter **blocks** the other colours: a red pixel throws away the green and blue light that falls on it. A colour sensor therefore collects **less light** than a monochrome sensor, so it is noisier in the same conditions (2.5).
+
+## 13. When to choose monochrome
+
+<Columns>
+<Panel title="Monochrome camera" tone="a">
+Measurement, edges, OCR, code reading, defects on metal, low light, fast exposures. **Most industrial inspection.**
+</Panel>
+<Panel title="Colour camera" tone="c">
+When colour **is** the information: sorting by colour, checking paint or labels, detecting rust or flame colour, human viewing.
+</Panel>
+</Columns>
+
+A common machine-vision trick: a **monochrome camera plus coloured lighting** (for example red LEDs) to increase contrast for one colour, with full resolution and full light.
+
+## 14. Raw vs processed output
+
+Industrial cameras can usually send either:
+
+- **Raw Bayer** (pixel formats like `BayerRG8`, `BayerRG12`): one channel, you demosaic on the PC; or
+- **Processed colour** (`RGB8`, `BGR8`, `YUV`): demosaiced and colour-corrected in the camera.
+
+Raw Bayer uses **one third** of the bandwidth of RGB and leaves the processing under your control.
+
+## 15. The OpenCV naming trap
+
+OpenCV has two names for the same codes. The legacy names describe a different corner of the pattern than most datasheets, which causes endless confusion:
+
+| Sensor pattern (datasheet) | New OpenCV name | Same code as legacy name |
+| --- | --- | --- |
+| RGGB | `COLOR_BayerRGGB2BGR` | `COLOR_BayerBG2BGR` |
+
+*(Checked in Code example 2: the RGGB mosaic is only reconstructed correctly by code 46, which both names share.)* Use the **new pattern names** (`BayerRGGB`, `BayerBGGR`, `BayerGRBG`, `BayerGBRG`) and confirm with a colourful test target: a wrong pattern swaps red and blue or makes everything green-tinted.
+
+## 16. Other colour filter arrays and sensors
+
+Bayer is not the only option:
+
+<Glossary
+  items={[
+    { term: "RGBW / RCCB", desc: "Replace some filters with clear (white) or other colours to collect more light; common in automotive cameras." },
+    { term: "Three-sensor (3CCD / prism)", desc: "A prism splits light onto three sensors: full resolution in each colour, but large and expensive." },
+    { term: "Polarization sensors", desc: "Micro-polarizers at four angles in a 2 × 2 block: the same mosaic idea for polarization instead of colour." },
+    { term: "Multispectral / NIR", desc: "Filters for many narrow bands, or near-infrared, for materials and agriculture." },
+  ]}
+/>
+
+## 17. Industrial example: colour or not?
+
+- **Billet ID / OCR on a painted number**: monochrome with suitable lighting usually reads better: more resolution, more light.
+- **Rust and scale detection** where the colour difference matters: colour camera, careful white balance (2.8).
+- **Flame or hot-metal colour**: colour can help, but saturation is a risk (2.5, 2.6); thermal cameras measure temperature directly (1.6).
+
+## What you should remember from 2.7
+
+<Takeaways>
+<Takeaway n={1} title="Pixels are colour-blind">Colour comes from a filter over each pixel.</Takeaway>
+<Takeaway n={2} title="Bayer pattern">2 × 2 block: R, G, G, B. Four arrangements: RGGB, BGGR, GRBG, GBRG.</Takeaway>
+<Takeaway n={3} title="Demosaicing">Each pixel measures one colour; the other two are interpolated from neighbours.</Takeaway>
+<Takeaway n={4} title="Artefacts">Soft edges, false colour and zippering on fine detail.</Takeaway>
+<Takeaway n={5} title="Choose wisely">Monochrome for measurement and low light; colour when colour is the information.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** In an RGGB pattern, which colour does pixel (row 1, column 1) measure?
+
+<Solution>
+
+**Blue** (bottom-right of the 2 × 2 block).
+
+</Solution>
+
+**Q2.** A 2448 × 2048 Bayer camera: how many pixels measure green?
+
+<Solution>
+
+Half of 5,013,504 = **2,506,752**.
+
+</Solution>
+
+**Q3.** Why can thin black-and-white stripes appear coloured after demosaicing?
+
+<Solution>
+
+Each colour is sampled only on some pixels. If, for example, all red pixels fall on white stripes and all blue pixels on black stripes, the interpolation reconstructs strong red and missing blue: false colour.
+
+</Solution>
+
+**Q4.** You convert raw data and the image looks blue where it should be red. What is the likely cause?
+
+<Solution>
+
+The **wrong Bayer pattern code** (red and blue swapped). Check the camera's pixel format and use the matching `COLOR_Bayer…` code.
+
+</Solution>
+
+**Q5.** For high-accuracy edge measurement on gray steel, colour or monochrome camera?
+
+<Solution>
+
+**Monochrome**: every pixel is a real measurement, no demosaicing artefacts, and more light per pixel.
+
+</Solution>
+
+### Next: 2.8 The ISP pipeline
+
+Demosaicing is just one step. Between the sensor and the image you receive, a camera may apply black level, white balance, colour correction, gamma, sharpening, denoising and compression. We'll follow that **image signal processor** pipeline step by step.
+
+## Code
+
+Three experiments: build a mosaic by hand, demosaic with OpenCV (and see what a wrong pattern does), and measure false colour.
+
+### 1. From scratch: what an RGGB sensor records
+
+```python
+import numpy as np
+
+rgb = np.array([[[200, 50, 30]] * 4] * 4, np.uint8)   # a flat orange-red patch, R=200 G=50 B=30
+mosaic = np.zeros((4, 4), np.uint8)
+mosaic[0::2, 0::2] = rgb[0::2, 0::2, 0]   # R on even rows, even columns
+mosaic[0::2, 1::2] = rgb[0::2, 1::2, 1]   # G
+mosaic[1::2, 0::2] = rgb[1::2, 0::2, 1]   # G
+mosaic[1::2, 1::2] = rgb[1::2, 1::2, 2]   # B on odd rows, odd columns
+print(mosaic)
+print("samples per channel: R", mosaic[0::2, 0::2].size, "G", mosaic[0::2, 1::2].size + mosaic[1::2, 0::2].size, "B", mosaic[1::2, 1::2].size)
+```
+
+Output:
+
+```text
+[[200  50 200  50]
+ [ 50  30  50  30]
+ [200  50 200  50]
+ [ 50  30  50  30]]
+samples per channel: R 4 G 8 B 4
+```
+
+- Slicing with step 2 (`0::2`, `1::2`) picks every other row or column: exactly the Bayer grid.
+- Green gets twice as many samples as red or blue.
+
+### 2. OpenCV: demosaic, compare methods, and use the right code
+
+```python
+import numpy as np
+import cv2
+
+bgr = cv2.imread("sample-color.png")              # the "true" colour scene
+h, w = bgr.shape[:2]
+
+# what an RGGB sensor records: one value per pixel
+mosaic = np.zeros((h, w), np.uint8)
+mosaic[0::2, 0::2] = bgr[0::2, 0::2, 2]            # R
+mosaic[0::2, 1::2] = bgr[0::2, 1::2, 1]            # G
+mosaic[1::2, 0::2] = bgr[1::2, 0::2, 1]            # G
+mosaic[1::2, 1::2] = bgr[1::2, 1::2, 0]            # B
+
+inner = (slice(4, -4), slice(4, -4))               # ignore the border
+for name in ["COLOR_BayerRGGB2BGR", "COLOR_BayerRGGB2BGR_VNG", "COLOR_BayerRGGB2BGR_EA", "COLOR_BayerGRBG2BGR"]:
+    out = cv2.cvtColor(mosaic, getattr(cv2, name))
+    print(f"{name:24s} PSNR {cv2.PSNR(bgr[inner], out[inner]):5.1f} dB")
+print("RGGB code value:", cv2.COLOR_BayerRGGB2BGR, "= legacy BayerBG2BGR:", cv2.COLOR_BayerBG2BGR)
+```
+
+Output:
+
+```text
+COLOR_BayerRGGB2BGR      PSNR  29.2 dB
+COLOR_BayerRGGB2BGR_VNG  PSNR  29.9 dB
+COLOR_BayerRGGB2BGR_EA   PSNR  29.6 dB
+COLOR_BayerGRBG2BGR      PSNR   9.7 dB
+RGGB code value: 46 = legacy BayerBG2BGR: 46
+```
+
+- `cv2.cvtColor(mosaic, code)` takes a **single-channel** Bayer image and returns 3-channel BGR.
+- **PSNR** (peak signal-to-noise ratio, `cv2.PSNR`) compares with the true colours: higher is closer. VNG and EA beat bilinear slightly on this image.
+- The wrong pattern (GRBG) scores 9.7 dB: the colours are garbage. Always confirm the pattern.
+- The new name `COLOR_BayerRGGB2BGR` and the legacy name `COLOR_BayerBG2BGR` are the same code (46).
+
+### 3. False colour from fine stripes
+
+```python
+import numpy as np
+import cv2
+
+# a gray scene with fine black/white stripes 1 px wide (no colour at all)
+gray = np.zeros((40, 40), np.uint8)
+gray[:, 0::2] = 255
+bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+mosaic = np.zeros((40, 40), np.uint8)
+mosaic[0::2, 0::2] = bgr[0::2, 0::2, 2]
+mosaic[0::2, 1::2] = bgr[0::2, 1::2, 1]
+mosaic[1::2, 0::2] = bgr[1::2, 0::2, 1]
+mosaic[1::2, 1::2] = bgr[1::2, 1::2, 0]
+out = cv2.cvtColor(mosaic, cv2.COLOR_BayerRGGB2BGR)
+
+inner = out[4:-4, 4:-4].astype(int)
+false_colour = (inner.max(axis=2) - inner.min(axis=2)).mean()
+print("input max channel difference:", int((bgr.max(axis=2) - bgr.min(axis=2)).max()))
+print(f"after demosaicing: mean channel difference {false_colour:.1f}")
+print("one output pixel (B, G, R):", out[10, 10], out[10, 11])
+```
+
+Output:
+
+```text
+input max channel difference: 0
+after demosaicing: mean channel difference 255.0
+one output pixel (B, G, R): [  0 128 255] [  0   0 255]
+```
+
+- A gray pixel has B = G = R, so the channel difference is 0. After demosaicing it is the maximum possible, 255: pure false colour.
+- Every red-filtered pixel sat on a white stripe and every blue-filtered pixel on a black one, so red reads 255 everywhere and blue 0.
+- Real lenses blur such fine detail a little before it reaches the sensor (optical low-pass filters do this on purpose), which reduces the effect.
+
+## OpenCV API notes
+
+**`cv2.cvtColor(src, code)` with Bayer codes**
+
+- `src`: one channel, `uint8` or `uint16` (10/12/16-bit raw). Output: 3 channels (or 4 with `…2BGRA`), same depth.
+- Codes: `COLOR_Bayer{RGGB,BGGR,GRBG,GBRG}2{BGR,RGB,BGRA,RGBA,GRAY}`, with `_VNG` (BGR/RGB, 8-bit only) or `_EA` variants.
+- Legacy names (`COLOR_BayerBG2BGR` …) map to the same values but name the pattern differently. Prefer the new names.
+- `…2GRAY` gives a luminance image directly from the raw mosaic.
+
+**`cv2.PSNR(a, b[, R=255])`** returns the peak signal-to-noise ratio in dB between two images of the same size and type.
+
+**Cropping raw Bayer images**: crop by an **even** number of rows and columns, or the pattern changes (RGGB becomes GRBG, GBRG or BGGR).
+
+## Where it fails
+
+- **Fine periodic textures** (meshes, fabrics, stripes) produce colour moiré that no demosaicing removes completely.
+- **Measurement at edges** with colour cameras: interpolation shifts and softens edges slightly, differently per channel.
+- **Wrong pattern or bit depth** settings give plausible-looking but wrong colours; test with a colour target.
+- **Camera-side processing** (2.8) may already have demosaiced, sharpened and compressed the image; you cannot undo it.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using a colour camera for precise gauging** when monochrome would give more resolution and light.
+- **Picking the Bayer code by name similarity** with the legacy names. Use `BayerRGGB…` style names and verify.
+- **Cropping raw images by an odd offset** and keeping the old pattern code.
+- **Treating demosaiced colour at edges as measured data.**
+- **Demosaicing twice**: converting an already-RGB image as if it were raw.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Bayer's choice
+
+Bayer's patent places luminance-sensitive (green) elements on a checkerboard and chrominance elements (red, blue) on the remaining sites, because the eye resolves luminance detail much better than colour detail [1].
+
+### Demosaicing algorithms
+
+Beyond bilinear: edge-directed interpolation (choose the direction with the smaller gradient), Variable Number of Gradients (VNG), adaptive homogeneity-directed (AHD) and many learned methods. Gunturk et al. survey the classical approaches and their artefacts [2].
+
+### Optical low-pass filters
+
+Many colour cameras put a thin birefringent filter in front of the sensor that splits each ray into slightly shifted copies, blurring detail below the Bayer period. It reduces moiré at the cost of sharpness; some cameras omit it [3].
+
+### Bayer sampling as aliasing
+
+Each colour plane is sampled at half the pixel pitch (red, blue) or on a checkerboard (green). Detail finer than these sampling rates aliases (Chapter 3.5), and demosaicing turns that aliasing into false colour.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What fraction of pixels in a Bayer sensor measure red?",
+      options: ["1/2", "1/3", "1/4", "All of them"],
+      answer: 2,
+      explanation: "One red per 2 × 2 block: 25 %.",
+    },
+    {
+      question: "Why are there two green pixels in each Bayer block?",
+      options: ["Green filters are cheaper", "The eye takes most of its detail (luminance) from green", "Green light has more photons", "To make the image greener"],
+      answer: 1,
+      explanation: "Green dominates perceived brightness and detail, so it gets more samples.",
+    },
+    {
+      question: "Your RGGB camera's raw image converts with blue and red swapped. Which code should you use?",
+      options: ["COLOR_BayerBGGR2BGR", "COLOR_BayerRGGB2BGR (same as legacy BayerBG2BGR)", "COLOR_BGR2RGB", "COLOR_BayerGRBG2BGR"],
+      answer: 1,
+      explanation: "Match the code to the sensor pattern: RGGB → COLOR_BayerRGGB2BGR.",
+    },
+    {
+      question: "Which artefact turns fine gray stripes into colours?",
+      options: ["Saturation", "False colour (colour moiré)", "Motion blur", "Vignetting"],
+      answer: 1,
+      explanation: "Each colour is sampled sparsely; fine detail aliases into false colour after interpolation.",
+    },
+    {
+      question: "For low-light, high-accuracy measurement, which camera is usually better?",
+      options: ["Colour", "Monochrome", "They are identical", "Colour with gain"],
+      answer: 1,
+      explanation: "Monochrome: no filters blocking light and every pixel measured.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A raw RGGB mosaic has these values around a **red** pixel (centre):
+
+<BayerPattern pattern="BGGR" values={[[30, 90, 32], [88, 150, 92], [34, 94, 36]]} caption="Centre pixel: red. Its up/down/left/right neighbours are green, its diagonals blue." />
+
+Using bilinear demosaicing, what are R, G and B at the centre?
+
+<Solution>
+
+- **R** = 150 (measured).
+- **G** = average of up, down, left, right = (90 + 94 + 88 + 92) / 4 = **91**.
+- **B** = average of the four diagonals = (30 + 32 + 34 + 36) / 4 = **33**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Build the RGGB mosaic of `sample-color.png`, then crop it by **one** column (`mosaic[:, 1:]`). Demosaic the crop with `COLOR_BayerRGGB2BGR` and with `COLOR_BayerGRBG2BGR`, and print the PSNR of each against the same crop of the true image. Which is right, and why?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+bgr = cv2.imread("sample-color.png")
+m = np.zeros(bgr.shape[:2], np.uint8)
+m[0::2, 0::2] = bgr[0::2, 0::2, 2]
+m[0::2, 1::2] = bgr[0::2, 1::2, 1]
+m[1::2, 0::2] = bgr[1::2, 0::2, 1]
+m[1::2, 1::2] = bgr[1::2, 1::2, 0]
+crop, true = m[:, 1:], bgr[:, 1:]
+for name in ["COLOR_BayerRGGB2BGR", "COLOR_BayerGRBG2BGR"]:
+    out = cv2.cvtColor(np.ascontiguousarray(crop), getattr(cv2, name))
+    print(f"{name}: {cv2.PSNR(true[4:-4, 4:-4], out[4:-4, 4:-4]):.1f} dB")
+```
+
+Output:
+
+```text
+COLOR_BayerRGGB2BGR: 9.6 dB
+COLOR_BayerGRBG2BGR: 29.2 dB
+```
+
+Dropping one column moves the green pixel to the top-left: the crop is **GRBG**. Cropping changes the pattern.
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+A 2448 × 2048 colour camera and a 2448 × 2048 monochrome camera image the same scene with the same lens and exposure. Give two reasons the monochrome image is better for measuring a thin crack, and one reason you might still pick colour.
+
+<Solution>
+
+Monochrome: (1) every pixel measures the crack: no interpolation softening the edges; (2) no colour filters, so more light reaches each pixel: less noise. Pick colour only if the **colour itself** separates the crack from the background (for example rust-coloured cracks in a gray surface).
+
+</Solution>
+
+## References
+
+1. B. E. Bayer, "Color imaging array," US Patent 3,971,065, 1976.
+2. B. K. Gunturk, J. Glotzbach, Y. Altunbasak, R. W. Schafer and R. M. Mersereau, "Demosaicking: color filter array interpolation," *IEEE Signal Processing Magazine*, vol. 22, no. 1, pp. 44–54, 2005.
+3. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. Springer, 2022. Sec. 2.3 (the digital camera: colour filter arrays, demosaicing). Free online edition: [szeliski.org/Book](https://szeliski.org/Book/).
+4. OpenCV 4.13.0 documentation, *Color Space Conversions* (Bayer codes): [docs.opencv.org/4.13.0/d8/d01/group__imgproc__color__conversions.html](https://docs.opencv.org/4.13.0/d8/d01/group__imgproc__color__conversions.html).

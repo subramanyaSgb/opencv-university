@@ -1,0 +1,365 @@
+export const meta = {
+  number: "25.4",
+  title: "Counting objects",
+  minutes: 25,
+  objectives: [
+    "Explain why threshold-and-label undercounts touching objects",
+    "Count touching objects by erosion, by area, and by distance-transform peaks",
+    "Turn peaks into markers and separate the objects with a watershed",
+    "Validate a counter against ground truth and choose its parameters",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 25.4 (Module 25).
+  Lab: LabelLab mode "count".
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 25.4 Counting objects
+
+<Definition term="Object counting">finding how many separate objects are in an image. For well-separated objects it is threshold and label (25.1). When objects touch, each connected region may hold several objects, and the counter must split them, usually by finding one marker per object.</Definition>
+
+Counting tablets in a blister, cells in a microscope slide, pills on a tray, bottles in a crate: the question "how many?" is one of the most common in industrial vision. The hard part is never the separated objects. It is the ones that touch, overlap slightly or lie on the image border.
+
+## 1. An analogy
+
+Counting coins on a table from above. Separate coins are easy: count the islands. Two touching coins form one island shaped like an 8. You still see two coins, because the island has two "middles" and a narrow waist between them. The counting methods below look for exactly that: the waist (erosion cuts it) or the middles (distance-transform peaks).
+
+## 2. Why plain labelling undercounts
+
+<Flow
+  steps={[
+    { label: "Grey image", tone: "data" },
+    { label: "Threshold (Otsu) + 3 × 3 opening", tone: "process" },
+    { label: "Label: 35 components", tone: "process" },
+    { label: "True count: 40 (touching pairs merged)", tone: "result" },
+  ]}
+/>
+
+The particle image (25.1–25.3) has 40 particles of radius 6–13 pixels. After Otsu (T = 117) and a 3 × 3 opening, labelling finds **35** components: five touching pairs are counted once each. The component areas show it: single particles have 112 to about 500 pixels, the two largest components have 695 and 948.
+
+Ways to fix this, from simple to robust:
+
+| Method | Idea | Weakness |
+| --- | --- | --- |
+| Area estimate | count ≈ total area / typical area | biased when sizes vary |
+| Erode, then label | cut the waists | erodes small objects away |
+| Distance-transform peaks | one maximum per object centre | needs a peak window ≈ object size |
+| Peaks + watershed | peaks become markers; grow regions | also gives each object's outline |
+| LoG blob detection (25.3) | curvature maxima in the grey image | needs a scale range and a threshold |
+
+## 3. A worked example by hand
+
+Two small discs joined by a one-pixel waist (white = object):
+
+<PixelMatrix size="sm" numbers={false} values={[[0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,255,255,255,0,0,0,255,255,255,0,0],[0,255,255,255,255,255,0,255,255,255,255,255,0],[0,255,255,255,255,255,255,255,255,255,255,255,0],[0,255,255,255,255,255,0,255,255,255,255,255,0],[0,0,255,255,255,0,0,0,255,255,255,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0]]} />
+
+Labelling gives **1** component. The L1 distance transform (23.5) gives each object pixel its distance to the background:
+
+```text
+0 0 0 0 0 0 0 0 0 0 0 0 0
+0 0 1 1 1 0 0 0 1 1 1 0 0
+0 1 2 2 2 1 0 1 2 2 2 1 0
+0 1 2 3 3 2 1 2 3 3 2 1 0
+0 1 2 2 2 1 0 1 2 2 2 1 0
+0 0 1 1 1 0 0 0 1 1 1 0 0
+0 0 0 0 0 0 0 0 0 0 0 0 0
+```
+
+The waist pixel has distance **1**; each disc has a plateau of **3** in its middle. Keeping pixels that equal the maximum of their 3 × 3 neighbourhood and are at least 2 gives (row, column) (3, 3), (3, 4) and (3, 8), (3, 9): two plateaus, so **2** objects. Erosion with a 3 × 3 square also removes the waist and leaves two small crosses: **2** components.
+
+## 4. The methods on 40 particles
+
+| Method | Setting | Count |
+| --- | --- | --- |
+| Label the mask | 8-connected | 35 |
+| Area estimate | total 10 328 px / median 244 px | 42.3 |
+| Area estimate per component | Σ round(area / 244) | 46 |
+| Erode (elliptical element), label | radius 1 | 35 |
+| | radius 2 | 36 |
+| | radius 3 to 5 | **38** |
+| | radius 6 | 33 |
+| | radius 9 | 14 |
+| Distance-transform peaks (L2), distance > 4 | window 3 × 3 | 42 |
+| | window 5 × 5 to 21 × 21 | **40** |
+
+The area estimate is off because particle sizes vary by a factor of about four. Erosion never reaches 40: a radius large enough to cut the widest waists already erases the smallest particles. Distance-transform peaks give the right count over a wide range of window sizes; only the 3 × 3 window lets a few particles produce two peaks (42; the lab, which rounds distances to 1/8 pixel, shows 43). Each of the 40 peaks lies within 0.75 pixels of a true particle centre.
+
+<LabelLab mode="count" caption="Counting the 40 particles. 'Label the mask' merges touching pairs. 'Erode, then label': move the radius and watch small particles disappear before the merged pairs split. 'Distance-transform peaks': white dots mark the peaks; the count stays at 40 for windows from 5 to 21 pixels."/>
+
+## 5. From peaks to outlines: marker-based watershed
+
+Peaks give the count and the centres, not the outline of each object. To measure each particle (area, diameter), use the peaks as **markers** for a watershed (27.4): each marker grows into its own region, and regions meet along the waists. On the particle image, the 40 peaks as markers give **40** separate regions. This is the standard OpenCV recipe for touching objects: threshold → distance transform → peaks → markers → `cv2.watershed`.
+
+## 6. Counting in production
+
+- **Validate against ground truth.** Count by hand (or with a reference instrument) on a few dozen images and report the error distribution, not one lucky image.
+- **Check the parameters' margin.** A good setting sits in the middle of a range that gives the same count (here a window of 5 to 21 pixels), not at its edge.
+- **Decide a border rule.** Objects cut by the image edge are counted once by exactly one of two neighbouring images, for example only those touching the top and left edges.
+- **Check plausibility.** Reject frames where the count jumps or where component areas are far outside the expected range (clumps, debris, a hand in the field of view).
+
+## What you should remember from 25.4
+
+<Takeaways>
+<Takeaway n={1} title="Labelling undercounts">Touching objects form one component.</Takeaway>
+<Takeaway n={2} title="Erosion">Cuts waists but deletes small objects; rarely exact.</Takeaway>
+<Takeaway n={3} title="Distance peaks">One maximum per object; robust over a wide window range.</Takeaway>
+<Takeaway n={4} title="Watershed">Peaks as markers give each object its own region.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** The total object area is 12 000 px and a single object has about 300 px. Why might "40 objects" be wrong?
+
+<Solution>
+
+The estimate assumes all objects have the same size. If sizes vary, or objects overlap (overlapping area is counted once), the estimate is biased. Use it only as a plausibility check.
+
+</Solution>
+
+**Q2.** Distance-transform peaks with a 3 × 3 window give 42 instead of 40. Why, and what do you change?
+
+<Solution>
+
+Noise in the outline creates small extra maxima inside some particles (a particle has more than one local maximum within 1 pixel). Use a window of roughly the object radius (here 5 to 21 pixels work) or a higher minimum distance.
+
+</Solution>
+
+### Next: 26.1 Hough lines
+
+Module 26 fits models to edge points: lines, circles and ellipses, robust to outliers.
+
+## Code
+
+Three examples: the worked example, the methods on the particle image, and peaks as watershed markers with a check against the true centres.
+
+### 1. The worked example
+
+```python
+import numpy as np
+import cv2
+
+disc = np.array([[0, 1, 1, 1, 0], [1, 1, 1, 1, 1], [1, 1, 1, 1, 1], [1, 1, 1, 1, 1], [0, 1, 1, 1, 0]], np.uint8)
+mask = np.zeros((7, 13), np.uint8)
+mask[1:6, 1:6] = disc
+mask[1:6, 7:12] = disc
+mask[3, 6] = 1                                                      # the waist
+mask *= 255
+
+print("components:", cv2.connectedComponents(mask)[0] - 1)
+dist = cv2.distanceTransform(mask, cv2.DIST_L1, 3)
+print("distance at the waist:", dist[3, 6], "| maximum:", dist.max())
+peaks = (dist == cv2.dilate(dist, np.ones((3, 3), np.uint8))) & (dist >= 2)
+print("peak pixels:", np.argwhere(peaks).tolist())
+print("objects:", cv2.connectedComponents(peaks.astype(np.uint8))[0] - 1)
+eroded = cv2.erode(mask, np.ones((3, 3), np.uint8))
+print("after 3 x 3 erosion:", cv2.connectedComponents(eroded)[0] - 1)
+```
+
+Output:
+
+```text
+components: 1
+distance at the waist: 1.0 | maximum: 3.0
+peak pixels: [[3, 3], [3, 4], [3, 8], [3, 9]]
+objects: 2
+after 3 x 3 erosion: 2
+```
+
+- `cv2.dilate` of the distance image is a running maximum: a pixel equal to its dilated value is a local maximum (or part of a plateau).
+- Labelling the peak pixels joins each plateau into one marker.
+
+### 2. Four counting methods on the particle image
+
+```python
+img = cv2.imread("sample-particles.png", cv2.IMREAD_GRAYSCALE)
+t, mask = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+
+n, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+areas = stats[1:, cv2.CC_STAT_AREA]
+print("Otsu T:", t, "| labelled components:", n - 1)
+print("area estimate:", round(areas.sum() / np.median(areas), 1))
+
+for r in (1, 2, 3, 5, 6, 9):
+    se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+    print("erode radius", r, "->", cv2.connectedComponents(cv2.erode(mask, se))[0] - 1)
+
+def count_peaks(mask, win, min_dist=4):
+    dist = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
+    peaks = (dist == cv2.dilate(dist, np.ones((win, win), np.uint8))) & (dist > min_dist)
+    return cv2.connectedComponentsWithStats(peaks.astype(np.uint8), connectivity=8)
+
+print("peaks:", [(w, count_peaks(mask, w)[0] - 1) for w in (3, 5, 9, 15, 21)])
+```
+
+Output:
+
+```text
+Otsu T: 117.0 | labelled components: 35
+area estimate: 42.3
+erode radius 1 -> 35
+erode radius 2 -> 36
+erode radius 3 -> 38
+erode radius 5 -> 38
+erode radius 6 -> 33
+erode radius 9 -> 14
+peaks: [(3, 42), (5, 40), (9, 40), (15, 40), (21, 40)]
+```
+
+### 3. Peaks as watershed markers, checked against the truth
+
+The true particle centres come from the image generator (`assets/images/generate_samples.py`, seed 25).
+
+```python
+n_pk, markers, _, centres = count_peaks(mask, 9)
+markers = markers.astype(np.int32) + 1                              # background marker 1, particles 2 … 41
+markers[(mask > 0) & (markers == 1)] = 0                            # 0 = unknown: let the watershed decide
+regions = cv2.watershed(cv2.cvtColor(img, cv2.COLOR_GRAY2BGR), markers)
+print("watershed regions:", len(np.unique(regions[regions > 1])))
+
+rng = np.random.default_rng(25)                                     # the generator's particle centres
+truth = []
+while len(truth) < 40:
+    x, y, r = rng.uniform(15, 305), rng.uniform(15, 185), rng.uniform(6, 13)
+    if all(np.hypot(x - a, y - b) > 0.8 * (r + c) for a, b, c in truth):
+        truth.append((x, y, r))
+truth = np.array(truth)
+d = np.hypot(centres[1:, None, 0] - truth[None, :, 0], centres[1:, None, 1] - truth[None, :, 1])
+print("true particles with a peak within 4 px:", int((d.min(axis=0) < 4).sum()), "of", len(truth))
+print("largest peak-to-centre distance:", round(float(d.min(axis=1).max()), 2), "px")
+```
+
+Output:
+
+```text
+watershed regions: 40
+true particles with a peak within 4 px: 40 of 40
+largest peak-to-centre distance: 0.75 px
+```
+
+- The markers image uses 1 for sure background, 2 and up for the objects, and 0 for pixels the watershed should assign. After the call, region borders are −1.
+- Matching detections to the truth (each true object has a detection nearby, each detection is near a true object) is a better test than comparing counts: a missed object and a false detection cancel out in the count.
+
+## OpenCV API notes
+
+- **`cv2.distanceTransform(mask, distanceType, maskSize)`** → float32 distances (23.5). `DIST_L2` with `maskSize=5` (or `DIST_MASK_PRECISE`) for round objects.
+- **Peaks**: `dist == cv2.dilate(dist, kernel)` plus a minimum distance; label the peak pixels to merge plateaus. `cv2.dilate` works on float32.
+- **`cv2.watershed(image_bgr8, markers_int32)`** modifies `markers` in place and returns it: region labels, −1 on borders. The image must be 8-bit, 3 channels.
+- **`cv2.connectedComponentsWithStats`** (25.1) gives the counts, areas and centroids for the plausibility checks.
+- **Speed**: all steps are linear in the number of pixels; a 5 MP image takes milliseconds.
+
+## Where it fails
+
+- **Heavily overlapping objects**: when one object covers most of another, there is no second distance maximum. Use LoG in the grey image (25.3) or deep-learning instance segmentation (55.2).
+- **Elongated objects** (rods, rice grains): the distance transform has a ridge, not a peak, and the ridge may break into several maxima. Use the skeleton (23.4) or shape-specific models.
+- **Objects of very different sizes**: one peak window cannot suit all; use a minimum distance relative to the local object size, or h-maxima (Go deeper).
+- **Clutter and piles**: objects stacked in 3D cannot be counted from one top view; use weight, side views or a different singulation.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Reporting the number of components as the count** without checking areas for merged objects.
+- **Counting raw peak pixels**: a plateau has several equal maxima; label the peaks first.
+- **Validating on one image**: a count that is right on one image may be right by cancellation (one miss plus one false detection).
+- **Forgetting the border rule**: objects cut by the edge are counted twice in overlapping views or tiles.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### h-maxima and dynamics
+
+Plain local maxima react to small bumps. The **h-maxima** transform keeps only maxima that rise at least h above every path to a higher maximum; it is computed by morphological reconstruction (Soille [2], Vincent [3]). Peaks of the distance transform filtered this way are the classical markers for separating touching convex objects, because the "height" of a waist relative to the centres is exactly what distinguishes two touching objects from one irregular object.
+
+### Counting by density
+
+When objects are tiny or crowded (crowds, cells in dense culture), detection fails. Density-estimation methods instead learn a density map whose integral over any region is the count in it (Lempitsky and Zisserman [1]); this is the basis of many deep crowd-counting networks.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why does threshold-and-label undercount?",
+      options: ["The threshold is too high", "Touching objects form one connected component", "Labelling skips small objects", "The image is noisy"],
+      answer: 1,
+      explanation: "Connected pixels get one label, whatever the shape.",
+    },
+    {
+      question: "Why did erosion never give 40 on the particle image?",
+      options: ["Wrong element shape", "A radius large enough to cut wide waists already erases small particles", "Erosion merges objects", "Too few iterations"],
+      answer: 1,
+      explanation: "Radius 3 to 5 gives 38; larger radii lose small particles.",
+    },
+    {
+      question: "Distance-transform peaks are found as…",
+      options: ["Pixels above the mean", "Pixels equal to their local maximum (dilation) and above a minimum distance", "Zero crossings", "Contour points"],
+      answer: 1,
+      explanation: "Then the peak pixels are labelled so plateaus count once.",
+    },
+    {
+      question: "Why is matching detections to true centres better than comparing counts?",
+      options: ["It is faster", "Misses and false detections can cancel in a count", "Counts are always wrong", "It needs no ground truth"],
+      answer: 1,
+      explanation: "A correct count may hide two errors.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A component has area 900 px; single objects of this kind have 280 to 320 px. How many objects does it probably contain, and what would you check next?
+
+<Solution>
+
+900 / 300 ≈ **3** (between 2.8 and 3.2). Check with distance-transform peaks (expect 3) and the shape: three touching objects have two waists.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Two cameras each see half of the conveyor: simulate it by splitting the particle image into the left 160 and the right 160 columns. Count the peaks in each half with `count_peaks(…, 9)` on the half's own mask, and count how many of each half's particle components touch the cut. Do the two halves add up to 40?
+
+<Solution>
+
+```python
+halves = {"left": mask[:, :160], "right": mask[:, 160:]}
+total = 0
+for name, m in halves.items():
+    n_pk = count_peaks(np.ascontiguousarray(m), 9)[0] - 1
+    n, _, st, _ = cv2.connectedComponentsWithStats(np.ascontiguousarray(m), connectivity=8)
+    edge_x = 159 if name == "left" else 0                         # column of the cut in this half
+    cut = int(sum(1 for s in st[1:] if s[0] <= edge_x < s[0] + s[2]))
+    print(name, "peaks:", n_pk, "| components touching the cut:", cut)
+    total += n_pk
+print("sum of both halves:", total)
+```
+
+Output:
+
+```text
+left peaks: 20 | components touching the cut: 3
+right peaks: 23 | components touching the cut: 3
+sum of both halves: 43
+```
+
+No: **43**. The three particles cut by the line are counted in both halves (43 − 3 = 40). A border rule fixes it: for example, each camera counts a cut particle only if its peak lies in the camera's own half of an overlap zone, or only the left camera counts particles touching the cut.
+
+</Solution>
+
+## References
+
+1. V. Lempitsky, A. Zisserman, "Learning to count objects in images", *Advances in Neural Information Processing Systems* 23, 2010.
+2. P. Soille, *Morphological Image Analysis: Principles and Applications*, 2nd ed., Springer, 2003 (regional maxima, h-maxima, reconstruction).
+3. L. Vincent, "Morphological grayscale reconstruction in image analysis: applications and efficient algorithms", *IEEE Trans. Image Processing* 2(2), 176–201, 1993.
+4. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Section 10.7 (watershed with markers).
+5. OpenCV 4.13.0 documentation: `distanceTransform`, `watershed`, `connectedComponentsWithStats`; tutorial "Image Segmentation with Distance Transform and Watershed Algorithm". https://docs.opencv.org/4.13.0/

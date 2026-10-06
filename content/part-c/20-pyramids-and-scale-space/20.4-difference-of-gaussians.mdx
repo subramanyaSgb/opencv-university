@@ -1,0 +1,280 @@
+export const meta = {
+  number: "20.4",
+  title: "Difference of Gaussians",
+  minutes: 20,
+  objectives: [
+    "Compute a difference of Gaussians (DoG) and explain it as a band-pass filter",
+    "Relate DoG to the scale-normalised Laplacian of Gaussian",
+    "Find the size of blobs by searching for the strongest DoG response across scales",
+    "Recognise DoG in SIFT, in edge enhancement and in biological vision",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 20.4 (last chapter of Module 20).
+  Lab: PyramidLab (mode dog).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 20.4 Difference of Gaussians
+
+<Definition term="Difference of Gaussians (DoG)">the image blurred with a Gaussian of σ subtracted from the image blurred with a slightly larger Gaussian kσ (or the other way round). Structures much smaller than σ are removed by both blurs; structures much larger survive both and cancel. What remains is detail of one size range: a band-pass filter.</Definition>
+
+The Laplacian pyramid (20.2) splits an image into bands, one per octave, by subtracting neighbouring levels. The DoG does the same at full resolution and for any pair of scales. It is cheap (two blurs and a subtraction), it is a close approximation of the Laplacian of Gaussian (LoG, 22.3), and it is the detector inside SIFT (34.1): keypoints are the maxima and minima of DoG images across position and scale.
+
+## 1. An analogy
+
+Two sieves with different hole sizes. The first lets through everything smaller than its holes; the second, with bigger holes, a bit more. What passes the second sieve but not the first is exactly the range of sizes between the two holes. A DoG keeps the image structures between two blur sizes.
+
+## 2. Two blurs and a subtraction
+
+<Flow
+  steps={[
+    { label: "Image I", tone: "data" },
+    { label: "Blur with σ and with kσ (k ≈ 1.6)", tone: "process" },
+    { label: "DoG = G(kσ) * I − G(σ) * I", tone: "process" },
+    { label: "Band-pass: blobs and edges of size about σ; flat areas and ramps → 0", tone: "result" },
+  ]}
+/>
+
+On a 1-D bright line of width 3 (values 0, 0, 0, 90, 90, 90, 0, 0, 0): a small blur keeps most of its peak; a larger blur spreads it out and lowers it. Their difference is negative on the line and slightly positive on both sides: a "Mexican hat" response, the same shape as the negative Laplacian of a Gaussian. In 2-D a bright blob gives a strong negative centre (dark in the DoG image) with a positive ring; a dark blob the opposite.
+
+**DoG ≈ LoG.** Because a Gaussian satisfies the heat equation (∂G/∂σ = σ∇²G), the difference of two nearby blurs is proportional to the Laplacian of the blurred image:
+
+```text
+G(kσ) * I − G(σ) * I  ≈  (k − 1) · σ² · ∇²(G(σ) * I)
+```
+
+On a test image the two agree with a correlation of 0.96 (σ = 3, k = 1.6). Lowe chose k = 2^(1/3) ≈ 1.26 for SIFT; Marr and Hildreth [2] suggested k ≈ 1.6 as the best match to the LoG shape.
+
+## 3. Finding the size of blobs
+
+The factor σ² makes the response **scale-normalised**: a blob of radius r gives the same peak response whatever r is, at a scale proportional to r. Searching over σ for the strongest response therefore measures the size of each blob. Three bright discs (radius 4, 8 and 16 pixels), DoG with k = 1.6 for σ from 1 to 20, divided by (k − 1):
+
+| Disc radius r | Best σ | Effective scale σ·√k | r / √2 | Peak response |
+| --- | --- | --- | --- | --- |
+| 4 | 2.25 | 2.85 | 2.83 | 99.9 |
+| 8 | 4.5 | 5.7 | 5.66 | 100.0 |
+| 16 | 9.0 | 11.4 | 11.31 | 100.1 |
+
+The best scale doubles when the radius doubles, and the peak response is the same for all three. The effective scale of the pair (σ, kσ) is about σ·√k, and the LoG theory predicts the maximum at σ = r/√2 [3]: both columns agree to within 1 %. This is automatic scale selection: the detector does not need to know the object size in advance.
+
+<PyramidLab mode="dog" initialSource="scene" caption="The scene blurred with σ and with kσ, and their difference (grey = 0). Small σ keeps fine edges and texture; large σ keeps only large blobs. Change k: values near 1 give a narrow band (and a weak response, raise the gain); k = 1.6 is the classic choice. Try the zone plate: the DoG passes a ring of frequencies and removes the centre and the corners."/>
+
+## 4. Industrial example
+
+DoG filtering is used to find round features of a known size range: solder balls, drilled holes, pores in castings, cells in microscope images, stars. A DoG tuned to the feature size suppresses both the uneven background (too large, cancels) and the sensor noise (too small, removed by both blurs), so a simple threshold on the DoG image finds the features; scanning a few σ values gives each feature's size. OpenCV's `SimpleBlobDetector` (25.3) works differently (thresholds and contour shape), and `cv2.SIFT_create` (34.1) uses a full DoG scale-space internally.
+
+## What you should remember from 20.4
+
+<Takeaways>
+<Takeaway n={1} title="Definition">DoG = G(kσ) * I − G(σ) * I: two blurs, one subtraction.</Takeaway>
+<Takeaway n={2} title="Band-pass">Keeps structures of size about σ; flat areas and smooth ramps give 0.</Takeaway>
+<Takeaway n={3} title="LoG">DoG ≈ (k − 1)σ²∇²G: a cheap, scale-normalised Laplacian of Gaussian.</Takeaway>
+<Takeaway n={4} title="Scale">Strongest response at σ√k ≈ r/√2: automatic blob size estimation (SIFT).</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Which σ (with k = 1.6) should a DoG use to respond best to holes of diameter 20 pixels?
+
+<Solution>
+
+r = 10, σ√k = r/√2 = 7.07, so σ = 7.07 / √1.6 ≈ **5.6**.
+
+</Solution>
+
+**Q2.** What is the DoG of a flat area? Of a linear brightness ramp?
+
+<Solution>
+
+**0** in both cases: a Gaussian blur leaves flat areas and linear ramps unchanged (away from the borders), so both blurred copies are equal.
+
+</Solution>
+
+### Next: Module 21, Image registration
+
+Aligning two images of the same scene: phase correlation, ECC and multi-camera fusion.
+
+## Code
+
+Two examples: DoG against LoG, then scale selection on discs.
+
+### 1. DoG and LoG
+
+```python
+import numpy as np
+import cv2
+
+img = np.full((120, 360), 40, np.float32)
+for cx, r in [(60, 4), (160, 8), (280, 16)]:
+    cv2.circle(img, (cx, 60), r, 220, -1, cv2.LINE_AA)               # three bright discs
+
+def dog(x, sigma, k=1.6):
+    return cv2.GaussianBlur(x, (0, 0), k * sigma) - cv2.GaussianBlur(x, (0, 0), sigma)
+
+s, k = 3, 1.6
+log = cv2.Laplacian(cv2.GaussianBlur(img, (0, 0), s), cv2.CV_32F, ksize=1) * s * s
+d = dog(img, s, k) / (k - 1)
+print("correlation DoG vs sigma^2 * LoG:", round(float(np.corrcoef(log.ravel(), d.ravel())[0, 1]), 4))
+print("DoG at a disc centre, 4 px outside its edge, far away:",
+      [round(float(d[60, x]), 1) for x in (160, 172, 220)])
+```
+
+Output:
+
+```text
+correlation DoG vs sigma^2 * LoG: 0.9612
+DoG at a disc centre, 4 px outside its edge, far away: [-67.7, 21.0, 0.0]
+```
+
+- Negative inside the bright disc, a positive ring just outside it, zero in the flat background: the Mexican hat. Bright blobs give a negative DoG with this sign convention (G(kσ) − G(σ)); SIFT looks for both minima and maxima.
+
+### 2. Scale selection
+
+```python
+import numpy as np
+import cv2
+
+sigmas = np.arange(1, 20.01, 0.25)
+for cx, r in [(60, 4), (160, 8), (280, 16)]:
+    response = np.array([-dog(img, s)[60, cx] / 0.6 for s in sigmas])        # divide by k - 1
+    best = sigmas[int(np.argmax(response))]
+    print(f"radius {r:2d}: best sigma {best:5.2f} | sigma*sqrt(k) {best * np.sqrt(1.6):5.2f}"
+          f" | r/sqrt(2) {r / np.sqrt(2):5.2f} | peak {response.max():5.1f}")
+```
+
+Output:
+
+```text
+radius  4: best sigma  2.25 | sigma*sqrt(k)  2.85 | r/sqrt(2)  2.83 | peak  99.9
+radius  8: best sigma  4.50 | sigma*sqrt(k)  5.69 | r/sqrt(2)  5.66 | peak 100.0
+radius 16: best sigma  9.00 | sigma*sqrt(k) 11.38 | r/sqrt(2) 11.31 | peak 100.1
+```
+
+## OpenCV API notes
+
+OpenCV has no DoG function; compute it from two blurs:
+
+- **`cv2.GaussianBlur(src, (0, 0), sigma)`** twice, in float32 (the DoG is signed and small), then subtract.
+- For a scale series, blur incrementally: G(σ₂) = G(√(σ₂² − σ₁²)) * G(σ₁), which saves time.
+- **`cv2.Laplacian(cv2.GaussianBlur(...), cv2.CV_32F)`** gives the LoG for comparison.
+- **`cv2.SIFT_create()`** builds a full DoG scale-space (3 scales per octave, σ₀ = 1.6) and returns its extrema as keypoints (34.1).
+
+## Where it fails
+
+- **Edges respond too**: DoG responds along edges, not only at blobs; SIFT rejects edge responses with a curvature test (the ratio of the Hessian's eigenvalues).
+- **Elongated features**: a scratch gives a weak, poorly localised DoG response; use ridge or line detectors.
+- **Noise at small σ**: with σ near 1 the DoG is dominated by noise.
+- **Overlapping blobs** of similar size interfere; their responses merge.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Computing the DoG in uint8**: negative values are lost.
+- **Comparing responses across scales without normalisation**: without the (k − 1)σ² factor, small scales always win or lose.
+- **Expecting the best σ to equal the radius**: it is about r/√2 (divided by √k for the smaller σ of the pair).
+- **k too close to 1**: a very weak response that drowns in rounding and noise.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Biological vision
+
+Retinal ganglion cells have centre-surround receptive fields that are well modelled by a difference of two Gaussians: an excitatory centre and a wider inhibitory surround (or the reverse). Marr and Hildreth [2] built their theory of edge detection on this: zero-crossings of the LoG (approximated by DoG) mark edges at each scale. The Mach bands of 10 come from the same mechanism.
+
+### Scale-space theory
+
+Lindeberg [3] showed how scale-normalised derivatives (multiplied by σ to the power of their order) make responses comparable across scales, and derived where the maximum of the normalised LoG lies for blobs of each shape; σ = r/√2 for a disc's centre in 2-D is one such result. The same theory gives scale selection for edges and ridges with other normalisations.
+
+### SIFT's scale-space
+
+Lowe [1] blurs each octave with σ₀ · 2^(s/3), s = 0 … 5, takes adjacent differences (5 DoG images per octave), and keeps points that are larger or smaller than all 26 neighbours in position and scale. Each keypoint then has a position, a scale and (from gradients) an orientation (34.1).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A DoG is…",
+      options: ["A low-pass filter", "A band-pass filter", "A high-pass filter only", "A median filter"],
+      answer: 1,
+      explanation: "It keeps structures between the two blur sizes.",
+    },
+    {
+      question: "DoG approximates which operator?",
+      options: ["Sobel", "The scale-normalised Laplacian of Gaussian", "The median", "The Fourier transform"],
+      answer: 1,
+      explanation: "(k − 1)σ²∇²G, from the heat equation.",
+    },
+    {
+      question: "A disc of radius 10 gives its strongest normalised DoG response at an effective scale of about…",
+      options: ["10", "7.1", "20", "1.6"],
+      answer: 1,
+      explanation: "r/√2 ≈ 7.07.",
+    },
+    {
+      question: "The DoG of a linear brightness ramp is…",
+      options: ["The ramp", "Zero", "A constant", "Noise"],
+      answer: 1,
+      explanation: "Gaussian blurs leave linear ramps unchanged, so both copies are equal.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+SIFT uses σ₀ = 1.6 and 3 scales per octave (k = 2^(1/3)). List the blur σ of the six Gaussian images of the first octave (s = 0 … 5).
+
+<Solution>
+
+1.6 · 2^(s/3): **1.60, 2.02, 2.54, 3.20, 4.03, 5.08**. The fourth (3.20) is twice the first; it starts the next octave after halving the image.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Detect the three discs automatically: compute normalised DoG images for σ = 1 … 12 (step 0.5), take the maximum of −DoG over all scales at every pixel, and report the positions and scales of the three strongest local maxima.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+sig = np.arange(1, 12.01, 0.5)
+stack = np.stack([-dog(img, s) / 0.6 for s in sig])                   # (scales, h, w)
+best = stack.max(axis=0)
+peaks = (best == cv2.dilate(best, np.ones((9, 9), np.uint8))) & (best > 50)   # 2-D local maxima above 50
+ys, xs = np.nonzero(peaks)
+for y, x in sorted(zip(ys, xs), key=lambda p: -best[p])[:3]:
+    s = sig[int(np.argmax(stack[:, y, x]))]
+    print(f"blob at ({x}, {y}) | sigma {s:.1f} | radius estimate {s * np.sqrt(1.6) * np.sqrt(2):.1f}")
+```
+
+Output:
+
+```text
+blob at (280, 60) | sigma 9.0 | radius estimate 16.1
+blob at (160, 60) | sigma 4.5 | radius estimate 8.0
+blob at (60, 60) | sigma 2.5 | radius estimate 4.5
+```
+
+All three discs are found at their centres, and the radius estimate r ≈ σ·√k·√2 is within half a pixel. The coarse σ step (0.5) limits the accuracy for the smallest disc.
+
+</Solution>
+
+## References
+
+1. D. G. Lowe, "Distinctive image features from scale-invariant keypoints", *Int. J. Computer Vision* 60(2), 91–110, 2004.
+2. D. Marr, E. Hildreth, "Theory of edge detection", *Proc. Royal Society of London B* 207, 187–217, 1980.
+3. T. Lindeberg, "Feature detection with automatic scale selection", *Int. J. Computer Vision* 30(2), 79–116, 1998.
+4. OpenCV 4.13.0 documentation: `GaussianBlur`, `Laplacian`, `SIFT`. https://docs.opencv.org/4.13.0/

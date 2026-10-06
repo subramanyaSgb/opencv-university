@@ -1,0 +1,278 @@
+export const meta = {
+  number: "17.4",
+  title: "Separable kernels",
+  minutes: 20,
+  objectives: [
+    "Recognise a separable kernel as the outer product of a column and a row",
+    "Filter with two 1-D passes (sepFilter2D) and get the same result as the 2-D kernel",
+    "Test separability with the SVD and approximate non-separable kernels",
+    "Estimate the speed-up: 2k instead of k² operations per pixel",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 17.4 (Module 17 plan).
+  New lab: SepLab (lib/sep-ops.ts: Jacobi SVD, rank tests).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 17.4 Separable kernels
+
+<Definition term="Separable kernel">a 2-D kernel that equals a column vector times a row vector (an outer product). Filtering with it is the same as filtering every row with the 1-D row kernel and then every column with the 1-D column kernel, which needs far fewer operations.</Definition>
+
+A 15 × 15 Gaussian needs 225 multiplications per pixel done directly, but only 30 as two passes. Box filters, Gaussians and Sobel kernels are all separable, which is why OpenCV can blur large images in real time. Knowing which kernels separate, and how to check, lets you write fast filters and understand why some shapes (a round disk) cost more.
+
+## 1. An analogy
+
+Painting a wall in a grid pattern: you can paint each square by hand (k² strokes), or roll horizontal stripes and then vertical stripes (2k strokes). If the pattern is "stripes times stripes", the two passes give exactly the same wall.
+
+## 2. Outer products
+
+<Flow
+  steps={[
+    { label: "2-D kernel K (k × k)", tone: "data" },
+    { label: "Separable if K = c · rᵀ (column times row)", tone: "process" },
+    { label: "Pass 1: filter rows with r; pass 2: filter columns with c", tone: "process" },
+    { label: "Same result, 2k instead of k² operations", tone: "result" },
+  ]}
+/>
+
+| Kernel | Column | Row |
+| --- | --- | --- |
+| Box 3 × 3 (÷ 9) | (1, 1, 1)ᵀ / 3 | (1, 1, 1) / 3 |
+| Gaussian 3 × 3 (÷ 16) | (1, 2, 1)ᵀ / 4 | (1, 2, 1) / 4 |
+| Sobel x | (1, 2, 1)ᵀ (smooth vertically) | (−1, 0, 1) (differentiate horizontally) |
+| Gaussian 5 × 5, σ = 1 | g = (0.0545, 0.2442, 0.4026, 0.2442, 0.0545)ᵀ | g |
+
+Real numbers: the middle row of the 5 × 5 Gaussian is 0.4026 · g = (0.0219, 0.0983, 0.1621, 0.0983, 0.0219), exactly what `getGaussianKernel(5, 1)` times itself gives.
+
+<SepLab caption="Choose a kernel and size. A separable kernel has one non-zero singular value; its two 1-D factors appear below it. The 4-neighbour Laplacian has two, a round disk several: they cannot be split into one pass of each." />
+
+## 3. Testing separability
+
+A matrix is an outer product exactly when it has **rank 1**: in its singular value decomposition K = Σ σᵢ uᵢ vᵢᵀ only σ₁ is non-zero, and then c = σ₁ u₁, r = v₁ (5.7).
+
+| Kernel | Singular values | Separable? |
+| --- | --- | --- |
+| Sobel x | 3.464, 0, 0 | yes |
+| Laplacian (0 1 0; 1 −4 1; 0 1 0) | 4.449, 0.449, 0 | no, but it is the sum of two separable kernels (∂²/∂x² + ∂²/∂y²) |
+| Disk 7 × 7 | 5.412, 1.505, 1.203, 0, … | no; the best single separable approximation keeps 88.8 % of its energy |
+
+Rank-2 or rank-3 kernels can still be computed as a sum of 2 or 3 separable passes, often cheaper than the full 2-D filter for large sizes.
+
+## 4. Industrial example
+
+A display-panel inspection removes the slowly varying background with a 61 × 61 Gaussian before searching for mura (faint, blotchy brightness defects) on 12-megapixel images. As a direct 2-D filter that would be 3 721 multiplications per pixel; as two 1-D passes it is 122, a 30-fold reduction. `GaussianBlur` does this automatically. When a later version used a round (disk) averaging window "to avoid square artefacts", processing time jumped, until the team replaced it with the separable Gaussian, which is round by nature (its 2-D shape is circularly symmetric).
+
+## What you should remember from 17.4
+
+<Takeaways>
+<Takeaway n={1} title="Separable">K = column · row; filter rows, then columns.</Takeaway>
+<Takeaway n={2} title="Examples">Box, Gaussian, Sobel: separable. Disk, Laplacian: not (Laplacian = sum of two).</Takeaway>
+<Takeaway n={3} title="Test">Rank 1 in the SVD; factors from σ₁, u₁, v₁.</Takeaway>
+<Takeaway n={4} title="Speed">2k instead of k² per pixel; sepFilter2D, GaussianBlur, blur use it.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Write the 3 × 3 kernel (1, 2, 1)ᵀ · (1, 0, −1).
+
+<Solution>
+
+(1 0 −1; 2 0 −2; 1 0 −1): a Sobel x kernel with the opposite sign.
+
+</Solution>
+
+**Q2.** How many multiplications per pixel for a 21 × 21 separable kernel, directly and in two passes?
+
+<Solution>
+
+Directly 441; two passes **42**.
+
+</Solution>
+
+### Next: 17.5 Integral images
+
+Box sums of any size in constant time.
+
+## Code
+
+Two examples: two 1-D passes vs the 2-D kernel, then the SVD test.
+
+### 1. sepFilter2D equals the 2-D kernel
+
+```python
+import numpy as np
+import cv2
+
+g = cv2.getGaussianKernel(5, 1.0)                     # 5 x 1 column
+K = g @ g.T                                            # outer product: 5 x 5
+print("g:", np.round(g.ravel(), 4).tolist())
+print("middle row of K:", np.round(K[2], 4).tolist())
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+full = cv2.filter2D(img, -1, K)                        # 25 multiplications per pixel
+two_pass = cv2.sepFilter2D(img, -1, g, g)              # 5 + 5
+blur = cv2.GaussianBlur(img, (5, 5), 1.0)
+print("largest difference 2-D vs two passes:", float(np.abs(full - two_pass).max()) < 1e-3,
+      "| vs GaussianBlur:", float(np.abs(full - blur).max()) < 1e-3)
+```
+
+Output:
+
+```text
+g: [0.0545, 0.2442, 0.4026, 0.2442, 0.0545]
+middle row of K: [0.0219, 0.0983, 0.1621, 0.0983, 0.0219]
+largest difference 2-D vs two passes: True | vs GaussianBlur: True
+```
+
+- The results agree to within float rounding (below 0.0001 grey levels).
+
+### 2. Is it separable? Ask the SVD
+
+```python
+import numpy as np
+import cv2
+
+kernels = {
+    "Sobel x": np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], float),
+    "Laplacian": np.array([[0, 1, 0], [1, -4, 1], [0, 1, 0]], float),
+    "disk 7x7": cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)).astype(float),
+}
+for name, k in kernels.items():
+    U, S, Vt = np.linalg.svd(k)
+    share = S[0] ** 2 / (S ** 2).sum()
+    print(f"{name:9s} singular values {np.round(S[S > 1e-9], 3).tolist()} | rank-1 share {share:.4f}")
+
+U, S, Vt = np.linalg.svd(kernels["Sobel x"])
+col, row = U[:, 0] * np.sqrt(S[0]), Vt[0] * np.sqrt(S[0])
+print("Sobel factors (up to sign and scale):", np.round(col / col[0], 3).tolist(), np.round(row / row[0] * -1, 3).tolist())
+```
+
+Output:
+
+```text
+Sobel x   singular values [3.464] | rank-1 share 1.0000
+Laplacian singular values [4.449, 0.449] | rank-1 share 0.9899
+disk 7x7  singular values [5.412, 1.505, 1.203] | rank-1 share 0.8875
+Sobel factors (up to sign and scale): [1.0, 2.0, 1.0] [-1.0, -0.0, 1.0]
+```
+
+- The SVD recovers the Sobel factors (1, 2, 1) and (−1, 0, 1) up to scale and sign; for the disk, a single separable pass would be a poor substitute.
+
+## OpenCV API notes
+
+**`cv2.sepFilter2D(src, ddepth, kernelX, kernelY, anchor, delta, borderType)`**: row kernel first, then column kernel.
+
+**Separable by construction**: `cv2.blur` / `boxFilter`, `cv2.GaussianBlur`, `cv2.Sobel`, `cv2.Scharr`. **Kernel builders**: `cv2.getGaussianKernel(ksize, sigma)`, `cv2.getDerivKernels(dx, dy, ksize)` (returns the 1-D pair).
+
+## Where it fails
+
+- **Round or arbitrary shapes** (disk, ring, oriented kernels at arbitrary angles) are not rank 1.
+- **Approximating** by rank-1 changes the result; check the energy share and the visual effect.
+- **Very small kernels** (3 × 3): the overhead of two passes can eat the gain.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Building large Gaussian kernels in 2-D** and calling `filter2D` (slow) instead of `GaussianBlur` / `sepFilter2D`.
+- **Swapping kernelX and kernelY** in `sepFilter2D` for asymmetric kernels (rotates a derivative by 90°).
+- **Assuming every symmetric kernel is separable** (the disk is symmetric but not separable).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The Gaussian's special property
+
+The 2-D Gaussian is the only kernel that is both circularly symmetric and separable: exp(−(x² + y²)/2σ²) = exp(−x²/2σ²) · exp(−y²/2σ²). This makes it the natural smoothing kernel for scale-space (Part C, 20) [1].
+
+### Low-rank approximations
+
+Any kernel can be written as a sum of rank-1 kernels from its SVD; keeping the largest few gives a fast approximate filter. Steerable filters use a related idea: a small set of separable basis filters combined with angle-dependent weights produces oriented filters at any angle [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A kernel is separable when…",
+      options: ["It is symmetric", "It is an outer product of a column and a row (rank 1)", "Its sum is 1", "It is 3 × 3"],
+      answer: 1,
+      explanation: "Rank 1 means K = c · rᵀ.",
+    },
+    {
+      question: "Which kernel is not separable?",
+      options: ["Box", "Gaussian", "Sobel", "Disk"],
+      answer: 3,
+      explanation: "A round disk has several non-zero singular values.",
+    },
+    {
+      question: "Multiplications per pixel for a separable 9 × 9 kernel done in two passes?",
+      options: ["9", "18", "81", "162"],
+      answer: 1,
+      explanation: "9 for the rows, 9 for the columns.",
+    },
+    {
+      question: "Which OpenCV function applies a row kernel and then a column kernel?",
+      options: ["filter2D", "sepFilter2D", "remap", "blendLinear"],
+      answer: 1,
+      explanation: "cv2.sepFilter2D(src, ddepth, kernelX, kernelY).",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Is (2 4 2; 1 2 1; 3 6 3) separable? If so, give the factors.
+
+<Solution>
+
+Each row is a multiple of (1, 2, 1): rows are 2×, 1×, 3×. So K = (2, 1, 3)ᵀ · (1, 2, 1): **separable**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Time a 31 × 31 Gaussian on the scene with `filter2D` (full 2-D kernel) and `sepFilter2D` over 50 runs.
+
+<Solution>
+
+```python
+# Timings depend on the computer; the output is not fixed.
+import time
+import numpy as np
+import cv2
+
+g = cv2.getGaussianKernel(31, 5.0)
+K = g @ g.T
+for name, f in [("filter2D 31x31", lambda: cv2.filter2D(img, -1, K)), ("sepFilter2D", lambda: cv2.sepFilter2D(img, -1, g, g))]:
+    t0 = time.perf_counter()
+    for _ in range(50):
+        f()
+    print(f"{name:15s} {(time.perf_counter() - t0) / 50 * 1000:.2f} ms")
+```
+
+Typical output:
+
+```text
+filter2D 31x31  1.10 ms
+sepFilter2D     0.25 ms
+```
+
+`filter2D` already switches to a DFT-based method for large kernels, so the gap is smaller than 961 vs 62 operations suggests; separable filtering is still several times faster.
+
+</Solution>
+
+## References
+
+1. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022: Section 3.2.1 (separable filtering).
+2. W. T. Freeman, E. H. Adelson, "The design and use of steerable filters", *IEEE Transactions on Pattern Analysis and Machine Intelligence* 13(9), 891–906, 1991.
+3. OpenCV 4.13.0 documentation: `sepFilter2D`, `getGaussianKernel`, `getDerivKernels`, `GaussianBlur`. https://docs.opencv.org/4.13.0/

@@ -1,0 +1,307 @@
+export const meta = {
+  number: "27.2",
+  title: "K-means",
+  minutes: 25,
+  objectives: [
+    "Run the k-means steps (assign, update) by hand",
+    "Segment an image by clustering pixel colours with cv2.kmeans",
+    "Choose the feature space (BGR, Lab, chromaticity, position) and K",
+    "Use k-means for colour quantisation and know its limits",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 27.2 (Module 27).
+  Lab: SegmentLab mode "kmeans".
+  Reference tail: all examples are deterministic (cv2.setRNGSeed) and compared automatically.
+*/}
+
+# 27.2 K-means
+
+<Definition term="K-means clustering">a method that splits a set of points into K groups so that each point belongs to the group with the nearest centre, and each centre is the mean of its group. For images, the points are pixels described by their colour (and sometimes position).</Definition>
+
+Region growing (27.1) needs seeds. K-means needs none: it looks at all pixel colours at once and finds K typical colours. Every pixel then gets the label of its nearest typical colour. It is the most common way to quantise colours, to separate a few distinctly coloured materials, and a building block of SLIC superpixels (27.6) and many other methods.
+
+## 1. An analogy
+
+Placing K ice-cream stands on a beach. Each sunbather walks to the nearest stand. Then each stand moves to the middle of its customers. Some sunbathers now have a different nearest stand, so they switch; the stands move again. After a few rounds nobody switches: every stand sits in the middle of its own crowd.
+
+## 2. The algorithm
+
+<Flow
+  steps={[
+    { label: "Pixels as feature vectors (e.g. L*, a*, b*)", tone: "data" },
+    { label: "Choose K initial centres (k-means++)", tone: "process" },
+    { label: "Assign: each pixel → nearest centre", tone: "process" },
+    { label: "Update: each centre → mean of its pixels", tone: "process" },
+    { label: "Repeat until stable → K clusters", tone: "result" },
+  ]}
+/>
+
+Each round can only lower the **compactness**, the sum of squared distances from pixels to their centres, so the method always converges, but possibly to a **local** minimum that depends on the starting centres. Two remedies, both in `cv2.kmeans`: the k-means++ start (Arthur and Vassilvitskii 2007 [2]), which spreads the first centres apart, and several attempts, keeping the most compact result.
+
+## 3. A worked example by hand
+
+Six grey values: 2, 4, 5, 10, 11, 12; K = 2. Start with the labels A = 2 and B = all the others.
+
+| Round | Centre A | Centre B | Assignment |
+| --- | --- | --- | --- |
+| start | 2 | (4 + 5 + 10 + 11 + 12) / 5 = 8.4 | 4: \|4 − 2\| = 2 < \|4 − 8.4\| = 4.4 → A; 5: 3 < 3.4 → A; 10, 11, 12 → B |
+| 1 | (2 + 4 + 5) / 3 = 3.67 | (10 + 11 + 12) / 3 = 11 | no change: stop |
+
+Compactness: (2 − 3.67)² + (4 − 3.67)² + (5 − 3.67)² + (10 − 11)² + 0 + (12 − 11)² = 2.78 + 0.11 + 1.78 + 2 = **6.67**. `cv2.kmeans` started from the same labels returns exactly this.
+
+## 4. Which features?
+
+On the test scene (5 objects, uneven light), K-means with K = 6 should find 6 groups. Scored by the best IoU any cluster reaches for each object:
+
+| Features | Cloth | Orange | Red | Crimson | Green box | Label |
+| --- | --- | --- | --- | --- | --- | --- |
+| B, G, R | 0.51 | 0.70 | 0.44 | 0.35 | 0.89 | 0.86 |
+| L*, a*, b* | 0.54 | 0.74 | 0.45 | 0.36 | **1.00** | 0.87 |
+| a*, b* only | **0.99** | **0.96** | **0.96** | **0.96** | **1.00** | 0.87 |
+| L*a*b* + 0.5 · (x, y) | 0.38 | 0.62 | 0.38 | 0.12 | 1.00 | 0.87 |
+
+With brightness included, k-means spends clusters on the **light gradient**: the cloth is split into a bright left and a dark right part, and the red and crimson discs share one cluster. Dropping L* (keeping only the chromaticity a*, b*, see 10.4) makes the clusters follow material colour, and every object gets its own cluster. The label stays at 0.87 because its dark text is a different colour. Adding position makes clusters compact blobs in the image, which here cuts across objects.
+
+K matters too. With a*, b* only: K = 4 merges the red and crimson discs (0.55 / 0.45) and the label with the orange; K = 5 separates the label; K = 6 gets everything; K = 7 splits the orange into two shades (0.59).
+
+<SegmentLab mode="kmeans" caption="Each pixel painted with its cluster's mean colour. Start with L*, a*, b* and K = 6: the cloth is split by brightness and the two discs merge. Switch to 'a*, b* only'. Then change K and the number of iterations; the compactness readout shows how fast k-means converges."/>
+
+## 5. Colour quantisation
+
+K-means with K colours is also the standard way to reduce an image to a small palette: replace each pixel by its centre. On the scene, 8 colours in B, G, R keep the picture recognisable at 3 bits per pixel. Uses: palette images (GIF/PNG-8), simple cartoon effects, and reducing the number of colours before a histogram or a lookup.
+
+## 6. Industrial use
+
+- **Material separation**: grain, tablets, fibres or ores of a few distinct colours.
+- **Colour sorting**: learning K reference colours from good samples, then classifying pixels by the nearest centre.
+- **Defect maps**: clusters of unusual colours that differ from all normal-surface centres.
+- **Pre-segmentation** for SLIC (27.6) and for training data (a quick colour mask to start labelling).
+
+## What you should remember from 27.2
+
+<Takeaways>
+<Takeaway n={1} title="Assign, update">Nearest centre, then mean; repeat until stable.</Takeaway>
+<Takeaway n={2} title="Local minimum">Use k-means++ and several attempts.</Takeaway>
+<Takeaway n={3} title="Features decide">Remove lighting (chromaticity) to cluster materials, not shading.</Takeaway>
+<Takeaway n={4} title="K is yours">K-means cannot tell you K; try a few and check.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Values 1, 2, 9, 10 and K = 2 starting with centres 1 and 2. Final centres?
+
+<Solution>
+
+Assign: 1 → 1; 2, 9, 10 → 2 (nearer). Update: 1 and 7. Assign: 1, 2 → 1 (2 is 1 from 1, 5 from 7); 9, 10 → 7. Update: **1.5 and 9.5**. Stable.
+
+</Solution>
+
+**Q2.** K-means splits one evenly coloured object into a bright and a dark half. Why, and the fix?
+
+<Solution>
+
+The features include brightness, and the object is unevenly lit. Use chromaticity (a*, b*, or normalised r, g), or correct the illumination first (15.2).
+
+</Solution>
+
+### Next: 27.3 Mean shift
+
+A clustering method that finds the number of clusters by itself.
+
+## Code
+
+Three examples: the worked example, the scene in three feature spaces, and colour quantisation.
+
+### 1. The worked example
+
+```python
+import numpy as np
+import cv2
+
+values = np.array([[2], [4], [5], [10], [11], [12]], np.float32)       # one row per sample
+start = np.array([[0], [1], [1], [1], [1], [1]], np.int32)             # initial labels: A = {2}, B = the rest
+criteria = (cv2.TERM_CRITERIA_MAX_ITER, 10, 0)
+compactness, labels, centres = cv2.kmeans(values, 2, start, criteria, 1, cv2.KMEANS_USE_INITIAL_LABELS)
+print("labels:", labels.ravel().tolist(), "| centres:", np.round(centres.ravel().astype(float), 2).tolist(), "| compactness:", round(compactness, 2))
+```
+
+Output:
+
+```text
+labels: [0, 0, 0, 1, 1, 1] | centres: [3.67, 11.0] | compactness: 6.67
+```
+
+- Samples are rows of a float32 array (N × features).
+- `cv2.kmeans` returns (compactness, labels N × 1, centres K × features).
+
+### 2. Three feature spaces on the scene
+
+```python
+scene = cv2.imread("sample-seg.png")
+ids = cv2.imread("sample-seg-ids.png", cv2.IMREAD_GRAYSCALE)
+h, w = ids.shape
+lab = cv2.cvtColor(scene, cv2.COLOR_BGR2Lab)
+criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 0.5)
+
+def best_iou(labels):
+    return [round(float(max(((labels == c) & (ids == k)).sum() / ((labels == c) | (ids == k)).sum()
+                            for c in np.unique(labels))), 2) for k in range(6)]
+
+for name, feats in [("BGR", scene.reshape(-1, 3)), ("Lab", lab.reshape(-1, 3)), ("ab", lab[..., 1:].reshape(-1, 2))]:
+    cv2.setRNGSeed(27)                                                  # repeatable k-means++ start
+    comp, labels, centres = cv2.kmeans(feats.astype(np.float32), 6, None, criteria, 5, cv2.KMEANS_PP_CENTERS)
+    print(name, best_iou(labels.reshape(h, w)))
+```
+
+Output:
+
+```text
+BGR [0.51, 0.7, 0.44, 0.35, 0.89, 0.86]
+Lab [0.54, 0.74, 0.45, 0.36, 1.0, 0.87]
+ab [0.99, 0.96, 0.96, 0.96, 1.0, 0.87]
+```
+
+- `attempts = 5`: k-means runs 5 times from different starts and keeps the most compact result.
+
+### 3. Colour quantisation
+
+```python
+for K in (2, 4, 8, 16):
+    cv2.setRNGSeed(1)
+    comp, labels, centres = cv2.kmeans(scene.reshape(-1, 3).astype(np.float32), K, None, criteria, 3, cv2.KMEANS_PP_CENTERS)
+    quant = np.uint8(np.rint(centres))[labels.ravel()].reshape(scene.shape)   # each pixel -> its centre colour
+    print(f"K {K:2d}: PSNR {cv2.PSNR(scene, quant):.1f} dB")
+```
+
+Output:
+
+```text
+K  2: PSNR 18.9 dB
+K  4: PSNR 22.4 dB
+K  8: PSNR 27.8 dB
+K 16: PSNR 33.5 dB
+```
+
+- Each doubling of K adds about 3 to 6 dB here; 16 colours (4 bits per pixel) are hard to tell from the original at this size.
+
+## OpenCV API notes
+
+- **`cv2.kmeans(data, K, bestLabels, criteria, attempts, flags, centers=None)`** → (compactness, labels, centers). `data`: float32, one sample per row.
+- **`flags`**: `cv2.KMEANS_PP_CENTERS` (k-means++), `cv2.KMEANS_RANDOM_CENTERS`, `cv2.KMEANS_USE_INITIAL_LABELS` (start from `bestLabels`, first attempt only).
+- **`criteria`**: (type, max_iter, epsilon); stops when centres move less than epsilon or after max_iter.
+- **Repeatability**: the random start uses OpenCV's RNG; call `cv2.setRNGSeed(n)` before `kmeans` for repeatable results.
+- **Speed**: O(N · K · features · iterations); for large images, fit on a random subset of pixels, then assign all pixels to the nearest centre.
+
+## Where it fails
+
+- **Non-spherical clusters**: k-means prefers round clusters of similar size in feature space; elongated colour distributions (shading along one hue) get split.
+- **Unknown K**: there is no built-in way to choose it.
+- **Spatial coherence**: pixels are clustered independently; noise gives speckled labels. Smooth first, or post-process with morphology or connected components.
+- **Similar colours**: objects of the same colour get the same label; use connected components to separate them.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Passing uint8 data**: `cv2.kmeans` needs float32.
+- **Passing an H × W × 3 image**: reshape to (H·W) × 3 first, and the labels back to H × W.
+- **Clustering BGR on unevenly lit scenes**: clusters follow the light.
+- **Comparing label numbers across runs**: cluster numbers are arbitrary; match them by centre colour.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Lloyd's algorithm and k-means++
+
+The assign–update iteration is Lloyd's algorithm [1]; it minimises the within-cluster sum of squares, an NP-hard problem in general, so only a local minimum is guaranteed. k-means++ [2] chooses each new initial centre with probability proportional to its squared distance from the nearest centre already chosen; this gives an expected result within O(log K) of the optimum before any iteration.
+
+### Choosing K
+
+Common heuristics: the "elbow" of compactness against K, the silhouette score, or information criteria with a probabilistic model (Gaussian mixtures, `cv2.ml.EM`). For images, the right K usually comes from the application: how many materials should be separated.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The two k-means steps are…",
+      options: ["Split and merge", "Assign to nearest centre, update centres to means", "Blur and threshold", "Seed and grow"],
+      answer: 1,
+      explanation: "Repeated until the assignment no longer changes.",
+    },
+    {
+      question: "Why use several attempts?",
+      options: ["Speed", "K-means can end in a local minimum that depends on the start", "To find K", "To smooth labels"],
+      answer: 1,
+      explanation: "OpenCV keeps the most compact attempt.",
+    },
+    {
+      question: "On the unevenly lit scene, which features separated all objects?",
+      options: ["B, G, R", "L*, a*, b*", "a*, b* only", "Position only"],
+      answer: 2,
+      explanation: "Removing lightness removes the light gradient.",
+    },
+    {
+      question: "cv2.kmeans needs data as…",
+      options: ["uint8 H × W × 3", "float32 N × features", "A list of tuples", "float64 K × N"],
+      answer: 1,
+      explanation: "One sample per row, float32.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Points (0, 0), (0, 2), (6, 0), (6, 2) and K = 2 with initial centres (0, 1) and (6, 1). What are the clusters and the compactness?
+
+<Solution>
+
+The two left points go to (0, 1), the two right points to (6, 1); the means stay (0, 1) and (6, 1). Each point is 1 from its centre: compactness = 4 × 1² = **4**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Plot nothing, but print the compactness for K = 2 … 8 with a*, b* features. Where is the "elbow"?
+
+<Solution>
+
+```python
+ab = lab[..., 1:].reshape(-1, 2).astype(np.float32)
+for K in range(2, 9):
+    cv2.setRNGSeed(27)
+    comp, _, _ = cv2.kmeans(ab, K, None, criteria, 5, cv2.KMEANS_PP_CENTERS)
+    print(K, round(comp / 1e3))
+```
+
+Output:
+
+```text
+2 21165
+3 6831
+4 3709
+5 1831
+6 1171
+7 911
+8 673
+```
+
+The compactness falls steeply up to K = 5 (by a factor of 1.8 to 3.1 per step) and then flattens (1 831 → 1 171 → 911): the elbow is at about **5 to 6**, matching the 6 coloured materials (the red and crimson discs are the last pair to separate).
+
+</Solution>
+
+## References
+
+1. S. P. Lloyd, "Least squares quantization in PCM", *IEEE Trans. Information Theory* 28(2), 129–137, 1982 (Bell Labs report 1957).
+2. D. Arthur, S. Vassilvitskii, "k-means++: the advantages of careful seeding", *Proc. ACM-SIAM Symposium on Discrete Algorithms*, 1027–1035, 2007.
+3. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022, Section 7.5 (segmentation).
+4. OpenCV 4.13.0 documentation: `kmeans`, `KmeansFlags`, `setRNGSeed`. https://docs.opencv.org/4.13.0/

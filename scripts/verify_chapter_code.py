@@ -7,6 +7,10 @@ Usage (with opencv-python 4.13.0.92 installed):
 Only blocks from the "## Code" section onward are run (lesson snippets are illustrative).
 Blocks run in order in one namespace (later blocks may use earlier variables),
 inside a temporary folder that holds a copy of assets/images/generated/*.
+Blocks whose first line starts with "# Needs a desktop" (GUI windows, cameras), "# Needs a CUDA" or
+"# Needs a GPU" (CUDA builds, OpenCL devices) or any other "# Needs …" marker (a model file to download) are skipped.
+Blocks whose first line starts with "# Needs opencv-contrib" run only when the contrib modules are
+installed (opencv-contrib-python-headless==4.13.0.92); otherwise they are skipped with a note.
 """
 import contextlib
 import io
@@ -38,6 +42,13 @@ def main(chapter: str) -> int:
         with contextlib.chdir(tmp):
             for i, b in enumerate(blocks):
                 if b.group(1) != "python":
+                    continue
+                first = b.group(2).lstrip().splitlines()[0]
+                if first.startswith("# Needs ") and not first.startswith("# Needs opencv-contrib"):
+                    print(f"SKIP  ({first[2:40]}) {b.group(2).strip().splitlines()[1][:50]}")
+                    continue
+                if b.group(2).lstrip().startswith("# Needs opencv-contrib") and not hasattr(ns.get("cv2") or __import__("cv2"), "ximgproc"):
+                    print(f"SKIP  (needs opencv-contrib) {b.group(2).strip().splitlines()[1][:50]}")
                     continue
                 buf = io.StringIO()
                 with contextlib.redirect_stdout(buf):

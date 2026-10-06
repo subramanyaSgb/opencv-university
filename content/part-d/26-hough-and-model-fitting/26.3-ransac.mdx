@@ -1,0 +1,340 @@
+export const meta = {
+  number: "26.3",
+  title: "RANSAC",
+  minutes: 25,
+  objectives: [
+    "Explain why least squares fails when some points do not belong to the model",
+    "Run RANSAC by hand: sample, fit, count inliers, keep the best, refit",
+    "Compute the number of iterations from the inlier ratio and the sample size",
+    "Compare RANSAC with robust M-estimators (cv2.fitLine with Huber)",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 26.3 (Module 26).
+  Lab: HoughLab mode "ransac".
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 26.3 RANSAC
+
+<Definition term="RANSAC (random sample consensus)">a method that fits a model to data that contains many wrong points: it repeatedly fits the model to a tiny random sample, counts how many points agree with it, and keeps the model with the most agreement.</Definition>
+
+Edge points rarely belong to only one object. Points on a part's edge are mixed with points from scratches, shadows, text and other parts. Least squares (5.6) gives every point a say, so a few wrong points, called **outliers**, pull the result away. RANSAC (Fischler and Bolles 1981 [1]) ignores them: it only listens to the largest group of points that agree.
+
+## 1. An analogy
+
+A crowd is asked "where is north?" Most people point the same way; some point randomly. Averaging all arms gives a direction nobody pointed. RANSAC instead picks one person at random, counts how many others point within a few degrees of them, repeats a few times, and goes with the person who had the most agreement. Then it averages only that group.
+
+## 2. The algorithm
+
+<Flow
+  steps={[
+    { label: "Points (with outliers)", tone: "data" },
+    { label: "Pick a minimal random sample (2 points for a line)", tone: "process" },
+    { label: "Fit the model to the sample", tone: "process" },
+    { label: "Count inliers: points within distance t", tone: "process" },
+    { label: "Repeat N times; keep the most inliers", tone: "process" },
+    { label: "Refit by least squares on the best inliers", tone: "result" },
+  ]}
+/>
+
+Three choices: the **sample size** s (the minimum to define the model: 2 for a line, 3 for a circle, 4 for a homography), the **inlier threshold** t (about 2 to 3 times the noise standard deviation), and the **number of iterations** N.
+
+## 3. A worked example by hand
+
+Six points: four on the line y = x, namely (0, 0), (1, 1), (2, 2), (3, 3), and two outliers (0, 3), (3, 0).
+
+**Least squares** on all six: mean (1.5, 1.5), Σ(x − x̄)(y − ȳ) = 0.5, Σ(x − x̄)² = 9.5, slope = 0.5 / 9.5 = **0.05**. The fitted line is almost flat: the two outliers cancel the four good points.
+
+**RANSAC** with threshold t = 0.5:
+
+| Sample | Line | Inliers |
+| --- | --- | --- |
+| (0, 0), (3, 0) | y = 0 | (0, 0), (3, 0): **2** |
+| (0, 3), (2, 2) | y = 3 − x / 2 | (0, 3), (2, 2): **2** |
+| (1, 1), (3, 3) | y = x | (0, 0), (1, 1), (2, 2), (3, 3): **4** |
+
+The third sample wins with 4 inliers; refitting on them gives exactly y = x, slope **1**. Of the 15 possible pairs, 6 contain only inliers, so each random sample has a 6/15 = 40 % chance of being good.
+
+## 4. How many iterations?
+
+If a fraction w of the points are inliers, a random sample of s points is all-inlier with probability wˢ. After N samples, the chance that none was good is (1 − wˢ)ᴺ. For a success probability p (say 0.99):
+
+```text
+N = log(1 − p) / log(1 − wˢ)
+```
+
+| w | s = 2 line | s = 3 circle | s = 4 homography | s = 8 F matrix |
+| --- | --- | --- | --- | --- |
+| 0.9 | 3 | 4 | 5 | 9 |
+| 0.7 | 7 | 11 | 17 | 78 |
+| 0.5 | 17 | 35 | 72 | 1 177 |
+| 0.3 | 49 | 169 | 567 | 70 188 |
+
+N does not depend on the number of points, only on w and s. Small samples are why RANSAC uses the **minimal** sample.
+
+The formula is optimistic. On 60 noisy line points (σ = 1.2 px) plus 60 random outliers (w = 0.5), 17 iterations found the line (at least 55 of the 60 true points as inliers) in 83.5 % of 200 runs, not 99 %: two inliers that lie close together define a noisy line that misses many other inliers. 50 iterations reached 99 %. In practice, use a few times the formula's N, or a variant with local optimisation (Go deeper).
+
+<HoughLab mode="ransac" caption="A line (blue points) among outliers (grey). Step through the iterations: each one samples two points (yellow) and counts the inliers within the threshold. Green: the RANSAC refit on the best inliers. Red: least squares on all points. Raise the outlier share and watch the red line tilt while the green one stays; lower the iterations below the formula's value and try new random points to see RANSAC sometimes fail."/>
+
+## 5. RANSAC vs robust least squares
+
+M-estimators (5.6) such as Huber or L1 down-weight large residuals instead of ignoring them. `cv2.fitLine` offers them. On the 120-point example (true angle −19.29°):
+
+| Method | Angle |
+| --- | --- |
+| Least squares (`DIST_L2`) on all points | −7.19° |
+| `DIST_HUBER` on all points | −19.13° |
+| `DIST_L1` on all points | −19.09° |
+| RANSAC (17 iterations, t = 3), refit on 61 inliers | **−19.39°** |
+
+With outliers spread evenly, robust least squares already works well. RANSAC's advantages are elsewhere: it tolerates more than 50 % outliers, it returns the **inlier set** (which points belong to the object), and it can be repeated on the remaining points to find several models (Exercise 2). M-estimators need a reasonable starting point; RANSAC does not.
+
+## 6. Industrial use
+
+- **Edge fitting**: a part's edge from edge points, ignoring burrs, chips and dirt.
+- **Homographies and pose**: `cv2.findHomography(..., cv2.RANSAC)` and `cv2.solvePnPRansac` reject wrong feature matches (34.5, 41.5).
+- **Planes in point clouds**: the floor, a table or a conveyor belt from 3D data (44.1).
+- **Circles on damaged parts**: three points per sample find a hole even if part of its edge is missing.
+
+## What you should remember from 26.3
+
+<Takeaways>
+<Takeaway n={1} title="Consensus">Fit to minimal random samples; keep the model most points agree with.</Takeaway>
+<Takeaway n={2} title="Iterations">N = log(1 − p) / log(1 − wˢ); grows fast with s and low w.</Takeaway>
+<Takeaway n={3} title="Threshold">t ≈ 2–3 × noise σ; refit on the inliers.</Takeaway>
+<Takeaway n={4} title="When">Many outliers, several models, or when you need the inlier set.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** 40 % of matches are correct and a homography needs 4. How many iterations for 99 %?
+
+<Solution>
+
+w⁴ = 0.0256; N = log(0.01) / log(0.9744) ≈ **178**.
+
+</Solution>
+
+**Q2.** Point noise σ is 1.5 pixels. Which inlier threshold?
+
+<Solution>
+
+About **3 to 4.5 pixels** (2–3 σ). Too small rejects good points; too large accepts outliers.
+
+</Solution>
+
+### Next: 26.4 Line, circle, ellipse fitting
+
+Least-squares fits to inliers: algebraic vs geometric error, and OpenCV's fitLine and fitEllipse.
+
+## Code
+
+Three examples: robust line fits with `cv2.fitLine`, RANSAC from scratch, and the success rate against the iteration formula.
+
+### 1. Least squares vs robust fitLine
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(263)
+x = rng.uniform(20, 300, 60)
+inliers = np.stack([x, 150 - 0.35 * x + rng.normal(0, 1.2, 60)], 1)       # true line, noise 1.2 px
+outliers = np.stack([rng.uniform(0, 320, 60), rng.uniform(0, 200, 60)], 1)
+pts = np.vstack([inliers, outliers])                                        # 50 % outliers
+
+def angle(vx, vy):                                                          # direction in degrees, -90 … 90
+    return round(float((np.degrees(np.arctan2(vy, vx)) + 90) % 180 - 90), 2)
+
+print("true:", round(float(np.degrees(np.arctan(-0.35))), 2))
+for name, dist in [("L2", cv2.DIST_L2), ("HUBER", cv2.DIST_HUBER), ("L1", cv2.DIST_L1)]:
+    vx, vy, x0, y0 = cv2.fitLine(pts.astype(np.float32), dist, 0, 0.01, 0.01).ravel()
+    print(name, angle(vx, vy))
+```
+
+Output:
+
+```text
+true: -19.29
+L2 -7.19
+HUBER -19.13
+L1 -19.09
+```
+
+- `cv2.fitLine` returns (vx, vy, x0, y0): a unit direction and a point on the line.
+
+### 2. RANSAC from scratch
+
+```python
+def ransac_line(pts, iterations, t, seed):
+    r = np.random.default_rng(seed)
+    best = np.zeros(len(pts), bool)
+    for _ in range(iterations):
+        i, j = r.choice(len(pts), 2, replace=False)                         # minimal sample
+        d = pts[j] - pts[i]
+        n = np.array([-d[1], d[0]]) / np.hypot(*d)                          # unit normal of the sample line
+        inl = np.abs((pts - pts[i]) @ n) < t                                # perpendicular distance < t
+        if inl.sum() > best.sum():
+            best = inl
+    return best
+
+best = ransac_line(pts, 17, 3, 0)
+print("inliers:", int(best.sum()), "| of them true line points:", int(best[:60].sum()))
+vx, vy, x0, y0 = cv2.fitLine(pts[best].astype(np.float32), cv2.DIST_L2, 0, 0.01, 0.01).ravel()
+print("refit angle:", angle(vx, vy))
+```
+
+Output:
+
+```text
+inliers: 61 | of them true line points: 60
+refit angle: -19.39
+```
+
+- One random outlier happens to lie within 3 pixels of the line; it is a legitimate inlier for this threshold.
+
+### 3. Iterations: formula vs reality
+
+```python
+for w in (0.9, 0.7, 0.5, 0.3):
+    print(w, [int(np.ceil(np.log(0.01) / np.log(1 - w ** s))) for s in (2, 3, 4, 8)])
+
+for n in (5, 17, 50):
+    ok = sum(ransac_line(pts, n, 3, s)[:60].sum() >= 55 for s in range(200))
+    print(n, "iterations: success", ok / 200)
+```
+
+Output:
+
+```text
+0.9 [3, 4, 5, 9]
+0.7 [7, 11, 17, 78]
+0.5 [17, 35, 72, 1177]
+0.3 [49, 169, 567, 70188]
+5 iterations: success 0.46
+17 iterations: success 0.835
+50 iterations: success 0.99
+```
+
+## OpenCV API notes
+
+- **`cv2.fitLine(points, distType, param, reps, aeps)`** → (vx, vy, x0, y0) for 2D. `distType`: `DIST_L2` (least squares), `DIST_L1`, `DIST_L12`, `DIST_FAIR`, `DIST_WELSCH`, `DIST_HUBER`; `param = 0` picks a default constant; `reps`, `aeps` = 0.01 are the usual accuracies. Points: float32 (N, 2).
+- **Built-in RANSAC**: `cv2.findHomography(src, dst, cv2.RANSAC, ransacReprojThreshold)`, `cv2.estimateAffine2D(..., method=cv2.RANSAC)`, `cv2.findFundamentalMat(..., cv2.FM_RANSAC)`, `cv2.solvePnPRansac`. They return the model and an inlier mask.
+- **USAC** (OpenCV 4.5+): `cv2.USAC_DEFAULT`, `cv2.USAC_MAGSAC`, `cv2.USAC_ACCURATE`, … as the `method` argument of these functions, with local optimisation and better stopping.
+- There is no generic RANSAC line or circle function in OpenCV; write the short loop yourself (Code 2).
+
+## Where it fails
+
+- **Very low inlier ratios with large samples**: N explodes (w = 0.3, s = 8: 70 000 iterations).
+- **Wrong threshold**: too small rejects real points; too large merges nearby structures.
+- **Several similar models**: the biggest wins each time; repeat on the remaining points, or use multi-model methods.
+- **Degenerate samples**: two identical points, three collinear points for a circle; check and skip them.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Not refitting** on the inliers: the sample model is only as good as two noisy points.
+- **Trusting the formula's N exactly**: noise makes good samples worse than assumed; use a margin.
+- **A threshold in the wrong units** (pixels vs millimetres, squared vs plain distance).
+- **Unseeded randomness in tests**: fix the seed so results repeat.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Variants
+
+MSAC and MLESAC (Torr and Zisserman 2000 [3]) score models by the sum of truncated residuals instead of the inlier count, which separates equally-sized but differently-accurate models. LO-RANSAC (Chum, Matas and Kittler 2003 [4]) refits on the inliers of every new best model inside the loop, which fixes the "noisy good sample" problem seen in Code 3. PROSAC samples the most promising matches first, and MAGSAC++ removes the need for a fixed threshold; OpenCV's USAC framework (Ivashechkin, Baráth and Matas 2021) combines these.
+
+### Adaptive N
+
+The inlier ratio is unknown in advance. Standard practice starts from a pessimistic w, and every time a better model is found, updates w to its inlier ratio and recomputes N; the loop stops when the iteration count exceeds the current N. See Hartley and Zisserman [2], Section 4.7.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why does RANSAC sample the minimum number of points?",
+      options: ["It is more accurate", "The chance that all sampled points are inliers is highest", "OpenCV requires it", "To save memory"],
+      answer: 1,
+      explanation: "wˢ falls quickly as s grows.",
+    },
+    {
+      question: "w = 0.5, s = 2, p = 0.99. N =",
+      options: ["2", "17", "72", "1177"],
+      answer: 1,
+      explanation: "log(0.01) / log(0.75) ≈ 16.0 → 17.",
+    },
+    {
+      question: "After finding the best sample, RANSAC should…",
+      options: ["Return the sample line", "Refit the model to all its inliers", "Restart", "Lower the threshold"],
+      answer: 1,
+      explanation: "The refit averages out the noise of the sample points.",
+    },
+    {
+      question: "An advantage of RANSAC over a Huber fit?",
+      options: ["Always more accurate", "It returns the inlier set and handles more than 50 % outliers", "It needs no threshold", "It is deterministic"],
+      answer: 1,
+      explanation: "It also finds several models one after another.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A circle is fitted by RANSAC (s = 3) to edge points of which 60 % lie on the circle. How many iterations for 99 %?
+
+<Solution>
+
+w³ = 0.216; N = log(0.01) / log(0.784) ≈ **19**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Two lines: replace the random outliers with 40 points on a second line y = 40 + 0.2 x (same noise). Find the first line with RANSAC (50 iterations), remove its inliers, run RANSAC again on the rest, and print both refitted angles.
+
+<Solution>
+
+```python
+x2 = rng.uniform(20, 300, 40)
+second = np.stack([x2, 40 + 0.2 * x2 + rng.normal(0, 1.2, 40)], 1)
+pts2 = np.vstack([inliers, second])
+b1 = ransac_line(pts2, 50, 3, 0)
+rest = pts2[~b1]
+b2 = ransac_line(rest, 50, 3, 1)
+for name, p in [("first", pts2[b1]), ("second", rest[b2])]:
+    vx, vy, x0, y0 = cv2.fitLine(p.astype(np.float32), cv2.DIST_L2, 0, 0.01, 0.01).ravel()
+    print(name, "inliers", len(p), "angle", angle(vx, vy))
+print("true angles:", round(float(np.degrees(np.arctan(-0.35))), 2), round(float(np.degrees(np.arctan(0.2))), 2))
+```
+
+Output:
+
+```text
+first inliers 60 angle -19.43
+second inliers 39 angle 11.47
+true angles: -19.29 11.31
+```
+
+Sequential RANSAC finds the larger line first, then the second one in what is left.
+
+</Solution>
+
+## References
+
+1. M. A. Fischler, R. C. Bolles, "Random sample consensus: a paradigm for model fitting with applications to image analysis and automated cartography", *Communications of the ACM* 24(6), 381–395, 1981.
+2. R. Hartley, A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004, Section 4.7 (robust estimation).
+3. P. H. S. Torr, A. Zisserman, "MLESAC: a new robust estimator with application to estimating image geometry", *Computer Vision and Image Understanding* 78(1), 138–156, 2000.
+4. O. Chum, J. Matas, J. Kittler, "Locally optimized RANSAC", *Pattern Recognition (DAGM)*, LNCS 2781, 236–243, 2003.
+5. OpenCV 4.13.0 documentation: `fitLine`, `findHomography`, `estimateAffine2D`, USAC. https://docs.opencv.org/4.13.0/

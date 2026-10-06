@@ -1,0 +1,325 @@
+export const meta = {
+  number: "10.1",
+  title: "RGB and BGR",
+  minutes: 25,
+  objectives: [
+    "Describe RGB as an additive colour model and a cube of possible colours",
+    "Explain why RGB values mix colour and brightness, and remove brightness with normalised chromaticity",
+    "Work with interleaved BGR images and separate planes (split, merge, per-channel statistics)",
+    "Know when RGB is the right space and when another one is better",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 10.1 (first chapter of Part B).
+  Builds on 3.3 (channels) and 7.3 (BGR vs RGB order); this chapter treats RGB as a colour space.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 10.1 RGB and BGR
+
+<Definition term="RGB colour space">describing every colour by the amounts of red, green and blue light that mix to produce it. Each pixel is a point in a cube: black at (0, 0, 0), white at (255, 255, 255). OpenCV stores the same three numbers in the order B, G, R.</Definition>
+
+Part B is about working with pixel values: colour, intensity, histograms, thresholds. It starts with the colour space every camera and screen uses. RGB is natural for devices, but awkward for questions like "is this part red?" when the light changes. This chapter shows why, and the first fix: chromaticity.
+
+## 1. An analogy
+
+Three dimmer switches for a red, a green and a blue lamp shining on the same wall. Every setting gives a colour; turning all three up together makes the same colour brighter. The three switch positions are the RGB values. The problem: "more light" and "a different colour" both change all three numbers.
+
+## 2. The RGB cube
+
+<Flow
+  steps={[
+    { label: "Light from the scene", tone: "world" },
+    { label: "Three filters (Bayer, 2.7): R, G, B signals", tone: "data" },
+    { label: "Three numbers per pixel = a point in the RGB cube", tone: "process" },
+    { label: "Screen mixes three lights to show it again", tone: "result" },
+  ]}
+/>
+
+| Corner of the cube | (R, G, B) | Colour |
+| --- | --- | --- |
+| origin | (0, 0, 0) | black |
+| three axes | (255, 0, 0), (0, 255, 0), (0, 0, 255) | red, green, blue |
+| sums of two | (255, 255, 0), (0, 255, 255), (255, 0, 255) | yellow, cyan, magenta |
+| far corner | (255, 255, 255) | white |
+| diagonal | (v, v, v) | greys |
+
+- **Additive**: light adds. Red + green light = yellow (3.3). Paint and ink mix the other way (subtractive, CMY).
+- **Device-dependent**: the exact colour of (255, 0, 0) depends on the camera's filters or the screen's primaries. sRGB defines a standard set of primaries and the encoding curve of 9.2; a camera's raw RGB is only roughly sRGB until colour-corrected.
+- **BGR in OpenCV**: the same cube, the numbers stored in the order B, G, R (7.3).
+
+## 3. Colour and brightness are mixed
+
+Move a red part from the light into a shadow: R, G and B all drop. A rule like "R > 150" fails in the shadow, although the part is still red. Brightness is spread over all three numbers.
+
+The first fix is to divide it out. **Normalised chromaticity**:
+
+<Equation terms={[{ value: "r = R / (R + G + B)" }, { op: ",", value: "g = G / (R + G + B)" }, { op: ",", value: "b = B / (R + G + B)", result: true }]} />
+
+- r + g + b = 1, so two numbers are enough.
+- If the light gets brighter or darker by a factor k, every channel is multiplied by k and the ratios do not change.
+- What it does **not** remove: a change of light **colour** (warm vs cool lamps, 10.6), saturated channels (a channel stuck at 255), and noise in very dark pixels (the sum is small).
+
+<ChromaLab caption="The same surface under brighter, darker or tinted light. RGB values change with intensity; chromaticity does not, until a channel saturates or the light colour changes." />
+
+Things to try: red part, intensity 100 % → 30 %: R, G, B drop to less than a third, r, g, b stay. Raise to 200 %: R hits 255, and r drops. Choose a warm light: chromaticity changes; that needs white balance.
+
+## 4. Interleaved and planar storage
+
+OpenCV and NumPy store colour images **interleaved**: B, G, R of pixel 0, then of pixel 1, and so on (shape `(h, w, 3)`). Some cameras, file formats and neural networks use **planar** storage: all B values, then all G, then all R (shape `(3, h, w)`, 8.7).
+
+| Task | Function |
+| --- | --- |
+| Interleaved → three planes | `b, g, r = cv2.split(img)` (copies) or `img[:, :, 0]` (view, not packed, 8.3) |
+| Planes → interleaved | `cv2.merge([b, g, r])` |
+| Reorder channels | `cv2.cvtColor(img, cv2.COLOR_BGR2RGB)`, `cv2.merge([r, g, b])`, `img[:, :, ::-1]` |
+| One channel only | `cv2.extractChannel(img, 2)` (packed copy) |
+| Statistics per channel | `cv2.mean(img)`, `cv2.meanStdDev(img)` |
+
+## 5. When RGB is the right choice
+
+| Use RGB (BGR) for | Use another space for |
+| --- | --- |
+| reading, writing, displaying images | "is it red?" under changing light → HSV (10.2), chromaticity |
+| per-channel corrections (white balance, flat field per channel) | perceptual colour differences → Lab and ΔE (10.3) |
+| deep-learning input (with the model's channel order) | separating brightness from colour for compression → YCrCb (10.4) |
+| colour cameras' calibration (colour matrices) | brightness only → grey conversion (10.5) |
+
+## 6. Industrial example
+
+A sorting line separates orange and yellow plastic caps on a belt lit from one side: caps on the far edge of the belt receive about 40 % less light. A threshold on R and G in RGB worked at the bright side and failed at the dark side. Converting each pixel to chromaticity (r, g) and classifying in that plane made the two colours separable over the whole belt width, because the shading is just a brightness factor. Saturated pixels (specular highlights on the caps) are excluded from the decision with a mask on max(R, G, B) < 250.
+
+## What you should remember from 10.1
+
+<Takeaways>
+<Takeaway n={1} title="Cube">RGB = a point in a cube; greys on the diagonal; OpenCV order B, G, R.</Takeaway>
+<Takeaway n={2} title="Mixed">RGB values change with both colour and brightness.</Takeaway>
+<Takeaway n={3} title="Chromaticity">r = R/(R+G+B): removes brightness, not light colour; beware saturation and dark pixels.</Takeaway>
+<Takeaway n={4} title="Storage">Interleaved (h, w, 3) in OpenCV; split/merge to and from planes.</Takeaway>
+<Takeaway n={5} title="Choice">RGB for I/O, display and per-channel corrections; other spaces for colour decisions.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A pixel is (B, G, R) = (20, 60, 120). What are its chromaticity values (b, g, r)?
+
+<Solution>
+
+Sum = 200: b = **0.10**, g = **0.30**, r = **0.60**.
+
+</Solution>
+
+**Q2.** The same surface is lit twice as brightly: (40, 120, 240). Chromaticity?
+
+<Solution>
+
+Sum = 400: **0.10, 0.30, 0.60**: unchanged.
+
+</Solution>
+
+**Q3.** And three times as brightly?
+
+<Solution>
+
+(60, 180, 360) → R saturates at 255: (60, 180, 255), sum 495: b ≈ 0.12, g ≈ 0.36, r ≈ 0.52. Saturation breaks the invariance.
+
+</Solution>
+
+### Next: 10.2 HSV
+
+Hue, saturation and value: a colour space that separates "which colour" from "how bright".
+
+## Code
+
+Two examples: chromaticity under uneven light, and working with channels in OpenCV.
+
+### 1. From scratch: chromaticity removes shading
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png").astype(np.float32)          # BGR, flat-coloured shapes
+h, w = img.shape[:2]
+shade = np.linspace(1.0, 0.3, w, dtype=np.float32)[None, :, None] # light falls off from left to right
+lit = img * shade                                                  # same objects, uneven light
+
+s = lit.sum(axis=2, keepdims=True)
+chrom = np.divide(lit, s, out=np.zeros_like(lit), where=s > 0)    # from scratch: b, g, r = B/S, G/S, R/S
+
+bar = (slice(165, 186), slice(20, 301))                            # the orange bar across the image
+mask = img[bar][..., 2] > 200
+for name, a in [("BGR values", lit[bar][mask]), ("chromaticity", chrom[bar][mask])]:
+    print(f"{name:12s}: mean {[round(float(v), 3) for v in a.mean(0)]} | std {[round(float(v), 3) for v in a.std(0)]}")
+```
+
+Output:
+
+```text
+BGR values  : mean [25.956, 97.335, 165.47] | std [7.12, 26.7, 45.39]
+chromaticity: mean [0.09, 0.337, 0.573] | std [0.0, 0.0, 0.0]
+```
+
+- Along the bar the light drops from 100 % to 30 %: the BGR values vary a lot (R standard deviation 45), the chromaticity not at all.
+- `np.divide(..., where=s > 0)` avoids dividing by zero on black pixels; they stay 0.
+- Real images also have noise: dark pixels give noisy chromaticity, so ignore pixels with a small sum.
+
+### 2. OpenCV: channels, planes and statistics
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+b, g, r = cv2.split(img)                                           # three separate 2-D planes
+print("interleaved:", img.shape, img.strides, "| one plane:", b.shape, b.strides)
+print("pixel (180, 100) BGR:", img[180, 100].tolist(), "| from planes:", [int(b[180, 100]), int(g[180, 100]), int(r[180, 100])])
+mean, std = cv2.meanStdDev(img)
+print("per-channel mean B, G, R:", [round(float(m), 1) for m in mean.ravel()])
+rgb = cv2.merge([r, g, b])                                         # same as cvtColor(img, COLOR_BGR2RGB)
+print("merge(r, g, b) == cvtColor BGR2RGB:", np.array_equal(rgb, cv2.cvtColor(img, cv2.COLOR_BGR2RGB)))
+```
+
+Output:
+
+```text
+interleaved: (200, 320, 3) (960, 3, 1) | one plane: (200, 320) (320, 1)
+pixel (180, 100) BGR: [40, 150, 255] | from planes: [40, 150, 255]
+per-channel mean B, G, R: [42.9, 56.5, 62.4]
+merge(r, g, b) == cvtColor BGR2RGB: True
+```
+
+- Interleaved strides (960, 3, 1): 3 bytes from one pixel to the next. A split plane has strides (320, 1): packed, one byte per pixel.
+- `cv2.meanStdDev` returns per-channel mean and standard deviation as 3 × 1 arrays (B, G, R order).
+
+## OpenCV API notes
+
+**Channels**: `cv2.split(img)` → tuple of planes; `cv2.merge(list)`; `cv2.extractChannel(img, i)`; `cv2.insertChannel(plane, img, i)`; `cv2.mixChannels(src, dst, fromTo)` for arbitrary reordering.
+
+**Order**: `cv2.cvtColor(img, cv2.COLOR_BGR2RGB)` / `COLOR_RGB2BGR`, `COLOR_BGRA2RGBA`.
+
+**Statistics**: `cv2.mean(img[, mask])` (4 values, unused = 0), `cv2.meanStdDev(img[, mask])`, `cv2.minMaxLoc` (one channel at a time).
+
+**Arithmetic for chromaticity**: work in float32; `cv2.divide(a, b)` with a 3-channel sum built by `cv2.merge([s, s, s])`, or NumPy broadcasting as above.
+
+## Where it fails
+
+- **Light colour**: chromaticity follows the illuminant; warm vs cool light shifts r, g, b (white balance, 10.6).
+- **Saturation**: clipped channels distort ratios; exclude them.
+- **Dark pixels**: noise dominates the ratios.
+- **Specular highlights**: reflect the light's colour, not the object's.
+- **Different cameras**: raw RGB values differ between camera models unless colour-calibrated.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Thresholding R alone** to find red things (white and yellow have high R too).
+- **Assuming the file is RGB** (OpenCV gives BGR).
+- **Computing chromaticity in uint8** (integer division gives zeros).
+- **Ignoring saturated pixels** in colour statistics.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Gamma and chromaticity
+
+The brightness invariance r = R/(R+G+B) holds exactly for **linear** sensor values. For gamma-encoded sRGB codes, scaling the light by k multiplies each code by about k^(1/2.2), which keeps ratios approximately but not exactly (and not at all near the linear segment of the curve). For accurate colour work, use linear raw values or decode sRGB first (9.2).
+
+### The rg chromaticity diagram
+
+Plotting pixels in the (r, g) plane removes the brightness axis of the RGB cube: every ray from black through the cube maps to one point. Objects of one material form compact clusters there, regardless of shading, which makes simple classifiers (distance to a cluster centre, 36.x) effective. The CIE xy chromaticity diagram is the same idea applied to standardised XYZ values instead of camera RGB [1].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Where are the greys in the RGB cube?",
+      options: ["On the R axis", "On the diagonal from black to white", "On the faces", "Nowhere"],
+      answer: 1,
+      explanation: "R = G = B.",
+    },
+    {
+      question: "What does normalised chromaticity remove?",
+      options: ["The light's colour", "Overall brightness (shading)", "Noise", "Saturation"],
+      answer: 1,
+      explanation: "Multiplying all channels by k leaves the ratios unchanged.",
+    },
+    {
+      question: "OpenCV colour images are stored…",
+      options: ["Planar, RGB", "Interleaved, BGR", "Planar, BGR", "Interleaved, RGB"],
+      answer: 1,
+      explanation: "Shape (h, w, 3), channel order B, G, R.",
+    },
+    {
+      question: "Why compute chromaticity in float32?",
+      options: ["It is faster", "Ratios are between 0 and 1; uint8 division gives 0", "OpenCV requires it", "To save memory"],
+      answer: 1,
+      explanation: "Integer division loses the fractions.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Two pixels: (B, G, R) = (30, 90, 180) and (10, 30, 60). Same material in different light? And (40, 90, 170)?
+
+<Solution>
+
+(30, 90, 180) → sum 300 → (0.10, 0.30, 0.60); (10, 30, 60) → sum 100 → (0.10, 0.30, 0.60): **same chromaticity**, consistent with one material in brighter and darker light. (40, 90, 170) → sum 300 → (0.133, 0.30, 0.567): a slightly different colour.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Classify the pixels of the shaded image `lit` from example 1 as "orange" when chromaticity r > 0.5 and g between 0.25 and 0.45, and count them. Compare with a fixed rule on the raw values (R > 200 and G > 120).
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+r_ch, g_ch = chrom[..., 2], chrom[..., 1]
+orange_chrom = (r_ch > 0.5) & (g_ch > 0.25) & (g_ch < 0.45) & (s[..., 0] > 30)
+orange_raw = (lit[..., 2] > 200) & (lit[..., 1] > 120)
+print("orange bar pixels in the image:", int(np.count_nonzero((img[..., 2] > 200) & (img[..., 1] > 100))))
+print("chromaticity rule:", int(np.count_nonzero(orange_chrom)), "| raw RGB rule:", int(np.count_nonzero(orange_raw)))
+```
+
+Output:
+
+```text
+orange bar pixels in the image: 5901
+chromaticity rule: 5901 | raw RGB rule: 1512
+```
+
+The chromaticity rule finds the whole bar; the raw rule finds only the brightly lit left part. (The `s > 30` condition ignores dark, noisy pixels.)
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Why can't chromaticity distinguish a white part from a grey part?
+
+<Solution>
+
+White (240, 240, 240) and grey (100, 100, 100) both have chromaticity (1/3, 1/3, 1/3): they differ only in brightness (reflectance), which chromaticity removes by design. To tell them apart you need the brightness back, normalised against a reference (a white patch in the image) or under controlled lighting.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Sections 6.1–6.2 (colour fundamentals, colour models).
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022: Section 2.3.2 (colour).
+3. IEC 61966-2-1:1999, sRGB.
+4. OpenCV 4.13.0 documentation: `split`, `merge`, `meanStdDev`, `cvtColor`. https://docs.opencv.org/4.13.0/

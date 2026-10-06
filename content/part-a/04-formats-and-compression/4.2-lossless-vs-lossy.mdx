@@ -1,0 +1,494 @@
+export const meta = {
+  number: "4.2",
+  title: "Lossless vs lossy",
+  minutes: 35,
+  objectives: [
+    "Explain how lossless compression shrinks data without changing it (runs, prediction)",
+    "Explain what lossy compression throws away and why the result is smaller",
+    "Measure the damage with maximum error and PSNR",
+    "Decide when lossy compression is acceptable in an inspection system",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 4.2 (Module 4 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3 (libjpeg-turbo bundled in the wheel).
+*/}
+
+# 4.2 Lossless vs lossy
+
+<Definition term="Lossless vs lossy">lossless compression gives back exactly the same pixels; lossy compression gives back similar pixels and is much smaller.</Definition>
+
+Chapter 4.1 showed that raw images are big. Compression makes them smaller in one of two ways: describe the **same** numbers more cleverly (lossless), or keep only what matters most and **throw the rest away** (lossy).
+
+<Flow
+  steps={[
+    { label: "Image (raw pixels)", tone: "world" },
+    { label: "Encoder", tone: "process" },
+    { label: "Compressed file", tone: "data" },
+    { label: "Decoder", tone: "process" },
+    { label: "Pixels: identical (lossless) or similar (lossy)", tone: "result" },
+  ]}
+/>
+
+## 1. An analogy
+
+Packing a suitcase. **Lossless** is folding the clothes neatly: everything you packed comes out again. **Lossy** is leaving some clothes at home: the suitcase is much lighter, and usually you don't miss them, but they are gone.
+
+<VsTable
+  left="Lossless (PNG, TIFF-LZW, lossless WebP)"
+  right="Lossy (JPEG, most video codecs)"
+  rows={[
+    ["Decoded pixels = original pixels", "Decoded pixels ≈ original pixels"],
+    ["Typically 1.5–3× smaller on camera images", "Typically 5–30× smaller"],
+    ["Size depends on content; you can't choose it", "You choose a quality; lower quality = smaller"],
+    ["Safe for measurement and archiving", "Fine for viewing; risky for measurement"],
+  ]}
+/>
+
+## 2. Lossless idea 1: runs
+
+Many images contain **runs**: the same value repeated. Instead of writing every value, write the value and how many times it repeats (**run-length encoding**, RLE):
+
+<MatrixTransform
+  before={[[30, 30, 30, 30, 30, 200, 200, 200, 30, 30, 30, 30]]}
+  after={[[30, 5], [200, 3], [30, 4]]}
+  rule="(value, count)"
+  beforeLabel="12 values"
+  afterLabel="3 pairs"
+  size="sm"
+/>
+
+The decoder repeats each value `count` times and gets back **exactly** the 12 values *(Code example 1)*. Runs are common in drawings, masks and label images, rare in camera images, where noise breaks every run.
+
+## 3. Lossless idea 2: prediction
+
+Neighbouring pixels are usually similar (3.6). So **predict** each pixel from its left neighbour and store only the **difference**:
+
+<MatrixTransform
+  before={[[100, 102, 103, 103, 105, 106]]}
+  after={[[100, 2, 1, 0, 2, 1]]}
+  rule="value − left neighbour"
+  beforeLabel="Pixel values"
+  afterLabel="Differences"
+  size="sm"
+/>
+
+The differences are small numbers close to 0, which a general-purpose compressor (like zlib's *deflate*, used inside PNG) packs into fewer bits. The decoder adds them back up, so nothing is lost. On our gradient scene, prediction drops the information per pixel (**entropy**) from 7.78 to 5.29 bits and the compressed size from 59 954 to 44 702 bytes *(Code example 2)*. PNG does exactly this, with five predictors to choose from per row (4.4).
+
+## 4. Why noise limits lossless compression
+
+Noise (2.5) is random: it can't be predicted, so the differences never become all zeros. A clean, flat image compresses 50×; a noisy camera image only about 1.5× (4.1). **Lossless compression can't remove noise, because it can't change pixels.**
+
+## 5. Lossy: throw away what you won't miss
+
+Lossy codecs change pixels on purpose. They remove fine detail and small variations that the eye hardly notices (and much of which is noise). JPEG does it in 8 × 8 blocks of frequencies (4.3). The decoded image looks similar, but the numbers are not the same:
+
+| Gradient scene, 320 × 200 | File size | PSNR | Max error | Pixels changed |
+| --- | --- | --- | --- | --- |
+| PNG (lossless) | 43 148 B | ∞ | 0 | 0 % |
+| JPEG quality 95 | 28 528 B | 42.3 dB | 9 | 79.0 % |
+| JPEG quality 75 | 9 698 B | 33.3 dB | 39 | 92.3 % |
+| JPEG quality 30 | 3 315 B | 30.1 dB | 114 | 93.7 % |
+| JPEG quality 10 | 1 791 B | 28.0 dB | 161 | 94.6 % |
+
+*(Code example 3.)* Even at quality 95, **most pixels change**, by a few levels.
+
+## 6. Measuring the damage
+
+**Maximum error**: the largest difference of any single pixel. Simple, but sensitive to one bad pixel.
+
+**PSNR** (peak signal-to-noise ratio): an average measure in decibels; **higher is better**, identical images give infinity.
+
+<Equation terms={[{ value: "PSNR" }, { op: "=", value: "10 · log₁₀(255² / MSE)", label: "MSE = mean squared error", result: true }]} />
+
+Rough guide for 8-bit images: above 40 dB differences are hard to see, 30–40 dB is good to acceptable, below 30 dB artefacts are clearly visible. PSNR does not say **where** the errors are; always look at the difference image too.
+
+## 7. Try it
+
+<CompressLab caption="Turn on the error view to see where JPEG changed the pixels: edges and texture first, flat areas last." />
+
+Things to try: the colour shapes keep sharp edges at high quality but get "ringing" around edges at low quality; the noisy gradient scene loses its noise first; the test chart's text breaks up below about quality 30.
+
+## 8. Generation loss
+
+Every lossy save loses a little more. If an image is decoded and re-encoded with **exactly the same settings**, the loss mostly stops after the first save (the same blocks are rounded the same way). But if anything changes between saves (a crop, a 1-pixel shift, a different quality), the errors **add up**:
+
+| Saves | Same settings | Shifted by 1 px, quality 75/85 alternating |
+| --- | --- | --- |
+| 1 | 38.92 dB | 38.31 dB |
+| 2 | 38.92 dB | 37.09 dB |
+| 5 | 38.92 dB | 33.26 dB |
+| 10 | 38.92 dB | 30.92 dB |
+
+*(Code example 4.)* Keep the **original**, and do processing on it, not on a copy that has been through several programs.
+
+## 9. Does lossy compression hurt inspection?
+
+It depends on the task. A faint crack, 2 px wide and 25 levels darker than the surface, in noise (σ = 4):
+
+| Image | Crack contrast |
+| --- | --- |
+| Original | 24.7 levels |
+| JPEG 90 | 24.8 levels |
+| JPEG 50 | 23.6 levels |
+| JPEG 20 | 24.7 levels |
+| JPEG 5 | **0.0 levels** (crack gone) |
+
+*(Exercise 2.)* Moderate quality kept this crack; very low quality erased it completely. Smaller, fainter defects disappear earlier. Edge positions of large objects hardly move at moderate quality; JPEG even smooths some noise.
+
+<Columns>
+<Panel title="Lossy is usually fine" tone="good">
+
+- Live display, operator screens
+- Long-term video archives (4.5)
+- Detecting or counting large objects
+- Sending images to a remote dashboard
+
+</Panel>
+<Panel title="Use lossless" tone="warn">
+
+- Measurement to sub-pixel accuracy
+- Faint or tiny defects
+- Training and test images for machine learning
+- Evidence images, calibration images, anything you may re-process
+
+</Panel>
+</Columns>
+
+## 10. Industrial example
+
+A rod-counting line saves every image for traceability:
+
+<Flow
+  steps={[
+    { label: "Camera: raw 8-bit frames", tone: "world" },
+    { label: "Processing: always on the raw frame", tone: "process" },
+    { label: "Defect / reject images → PNG (lossless)", tone: "data" },
+    { label: "All other frames → JPEG q90 or video (lossy)", tone: "data" },
+    { label: "Storage cut by ~10× without losing evidence", tone: "result" },
+  ]}
+/>
+
+Process **before** compressing, and keep lossless copies of the images that matter.
+
+## What you should remember from 4.2
+
+<Takeaways>
+<Takeaway n={1} title="Lossless">Exactly the same pixels back; uses runs and prediction; limited by noise.</Takeaway>
+<Takeaway n={2} title="Lossy">Similar pixels back; much smaller; you choose the quality.</Takeaway>
+<Takeaway n={3} title="Measure">Max error, PSNR (dB, higher is better) and the difference image.</Takeaway>
+<Takeaway n={4} title="Generation loss">Repeated saves with changes add up errors; keep the original.</Takeaway>
+<Takeaway n={5} title="Inspection">Process raw frames; store measurement, defect and training images lossless.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** RLE-encode the row `0 0 0 0 255 255 0 0`.
+
+<Solution>
+
+(0, 4), (255, 2), (0, 2): three pairs.
+
+</Solution>
+
+**Q2.** Prediction from the left neighbour: write the differences for `50 52 52 51 55`.
+
+<Solution>
+
+50, 2, 0, −1, 4 (the first value is stored as is).
+
+</Solution>
+
+**Q3.** A JPEG at quality 95 changed 79 % of the pixels. Is it "lossless at high quality"?
+
+<Solution>
+
+No. JPEG is always lossy; at high quality the changes are small (here max 9 levels), not zero.
+
+</Solution>
+
+### Next: 4.3 How JPEG works
+
+Colour conversion, 8 × 8 blocks, the DCT and quantization: where exactly the information is thrown away.
+
+## Code
+
+Four examples: run-length encoding, prediction, JPEG quality vs error, and generation loss. Copy the sample images next to the script.
+
+### 1. From scratch: run-length encoding
+
+```python
+import numpy as np
+
+row = np.array([30, 30, 30, 30, 30, 200, 200, 200, 30, 30, 30, 30], np.uint8)
+
+def rle_encode(a):
+    runs, start = [], 0
+    for i in range(1, len(a) + 1):
+        if i == len(a) or a[i] != a[start]:
+            runs.append((int(a[start]), i - start))   # (value, run length)
+            start = i
+    return runs
+
+def rle_decode(runs):
+    return np.concatenate([np.full(n, v, np.uint8) for v, n in runs])
+
+runs = rle_encode(row)
+print("runs:", runs)
+print(f"{len(row)} values -> {len(runs)} (value, count) pairs; exact round trip:", np.array_equal(rle_decode(runs), row))
+```
+
+Output:
+
+```text
+runs: [(30, 5), (200, 3), (30, 4)]
+12 values -> 3 (value, count) pairs; exact round trip: True
+```
+
+- A run ends when the next value differs (or at the end of the row).
+- `np.full(n, v)` repeats a value `n` times; decoding is exact.
+
+### 2. From scratch: prediction and entropy
+
+```python
+import numpy as np
+import cv2
+import zlib
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+diff = np.diff(img.astype(np.int16), axis=1, prepend=0).astype(np.uint8)   # left-neighbour prediction, wraps mod 256
+
+def entropy(a):
+    p = np.bincount(a.ravel(), minlength=256) / a.size
+    p = p[p > 0]
+    return -(p * np.log2(p)).sum()
+
+print(f"raw values : entropy {entropy(img):.2f} bits/pixel, zlib {len(zlib.compress(img.tobytes(), 9))} B")
+print(f"differences: entropy {entropy(diff):.2f} bits/pixel, zlib {len(zlib.compress(diff.tobytes(), 9))} B")
+back = np.cumsum(diff.astype(np.uint16), axis=1).astype(np.uint8)          # undo: running sum, mod 256
+print("exact round trip:", np.array_equal(back, img))
+```
+
+Output:
+
+```text
+raw values : entropy 7.78 bits/pixel, zlib 59954 B
+differences: entropy 5.29 bits/pixel, zlib 44702 B
+exact round trip: True
+```
+
+- `np.diff(..., prepend=0)` gives each pixel minus its left neighbour (the first column minus 0).
+- Casting to `uint8` wraps negatives modulo 256 (−1 → 255); the running sum in `uint8` wraps back, so the round trip is exact. PNG uses the same trick.
+- **Entropy** (Shannon) is the average number of bits per value a perfect coder needs if values are coded independently.
+- `zlib` is Python's built-in deflate compressor, the same algorithm PNG uses.
+
+### 3. OpenCV: JPEG quality vs size and error
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+png = cv2.imdecode(cv2.imencode(".png", img)[1], cv2.IMREAD_UNCHANGED)
+print(f"PNG    : {len(cv2.imencode('.png', img)[1]):6d} B, identical: {np.array_equal(png, img)}")
+for q in [95, 75, 30, 10]:
+    buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, q])[1]
+    dec = cv2.imdecode(buf, cv2.IMREAD_UNCHANGED)
+    err = np.abs(dec.astype(int) - img)
+    print(f"JPEG {q:2d}: {len(buf):6d} B, PSNR {cv2.PSNR(img, dec):5.1f} dB, max error {err.max():3d}, changed pixels {100 * np.mean(err > 0):4.1f} %")
+```
+
+Output:
+
+```text
+PNG    :  43148 B, identical: True
+JPEG 95:  28528 B, PSNR  42.3 dB, max error   9, changed pixels 79.0 %
+JPEG 75:   9698 B, PSNR  33.3 dB, max error  39, changed pixels 92.3 %
+JPEG 30:   3315 B, PSNR  30.1 dB, max error 114, changed pixels 93.7 %
+JPEG 10:   1791 B, PSNR  28.0 dB, max error 161, changed pixels 94.6 %
+```
+
+- `cv2.imencode` + `cv2.imdecode` simulate save and load without files.
+- `.astype(int)` before subtracting avoids `uint8` wrap-around (3.2).
+- `cv2.PSNR(a, b)` uses a peak of 255 by default (third argument `R`).
+
+### 4. OpenCV: generation loss
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-pinhole-scene.png", cv2.IMREAD_GRAYSCALE)
+same, alt = img.copy(), img.copy()
+for gen in range(1, 11):
+    same = cv2.imdecode(cv2.imencode(".jpg", same, [cv2.IMWRITE_JPEG_QUALITY, 75])[1], cv2.IMREAD_UNCHANGED)
+    q = 75 if gen % 2 else 85                               # e.g. two programs with different settings
+    alt = cv2.imdecode(cv2.imencode(".jpg", np.roll(alt, 1, axis=1), [cv2.IMWRITE_JPEG_QUALITY, q])[1], cv2.IMREAD_UNCHANGED)
+    if gen in (1, 2, 5, 10):
+        back = np.roll(alt, -gen, axis=1)                   # undo the shifts to compare
+        print(f"after {gen:2d} saves: same settings {cv2.PSNR(img, same):5.2f} dB | shifted + mixed quality {cv2.PSNR(img[:, 10:-10], back[:, 10:-10]):5.2f} dB")
+```
+
+Output:
+
+```text
+after  1 saves: same settings 38.92 dB | shifted + mixed quality 38.31 dB
+after  2 saves: same settings 38.92 dB | shifted + mixed quality 37.09 dB
+after  5 saves: same settings 38.92 dB | shifted + mixed quality 33.26 dB
+after 10 saves: same settings 38.92 dB | shifted + mixed quality 30.92 dB
+```
+
+- `np.roll(a, 1, axis=1)` shifts every row 1 pixel to the right (wrapping around); this moves the 8 × 8 block grid relative to the content.
+- The comparison drops 10 columns at each side to ignore the wrapped edge.
+
+## OpenCV API notes
+
+**`cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, q])`**: quality 0–100, default 95. Other JPEG options include `IMWRITE_JPEG_OPTIMIZE` (smaller Huffman tables), `IMWRITE_JPEG_PROGRESSIVE`, `IMWRITE_JPEG_SAMPLING_FACTOR` (chroma subsampling, 4.3).
+
+**Lossless options**: `.png` (`IMWRITE_PNG_COMPRESSION` 0–9), `.tiff` (`IMWRITE_TIFF_COMPRESSION`, e.g. LZW), `.webp` with `IMWRITE_WEBP_QUALITY` above 100 (lossless WebP).
+
+**`cv2.PSNR(src1, src2[, R=255])`**: same size and type. Mathematically PSNR is infinite for identical images; OpenCV 4.13 clamps it and returns about 361 dB instead (checked on 4.13.0). For 16-bit images pass `R=65535`.
+
+**Speed**: PNG level 9 is much slower to write than level 1; JPEG encoding is fast (libjpeg-turbo). Measure on your hardware if you save every frame.
+
+## Where it fails
+
+- **PSNR is not perception**: two images with the same PSNR can look very different. SSIM and similar metrics follow perception better (Go deeper).
+- **"Quality" numbers are not portable**: quality 75 in OpenCV, a browser or a camera may use different tables and give different files.
+- **Lossless is not free**: it only gives 1.5–3× on noisy camera images, so storage still grows fast (4.1).
+- **Colour subsampling** in JPEG removes colour detail even at quality 95 unless you change the sampling factor (4.3).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Saving training or calibration images as JPEG** and later wondering why results differ from live images.
+- **Processing a JPEG that has been through several programs** (generation loss).
+- **Believing quality 100 is lossless**: it is not; rounding and colour conversion still change pixels (max error 1 on the gradient scene).
+- **Judging compression by eye only**: check the difference image and max error near the features you measure.
+- **Re-saving a PNG as JPEG "to save space"** in an archive that may be re-processed later.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Entropy and the limit of lossless coding
+
+Shannon showed that a source with entropy H bits per symbol cannot be coded losslessly with fewer than H bits per symbol on average [1]. Prediction reduces the entropy of what is coded (the residuals), which is why PNG filters help. Better context models (as in JPEG-LS or JPEG XL lossless) predict better and compress further.
+
+### Rate–distortion
+
+Lossy coding trades **rate** (bits) for **distortion** (error). For a given source there is a best possible curve; real codecs approach it more or less closely. The PSNR-vs-size table in Section 5 is one point per quality setting on such a curve [2].
+
+### SSIM
+
+The structural similarity index compares local means, contrasts and structures instead of raw squared error, and correlates better with how people judge image quality [3]. OpenCV's `quality` module (with SSIM) is part of opencv-contrib; it is not in the `opencv-python` wheel used in this course (`cv2.quality` does not exist there).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which statement is true for lossless compression?",
+      options: ["The decoded image is slightly blurred", "The decoded pixels are identical to the original", "You choose a quality from 0 to 100", "It always gives at least 10×"],
+      answer: 1,
+      explanation: "Lossless means exactly the same numbers come back.",
+    },
+    {
+      question: "Why does prediction help lossless compression?",
+      options: ["It removes noise", "Differences between neighbours are small and repeat often", "It reduces the image size in pixels", "It converts to colour"],
+      answer: 1,
+      explanation: "Small, frequent values have low entropy and need fewer bits.",
+    },
+    {
+      question: "PSNR of two identical images?",
+      options: ["0 dB", "100 dB", "Infinite", "Negative"],
+      answer: 2,
+      explanation: "MSE is 0, so 255²/0 is infinite. (cv2.PSNR returns a large finite value, about 361 dB, instead.)",
+    },
+    {
+      question: "Re-saving a JPEG with exactly the same settings, no edits:",
+      options: ["Loses the same amount again every time", "Loses very little after the first save", "Restores the original", "Makes the file bigger every time"],
+      answer: 1,
+      explanation: "The same blocks round the same way; changes between saves are what add up.",
+    },
+    {
+      question: "Which images should be stored lossless?",
+      options: ["Operator display streams", "Calibration and training images", "24-hour overview video", "Thumbnails"],
+      answer: 1,
+      explanation: "Anything you may measure or re-process later.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A JPEG gives MSE = 25 on an 8-bit image. Compute the PSNR.
+
+<Solution>
+
+10 · log₁₀(255² / 25) = 10 · log₁₀(2601) ≈ **34.2 dB**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Make a 120 × 400 gray image at 150 with a faint horizontal crack (rows 58–59, columns 50–349, 25 levels darker) and Gaussian noise σ = 4 (seed 42). Measure the crack contrast (mean of rows 50–55 and 62–67 minus mean of rows 58–59, columns 60–339) on the original and after JPEG at quality 90, 50, 20 and 5.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(seed=42)
+img = np.full((120, 400), 150, np.float32)
+img[58:60, 50:350] -= 25                                  # a faint crack: 2 px wide, 25 levels darker
+img = np.clip(img + rng.normal(0, 4, img.shape), 0, 255).astype(np.uint8)
+
+def crack_contrast(im):
+    crack = im[58:60, 60:340].astype(float).mean()
+    around = np.r_[im[50:56, 60:340].ravel(), im[62:68, 60:340].ravel()].astype(float).mean()
+    return around - crack
+
+for name, im in [("original", img)] + [(f"JPEG {q}", cv2.imdecode(cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, q])[1], cv2.IMREAD_UNCHANGED)) for q in [90, 50, 20, 5]]:
+    print(f"{name:8s}: crack contrast {crack_contrast(im):5.1f} levels")
+```
+
+Output:
+
+```text
+original: crack contrast  24.7 levels
+JPEG 90 : crack contrast  24.8 levels
+JPEG 50 : crack contrast  23.6 levels
+JPEG 20 : crack contrast  24.7 levels
+JPEG 5  : crack contrast   0.0 levels
+```
+
+The average contrast survives down to quality 20 here, but at quality 5 the crack has been quantized away completely. The result is not monotonic, because the crack's position relative to the 8 × 8 blocks matters. A thinner, fainter or shorter defect disappears at higher quality; test with your own defects before choosing a setting.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Your customer wants all images from a gauging station archived for one year, and storage is limited. Suggest a scheme.
+
+<Solution>
+
+Measure on raw frames in real time. Store the **measurement results** for every part, **lossless PNG** for out-of-tolerance parts and a small random sample of good parts (for audits and re-checking), and lossy JPEG or video for the rest if images are needed at all. Check the expected volume with the formula from 4.1.
+
+</Solution>
+
+## References
+
+1. C. E. Shannon, "A mathematical theory of communication," *Bell System Technical Journal*, vol. 27, pp. 379–423 and 623–656, 1948.
+2. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Chapter 8 (Image compression and watermarking).
+3. Z. Wang, A. C. Bovik, H. R. Sheikh and E. P. Simoncelli, "Image quality assessment: from error visibility to structural similarity," *IEEE Transactions on Image Processing*, vol. 13, no. 4, pp. 600–612, 2004.
+4. OpenCV 4.13.0 documentation, *Image file reading and writing* (`imencode`, `ImwriteFlags`): [docs.opencv.org/4.13.0/d4/da8/group__imgcodecs.html](https://docs.opencv.org/4.13.0/d4/da8/group__imgcodecs.html); `PSNR`: [docs.opencv.org/4.13.0/d2/de8/group__core__array.html](https://docs.opencv.org/4.13.0/d2/de8/group__core__array.html).

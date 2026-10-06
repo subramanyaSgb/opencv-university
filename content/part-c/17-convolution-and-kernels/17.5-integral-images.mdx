@@ -1,0 +1,271 @@
+export const meta = {
+  number: "17.5",
+  title: "Integral images",
+  minutes: 20,
+  objectives: [
+    "Build an integral image (summed-area table) and read rectangle sums from four values",
+    "Use cv2.integral and integral2 for local means and standard deviations",
+    "Explain why the cost of a box sum no longer depends on its size",
+    "Know where integral images are used: adaptive thresholds, Haar features, box filters",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 17.5 (Module 17 plan).
+  New lab: IntegralLab.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 17.5 Integral images
+
+<Definition term="Integral image (summed-area table)">an image in which each value is the sum of all original pixels above and to the left of it. With it, the sum of any rectangle is computed from just four lookups, whatever the rectangle's size.</Definition>
+
+A box filter, a local mean for an adaptive threshold (13.5), the Haar features of the classic face detector (Part F): all need sums over rectangles, often of many sizes. Summing each rectangle directly costs as many additions as it has pixels. One pass that builds an integral image makes every rectangle sum cost three additions.
+
+## 1. An analogy
+
+A running total in a bank statement. To know how much you spent between March and June, you do not add up every transaction; you subtract the balance at the end of February from the balance at the end of June. An integral image is a running total in two directions.
+
+## 2. Build once, look up four times
+
+<Flow
+  steps={[
+    { label: "Image I (h × w)", tone: "data" },
+    { label: "S[y+1][x+1] = I[y][x] + S[y][x+1] + S[y+1][x] − S[y][x] (one pass)", tone: "process" },
+    { label: "Rectangle rows y0…y1−1, columns x0…x1−1", tone: "process" },
+    { label: "sum = S[y1][x1] − S[y0][x1] − S[y1][x0] + S[y0][x0]", tone: "result" },
+  ]}
+/>
+
+`cv2.integral` returns an (h + 1) × (w + 1) image with an extra row and column of zeros, so the formula works at the image edge without special cases.
+
+Real numbers on the 6 × 6 image of the lab: the 3 × 3 rectangle at columns 1–3, rows 1–3 has sum 45. From the integral image: D = S[4][4] = 73, B = S[1][4] = 9, C = S[4][1] = 22, A = S[1][1] = 3:
+
+<Equation terms={[{ value: "sum" }, { op: "=", value: "73 − 9 − 22 + 3 = 45", result: true }]} />
+
+B and C remove the strips above and to the left; A was removed twice, so it is added back.
+
+<IntegralLab caption="Move the rectangle's edges. The green cells (D and A) are added, the red ones (B and C) subtracted; the result always equals the direct sum, but uses four values however large the rectangle is." />
+
+## 3. Means and standard deviations
+
+With a second table of squared values (`cv2.integral2` returns both), the variance of any window comes from two rectangle sums:
+
+<Equation terms={[{ value: "σ²" }, { op: "=", value: "Σ(I²)/n − (ΣI/n)²", result: true }]} />
+
+This is how Niblack and Sauvola thresholds (13.5) and normalised template matching (Part E) get local statistics at every pixel in constant time. For the 15 × 15 window around (160, 100) in the scene: mean 14.853, standard deviation 5.991, identical to computing them from the 225 pixels directly.
+
+| Method | Additions per window | 15 × 15 | 51 × 51 |
+| --- | --- | --- | --- |
+| Direct sum | k² − 1 | 224 | 2 600 |
+| Separable (17.4) | 2(k − 1) | 28 | 100 |
+| Integral image | 3 (after one build pass) | 3 | 3 |
+
+## 4. Industrial example
+
+The Viola–Jones face detector (Part F, 37.2) evaluates thousands of rectangle features (differences of two or three adjacent rectangle sums) at every position and scale. Integral images make each feature cost a handful of lookups, which made real-time face detection possible on 2001 hardware [1]. The same trick is used today in industrial textile inspection: local mean and variance in many window sizes are computed from one pair of integral images per frame, to find weave faults of different sizes at line speed.
+
+## What you should remember from 17.5
+
+<Takeaways>
+<Takeaway n={1} title="Table">S[y][x] = sum of everything above-left; one pass to build.</Takeaway>
+<Takeaway n={2} title="Rectangle">D − B − C + A: four lookups, any size.</Takeaway>
+<Takeaway n={3} title="Statistics">integral2 gives sums of squares: local variance in constant time.</Takeaway>
+<Takeaway n={4} title="Uses">Box filters, adaptive thresholds, Haar features, template matching.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Using the integral image of the lab, compute the sum of the whole 6 × 6 image.
+
+<Solution>
+
+S[6][6] − S[0][6] − S[6][0] + S[0][0] = 173 − 0 − 0 + 0 = **173**.
+
+</Solution>
+
+**Q2.** Why does `cv2.integral` add a row and a column of zeros?
+
+<Solution>
+
+So that rectangles touching the top or left edge (x0 = 0 or y0 = 0) use the same formula: S[0][…] and S[…][0] are 0, no special cases.
+
+</Solution>
+
+### Next: 17.6 filter2D
+
+Custom kernels in practice: ddepth, delta, anchor, speed and when OpenCV switches to the DFT.
+
+## Code
+
+Two examples: rectangle sums from cv2.integral, then local mean and standard deviation from integral2.
+
+### 1. Rectangle sums
+
+```python
+import numpy as np
+import cv2
+
+a = np.array([[3, 1, 4, 1, 5, 9], [2, 6, 5, 3, 5, 8], [9, 7, 9, 3, 2, 3],
+              [8, 4, 6, 2, 6, 4], [3, 3, 8, 3, 2, 7], [9, 5, 0, 2, 8, 8]], np.uint8)
+S = cv2.integral(a)                                           # (7, 7), int32
+print("shape", S.shape, S.dtype, "| last row:", S[-1].tolist())
+
+def rect_sum(S, x0, y0, x1, y1):                               # columns x0..x1-1, rows y0..y1-1
+    return int(S[y1, x1] - S[y0, x1] - S[y1, x0] + S[y0, x0])
+
+print("rectangle cols 1-3, rows 1-3:", rect_sum(S, 1, 1, 4, 4), "| direct:", int(a[1:4, 1:4].sum()))
+print("whole image:", rect_sum(S, 0, 0, 6, 6), "| direct:", int(a.sum()))
+```
+
+Output:
+
+```text
+shape (7, 7) int32 | last row: [0, 34, 60, 92, 106, 134, 173]
+rectangle cols 1-3, rows 1-3: 45 | direct: 45
+whole image: 173 | direct: 173
+```
+
+- 8-bit input gives an int32 integral image (enough for images up to about 8 million pixels of value 255); `sdepth=cv2.CV_64F` for larger sums.
+
+### 2. Local mean and standard deviation
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+S, SQ = cv2.integral2(img)                                     # sums (int32) and squared sums (float64)
+r = 7
+n = (2 * r + 1) ** 2
+y, x = 100, 160
+s = rect_sum(S, x - r, y - r, x + r + 1, y + r + 1)
+sq = SQ[y + r + 1, x + r + 1] - SQ[y - r, x + r + 1] - SQ[y + r + 1, x - r] + SQ[y - r, x - r]
+mean, std = s / n, np.sqrt(sq / n - (s / n) ** 2)
+patch = img[y - r:y + r + 1, x - r:x + r + 1].astype(float)
+print(f"integral: mean {mean:.3f}, std {std:.3f} | direct: mean {patch.mean():.3f}, std {patch.std():.3f}")
+print("same as boxFilter:", bool(np.isclose(cv2.boxFilter(img.astype(np.float32), -1, (15, 15))[y, x], mean)))
+```
+
+Output:
+
+```text
+integral: mean 14.853, std 5.991 | direct: mean 14.853, std 5.991
+same as boxFilter: True
+```
+
+- The variance formula E[I²] − E[I]² can lose precision for large values in float32; `integral2` keeps the squared sums in float64.
+
+## OpenCV API notes
+
+**`cv2.integral(src, sdepth=-1)`** → (h + 1) × (w + 1) sums; **`cv2.integral2(src)`** → (sums, squared sums); **`cv2.integral3(src)`** → (sums, squared sums, 45°-tilted sums for rotated Haar features).
+
+**Box filters**: `cv2.boxFilter(src, ddepth, ksize, normalize=True)` and `cv2.blur` use running sums internally; you rarely need the integral image for a plain box blur, but it is ideal for many different rectangle sizes or sparse queries.
+
+**`cv2.sqrBoxFilter`**: box filter of squared values, for local variance with a fixed window.
+
+## Where it fails
+
+- **Only rectangles** aligned with the axes (and 45° with integral3); other shapes need other methods.
+- **Overflow**: large images with int32 sums; use a 64-bit `sdepth`.
+- **Memory**: one extra 32- or 64-bit image per table (4–8 times the size of an 8-bit image).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Off-by-one errors**: forgetting the extra zero row/column, or using inclusive end indices.
+- **Using uint8 integral images** (immediate overflow).
+- **Computing variance in float32** for bright images (precision loss); use float64 squared sums.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Summed-area tables
+
+Crow (1984) introduced summed-area tables in computer graphics for fast texture filtering [2]. Viola and Jones (2001) popularised them in computer vision as "integral images" for rectangle features [1]. The idea generalises to any dimension (3-D for video volumes) and to repeated integration, which allows triangular and higher-order box-spline filters in constant time.
+
+### Running sums
+
+For one fixed window size, a running (moving) sum along rows and then columns gives box filtering with two additions per pixel per direction, without storing a full table; this is what `boxFilter` does. Integral images win when many window sizes or positions are queried.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "An integral image value S[y][x] holds…",
+      options: ["The pixel value", "The sum of all pixels above and to the left", "The local mean", "The gradient"],
+      answer: 1,
+      explanation: "A 2-D running total.",
+    },
+    {
+      question: "How many lookups does a rectangle sum need?",
+      options: ["1", "4", "k²", "2k"],
+      answer: 1,
+      explanation: "D − B − C + A.",
+    },
+    {
+      question: "What does cv2.integral2 add compared with cv2.integral?",
+      options: ["Tilted sums", "Sums of squared values", "Gradients", "Nothing"],
+      answer: 1,
+      explanation: "For local variance; integral3 adds tilted sums.",
+    },
+    {
+      question: "The cost of a box sum with an integral image depends on…",
+      options: ["The box size", "Nothing (constant)", "The image size", "The pixel values"],
+      answer: 1,
+      explanation: "Four lookups whatever the size.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 2 × 2 image (1 2; 3 4). Write its 3 × 3 integral image.
+
+<Solution>
+
+(0 0 0; 0 1 3; 0 4 10).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Compute a 15 × 15 local mean image of the scene from the integral image with NumPy slicing (no loops, borders excluded) and compare it with `cv2.blur` on the inner region.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+S = cv2.integral(img).astype(np.int64)
+k = 15
+box = (S[k:, k:] - S[:-k, k:] - S[k:, :-k] + S[:-k, :-k]) / (k * k)    # one value per full window
+ref = cv2.blur(img.astype(np.float32), (k, k))[7:-7, 7:-7]
+print(box.shape, ref.shape, "| max difference:", float(np.abs(box - ref).max()) < 1e-3)
+```
+
+Output:
+
+```text
+(186, 306) (186, 306) | max difference: True
+```
+
+Four shifted views of the integral image give all window sums at once: the vectorised form of D − B − C + A.
+
+</Solution>
+
+## References
+
+1. P. Viola, M. Jones, "Rapid object detection using a boosted cascade of simple features", *Proc. CVPR*, I-511–I-518, 2001.
+2. F. C. Crow, "Summed-area tables for texture mapping", *Computer Graphics (Proc. SIGGRAPH)* 18(3), 207–212, 1984.
+3. OpenCV 4.13.0 documentation: `integral`, `boxFilter`, `sqrBoxFilter`. https://docs.opencv.org/4.13.0/

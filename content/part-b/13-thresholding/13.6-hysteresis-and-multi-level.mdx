@@ -1,0 +1,307 @@
+export const meta = {
+  number: "13.6",
+  title: "Hysteresis and multi-level thresholds",
+  minutes: 25,
+  objectives: [
+    "Explain hysteresis thresholding: confident seeds grown through weaker pixels",
+    "Implement it with connected components and choose the two thresholds",
+    "Split an image into three or more classes with multi-level Otsu",
+    "Know when two thresholds are better than one",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 13.6 (Module 13 plan).
+  Reuses ThreshLab (hysteresis mode, new props initialStrong/initialWeak). New sample: sample-crack-faint.png.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 13.6 Hysteresis and multi-level thresholds
+
+<Definition term="Hysteresis and multi-level thresholds">two ways of using more than one threshold. **Hysteresis** uses a strict threshold to find confident object pixels and a loose one to grow them along connected pixels. **Multi-level** thresholding uses several thresholds to split the grey values into three or more classes.</Definition>
+
+A single threshold forces a hard choice: strict (miss faint parts of the object) or loose (pick up noise). Hysteresis avoids the choice by adding a second rule: a pixel that is only "a bit dark" counts as object **if it touches** a pixel that is clearly dark. Multi-level thresholds answer a different need: images with more than two kinds of material.
+
+## 1. An analogy
+
+Tracing a faint pencil line on a smudged page: you start where the line is clearly visible and follow it into the faint parts, but you do not start a new line from a random smudge. Hysteresis does the same; the Canny edge detector (Module 20) uses exactly this idea for edges.
+
+## 2. Hysteresis
+
+<Flow
+  steps={[
+    { label: "Strong pixels: v ≤ T_strong (seeds, almost no noise)", tone: "data" },
+    { label: "Weak pixels: v ≤ T_weak (object and some noise)", tone: "process" },
+    { label: "Connected components of the weak mask", tone: "process" },
+    { label: "Keep components that contain at least one strong pixel", tone: "result" },
+  ]}
+/>
+
+`sample-crack-faint.png` has a crack at grey 150 on a plate at 180 with noise of σ = 12. The two grey-value hills overlap so much that **every** single threshold fails:
+
+| Method | Threshold(s) | F1 |
+| --- | --- | --- |
+| Best single threshold | T = 151 | 0.562 |
+| Hysteresis | strong 130, weak 166 | **0.915** |
+
+- With T = 151 about 40 % of the crack is missed and about 600 noise pixels pass.
+- With hysteresis, the weak threshold 166 lets almost all crack pixels in, together with lots of noise; but the noise pixels form small islands that contain no pixel darker than 130, so they are dropped. The crack is one long connected chain with many dark seeds along it.
+
+<ThreshLab methods={["manual", "hysteresis"]} initial="hysteresis" initialStrong={130} initialWeak={166} initialT={151} sources={[{ label: "faint crack in noise", src: "/images/sample-crack-faint.png", gt: "/images/sample-plate-crack-mask.png", dark: true }]} caption="Hysteresis on a faint, noisy crack. Switch to 'manual' and try to find any single threshold that works. Then raise the weak threshold until noise islands start to connect to the crack, and lower the strong one until the crack loses its seeds." />
+
+Choosing the two thresholds:
+
+- **Strong**: so strict that almost no background pixel passes (a false seed brings its whole noise island in).
+- **Weak**: loose enough to include almost all object pixels, but not so loose that background noise forms large connected regions that reach the object.
+- Canny's rule of thumb for edge strengths is a ratio of 2:1 to 3:1 between the two thresholds; for grey values, set them from the histograms of object and background.
+
+## 3. Multi-level thresholds
+
+Some images have three or more materials: board, copper and solder on a PCB; air, plastic and metal in an X-ray. Two thresholds T₁ < T₂ give three classes. Multi-level Otsu extends 13.3: choose (T₁, T₂) to maximise the between-class variance Σ ωₖ (μₖ − μ)² of all classes.
+
+A synthetic PCB patch (board 90, copper 170, solder 230, noise σ 10): two-class Otsu puts copper and solder together, three-class Otsu finds T₁ = 127 and T₂ = 199, close to the midpoints between the levels (130 and 200), and labels 100.0 % of the pixels correctly (to one decimal).
+
+Cost: an exhaustive search over pairs is about 32 000 combinations of 256 levels (fast with cumulative sums); for 4 or more classes, use a library implementation (scikit-image `threshold_multiotsu`) or a smarter search.
+
+## 4. Industrial example
+
+A battery-electrode coater inspects the coated foil with a line camera. Bright foil shows through in **pinholes** (critical), slightly bright **thin coating** areas are a warning, and normal coating is dark. Two thresholds give three classes: normal, thin, pinhole. The thin-coating class uses hysteresis: a slightly bright region is reported only if it contains a clearly bright core or is larger than a minimum area, which suppresses the coating's natural texture.
+
+## What you should remember from 13.6
+
+<Takeaways>
+<Takeaway n={1} title="Hysteresis">Strong seeds + weak growth through connected pixels; noise islands without seeds are dropped.</Takeaway>
+<Takeaway n={2} title="When">Thin, faint, elongated objects in noise: cracks, scratches, edges (Canny).</Takeaway>
+<Takeaway n={3} title="Multi-level">Several thresholds for several materials; multi-level Otsu maximises the between-class variance.</Takeaway>
+<Takeaway n={4} title="Tools">connectedComponents for hysteresis; NumPy or scikit-image for multi-Otsu; np.digitize to label.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A row of pixels: 120, 160, 165, 200, 162, 158. Strong ≤ 130, weak ≤ 166, 1D connectivity. Which pixels are kept?
+
+<Solution>
+
+Strong: 120. Weak: 120, 160, 165 (connected to 120), then 200 breaks the chain; 162 and 158 are weak but have no strong pixel in their run. Kept: **120, 160, 165**.
+
+</Solution>
+
+**Q2.** What happens if T_strong = T_weak?
+
+<Solution>
+
+Every weak pixel is also strong, so all of them are kept: hysteresis becomes an **ordinary single threshold**.
+
+</Solution>
+
+### Next: 13.7 Measuring quality
+
+How to say how good a threshold is: precision, recall, F1, IoU, and what to measure them against.
+
+## Code
+
+Two examples: hysteresis with connected components, then three-class Otsu.
+
+### 1. Hysteresis with connected components
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-crack-faint.png", cv2.IMREAD_GRAYSCALE)
+gt = cv2.imread("sample-plate-crack-mask.png", cv2.IMREAD_GRAYSCALE) > 0
+f1 = lambda m: 2 * (m & gt).sum() / (m.sum() + gt.sum())
+
+def hysteresis(im, t_strong, t_weak):
+    weak = (im <= t_weak).astype(np.uint8)
+    n, labels = cv2.connectedComponents(weak, connectivity=8)       # label every weak region
+    keep = np.zeros(n, bool)
+    keep[np.unique(labels[im <= t_strong])] = True                  # regions that contain a strong pixel
+    keep[0] = False                                                 # label 0 is the background
+    return keep[labels]
+
+scores = [f1(img <= t) for t in range(256)]
+t = int(np.argmax(scores))
+print(f"best single threshold: T = {t}, F1 {scores[t]:.3f}, {(img <= t).sum()} pixels marked")
+m = hysteresis(img, 130, 166)
+print(f"hysteresis 130/166: F1 {f1(m):.3f}, {m.sum()} pixels marked, crack pixels {gt.sum()}")
+n_weak = cv2.connectedComponents((img <= 166).astype(np.uint8), connectivity=8)[0] - 1
+print(f"weak regions: {n_weak}, kept: {cv2.connectedComponents(m.astype(np.uint8), connectivity=8)[0] - 1}")
+```
+
+Output:
+
+```text
+best single threshold: T = 151, F1 0.562, 1334 pixels marked
+hysteresis 130/166: F1 0.915, 1332 pixels marked, crack pixels 1298
+weak regions: 4575, kept: 1
+```
+
+- Of 4 575 weak regions (mostly single noise pixels and small islands), only one survives: the crack, joined into one chain by the weak pixels, with its attached noise.
+- `keep[labels]` turns the per-region decision back into a per-pixel mask in one step.
+
+### 2. Three-class Otsu
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(2)
+truth = np.zeros((120, 200), np.uint8)                           # 0 board, 1 copper, 2 solder
+truth[20:100, 30:170] = 1
+truth[45:75, 60:140] = 2
+levels = np.array([90, 170, 230])
+pcb = np.clip(levels[truth] + rng.normal(0, 10, truth.shape), 0, 255).astype(np.uint8)
+
+p = np.bincount(pcb.ravel(), minlength=256) / pcb.size
+P = np.concatenate([[0], np.cumsum(p)])                          # P[k] = fraction of pixels < k
+M = np.concatenate([[0], np.cumsum(p * np.arange(256))])
+best, t1, t2 = -1, 0, 0
+for a in range(1, 255):                                          # classes [0, a), [a, b), [b, 256)
+    b = np.arange(a + 1, 256)
+    w = np.stack([np.full(b.shape, P[a]), P[b] - P[a], 1 - P[b]])
+    m = np.stack([np.full(b.shape, M[a]), M[b] - M[a], M[256] - M[b]])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        score = np.where(w > 0, m ** 2 / w, 0).sum(0)            # Σ ω_k μ_k² (same maximum as Σ ω_k (μ_k − μ)²)
+    k = score.argmax()
+    if score[k] > best:
+        best, t1, t2 = score[k], a - 1, b[k] - 1                 # thresholds: class = v > t1, v > t2
+print(f"three-class Otsu: T1 = {t1}, T2 = {t2}")
+labels = np.digitize(pcb, [t1 + 0.5, t2 + 0.5])                  # 0, 1, 2
+print(f"correct labels: {(labels == truth).mean():.1%}")
+t_two = cv2.threshold(pcb, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[0]
+print(f"two-class Otsu: T = {t_two:.0f} (between board and copper: copper and solder become one class)")
+```
+
+Output:
+
+```text
+three-class Otsu: T1 = 127, T2 = 199
+correct labels: 100.0%
+two-class Otsu: T = 136 (between board and copper: copper and solder become one class)
+```
+
+- Σ ωₖ μₖ² differs from the between-class variance Σ ωₖ (μₖ − μ)² only by a constant (μ² ), so both have the same maximum and the simpler form is used.
+- `np.digitize(v, [t1 + 0.5, t2 + 0.5])` returns the class index 0, 1 or 2 for every pixel.
+
+## OpenCV API notes
+
+**Hysteresis**: no single OpenCV call for grey values; combine `cv2.threshold` (twice) with `cv2.connectedComponents(mask, connectivity=8)` as above. `cv2.Canny` applies hysteresis to gradient magnitudes internally. scikit-image: `skimage.filters.apply_hysteresis_threshold(image, low, high)` (for bright objects).
+
+**Multi-level**: no OpenCV function; scikit-image `threshold_multiotsu(image, classes=3)`, then `np.digitize(image, thresholds)`.
+
+**Labelling classes**: `np.digitize`, or a LUT (`cv2.LUT`) that maps each grey value to its class (11.1).
+
+## Where it fails
+
+- **Hysteresis**: a noise island that contains one strong pixel is kept whole; touching noise grows into the object. Also, the result depends on connectivity (4 vs 8, 3.6).
+- **Weak threshold too loose**: background noise percolates into large connected regions and everything is kept.
+- **Multi-level**: classes must still be separable in grey value; overlapping materials stay mixed, and the number of classes must be known.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Swapping strong and weak** (for dark objects the strong threshold is the **lower** grey value).
+- **Forgetting to drop label 0** (the background of `connectedComponents`) and keeping everything.
+- **Using hysteresis for compact blobs in low noise**, where a single threshold is simpler and equally good.
+- **Running a brute-force multi-Otsu with Python loops over all pairs and classes** in production (vectorise or use a library).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Hysteresis in Canny's edge detector
+
+Canny (1986) introduced hysteresis to keep edges continuous: an edge point is accepted if its gradient exceeds the high threshold, or exceeds the low threshold and is connected to an accepted point [2]. The same logic applies to any "strength" map: grey values, back-projections (12.5), probability maps from a classifier.
+
+### Multi-level Otsu
+
+Otsu's 1979 paper already gives the criterion for more than two classes [3]. The exhaustive search grows as 256^(K−1) for K classes; Liao, Chen and Chung (2001) showed a lookup-table formulation that makes it fast enough for several classes [4].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "In hysteresis thresholding, a weak pixel is kept when…",
+      options: ["It is darker than the mean", "It belongs to a connected region that contains a strong pixel", "It is next to the image border", "Always"],
+      answer: 1,
+      explanation: "Weak regions are kept only if they hold at least one seed.",
+    },
+    {
+      question: "Why does hysteresis work well for cracks and scratches?",
+      options: ["They are bright", "They are long, connected structures with dark seeds along them, unlike isolated noise", "They are small", "They have sharp corners"],
+      answer: 1,
+      explanation: "Connectivity separates the elongated object from scattered noise.",
+    },
+    {
+      question: "Which OpenCV function is the core of a hysteresis implementation?",
+      options: ["cv2.equalizeHist", "cv2.connectedComponents", "cv2.LUT", "cv2.calcHist"],
+      answer: 1,
+      explanation: "Label the weak mask, keep labels that contain strong pixels.",
+    },
+    {
+      question: "An image shows board, copper and solder. How many thresholds are needed to separate them?",
+      options: ["1", "2", "3", "256"],
+      answer: 1,
+      explanation: "K classes need K − 1 thresholds.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+With three classes on 0–255 and an exhaustive search, how many (T₁, T₂) pairs with T₁ < T₂ are there?
+
+<Solution>
+
+Choose 2 of the 255 possible cut positions: 255 · 254 / 2 = **32 385** pairs.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+On `sample-crack-faint.png`, keep the strong threshold at 130 and vary the weak threshold from 150 to 180 in steps of 5. Print the F1 and the number of kept regions for each.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+for tw in range(150, 181, 5):
+    m = hysteresis(img, 130, tw)
+    kept = cv2.connectedComponents(m.astype(np.uint8), connectivity=8)[0] - 1
+    print(f"weak {tw}: F1 {f1(m):.3f}, regions kept {kept}")
+```
+
+Output:
+
+```text
+weak 150: F1 0.666, regions kept 21
+weak 155: F1 0.813, regions kept 1
+weak 160: F1 0.887, regions kept 1
+weak 165: F1 0.916, regions kept 1
+weak 170: F1 0.887, regions kept 1
+weak 175: F1 0.321, regions kept 1
+weak 180: F1 0.072, regions kept 1
+```
+
+At 150 the crack is still in 21 pieces; from 155 on the weak pixels join it into one chain, and F1 peaks around 165. Beyond 170, background noise percolates: the weak mask becomes one large connected region that reaches the crack, and almost the whole plate is kept.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 10.3 (multiple thresholds) and Section 10.2 (Canny, hysteresis).
+2. J. Canny, "A computational approach to edge detection", *IEEE Transactions on Pattern Analysis and Machine Intelligence* 8(6), 679–698, 1986.
+3. N. Otsu, "A threshold selection method from gray-level histograms", *IEEE Transactions on Systems, Man, and Cybernetics* 9(1), 62–66, 1979.
+4. P.-S. Liao, T.-S. Chen, P.-C. Chung, "A fast algorithm for multilevel thresholding", *Journal of Information Science and Engineering* 17(5), 713–727, 2001.
+5. OpenCV 4.13.0 documentation: `connectedComponents`, `Canny`. https://docs.opencv.org/4.13.0/

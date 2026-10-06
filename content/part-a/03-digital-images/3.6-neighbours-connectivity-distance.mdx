@@ -1,0 +1,436 @@
+export const meta = {
+  number: "3.6",
+  title: "Neighbours, connectivity, distance",
+  minutes: 40,
+  objectives: [
+    "Name the 4-, diagonal and 8-neighbours of a pixel, including at the border",
+    "Decide whether pixels are connected under 4- or 8-connectivity",
+    "Count objects with cv2.connectedComponents and explain why the count depends on connectivity",
+    "Compute city-block, chessboard and Euclidean distances, and use the distance transform",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 3.6 (Module 3 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 3.6 Neighbours, connectivity, distance
+
+<Definition term="Connectivity">the rule that decides which neighbouring pixels count as touching, and therefore which pixels form one object.</Definition>
+
+Counting rods, finding blobs, measuring how far a pixel is from an edge: all of these need three simple ideas on the pixel grid. **Who are my neighbours?** **When are two pixels part of the same object?** **How far apart are they?** The answers are less obvious than on paper, because the grid is square.
+
+<Flow direction="right" steps={[{ label: "Neighbours", tone: "process" }, { label: "Connectivity", tone: "process" }, { label: "Objects (labels)", tone: "data" }, { label: "Counting, distances, shapes", tone: "result" }]} />
+
+## 1. Neighbours of a pixel
+
+A pixel (not on the border) has **8** pixels around it:
+
+<IndexedGrid values={[[0, 1, 0], [1, 2, 1], [0, 1, 0]]} show="values" caption="Centre pixel (2). Its 4-neighbours (1) share an edge with it; the corners (0) share only a corner." />
+
+<Glossary
+  items={[
+    { term: "N4 (4-neighbours)", desc: "Up, down, left, right: they share an edge.", example: "(r±1, c), (r, c±1)" },
+    { term: "ND (diagonal neighbours)", desc: "The four corners.", example: "(r±1, c±1)" },
+    { term: "N8 (8-neighbours)", desc: "N4 + ND: all eight around.", example: "3 × 3 minus the centre" },
+  ]}
+/>
+
+At the **border**, some neighbours lie outside the image: a corner pixel has only 3 of its 8 (Code example 1). Every algorithm must decide what to do there (Chapter 16 covers border modes).
+
+## 2. Connectivity
+
+Two foreground pixels are **connected** if you can walk from one to the other in steps from pixel to neighbouring foreground pixel. **Which** steps are allowed is the connectivity:
+
+<Columns>
+<Panel title="4-connectivity" tone="a">Only steps up, down, left, right. Pixels touching **only at a corner** are **not** connected.</Panel>
+<Panel title="8-connectivity" tone="b">Diagonal steps allowed too. Corner touches **are** connected.</Panel>
+</Columns>
+
+## 3. Same image, different object counts
+
+Three square blobs that touch only at their corners:
+
+<PixelMatrix values={[[255, 255, 0, 0, 0], [255, 255, 0, 0, 0], [0, 0, 255, 255, 0], [0, 0, 255, 255, 0], [0, 0, 0, 0, 255]]} caption="With 4-connectivity: 3 objects. With 8-connectivity: 1 object (Code example 2)." />
+
+Neither answer is "right": it depends on what the pixels represent. For **rod ends** that touch at a corner, 4-connectivity may be correct (two rods); for a **thin diagonal crack**, 8-connectivity keeps it in one piece.
+
+## 4. Try it
+
+<ConnectivityLab caption="Paint pixels in 'Connected regions' and switch between 4- and 8-connectivity. Each colour and number is one object. Then pick a distance view and click to move the start pixel." />
+
+## 5. Labelling: giving every object a number
+
+**Connected-component labelling** gives every pixel of each object the same number (1, 2, 3, …), with 0 for the background. That one step turns a binary image into **countable, measurable objects**: area, centre, bounding box (Chapter 26).
+
+<Flow direction="right" steps={["Binary image (0 / 255)", "cv2.connectedComponents", "Label image + count", { label: "Measure each object", tone: "result" }]} />
+
+## 6. The connectivity paradox
+
+A closed ring drawn with **diagonal** steps (8-connected) seems to enclose a hole. But with 8-connectivity the **background** can also step diagonally through the gaps between the ring's pixels, so inside and outside become one region: a closed curve that does not separate anything.
+
+The standard fix: use **opposite** connectivities for foreground and background:
+
+| Foreground | Background | Ring | Inside separate from outside? |
+| --- | --- | --- | --- |
+| 8 | 8 | 1 piece | no (1 background region) |
+| **8** | **4** | **1 piece** | **yes (2 regions)** |
+| 4 | 4 | 8 pieces | yes, but the ring falls apart |
+
+*(Code example 4.)* OpenCV's contour and hole functions follow this pairing internally.
+
+## 7. Distances on a grid
+
+How far is pixel (1, 2) from pixel (4, 6)? Three common answers:
+
+| Distance | Formula | (1, 2) → (4, 6) |
+| --- | --- | --- |
+| City-block | \|Δr\| + \|Δc\| | 3 + 4 = **7** |
+| Chessboard | max(\|Δr\|, \|Δc\|) | max(3, 4) = **4** |
+| Euclidean | √(Δr² + Δc²) | √(9 + 16) = **5** |
+
+- **City-block** (D4, L1): walk only up/down/left/right, like streets in a grid city.
+- **Chessboard** (D8): a king's moves; diagonal steps cost 1.
+- **Euclidean** (L2): the straight-line distance.
+
+The 4-connectivity neighbours are exactly the pixels at city-block distance 1; the 8-neighbours are those at chessboard distance 1.
+
+## 8. The distance transform
+
+The **distance transform** gives **every** pixel its distance to the nearest zero pixel. In a binary object it measures how deep inside each pixel is: the maximum is the centre of the thickest part, and twice the maximum is roughly the object's thickness.
+
+<Flow direction="right" steps={["Binary object", "cv2.distanceTransform", "Distance of each pixel to the background", { label: "Thickness, centre lines, separating touching objects", tone: "result" }]} />
+
+Chapter 27 uses it to separate touching rods with the watershed algorithm.
+
+## 9. Neighbourhood operations
+
+Neighbours are also the basis of the second family of operations from 1.5: filters look at a pixel's 3 × 3 (or larger) **neighbourhood**. 4- and 8-neighbourhoods appear again in morphology (Module 25) as the cross- and square-shaped structuring elements.
+
+## 10. Industrial example: counting rods
+
+Rod ends in a bundle image are thresholded to white disks on black. Two rods that **just touch** produce disks connected by a few pixels:
+
+- With **8-connectivity**, diagonally touching disks merge: undercount.
+- With **4-connectivity**, a corner touch keeps them apart, but a real edge contact still merges them.
+
+Connectivity alone rarely solves touching objects. It is the first step; erosion, the distance transform and watershed do the rest (Modules 25, 27).
+
+## What you should remember from 3.6
+
+<Takeaways>
+<Takeaway n={1} title="Neighbours">N4 share an edge, ND a corner; N8 = both. Border pixels have fewer.</Takeaway>
+<Takeaway n={2} title="Connectivity">4: no diagonal steps. 8: diagonal steps allowed. Object counts depend on it.</Takeaway>
+<Takeaway n={3} title="Labelling">connectedComponents numbers each object; background is label 0.</Takeaway>
+<Takeaway n={4} title="Paradox">Use opposite connectivities for foreground and background (8/4).</Takeaway>
+<Takeaway n={5} title="Distances">City-block, chessboard, Euclidean; distanceTransform gives each pixel its distance to the background.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** How many 8-neighbours does a pixel on the top edge (not a corner) have?
+
+<Solution>
+
+**5**: left, right, and the three below.
+
+</Solution>
+
+**Q2.** Pixels (2, 2) and (3, 3) are both foreground; (2, 3) and (3, 2) are background. Are they connected with 4-connectivity? With 8?
+
+<Solution>
+
+4-connectivity: **no** (they touch only at a corner). 8-connectivity: **yes**.
+
+</Solution>
+
+**Q3.** City-block and chessboard distance between (0, 0) and (3, 5)?
+
+<Solution>
+
+City-block 3 + 5 = **8**; chessboard max(3, 5) = **5**. (Euclidean ≈ 5.83.)
+
+</Solution>
+
+**Q4.** `cv2.connectedComponents` returns n = 5. How many objects are there?
+
+<Solution>
+
+**4**: the count includes label 0, the background.
+
+</Solution>
+
+### Next: Module 4 — Formats and compression
+
+Module 3 treated images as clean arrays of numbers. Module 4 looks at how they are **stored and sent**: bytes, lossless and lossy compression, how JPEG works, PNG and TIFF, raw and 16-bit files, video streams and metadata.
+
+## Code
+
+Four experiments: listing neighbours, counting objects with two connectivities, grid distances and the distance transform, and the connectivity paradox.
+
+### 1. From scratch: neighbours, including at the border
+
+```python
+import numpy as np
+
+def neighbours(r, c, h, w, kind=4):
+    n4 = [(r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]
+    nd = [(r - 1, c - 1), (r - 1, c + 1), (r + 1, c - 1), (r + 1, c + 1)]
+    cand = n4 if kind == 4 else nd if kind == "D" else n4 + nd
+    return [(y, x) for y, x in cand if 0 <= y < h and 0 <= x < w]   # drop positions outside the image
+
+print("N4 of (2, 2):", neighbours(2, 2, 5, 5, 4))
+print("ND of (2, 2):", neighbours(2, 2, 5, 5, "D"))
+print("N8 of corner (0, 0):", neighbours(0, 0, 5, 5, 8))
+```
+
+Output:
+
+```text
+N4 of (2, 2): [(1, 2), (3, 2), (2, 1), (2, 3)]
+ND of (2, 2): [(1, 1), (1, 3), (3, 1), (3, 3)]
+N8 of corner (0, 0): [(1, 0), (0, 1), (1, 1)]
+```
+
+- The corner pixel keeps only 3 of its 8 neighbours; the others are outside the image.
+
+### 2. OpenCV: counting objects with 4- and 8-connectivity
+
+```python
+import numpy as np
+import cv2
+
+img = np.array([[1, 1, 0, 0, 0],
+                [1, 1, 0, 0, 0],
+                [0, 0, 1, 1, 0],
+                [0, 0, 1, 1, 0],
+                [0, 0, 0, 0, 1]], np.uint8) * 255   # three blobs that touch only at corners
+for conn in (4, 8):
+    n, labels = cv2.connectedComponents(img, connectivity=conn)
+    print(f"{conn}-connectivity: {n - 1} objects (+ background)")
+    print(labels)
+```
+
+Output:
+
+```text
+4-connectivity: 3 objects (+ background)
+[[1 1 0 0 0]
+ [1 1 0 0 0]
+ [0 0 2 2 0]
+ [0 0 2 2 0]
+ [0 0 0 0 3]]
+8-connectivity: 1 objects (+ background)
+[[1 1 0 0 0]
+ [1 1 0 0 0]
+ [0 0 1 1 0]
+ [0 0 1 1 0]
+ [0 0 0 0 1]]
+```
+
+- `cv2.connectedComponents(binary, connectivity)` returns the number of labels **including** the background, and an int32 label image.
+- Any non-zero pixel counts as foreground.
+
+### 3. Distances, and the distance transform
+
+```python
+import numpy as np
+import cv2
+
+p, q = np.array([1, 2]), np.array([4, 6])          # (row, col)
+d = np.abs(p - q)
+print("city-block (D4):", d.sum(), " chessboard (D8):", d.max(), " Euclidean:", round(float(np.hypot(*d)), 2))
+
+img = np.full((7, 7), 255, np.uint8)
+img[3, 3] = 0                                      # one zero pixel in the middle
+for name, dist, mask in [("L1 (city-block)", cv2.DIST_L1, 3), ("C (chessboard)", cv2.DIST_C, 3),
+                         ("L2, 5x5 mask", cv2.DIST_L2, 5), ("L2, precise", cv2.DIST_L2, cv2.DIST_MASK_PRECISE)]:
+    dt = cv2.distanceTransform(img, dist, mask)
+    print(f"{name:16s} distance from the centre to corner (0, 0): {dt[0, 0]:.2f}")
+```
+
+Output:
+
+```text
+city-block (D4): 7  chessboard (D8): 4  Euclidean: 5.0
+L1 (city-block)  distance from the centre to corner (0, 0): 6.00
+C (chessboard)   distance from the centre to corner (0, 0): 3.00
+L2, 5x5 mask     distance from the centre to corner (0, 0): 4.20
+L2, precise      distance from the centre to corner (0, 0): 4.24
+```
+
+- `cv2.distanceTransform(src, distanceType, maskSize)` computes, for each non-zero pixel, the distance to the nearest zero pixel.
+- The true Euclidean distance from (3, 3) to (0, 0) is √18 ≈ 4.24. The fast 5 × 5 mask approximates it (4.20); `cv2.DIST_MASK_PRECISE` gives the exact value.
+
+### 4. The connectivity paradox
+
+```python
+import numpy as np
+import cv2
+
+ring = np.zeros((7, 7), np.uint8)                  # a diamond-shaped ring drawn with diagonal steps
+for r, c in [(1, 3), (2, 2), (2, 4), (3, 1), (3, 5), (4, 2), (4, 4), (5, 3)]:
+    ring[r, c] = 255
+for fg, bg in [(8, 8), (8, 4), (4, 4)]:
+    n_fg, _ = cv2.connectedComponents(ring, connectivity=fg)
+    n_bg, _ = cv2.connectedComponents(255 - ring, connectivity=bg)
+    print(f"foreground {fg}-conn: {n_fg - 1} ring piece(s); background {bg}-conn: {n_bg - 1} region(s)")
+```
+
+Output:
+
+```text
+foreground 8-conn: 1 ring piece(s); background 8-conn: 1 region(s)
+foreground 8-conn: 1 ring piece(s); background 4-conn: 2 region(s)
+foreground 4-conn: 8 ring piece(s); background 4-conn: 2 region(s)
+```
+
+- Labelling the background is done by labelling the inverted image (`255 − ring`).
+- Only the 8/4 pairing gives what we expect: one closed ring, with an inside and an outside.
+
+## OpenCV API notes
+
+**`cv2.connectedComponents(image, connectivity=8, ltype=cv2.CV_32S) → retval, labels`**: `retval` includes the background label 0. The default connectivity is **8**.
+
+**`cv2.connectedComponentsWithStats(image, connectivity)`** additionally returns `stats` (x, y, width, height, area per label) and `centroids`: the usual way to count and measure blobs (Chapter 26).
+
+**`cv2.distanceTransform(src, distanceType, maskSize)`**: `src` is 8-bit, distances are measured to the nearest **zero** pixel; output is float32. Types `DIST_L1`, `DIST_L2`, `DIST_C`; mask sizes 3, 5 or `DIST_MASK_PRECISE`.
+
+**Neighbourhood shapes for morphology**: `cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))` is the 4-neighbourhood; `MORPH_RECT` is the 8-neighbourhood (Module 25).
+
+## Where it fails
+
+- **Touching objects** merge under any connectivity if they share edge pixels; connectivity cannot split them.
+- **Noise pixels** become tiny objects; filter labels by area afterwards.
+- **Thin structures** (cracks, wires) break into pieces under 4-connectivity if they run diagonally.
+- **Grid distances** are approximations of real distances; convert with mm per pixel and remember anisotropic pixels in line-scan images (2.10).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Forgetting that the label count includes the background.**
+- **Using the default 8-connectivity** without thinking about whether diagonal touches should join objects.
+- **Passing an image with white background and dark objects** to `connectedComponents`: it labels the background as one huge object. Invert first.
+- **Expecting `distanceTransform` to measure distance to white pixels**: it measures to **zero** pixels.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Digital topology
+
+Rosenfeld showed that on a square grid, consistent notions of "closed curve" and "hole" require pairing 8-connectivity for the foreground with 4-connectivity for the background (or the reverse). Hexagonal grids avoid the problem because every neighbour shares an edge [1].
+
+### Labelling algorithms
+
+Classic two-pass labelling scans the image, assigns provisional labels and records equivalences, then resolves them in a second pass. OpenCV uses fast block-based variants of this idea [2][3].
+
+### Fast distance transforms
+
+Chamfer distance transforms propagate approximate distances with small masks in two passes; exact Euclidean transforms can also be computed in linear time [3].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "How many neighbours does a pixel have under 4-connectivity (not at the border)?",
+      options: ["2", "4", "8", "9"],
+      answer: 1,
+      explanation: "Up, down, left and right.",
+    },
+    {
+      question: "Two pixels touch only at a corner. Under which connectivity are they connected?",
+      options: ["4 only", "8 only", "Both", "Neither"],
+      answer: 1,
+      explanation: "Diagonal steps are allowed only in 8-connectivity.",
+    },
+    {
+      question: "City-block distance between (2, 3) and (5, 7)?",
+      options: ["4", "5", "7", "25"],
+      answer: 2,
+      explanation: "|5 − 2| + |7 − 3| = 3 + 4 = 7.",
+    },
+    {
+      question: "Which pairing avoids the connectivity paradox?",
+      options: ["8 foreground, 8 background", "4 foreground, 4 background", "8 foreground, 4 background", "Any pairing"],
+      answer: 2,
+      explanation: "Opposite connectivities make closed curves separate inside from outside.",
+    },
+    {
+      question: "cv2.distanceTransform measures each pixel's distance to…",
+      options: ["The image centre", "The nearest zero pixel", "The nearest white pixel", "The top-left corner"],
+      answer: 1,
+      explanation: "Distances are to the nearest zero (background) pixel.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+In the grid below (1 = foreground), count the objects under 4- and 8-connectivity.
+
+<PixelMatrix values={[[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 0], [255, 0, 0, 0]]} />
+
+<Solution>
+
+4-connectivity: (0,0), (1,1) and (2,2) are each alone (they touch only at corners), (0,3) and (1,3) form one object, and (3,0) is alone: **5 objects**. 8-connectivity: (0,0)–(1,1)–(2,2) join along the diagonal, and (2,2) touches (1,3) at a corner, so the right-hand pair joins too: one object, plus (3,0): **2 objects**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Use `cv2.connectedComponentsWithStats` on the 5 × 5 three-blob image of Code example 2 with 4-connectivity and print the area and centroid of each object.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+img = np.array([[1, 1, 0, 0, 0],
+                [1, 1, 0, 0, 0],
+                [0, 0, 1, 1, 0],
+                [0, 0, 1, 1, 0],
+                [0, 0, 0, 0, 1]], np.uint8) * 255
+n, labels, stats, cents = cv2.connectedComponentsWithStats(img, connectivity=4)
+for k in range(1, n):
+    print(f"object {k}: area {stats[k, cv2.CC_STAT_AREA]}, centroid (x, y) = ({cents[k, 0]:.1f}, {cents[k, 1]:.1f})")
+```
+
+Output:
+
+```text
+object 1: area 4, centroid (x, y) = (0.5, 0.5)
+object 2: area 4, centroid (x, y) = (2.5, 2.5)
+object 3: area 1, centroid (x, y) = (4.0, 4.0)
+```
+
+Centroids are (x, y), and with pixel centres at integer coordinates (3.4) a 2 × 2 block at columns 0–1 has its centre at x = 0.5.
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+A binary rod-end image has two disks of radius 10 px whose edges overlap by 2 px. Will `connectedComponents` separate them with 4-connectivity? What could?
+
+<Solution>
+
+**No**: overlapping disks share edge-connected pixels, so they are one object under either connectivity. Separating them needs shape-based methods: erosion until they split, or the distance transform (two peaks near the centres) followed by watershed (Modules 25, 27).
+
+</Solution>
+
+## References
+
+1. A. Rosenfeld, "Connectivity in digital pictures," *Journal of the ACM*, vol. 17, no. 1, pp. 146–160, 1970.
+2. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed. Pearson, 2018. Sec. 2.5 (basic relationships between pixels: neighbours, adjacency, connectivity, distance measures).
+3. G. Borgefors, "Distance transformations in digital images," *Computer Vision, Graphics, and Image Processing*, vol. 34, no. 3, pp. 344–371, 1986.
+4. OpenCV 4.13.0 documentation, *Structural Analysis and Shape Descriptors* (`connectedComponents`, `connectedComponentsWithStats`) and *Miscellaneous Image Transformations* (`distanceTransform`): [docs.opencv.org/4.13.0/d3/dc0/group__imgproc__shape.html](https://docs.opencv.org/4.13.0/d3/dc0/group__imgproc__shape.html), [docs.opencv.org/4.13.0/d7/d1b/group__imgproc__misc.html](https://docs.opencv.org/4.13.0/d7/d1b/group__imgproc__misc.html).

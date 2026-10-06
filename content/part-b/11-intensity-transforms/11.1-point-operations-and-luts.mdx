@@ -1,0 +1,289 @@
+export const meta = {
+  number: "11.1",
+  title: "Point operations and LUTs",
+  minutes: 25,
+  objectives: [
+    "Define a point operation and draw it as a transfer curve",
+    "Implement any point operation on 8-bit images as a 256-entry lookup table (LUT)",
+    "Compose several operations into one LUT and use per-channel LUTs",
+    "Know which operations are not point operations",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 11.1 (first chapter of Module 11).
+  CurveLab (lib/curve-ops.ts) is shared by the chapters of Module 11.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 11.1 Point operations and LUTs
+
+<Definition term="Point operation">an image operation where each output pixel depends only on the value of the same input pixel: out(x, y) = T(in(x, y)). The function T is the same everywhere in the image and can be drawn as a curve from input value to output value.</Definition>
+
+Brightening, darkening, inverting, increasing contrast, applying gamma, thresholding: all are point operations. They are the simplest image operations, they are extremely fast with a lookup table, and they set the stage for histograms (Module 12) and thresholds (Module 13).
+
+## 1. An analogy
+
+A currency exchange board. Every amount in euros is converted with the same table to dollars: it does not matter who brings the money or what the neighbouring customer exchanged. A point operation is an exchange table for grey values.
+
+## 2. The transfer curve
+
+<Flow
+  steps={[
+    { label: "Input pixel value v (0–255)", tone: "data" },
+    { label: "Transfer function T (the curve)", tone: "process" },
+    { label: "Output pixel value T(v)", tone: "result" },
+  ]}
+/>
+
+The curve tells you everything:
+
+- **Diagonal** (T(v) = v): nothing changes.
+- **Above the diagonal**: brighter; **below**: darker.
+- **Steeper than 45°**: more contrast in that range (values pushed apart); **flatter**: less contrast (values squeezed).
+- **Horizontal parts**: different inputs become the same output (information lost, clipping).
+- **Decreasing**: an inverted image.
+
+<CurveLab caption="Choose a point operation and its parameters. Left: input; middle: the transfer curve; right: output. Histograms show where the values go." />
+
+Things to try: gamma 0.5 (dark values spread, brightening), negative, stretch 60–180 (steeper: more contrast, values outside clipped), threshold 128 (a step: two output values).
+
+## 3. Lookup tables
+
+An 8-bit image has only 256 possible values. Instead of evaluating T for every pixel (millions of times), compute it **once for each of the 256 values** and store the results in a table. Applying the operation is then a single table lookup per pixel:
+
+<Equation terms={[{ value: "out[y, x]" }, { op: "=", value: "table[ in[y, x] ]", result: true }]} />
+
+- Works for **any** T: formulas, piecewise curves, hand-drawn curves, measured calibration curves.
+- Speed does not depend on how expensive T is.
+- Several operations in a row can be **composed into one table**: table = T₂[T₁] (example 2).
+- Colour images: one table for all channels, or a **different table per channel** (white balance, colour grading).
+
+For 16-bit images a table has 65 536 entries: still practical. For float images, LUTs do not apply directly; compute the formula.
+
+## 4. What is not a point operation
+
+| Operation | Why not |
+| --- | --- |
+| Blur, sharpen, edge detection | output depends on neighbours (neighbourhood operations, Part C) |
+| Histogram equalization | T depends on the whole image's histogram, but once computed it is a LUT (12.2) |
+| CLAHE, adaptive threshold | T changes from region to region (12.3, 13.5) |
+| Flat-field correction | the factor depends on the position (x, y) (15.3) |
+| Geometric transforms | pixels move (Module 16) |
+
+## 5. Industrial example
+
+A laser-marking verification station reads dark codes on anodised aluminium. The raw images are linear and dark (gamma off for measurement). The pipeline applies one combined LUT for the code reader: a black-level subtraction (values below 12 → 0), a contrast stretch of the 12–90 range to 0–255, and a gamma of 0.8. Three operations, composed once at start-up into a single 256-entry table and applied with `cv2.LUT` in well under a millisecond per frame; the measurement path uses the untouched linear image.
+
+## What you should remember from 11.1
+
+<Takeaways>
+<Takeaway n={1} title="Definition">out = T(in), pixel by pixel, the same T everywhere.</Takeaway>
+<Takeaway n={2} title="Curve">Steep = more contrast, flat = less, horizontal = clipping, decreasing = inversion.</Takeaway>
+<Takeaway n={3} title="LUT">For 8-bit images compute T for 256 values once, then look up: cv2.LUT.</Takeaway>
+<Takeaway n={4} title="Compose">Several point operations = one table.</Takeaway>
+<Takeaway n={5} title="Limits">Anything using neighbours or position is not a point operation.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** T(v) = 2v − 100, clipped to 0…255. What happens to values 40, 100, 200?
+
+<Solution>
+
+40 → −20 → **0**; 100 → **100**; 200 → 300 → **255**. Contrast doubles around 100; the ends are clipped.
+
+</Solution>
+
+**Q2.** Is "replace each pixel by the median of its 3 × 3 neighbourhood" a point operation?
+
+<Solution>
+
+No: the output depends on neighbouring pixels.
+
+</Solution>
+
+### Next: 11.2 Negative and log
+
+Two classic curves: inverting an image, and compressing a huge range of values with a logarithm.
+
+## Code
+
+Two examples: why a LUT gives the same result as evaluating the formula, and LUTs in OpenCV (composition, per channel).
+
+### 1. From scratch: formula vs table
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+f = lambda x: np.clip(np.round(255 * (x / 255) ** 0.5), 0, 255)   # any point operation (here gamma 0.5)
+
+direct = f(img.astype(np.float64)).astype(np.uint8)               # 1. compute for every pixel: 64 000 evaluations
+table = f(np.arange(256, dtype=np.float64)).astype(np.uint8)       # 2. compute once for every possible value: 256
+via_table = table[img]                                             #    then look up (NumPy fancy indexing)
+print("pixels:", img.size, "| distinct input values:", len(np.unique(img)), "| table entries: 256")
+print("identical:", np.array_equal(direct, via_table), "| example 64 ->", int(table[64]), "| 200 ->", int(table[200]))
+```
+
+Output:
+
+```text
+pixels: 64000 | distinct input values: 256 | table entries: 256
+identical: True | example 64 -> 128 | 200 -> 226
+```
+
+- 64 000 formula evaluations replaced by 256 plus 64 000 cheap lookups; for 5 MP images and expensive formulas the difference is large.
+- `table[img]` is the NumPy way to apply a LUT (6.3); OpenCV's `cv2.LUT` does the same, multi-threaded.
+
+### 2. OpenCV: cv2.LUT, composition and per-channel tables
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+x = np.arange(256, dtype=np.float64)
+gamma = np.clip(np.round(255 * (x / 255) ** 0.5), 0, 255).astype(np.uint8)
+negative = (255 - x).astype(np.uint8)
+
+out1 = cv2.LUT(cv2.LUT(img, gamma), negative)                       # two passes over the image
+combined = negative[gamma]                                          # compose the tables: negative(gamma(x))
+out2 = cv2.LUT(img, combined)                                       # one pass
+print("two LUTs == one combined LUT:", np.array_equal(out1, out2))
+
+color = cv2.imread("sample-color.png")
+per_channel = np.stack([x * 0.8, x, np.minimum(x * 1.2, 255)], axis=1).round().astype(np.uint8).reshape(256, 1, 3)
+warm = cv2.LUT(color, per_channel)                                  # a different table for B, G, R
+print("one table for all channels:", cv2.LUT(color, gamma).shape, "| per-channel table shape:", per_channel.shape,
+      "| pixel (180, 100):", color[180, 100].tolist(), "->", warm[180, 100].tolist())
+print("convertScaleAbs(alpha=1.5, beta=-40) at 100:", int(cv2.convertScaleAbs(np.uint8([[100]]), alpha=1.5, beta=-40)[0, 0]))
+```
+
+Output:
+
+```text
+two LUTs == one combined LUT: True
+one table for all channels: (200, 320, 3) | per-channel table shape: (256, 1, 3) | pixel (180, 100): [40, 150, 255] -> [32, 150, 255]
+convertScaleAbs(alpha=1.5, beta=-40) at 100: 110
+```
+
+- `negative[gamma]` applies the negative table to the gamma table's outputs: the composition is itself a table.
+- A (256, 1, 3) table applies a different curve to each channel: here B × 0.8 and R × 1.2 (R already at 255 stays clipped).
+- For the linear case α·v + β, `cv2.convertScaleAbs` is a shortcut (it also takes the absolute value and saturates to uint8).
+
+## OpenCV API notes
+
+**`cv2.LUT(src, lut[, dst])`**: `src` 8-bit (any number of channels); `lut` 256 elements, either single-channel (same table for all channels) or with as many channels as `src`; output has the table's depth (a float32 table gives a float32 image).
+
+**Linear point operations**: `cv2.convertScaleAbs(src, alpha, beta)` → |α·src + β| saturated to uint8; `src.astype(np.float32) * a + b` then `np.clip` for full control; `cv2.addWeighted(src, a, src, 0, b)`.
+
+**Drawing curves**: `np.interp(np.arange(256), xs, ys)` builds a piecewise-linear table from a few control points.
+
+## Where it fails
+
+- **Information loss**: flat or clipped parts of the curve merge different input values; no later operation can separate them again.
+- **8-bit quantisation**: a steep curve on 8-bit data creates gaps in the histogram (banding); stretch on higher-bit data if available.
+- **Non-uniform problems** (uneven lighting, vignetting) cannot be fixed by one global curve.
+- **Float and 16-bit data**: 16-bit needs a 65 536-entry table (NumPy indexing works; `cv2.LUT` is 8-bit only).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Building the table in float and forgetting to round and clip** before converting to uint8.
+- **Applying a curve meant for linear data to gamma-encoded images** (or the reverse).
+- **Using uint8 arithmetic** for the formula (wrap-around, 6.4).
+- **Chaining many LUT calls** in a loop instead of composing them once.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Point operations and histograms
+
+If a monotonically increasing T maps value v to T(v), the histogram of the output is the input histogram with its bins moved and possibly merged: the order of pixels by brightness is preserved. Histogram equalization (12.2) chooses T as the cumulative distribution so that the output histogram becomes as flat as possible. Any monotone point operation therefore preserves the result of rank-based operations such as median filtering in the sense that median(T(x)) = T(median(x)) [1].
+
+### Hardware LUTs
+
+Industrial cameras, frame grabbers and displays often implement LUTs in hardware (GenICam `LUTSelector`, `LUTValue`), applying gamma or a custom curve before the image reaches the PC at no CPU cost. The trade-off: once applied in the camera, the original values are gone [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "How many entries does a LUT for an 8-bit image need?",
+      options: ["8", "255", "256", "65 536"],
+      answer: 2,
+      explanation: "One for each value 0…255.",
+    },
+    {
+      question: "Where the transfer curve is steeper than the diagonal, contrast…",
+      options: ["decreases", "increases", "stays the same", "is inverted"],
+      answer: 1,
+      explanation: "Neighbouring input values are pushed apart.",
+    },
+    {
+      question: "Applying LUT A and then LUT B equals one LUT…",
+      options: ["A[B]", "B[A]", "A + B", "Not possible"],
+      answer: 1,
+      explanation: "B applied to A's outputs: B[A].",
+    },
+    {
+      question: "Which is NOT a point operation?",
+      options: ["Negative", "Gamma", "Gaussian blur", "Threshold"],
+      answer: 2,
+      explanation: "Blur uses neighbouring pixels.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Draw (or describe) the transfer curve that maps 0–50 to 0, 50–200 linearly to 0–255, and 200–255 to 255. What is the output for 125?
+
+<Solution>
+
+A ramp: flat at 0 up to 50, a straight line from (50, 0) to (200, 255), flat at 255 above 200. 125 → (125 − 50) · 255/150 = **127.5 → 128**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Build the table of exercise 1 with `np.interp` and apply it with `cv2.LUT` to `sample-scene.png`. Print the output min and max and the fraction of pixels clipped at 0 and at 255.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+table = np.round(np.interp(np.arange(256), [0, 50, 200, 255], [0, 0, 255, 255])).astype(np.uint8)
+out = cv2.LUT(img, table)
+print("min", int(out.min()), "max", int(out.max()), f"| clipped low {np.mean(out == 0):.1%} | clipped high {np.mean(out == 255):.1%} | table[125] = {table[125]}")
+```
+
+Output:
+
+```text
+min 0 max 255 | clipped low 19.4% | clipped high 12.5% | table[125] = 128
+```
+
+About a third of the pixels end up at 0 or 255: the price of the stronger contrast in the middle.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Sections 3.1–3.2 (intensity transformation functions).
+2. EMVA, *GenICam Standard Features Naming Convention* (LUT features). https://www.emva.org/standards-technology/genicam/
+3. OpenCV 4.13.0 documentation: `LUT`, `convertScaleAbs`. https://docs.opencv.org/4.13.0/

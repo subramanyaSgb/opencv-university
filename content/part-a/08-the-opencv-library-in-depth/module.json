@@ -1,0 +1,17 @@
+{
+  "number": 8,
+  "title": "The OpenCV library in depth",
+  "summary": "Inside OpenCV: how the library is organised, the C++ core and cv::Mat, the Python bindings, contrib modules, GPU paths (CUDA, OpenCL), the DNN module, G-API, OpenCV.js and versions.",
+  "chapters": [
+    { "number": "8.1", "slug": "8.1-architecture-and-modules", "title": "Architecture and modules" },
+    { "number": "8.2", "slug": "8.2-the-cpp-api-and-cv-mat", "title": "The C++ API and cv::Mat" },
+    { "number": "8.3", "slug": "8.3-python-bindings-and-data-types", "title": "Python bindings and data types" },
+    { "number": "8.4", "slug": "8.4-contrib-modules", "title": "Contrib modules" },
+    { "number": "8.5", "slug": "8.5-building-with-cuda-and-cv2-cuda", "title": "Building with CUDA, and cv2.cuda" },
+    { "number": "8.6", "slug": "8.6-umat-and-opencl", "title": "UMat and OpenCL" },
+    { "number": "8.7", "slug": "8.7-the-dnn-module", "title": "The DNN module" },
+    { "number": "8.8", "slug": "8.8-g-api", "title": "G-API" },
+    { "number": "8.9", "slug": "8.9-opencv-js", "title": "OpenCV.js" },
+    { "number": "8.10", "slug": "8.10-versions-4x-and-5x", "title": "Versions 4.x and 5.x" }
+  ]
+}

@@ -1,0 +1,360 @@
+export const meta = {
+  number: "4.1",
+  title: "Image size in bytes",
+  minutes: 30,
+  objectives: [
+    "Compute the uncompressed size of any image or frame",
+    "Compute data rates and check them against camera links",
+    "Estimate storage for recording systems",
+    "Measure how much PNG and JPEG compress different kinds of images",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 4.1 (Module 4 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+  Link payloads are estimates (about 90 % of the raw bit rate); real throughput depends on the setup.
+*/}
+
+# 4.1 Image size in bytes
+
+<Definition term="Image size">the number of bytes needed to store or send the pixels: width × height × channels × bytes per value.</Definition>
+
+Before compression, an image is just its numbers. Knowing **how many bytes** they take decides whether a camera link can carry the frames, how much memory processing needs, and how many disks a recording system fills per day.
+
+<Equation terms={[{ value: "width" }, { op: "×", value: "height" }, { op: "×", value: "channels" }, { op: "×", value: "bytes per value" }, { op: "=", value: "bytes", result: true }]} />
+
+## 1. The formula
+
+Each pixel stores one value per channel (3.3), each value uses 1 byte (8-bit) or 2 bytes (10- to 16-bit, 3.2):
+
+| Image | Bytes | MB |
+| --- | --- | --- |
+| 1920 × 1080, mono 8-bit | 2 073 600 | 2.07 |
+| 1920 × 1080, BGR 8-bit | 6 220 800 | 6.22 |
+| 2448 × 2048, mono 12-bit (in 16 bits) | 10 027 008 | 10.03 |
+| 4096 × 3000, BGR 8-bit | 36 864 000 | 36.86 |
+
+*(Code example 1.)* In NumPy, `img.nbytes` gives the same number.
+
+## 2. MB or MiB?
+
+Storage and network people use **MB = 1 000 000 bytes**; operating systems often show **MiB = 1 048 576 bytes** (2²⁰) but call them "MB". A 6.22 MB image shows as 5.93 "MB" in some file managers. This course uses MB = 10⁶ bytes.
+
+## 3. Frames per second → bytes per second
+
+A camera sends a stream of frames. The **data rate** is simply:
+
+<Equation terms={[{ value: "bytes per frame" }, { op: "×", value: "frames per second" }, { op: "=", value: "bytes per second", result: true }]} />
+
+A 5 MP mono 8-bit camera at 10 fps sends about **50 MB/s**; at 60 fps, about **300 MB/s**.
+
+## 4. Will it fit through the cable?
+
+Camera links have a maximum payload. Rough figures (about 90 % of the raw bit rate):
+
+| Link | ≈ Payload | 5 MP mono 8-bit |
+| --- | --- | --- |
+| GigE (1 Gbit/s) | 112 MB/s | 22 fps |
+| 2.5GigE | 281 MB/s | 56 fps |
+| 5GigE | 562 MB/s | 112 fps |
+| 10GigE | 1125 MB/s | 224 fps |
+
+*(Code example 3.)* USB3 Vision cameras typically deliver several hundred MB/s in practice; CoaXPress and Camera Link go higher. Several cameras sharing one network port or switch uplink **share** its bandwidth.
+
+## 5. Try it
+
+<SizeCalc caption="Uncompressed sizes. Link payloads are estimates; real throughput depends on the network card, switch, packet size and driver settings." />
+
+## 6. Ways to reduce the data
+
+<Chips items={["Region of interest (send only part of the sensor)", "Mono instead of colour (÷ 3)", "8-bit instead of 12-bit (÷ 2)", "Raw Bayer instead of RGB (÷ 3, 2.7)", "Lower frame rate or triggering only when needed", "Binning (2.5)", "Compression (4.2)"]} />
+
+The cheapest bytes are the ones never sent: an ROI of only the inspection zone often cuts the data by half or more.
+
+## 7. Memory during processing
+
+Processing needs more memory than one frame: copies, float versions (4 bytes per value), intermediate results, buffers for several frames. A 5 MP image converted to `float32` takes **20 MB**; a 10-frame buffer of 12-bit images takes **100 MB**. On small industrial PCs and edge devices this adds up quickly.
+
+## 8. Recording and storage
+
+Uncompressed recording is huge:
+
+<Equation terms={[{ value: "5 MB", label: "per frame" }, { op: "×", value: "10 fps" }, { op: "×", value: "86 400 s", label: "per day" }, { op: "=", value: "4.33 TB", label: "per day", result: true }]} />
+
+That is why systems record **compressed** video (4.5), store only **events** (defects, alarms), or keep raw images for a short rolling window.
+
+## 9. File size is not memory size
+
+A file on disk is usually **compressed**, so it is smaller than the image in memory. How much smaller depends on the **content**:
+
+| Image | Raw | PNG (lossless) | JPEG q90 (lossy) |
+| --- | --- | --- | --- |
+| Colour shapes on a flat background | 192 000 B | 3 272 B (59×) | 7 549 B (25×) |
+| Test chart (bars, text) | 64 000 B | 7 134 B (9×) | 9 667 B (7×) |
+| Gradient scene with noise | 64 000 B | 43 148 B (1.5×) | 19 871 B (3.2×) |
+
+*(Code example 2.)* Flat areas compress very well; **noise compresses badly**, because it is random. Chapter 4.2 explains why.
+
+## 10. Headers and row padding
+
+Files add a small **header** (size, type, bit depth). Some formats and some memory layouts also **pad** each row to a multiple of 4 bytes (BMP files, some camera buffers). Then the bytes between two rows (**stride** or **step**) are a little more than width × channels. OpenCV and NumPy handle this for you, but raw buffers from camera SDKs may need the stride when you wrap them in an array.
+
+## 11. Industrial example
+
+A rod-counting station uses **four 5 MP mono cameras at 15 fps** on one PC:
+
+<Flow
+  steps={[
+    { label: "Per camera: 5.01 MB × 15 = 75 MB/s", tone: "data" },
+    { label: "Four cameras: 300 MB/s", tone: "data" },
+    { label: "One GigE port (≈ 112 MB/s): far too little", tone: "process" },
+    { label: "Fix: one GigE port per camera (4-port card), or 5/10GigE, or ROIs", tone: "result" },
+  ]}
+/>
+
+Plan the bandwidth **before** buying the PC and switch.
+
+## What you should remember from 4.1
+
+<Takeaways>
+<Takeaway n={1} title="Formula">Bytes = width × height × channels × bytes per value (1 for 8-bit, 2 for 10–16-bit).</Takeaway>
+<Takeaway n={2} title="Data rate">Bytes per frame × fps; compare with the link's payload.</Takeaway>
+<Takeaway n={3} title="Shared links">Cameras on one port or uplink share its bandwidth.</Takeaway>
+<Takeaway n={4} title="Reduce">ROI, mono, 8-bit, raw Bayer, lower fps, binning, compression.</Takeaway>
+<Takeaway n={5} title="Files">Compressed files are smaller; how much depends on content, not just size.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Size of a 1280 × 1024 mono 10-bit image (stored in 16 bits)?
+
+<Solution>
+
+1280 × 1024 × 2 = **2 621 440 bytes** ≈ 2.62 MB.
+
+</Solution>
+
+**Q2.** Can a GigE link (≈ 112 MB/s) carry a 1920 × 1080 colour stream at 30 fps?
+
+<Solution>
+
+6.22 MB × 30 = **187 MB/s**: no. Use mono, raw Bayer (≈ 62 MB/s) or a faster link.
+
+</Solution>
+
+**Q3.** Why does a noisy image compress worse than a clean one with PNG?
+
+<Solution>
+
+Lossless compression exploits repetition and predictability; random noise has neither, so it cannot be described in fewer bytes.
+
+</Solution>
+
+### Next: 4.2 Lossless vs lossy
+
+Two ways to make images smaller: keep every pixel exactly (lossless) or throw away what matters least (lossy). When is each acceptable?
+
+## Code
+
+Three calculations: frame sizes, real compressed sizes with OpenCV, and link capacity and storage.
+
+### 1. From scratch: bytes per frame
+
+```python
+import numpy as np
+
+def frame_bytes(w, h, channels=1, bits=8):
+    bytes_per_sample = 1 if bits <= 8 else 2          # 10/12/16-bit stored in 2 bytes
+    return w * h * channels * bytes_per_sample
+
+for label, args in [("1920x1080 gray 8-bit", (1920, 1080)), ("1920x1080 BGR 8-bit", (1920, 1080, 3)),
+                    ("2448x2048 gray 12-bit", (2448, 2048, 1, 12)), ("4096x3000 BGR 8-bit", (4096, 3000, 3))]:
+    print(f"{label:22s}: {frame_bytes(*args):>11,d} bytes = {frame_bytes(*args) / 1e6:6.2f} MB")
+img = np.zeros((2048, 2448), np.uint16)
+print("NumPy agrees:", img.nbytes == frame_bytes(2448, 2048, 1, 12))
+```
+
+Output:
+
+```text
+1920x1080 gray 8-bit  :   2,073,600 bytes =   2.07 MB
+1920x1080 BGR 8-bit   :   6,220,800 bytes =   6.22 MB
+2448x2048 gray 12-bit :  10,027,008 bytes =  10.03 MB
+4096x3000 BGR 8-bit   :  36,864,000 bytes =  36.86 MB
+NumPy agrees: True
+```
+
+- `{n:,d}` formats a number with thousands separators.
+- `img.nbytes` is the true memory size of the pixel data.
+
+### 2. OpenCV: compressed sizes with `cv2.imencode`
+
+```python
+import numpy as np
+import cv2
+
+for name in ["sample-pinhole-scene.png", "sample-color.png", "sample-scene.png", "sample-noise-dark-gain.png"]:
+    img = cv2.imread(name, cv2.IMREAD_UNCHANGED)
+    raw = img.nbytes
+    png = len(cv2.imencode(".png", img)[1])
+    jpg = len(cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 90])[1])
+    print(f"{name:27s} raw {raw:6d} B | PNG {png:6d} B ({raw / png:4.1f}x) | JPEG q90 {jpg:6d} B ({raw / jpg:4.1f}x)")
+```
+
+Output:
+
+```text
+sample-pinhole-scene.png    raw  64000 B | PNG   7134 B ( 9.0x) | JPEG q90   9667 B ( 6.6x)
+sample-color.png            raw 192000 B | PNG   3272 B (58.7x) | JPEG q90   7549 B (25.4x)
+sample-scene.png            raw  64000 B | PNG  43148 B ( 1.5x) | JPEG q90  19871 B ( 3.2x)
+sample-noise-dark-gain.png  raw  64000 B | PNG  43449 B ( 1.5x) | JPEG q90  19850 B ( 3.2x)
+```
+
+- `cv2.imencode(ext, img, params)` compresses in memory and returns `(ok, buffer)`; `len(buffer)` is the file size without writing a file.
+- On simple graphics PNG (lossless) beats JPEG; on noisy natural images JPEG is smaller, because it is allowed to change the pixels (4.2, 4.3).
+
+### 3. From scratch: link capacity and storage
+
+```python
+import numpy as np
+
+links = {"GigE (1 Gbit/s)": 1e9, "2.5GigE": 2.5e9, "5GigE": 5e9, "10GigE": 10e9}
+frame = 2448 * 2048 * 1                     # bytes, 8-bit mono
+for name, bits in links.items():
+    usable = bits / 8 * 0.9                 # assume ~90 % of the raw bit rate is usable payload
+    print(f"{name:16s}: about {usable / 1e6:6.0f} MB/s -> {usable / frame:5.1f} fps of 5 MP mono 8-bit")
+day = frame * 10 * 3600 * 24                # 10 fps for 24 h
+print(f"10 fps for a day: {day / 1e12:.2f} TB uncompressed")
+```
+
+Output:
+
+```text
+GigE (1 Gbit/s) : about    112 MB/s ->  22.4 fps of 5 MP mono 8-bit
+2.5GigE         : about    281 MB/s ->  56.1 fps of 5 MP mono 8-bit
+5GigE           : about    562 MB/s -> 112.2 fps of 5 MP mono 8-bit
+10GigE          : about   1125 MB/s -> 224.4 fps of 5 MP mono 8-bit
+10 fps for a day: 4.33 TB uncompressed
+```
+
+- Bits ÷ 8 = bytes. Network speeds are quoted in bits per second.
+- The 90 % factor is a rough allowance for protocol overhead; measure on the real system.
+
+## OpenCV API notes
+
+**`img.nbytes`, `img.shape`, `img.dtype`, `img.itemsize`**: NumPy attributes for memory size, dimensions, type and bytes per value.
+
+**`cv2.imencode(ext, img[, params]) → ok, buf`** and **`cv2.imdecode(buf, flags)`**: compress and decompress in memory, useful for measuring sizes or sending images over a network.
+
+**`cv2.imwrite(path, img, params)`**: common parameters `IMWRITE_JPEG_QUALITY` (0–100, default 95), `IMWRITE_PNG_COMPRESSION` (0–9; higher is smaller but slower). Without parameters OpenCV uses a fast default; setting a level explicitly can give quite different sizes (Exercise 2).
+
+## Where it fails
+
+- **Link figures are optimistic**: packet loss, small packets, shared switches and CPU load reduce real throughput. Test with the real cameras.
+- **Compression ratios depend on content**: the same camera gives very different file sizes for a clean part and a noisy, textured one.
+- **Packed pixel formats** (for example 12-bit packed) use 1.5 bytes per pixel on the wire, not 2.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Mixing bits and bytes** (1 Gbit/s is 125 MB/s, not 1000 MB/s).
+- **Forgetting that 12-bit pixels take 2 bytes** in memory.
+- **Putting several cameras on one GigE port** and wondering why frames drop.
+- **Estimating storage from file sizes of clean test images**; production images are noisier and bigger.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Jumbo frames and GigE Vision
+
+GigE Vision cameras stream images in UDP packets. Larger packets ("jumbo frames", e.g. 8–9 kB) reduce per-packet overhead and CPU load; switches and network cards must support them [1].
+
+### Entropy as a limit
+
+The best possible lossless compression of a source is bounded by its entropy. Random noise has high entropy and cannot be compressed much; smooth images have low entropy given a good predictor [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Size of a 640 × 480 BGR 8-bit image?",
+      options: ["307 200 B", "921 600 B", "614 400 B", "1 228 800 B"],
+      answer: 1,
+      explanation: "640 × 480 × 3 × 1 = 921 600 bytes.",
+    },
+    {
+      question: "How many bytes per value does a 12-bit image use in memory?",
+      options: ["1", "1.5", "2", "4"],
+      answer: 2,
+      explanation: "It is stored in a 16-bit container (uint16).",
+    },
+    {
+      question: "A GigE link carries about 112 MB/s. Max fps for 2 MB frames?",
+      options: ["About 22", "About 56", "About 112", "About 500"],
+      answer: 1,
+      explanation: "112 / 2 = 56 frames per second.",
+    },
+    {
+      question: "Which image compresses least with lossless PNG?",
+      options: ["A flat gray card", "A drawing with few colours", "A noisy dark image", "A black image"],
+      answer: 2,
+      explanation: "Noise is random and unpredictable.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Three 2448 × 2048 mono cameras at 20 fps, 8-bit. (a) Total data rate? (b) Do they fit on one GigE port? (c) What would you do?
+
+<Solution>
+
+(a) 5.01 MB × 20 × 3 ≈ **301 MB/s**. (b) **No** (≈ 112 MB/s). (c) One GigE port per camera (each ≈ 100 MB/s, which fits), or a 5/10GigE link, or ROIs/lower fps.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Use `cv2.imencode` to compare PNG sizes on `sample-pinhole-scene.png`: with no parameters, and with compression levels 0, 1 and 9.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-pinhole-scene.png", cv2.IMREAD_UNCHANGED)
+print(f"PNG default: {len(cv2.imencode('.png', img)[1])} bytes")
+for level in [0, 1, 9]:
+    size = len(cv2.imencode(".png", img, [cv2.IMWRITE_PNG_COMPRESSION, level])[1])
+    print(f"PNG level {level}: {size} bytes")
+```
+
+Output:
+
+```text
+PNG default: 7134 bytes
+PNG level 0: 64357 bytes
+PNG level 1: 3889 bytes
+PNG level 9: 2941 bytes
+```
+
+Level 0 stores the pixels uncompressed (plus headers); higher levels search harder for a smaller encoding. Note that the **default** (no parameter) is larger than level 1: OpenCV's default settings favour speed (a run-length strategy, `IMWRITE_PNG_STRATEGY_RLE`), and setting the level explicitly also switches to zlib's standard strategy. All four decode to identical pixels.
+
+</Solution>
+
+## References
+
+1. Automated Imaging Association (A3), *GigE Vision Standard*.
+2. C. E. Shannon, "A mathematical theory of communication," *Bell System Technical Journal*, vol. 27, pp. 379–423 and 623–656, 1948.
+3. OpenCV 4.13.0 documentation, *Image file reading and writing* (`imencode`, `imwrite` flags): [docs.opencv.org/4.13.0/d4/da8/group__imgcodecs.html](https://docs.opencv.org/4.13.0/d4/da8/group__imgcodecs.html).

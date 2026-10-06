@@ -1,0 +1,330 @@
+export const meta = {
+  number: "27.5",
+  title: "GrabCut and graph cut",
+  minutes: 30,
+  objectives: [
+    "Write segmentation as an energy: data cost plus smoothness cost",
+    "Find the minimum-energy labelling of a tiny example by hand",
+    "Use cv2.grabCut with a rectangle, then refine it with mask strokes",
+    "Understand the four mask values and when GrabCut needs help",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 27.5 (Module 27).
+  Lab: SegmentLab mode "grabcut" (cases precomputed with cv2.grabCut by scripts/gen_grabcut_data.py).
+  Reference tail: all examples are deterministic (cv2.setRNGSeed) and compared automatically.
+*/}
+
+# 27.5 GrabCut and graph cut
+
+<Definition term="Graph-cut segmentation">segmentation that chooses, for every pixel, foreground or background so that a total cost is as small as possible: a data cost (how well each pixel's colour fits the label) plus a smoothness cost (a penalty for every pair of similar neighbours that get different labels). The best labelling is found exactly with a minimum cut in a graph.</Definition>
+
+The methods so far decide pixel by pixel (thresholds, k-means) or grow from seeds. Graph cut decides all pixels **together**: a pixel that looks a bit like foreground but sits among background pixels is labelled background, because changing it would cost a border. GrabCut (Rother, Kolmogorov and Blake 2004 [3]) wraps this in a simple interaction: draw a box around the object; strokes fix the mistakes.
+
+## 1. An analogy
+
+Cutting a photo of a person out of a magazine with scissors. You want to cut where the colours change (cheap to cut there) and keep pieces that look like the person on one side and the background on the other. A cut through the middle of a uniform area is expensive, so you avoid it. The best cut is the cheapest line around the person.
+
+## 2. The energy
+
+<Flow
+  steps={[
+    { label: "Pixels + colour models for FG and BG", tone: "data" },
+    { label: "Data cost D(pixel, label): low if the colour fits", tone: "process" },
+    { label: "Smoothness cost λ for each neighbour pair with different labels (lower across strong edges)", tone: "process" },
+    { label: "Minimum cut of a graph = minimum total energy", tone: "process" },
+    { label: "Foreground / background mask", tone: "result" },
+  ]}
+/>
+
+E(labels) = Σ D(pixel, label) + λ · Σ [neighbours labelled differently] · (smaller where the colours differ strongly).
+
+Boykov and Jolly [1] showed that for two labels this energy is minimised exactly by a max-flow / min-cut computation on a graph with one node per pixel plus a source (foreground) and a sink (background).
+
+**GrabCut** adds two ideas:
+
+- The colour models are **Gaussian mixture models** (5 components each for foreground and background), learned from the pixels inside and outside the rectangle.
+- It **iterates**: segment with the current models, re-learn the models from the result, segment again.
+
+## 3. A worked example by hand
+
+Four pixels in a row with grey values 10, 60, 20, 85. Background colour ≈ 15, foreground ≈ 85; data cost = distance / 10:
+
+| Pixel | 10 | 60 | 20 | 85 |
+| --- | --- | --- | --- | --- |
+| D(B) | 0.5 | 4.5 | 0.5 | 7.0 |
+| D(F) | 7.5 | 2.5 | 6.5 | 0.0 |
+
+The 60 is closer to foreground. Energies of some labellings with smoothness λ per label change:
+
+| Labels | Data | Changes | λ = 0 | λ = 3 |
+| --- | --- | --- | --- | --- |
+| B F B F | 3.5 | 3 | **3.5** | 12.5 |
+| B B B F | 5.5 | 1 | 5.5 | **8.5** |
+| B F F F | 9.5 | 1 | 9.5 | 12.5 |
+| B B B B | 12.5 | 0 | 12.5 | 12.5 |
+
+Without smoothness (λ = 0), each pixel takes its own best label: the lone 60 becomes foreground. With λ = 3 an isolated foreground pixel costs two borders (6) for a gain of 2: the best labelling is B B B F. Trying all 16 labellings confirms these minima (Code 1); a min-cut finds them without trying all 2ⁿ.
+
+## 4. GrabCut on the scene
+
+`cv2.grabCut` with a rectangle (outside = sure background, inside = "probably foreground"):
+
+| Input | 1 iteration | 5 iterations |
+| --- | --- | --- |
+| orange, tight box | 0.987 | **0.998** |
+| crimson disc, tight box | 0.999 | 0.999 |
+| crimson disc, loose box with the red disc inside | 0.454 | 0.456 |
+| … + small background stroke (radius 6) on red | 0.470 | 0.472 |
+| … + larger background stroke (radius 16) on red | 0.992 | **0.999** |
+| orange, loose box with the green box inside | 0.481 | 0.483 |
+
+(IoU with the intended object.) With a tight box GrabCut is excellent. When the box contains a second object that does not look like the outside, GrabCut has no reason to call it background: the red disc, or the green box, is kept as foreground. A stroke marking part of it as **sure background** teaches the background model its colour. The small stroke was not enough here, the larger one fixed it completely.
+
+<SegmentLab mode="grabcut" caption="cv2.grabCut results (OpenCV 4.13, seed 0). Yellow box: the rectangle; red circle: a sure-background stroke. Compare the tight and loose boxes, then the two stroke sizes; switch between 1 and 5 iterations."/>
+
+## 5. The mask
+
+`cv2.grabCut` works on a mask with four values:
+
+| Value | Constant | Meaning |
+| --- | --- | --- |
+| 0 | `GC_BGD` | sure background (never changed) |
+| 1 | `GC_FGD` | sure foreground (never changed) |
+| 2 | `GC_PR_BGD` | probably background |
+| 3 | `GC_PR_FGD` | probably foreground |
+
+With `GC_INIT_WITH_RECT`, the mask is filled from the rectangle. With `GC_INIT_WITH_MASK` you prepare it yourself: draw strokes with 0 or 1. The final foreground is `(mask == 1) | (mask == 3)`.
+
+## 6. Industrial use
+
+- **Labelling tools**: box → mask in one step for training data (55.x).
+- **Product photos**: background removal for catalogues and inspection reports.
+- **Semi-automatic measurement**: an operator draws a box around a part; GrabCut gives its outline.
+- **Graph cuts beyond GrabCut**: stereo matching, image stitching seams (34.6), multi-label segmentation (alpha-expansion).
+
+## What you should remember from 27.5
+
+<Takeaways>
+<Takeaway n={1} title="Energy">Data cost + λ · borders; minimum found by a graph cut.</Takeaway>
+<Takeaway n={2} title="GrabCut">Box → colour models (GMMs) → cut → re-learn → cut.</Takeaway>
+<Takeaway n={3} title="Mask">0 sure BG, 1 sure FG, 2 probably BG, 3 probably FG.</Takeaway>
+<Takeaway n={4} title="Strokes">Fix objects inside the box that are not the target.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** In the worked example, at which λ do B F B F and B B B F cost the same?
+
+<Solution>
+
+3.5 + 3λ = 5.5 + λ → λ = **1**. Above 1, smoothing wins.
+
+</Solution>
+
+**Q2.** GrabCut includes a shadow next to the object. What do you do?
+
+<Solution>
+
+Draw a sure-background stroke (mask value 0) on the shadow and run GrabCut again with `GC_INIT_WITH_MASK` (or `GC_EVAL` to continue from the current models).
+
+</Solution>
+
+### Next: 27.6 Superpixels
+
+Grouping pixels into hundreds of small, compact regions as a first step.
+
+## Code
+
+Three examples: brute-force energy, GrabCut with a box, and strokes.
+
+### 1. All labellings of the worked example
+
+```python
+import itertools
+import numpy as np
+import cv2
+
+values = [10, 60, 20, 85]
+cost = {"B": lambda v: abs(v - 15) / 10, "F": lambda v: abs(v - 85) / 10}
+for lam in (0, 3):
+    best = min(itertools.product("BF", repeat=4),
+               key=lambda L: sum(cost[l](v) for l, v in zip(L, values)) + lam * sum(a != b for a, b in zip(L, L[1:])))
+    energy = sum(cost[l](v) for l, v in zip(best, values)) + lam * sum(a != b for a, b in zip(best, best[1:]))
+    print("lambda", lam, "best", "".join(best), "energy", energy)
+```
+
+Output:
+
+```text
+lambda 0 best BFBF energy 3.5
+lambda 3 best BBBF energy 8.5
+```
+
+### 2. GrabCut with a rectangle
+
+```python
+scene = cv2.imread("sample-seg.png")
+ids = cv2.imread("sample-seg-ids.png", cv2.IMREAD_GRAYSCALE)
+
+def grabcut_rect(rect, iterations):
+    cv2.setRNGSeed(0)                                                   # GMM initialisation uses OpenCV's RNG
+    mask = np.zeros(ids.shape, np.uint8)
+    bgd, fgd = np.zeros((1, 65), np.float64), np.zeros((1, 65), np.float64)   # model buffers
+    cv2.grabCut(scene, mask, rect, bgd, fgd, iterations, cv2.GC_INIT_WITH_RECT)
+    return mask
+
+def iou(fg, k):
+    return round(float((fg & (ids == k)).sum() / (fg | (ids == k)).sum()), 3)
+
+for it in (1, 5):
+    m = grabcut_rect((18, 24, 76, 64), it)                              # (x, y, w, h) around the orange
+    fg = (m == cv2.GC_FGD) | (m == cv2.GC_PR_FGD)
+    print("orange,", it, "iteration(s): IoU", iou(fg, 1), "| mask values", np.bincount(m.ravel(), minlength=4).tolist())
+m = grabcut_rect((10, 15, 110, 140), 5)                                 # loose box around orange and green box
+fg = (m == 1) | (m == 3)
+print("loose box: foreground px per object", [int((fg & (ids == k)).sum()) for k in range(6)])
+```
+
+Output:
+
+```text
+orange, 1 iteration(s): IoU 0.987 | mask values [33536, 0, 1748, 3116]
+orange, 5 iteration(s): IoU 0.998 | mask values [33536, 0, 1781, 3083]
+loose box: foreground px per object [27, 3076, 0, 0, 3266, 0]
+```
+
+- The mask holds only 0 (outside the box), 2 and 3: with a rectangle, nothing inside becomes "sure".
+- The loose box keeps the whole green box (3 266 px) as foreground.
+
+### 3. Fixing a loose box with a stroke
+
+```python
+for r in (6, 16):
+    cv2.setRNGSeed(0)
+    mask = np.zeros(ids.shape, np.uint8)                                # 0 = sure background outside the box
+    mask[25:95, 100:190] = cv2.GC_PR_FGD                                # the loose box around the crimson disc
+    cv2.circle(mask, (118, 50), r, cv2.GC_BGD, -1)                      # background stroke on the red disc
+    bgd, fgd = np.zeros((1, 65)), np.zeros((1, 65))
+    cv2.grabCut(scene, mask, None, bgd, fgd, 5, cv2.GC_INIT_WITH_MASK)
+    print("stroke radius", r, ": crimson IoU", iou((mask == 1) | (mask == 3), 3))
+```
+
+Output:
+
+```text
+stroke radius 6 : crimson IoU 0.472
+stroke radius 16 : crimson IoU 0.999
+```
+
+## OpenCV API notes
+
+- **`cv2.grabCut(img, mask, rect, bgdModel, fgdModel, iterCount, mode)`** → (mask, bgdModel, fgdModel); also updates them in place. `img`: 8-bit 3-channel. `mask`: uint8, same size. `bgdModel`, `fgdModel`: float64 arrays of shape (1, 65) (5 Gaussians × 13 numbers).
+- **`mode`**: `cv2.GC_INIT_WITH_RECT` (mask from `rect`), `cv2.GC_INIT_WITH_MASK` (your mask), `cv2.GC_EVAL` (continue with the current models; use after adding strokes), `cv2.GC_EVAL_FREEZE_MODEL` (segment without updating the models).
+- **Speed**: each iteration fits the GMMs and runs a max-flow on the whole image, so time grows with the image size; crop to a margin around the box for speed.
+- **Repeatability**: the GMMs are initialised with k-means using OpenCV's RNG; call `cv2.setRNGSeed` for identical results.
+
+## Where it fails
+
+- **Foreground and background with similar colours**: the colour models cannot separate them; the smoothness term alone does not help.
+- **Thin structures** (hair, wires, fine fibres): the smoothness term cuts them off; use matting.
+- **Several objects in the box**: all kept unless marked with strokes.
+- **Automatic pipelines**: GrabCut needs a box; supply it from a detector (54.x), then GrabCut refines the mask.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Taking `mask == 1` only**: most of the foreground is "probably foreground" (3).
+- **rect as (x1, y1, x2, y2)**: it is (x, y, width, height).
+- **Models as float32**: they must be float64 (1, 65).
+- **Strokes drawn with 255**: use the mask constants 0 and 1.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Graph construction
+
+Each pixel is a node linked to the source and the sink with capacities equal to its data costs, and to its neighbours with capacities equal to the smoothness costs. A cut separating source from sink assigns every pixel to one side; its total capacity equals the energy, so the minimum cut is the minimum energy. Boykov and Kolmogorov's max-flow algorithm [2] is fast on such grid graphs. In GrabCut the neighbour weight is λ · exp(−β‖zᵢ − zⱼ‖²), with β set from the mean colour difference in the image.
+
+### More than two labels
+
+For several labels the energy is NP-hard in general; α-expansion and α-β swap (Boykov, Veksler and Zabih 2001) reduce it to a sequence of binary graph cuts with guaranteed bounds.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does the smoothness term do?",
+      options: ["Blurs the image", "Penalises neighbours with different labels, so isolated pixels flip", "Learns colours", "Finds edges"],
+      answer: 1,
+      explanation: "In the example, λ = 3 removes the lone foreground pixel.",
+    },
+    {
+      question: "The final GrabCut foreground is…",
+      options: ["mask == 1", "mask == 3", "(mask == 1) | (mask == 3)", "mask > 0"],
+      answer: 2,
+      explanation: "Sure and probable foreground.",
+    },
+    {
+      question: "Why did the loose box keep the red disc?",
+      options: ["Too few iterations", "Nothing outside the box looks like it, so the background model cannot claim it", "The box was too small", "λ too high"],
+      answer: 1,
+      explanation: "A background stroke on it fixes this.",
+    },
+    {
+      question: "Which mode continues after you add strokes to the current mask and models?",
+      options: ["GC_INIT_WITH_RECT", "GC_EVAL", "GC_BGD", "GC_PR_FGD"],
+      answer: 1,
+      explanation: "GC_INIT_WITH_MASK also works, re-learning models from the mask.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Pixels 15, 80, 85 with the costs of Section 3 and λ = 2. Compare B F F, B B F and F F F.
+
+<Solution>
+
+D: 15 → B 0, F 7; 80 → B 6.5, F 0.5; 85 → B 7, F 0. BFF: 0 + 0.5 + 0 + 2 = **2.5**. BBF: 0 + 6.5 + 0 + 2 = 8.5. FFF: 7 + 0.5 + 0 = 7.5. Best: **B F F**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Run GrabCut on the label (object 5) with the box (125, 100, 96, 46) for 5 iterations. Is the dark text kept as foreground? Print the IoU with the label including its text.
+
+<Solution>
+
+```python
+m = grabcut_rect((125, 100, 96, 46), 5)
+fg = (m == 1) | (m == 3)
+print("label IoU:", iou(fg, 5), "| foreground px:", int(fg.sum()), "of", int((ids == 5).sum()))
+```
+
+Output:
+
+```text
+label IoU: 1.0 | foreground px: 3096 of 3096
+```
+
+Yes: a perfect result. The dark text is surrounded by label colour, and cutting it out would cost a long border; the smoothness term keeps it, which is what we want here (the text is part of the label). Region growing (27.1) left it out as holes.
+
+</Solution>
+
+## References
+
+1. Y. Boykov, M.-P. Jolly, "Interactive graph cuts for optimal boundary and region segmentation of objects in N-D images", *Proc. IEEE ICCV*, 105–112, 2001.
+2. Y. Boykov, V. Kolmogorov, "An experimental comparison of min-cut/max-flow algorithms for energy minimization in vision", *IEEE Trans. Pattern Analysis and Machine Intelligence* 26(9), 1124–1137, 2004.
+3. C. Rother, V. Kolmogorov, A. Blake, "GrabCut: interactive foreground extraction using iterated graph cuts", *ACM Trans. Graphics (SIGGRAPH)* 23(3), 309–314, 2004.
+4. OpenCV 4.13.0 documentation: `grabCut`, `GrabCutClasses`, `GrabCutModes`; tutorial "Interactive Foreground Extraction using GrabCut Algorithm". https://docs.opencv.org/4.13.0/

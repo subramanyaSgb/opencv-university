@@ -1,0 +1,302 @@
+export const meta = {
+  number: "12.4",
+  title: "Histogram matching",
+  minutes: 20,
+  objectives: [
+    "Build a matching LUT from two cumulative histograms",
+    "See equalization as matching to a flat histogram",
+    "Use matching to align cameras or images before comparing them",
+    "Recognise that matching copies the histogram's shape, not the image content",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 12.4 (Module 12 plan).
+  Reuses HistLab (match mode). New sample: sample-scene-camb.png (simulated second camera).
+  OpenCV has no histogram-matching function; the chapter builds it from calcHist/cumsum + LUT.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 12.4 Histogram matching
+
+<Definition term="Histogram matching (histogram specification)">a point operation that changes an image's grey values so that its histogram becomes (approximately) the same as the histogram of a chosen reference image or target shape.</Definition>
+
+Equalization (12.2) always aims at a flat histogram. Matching lets you choose the target: usually a reference image that looks right. Typical uses are making two cameras look alike, removing brightness drift between images, and preparing images so that a method tuned on one set of images works on another.
+
+## 1. An analogy
+
+Two schools grade on different scales. To compare students, you convert each grade to a rank ("better than 70 % of the class"), then look up which grade has the same rank at the other school. Histogram matching does exactly this with grey values: value → rank (cumulative histogram) → value with the same rank in the reference.
+
+## 2. Two cumulative histograms
+
+<Flow
+  steps={[
+    { label: "Source value v", tone: "data" },
+    { label: "Its rank: p = C_src(v) (fraction of pixels ≤ v)", tone: "process" },
+    { label: "Smallest reference value u with C_ref(u) ≥ p", tone: "process" },
+    { label: "LUT[v] = u, apply to every pixel", tone: "result" },
+  ]}
+/>
+
+Real numbers: `sample-scene-camb.png` shows the same scene as `sample-scene.png`, but taken by a "second camera" with less gain, a gamma of 1.5, an offset of 25 and a little noise. Its mean is 91 instead of 120. Matching it to the first camera's image gives this LUT:
+
+| Camera B value | 25 | 50 | 100 | 150 | 200 |
+| --- | --- | --- | --- | --- | --- |
+| Matched value | 9 | 69 | 143 | 200 | 251 |
+
+The mean difference to the reference image drops from **32.6** to **2.1** grey levels. The LUT has undone the gain, gamma and offset, without anyone knowing what they were.
+
+<HistLab ops={["none", "match"]} initial="match" src="/images/sample-scene-camb.png" refSrc="/images/sample-scene.png" caption="Camera B matched to the reference camera. The output histogram and cumulative curve take the reference's shape; the remaining differences are the noise." />
+
+- **Equalization is matching to a flat histogram**: with the target C_ref(u) = (u + 1) / 256, the matching LUT agrees with `cv2.equalizeHist` to within one level (example 1).
+- The result is **monotonic**: order is kept, only spacing changes.
+- Like equalization, matching cannot create levels: if the source uses 60 levels, the output uses at most 60.
+
+## 3. It copies the shape, not the content
+
+Matching assumes that the two images show **the same kind of content in the same proportions**. It only knows "the darkest 2 % of the pixels". If that 2 % is a crack in the reference but a shadowed corner in the source, the corner is made as dark as the crack.
+
+<HistLab ops={["none", "match"]} initial="match" src="/images/sample-plate-poor.png" refSrc="/images/sample-plate-good.png" caption="The badly lit plate matched to the well-lit one. The reference's crack covers 2 % of its pixels, so the darkest 2 % of the source (mostly the shadowed left corner) become crack-dark: only 8 % of those dark pixels are on the actual crack." />
+
+Rules of thumb:
+
+- Match images of the **same scene type and framing** (same part, same field of view).
+- Match on a **region** that has the same content in both (a clean background patch, a reference card) and apply the LUT to the whole image.
+- For uneven illumination, correct the lighting first (15.3); matching applies one global curve and cannot fix a gradient.
+
+## 4. Industrial example
+
+A line has two identical stations with cameras from different batches. A classifier was trained on images from station 1 and performs worse on station 2, whose images are slightly darker and lower in contrast. During commissioning, both cameras take images of the same set of good parts. A matching LUT is computed once from the pooled histograms (station 2 → station 1) and applied to every station 2 image with `cv2.LUT`. The LUT is fixed: it is not recomputed per image, so a defect cannot change its own correction.
+
+## What you should remember from 12.4
+
+<Takeaways>
+<Takeaway n={1} title="Rule">LUT[v] = smallest u with C_ref(u) ≥ C_src(v).</Takeaway>
+<Takeaway n={2} title="Special case">Equalization = matching to a flat histogram.</Takeaway>
+<Takeaway n={3} title="Use">Align cameras, remove drift; compute once on representative images, then apply the fixed LUT.</Takeaway>
+<Takeaway n={4} title="Limit">Same content proportions needed; one global curve; no new levels.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** In the source, 30 % of the pixels are ≤ 80. In the reference, 25 % are ≤ 100 and 32 % are ≤ 110 (with no value between 101 and 109). What is LUT[80]?
+
+<Solution>
+
+p = 0.30. The smallest reference value with C_ref ≥ 0.30 is **110** (100 has only 0.25).
+
+</Solution>
+
+**Q2.** Why should a matching LUT used in production be computed once rather than for each image?
+
+<Solution>
+
+A per-image LUT depends on the image content: a part with a large defect has a different histogram, and the matching would partly "correct" the defect away. A fixed LUT treats every image the same.
+
+</Solution>
+
+### Next: 12.5 Back-projection
+
+Use a histogram as a model of a colour and find where in an image that colour appears.
+
+## Code
+
+Two examples: matching from scratch (with equalization as a special case), then colour matching per channel.
+
+### 1. From scratch: the matching LUT
+
+```python
+import numpy as np
+import cv2
+
+scene = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)        # reference camera
+camb = cv2.imread("sample-scene-camb.png", cv2.IMREAD_GRAYSCALE)    # second camera, same scene
+
+def match_lut(src, ref):
+    cs = np.cumsum(np.bincount(src.ravel(), minlength=256)) / src.size    # C_src
+    cr = np.cumsum(np.bincount(ref.ravel(), minlength=256)) / ref.size    # C_ref
+    return np.searchsorted(cr, cs).clip(0, 255).astype(np.uint8)          # smallest u with C_ref(u) >= C_src(v)
+
+lut = match_lut(camb, scene)
+out = cv2.LUT(camb, lut)
+print(f"camera B: mean {camb.mean():.1f}, std {camb.std():.1f} | matched: mean {out.mean():.1f}, std {out.std():.1f} | reference: mean {scene.mean():.1f}, std {scene.std():.1f}")
+print(f"mean abs difference to the reference: {np.abs(camb.astype(int) - scene).mean():.1f} -> {np.abs(out.astype(int) - scene).mean():.1f} levels")
+print("LUT at 25, 50, 100, 150, 200:", lut[[25, 50, 100, 150, 200]].tolist())
+
+flat_cdf = (np.arange(256) + 1) / 256                                     # target: a flat histogram
+cs = np.cumsum(np.bincount(camb.ravel(), minlength=256)) / camb.size
+lut_flat = np.searchsorted(flat_cdf, cs).clip(0, 255).astype(np.uint8)
+d = np.abs(cv2.LUT(camb, lut_flat).astype(int) - cv2.equalizeHist(camb))
+print("matching to a flat histogram vs equalizeHist: max difference", d.max())
+```
+
+Output:
+
+```text
+camera B: mean 91.0, std 50.8 | matched: mean 121.1, std 69.3 | reference: mean 120.3, std 69.6
+mean abs difference to the reference: 32.6 -> 2.1 levels
+LUT at 25, 50, 100, 150, 200: [9, 69, 143, 200, 251]
+matching to a flat histogram vs equalizeHist: max difference 1
+```
+
+- `np.searchsorted(cr, cs)` finds, for each source rank, the first reference index whose cumulative value reaches it: the whole matching rule in one call.
+- The matched mean is 0.8 above the reference: choosing the *smallest* u with C_ref(u) ≥ p rounds slightly upwards. Interpolating between reference values (as scikit-image's `match_histograms` does) reduces this.
+
+### 2. Colour: one LUT per channel
+
+```python
+import numpy as np
+import cv2
+
+color = cv2.imread("sample-color.png")
+tinted = np.clip(color * np.array([0.75, 1.0, 1.15]) + 10, 0, 255).astype(np.uint8)   # a colour cast + offset
+fixed = cv2.merge([cv2.LUT(t, match_lut(t, c)) for t, c in zip(cv2.split(tinted), cv2.split(color))])
+print("channel means BGR: original", np.round(color.reshape(-1, 3).mean(0), 1).tolist(),
+      "| tinted", np.round(tinted.reshape(-1, 3).mean(0), 1).tolist(),
+      "| matched", np.round(fixed.reshape(-1, 3).mean(0), 1).tolist())
+print(f"mean abs error: tinted {np.abs(tinted.astype(int) - color).mean():.1f}, matched {np.abs(fixed.astype(int) - color).mean():.1f}")
+```
+
+Output:
+
+```text
+channel means BGR: original [42.9, 56.5, 62.4] | tinted [42.2, 66.5, 76.4] | matched [42.9, 56.5, 65.4]
+mean abs error: tinted 9.5, matched 1.0
+```
+
+- Unlike equalization (12.2), per-channel matching is fine for colour: each channel is mapped to the **reference's** channel, so the colour balance of the reference is restored.
+- R stays 3 levels too high: the tint pushed bright reds to 255, where they were clipped. Matching cannot separate values that clipping merged.
+
+## OpenCV API notes
+
+**No built-in function**: OpenCV 4.13 has no histogram matching call. Build it from `cv2.calcHist` (or `np.bincount`), `np.cumsum`, `np.searchsorted`, then apply with **`cv2.LUT`**.
+
+**Masks**: compute both histograms with a mask (`cv2.calcHist([img], [0], mask, [256], [0, 256])`) to match on a region with known, equal content.
+
+**Alternatives**: scikit-image `skimage.exposure.match_histograms(image, reference, channel_axis=-1)` (interpolates between values; float output).
+
+**16-bit**: use 65 536 bins (or fewer bins plus interpolation) and a 16-bit LUT applied by NumPy indexing (`lut[img]`); `cv2.LUT` only takes 8-bit input.
+
+## Where it fails
+
+- **Different content or proportions** (section 3): defects, missing parts or a different background change the histogram, and the curve follows.
+- **Spatially varying effects** (vignetting, gradients): one global curve cannot correct them.
+- **Clipped or quantized sources**: merged values stay merged.
+- **Noise in nearly flat references**: a narrow reference histogram leads to a very steep LUT, as with equalization.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Recomputing the LUT per image in production**.
+- **Matching images of different scenes** and expecting a meaningful result.
+- **Forgetting to normalise the cumulative histograms** when the images have different sizes (divide by the pixel count).
+- **Matching in a colour space that mixes channels** without thinking (per-channel BGR matching is fine for casts; for strong colour changes, match L, a, b separately in Lab).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why matching works (continuous case)
+
+If v has cumulative distribution C_src, then p = C_src(v) is uniformly distributed (as in equalization). Applying the inverse of the reference's cumulative distribution, u = C_ref⁻¹(p), gives a variable with distribution C_ref. Matching is therefore "equalize the source, then un-equalize with the reference's curve" [1]. With discrete values the result is only approximate, for the same reasons as in 12.2.
+
+### Colour transfer
+
+Reinhard et al. (2001) transfer the look of one photo to another by matching only the mean and standard deviation of each channel in a decorrelated colour space (lαβ) [2]. It is cruder than full histogram matching but more robust, because two numbers per channel are less sensitive to content differences than a whole histogram.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Histogram matching maps each source value v to…",
+      options: ["The reference value at the same position", "The smallest reference value whose cumulative fraction reaches C_src(v)", "The mean of the reference", "v + (mean_ref − mean_src)"],
+      answer: 1,
+      explanation: "Equal ranks: value → fraction of pixels below → value with the same fraction in the reference.",
+    },
+    {
+      question: "Matching to a flat histogram is the same as…",
+      options: ["Contrast stretching", "Histogram equalization", "Gamma correction", "Thresholding"],
+      answer: 1,
+      explanation: "A flat target's cumulative curve is a straight line, so the LUT becomes the source's own scaled cumulative histogram.",
+    },
+    {
+      question: "Which OpenCV function performs histogram matching directly?",
+      options: ["cv2.matchHistogram", "cv2.equalizeHist with a reference", "None: build the LUT and use cv2.LUT", "cv2.compareHist"],
+      answer: 2,
+      explanation: "OpenCV has no matching call; compareHist only measures how similar two histograms are.",
+    },
+    {
+      question: "The reference image contains a dark crack covering 2 % of its pixels; the source has none. After matching…",
+      options: ["The source is unchanged", "The darkest 2 % of source pixels become crack-dark", "A crack appears in the right place", "Matching fails with an error"],
+      answer: 1,
+      explanation: "Matching copies the proportions of the histogram, not the content.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Source (8 pixels): 10, 10, 10, 10, 20, 20, 30, 30. Reference (8 pixels): 50, 50, 60, 60, 60, 60, 90, 90. Compute the matching LUT for 10, 20 and 30.
+
+<Solution>
+
+C_src: 10 → 0.5, 20 → 0.75, 30 → 1.0. C_ref: 50 → 0.25, 60 → 0.75, 90 → 1.0. LUT[10] = smallest u with C_ref ≥ 0.5 → **60**; LUT[20] → C_ref ≥ 0.75 → **60**; LUT[30] → **90**. Values 10 and 20 merge: the reference has no third level to give them.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Match the badly lit plate (`sample-plate-poor.png`) to the well-lit one (`sample-plate-good.png`) twice: once with full-image histograms, once with both histograms computed only on the region without the crack in the right half (rows 0–200, columns 200–320, minus the crack mask `sample-plate-crack-mask.png`). Count how many output pixels fall below 100 in each case.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+src = cv2.imread("sample-plate-poor.png", cv2.IMREAD_GRAYSCALE)
+ref = cv2.imread("sample-plate-good.png", cv2.IMREAD_GRAYSCALE)
+crack = cv2.imread("sample-plate-crack-mask.png", cv2.IMREAD_GRAYSCALE) > 0
+
+def match_lut_masked(src, ref, mask):
+    cs = np.cumsum(np.bincount(src[mask], minlength=256)) / mask.sum()
+    cr = np.cumsum(np.bincount(ref[mask], minlength=256)) / mask.sum()
+    cs = np.maximum(cs, 1 / mask.sum())          # values darker than anything in the region: map to the region's minimum
+    return np.searchsorted(cr, cs).clip(0, 255).astype(np.uint8)
+
+full = np.ones(src.shape, bool)
+region = np.zeros(src.shape, bool)
+region[:, 200:] = True
+region &= ~crack
+for name, m in [("full image", full), ("clean region", region)]:
+    out = cv2.LUT(src, match_lut_masked(src, ref, m))
+    print(f"{name}: {(out < 100).sum()} pixels below 100, of which {(out < 100)[crack].sum()} on the crack | mean left / right quarter: {out[:, :80].mean():.0f} / {out[:, 240:].mean():.0f}")
+```
+
+Output:
+
+```text
+full image: 1240 pixels below 100, of which 96 on the crack | mean left / right quarter: 185 / 204
+clean region: 0 pixels below 100, of which 0 on the crack | mean left / right quarter: 189 / 201
+```
+
+With the clean region, the dark corner is no longer forced to crack-dark. Two limits remain visible: the left quarter is still darker than the right (one global curve cannot remove the lighting gradient), and the faint crack stays faint (matching never adds contrast that is not there).
+
+The `np.maximum(cs, 1 / mask.sum())` line matters: source values darker than every pixel in the region have rank 0, and `searchsorted` would map them to 0, creating black pixels. Clamping the rank maps them to the darkest reference value in the region instead.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 3.3 (histogram matching / specification).
+2. E. Reinhard, M. Ashikhmin, B. Gooch, P. Shirley, "Color transfer between images", *IEEE Computer Graphics and Applications* 21(5), 34–41, 2001.
+3. OpenCV 4.13.0 documentation: `calcHist`, `LUT`. https://docs.opencv.org/4.13.0/
+4. scikit-image documentation: `skimage.exposure.match_histograms`. https://scikit-image.org/docs/stable/api/skimage.exposure.html

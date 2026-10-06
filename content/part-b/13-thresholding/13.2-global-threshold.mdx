@@ -1,0 +1,294 @@
+export const meta = {
+  number: "13.2",
+  title: "Global threshold",
+  minutes: 20,
+  objectives: [
+    "Read a histogram to judge whether one global threshold can work",
+    "Choose T from physics, from the histogram valley, by iteration or by a known area fraction",
+    "Measure how much margin a threshold has",
+    "Recognise when no global threshold exists",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 13.2 (Module 13 plan).
+  Reuses ThreshLab (13.1) with the plate images and the crack ground truth.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 13.2 Global threshold
+
+<Definition term="Global threshold">one value T used for every pixel of the image: pixels on one side of T are object, on the other side background.</Definition>
+
+13.1 showed what thresholding does. This chapter is about choosing T for a whole image. The histogram (12.1) decides whether that is easy, hard or impossible: if object and background form two separate hills, any T in the valley between them works; if the hills overlap, no T can be right.
+
+## 1. An analogy
+
+Sorting apples and lemons by colour on a belt: there is a wide gap between "red" and "yellow", so the exact boundary hardly matters. Sorting ripe from nearly ripe tomatoes by colour is different: the colours overlap, and wherever you put the boundary, some go into the wrong box.
+
+## 2. Ways to choose T
+
+<Flow
+  steps={[
+    { label: "Look at the histogram: two hills? how wide is the valley?", tone: "data" },
+    { label: "Choose T: physics, valley, iteration, or known area", tone: "process" },
+    { label: "Check the margin: how far can T move before errors appear?", tone: "result" },
+  ]}
+/>
+
+| Method | Idea | Needs |
+| --- | --- | --- |
+| Physics / set-up | T halfway between the known background and object grey levels | stable lighting, a few calibration images |
+| Histogram valley | T at the lowest point between two peaks | a clear valley (often smoothed histogram) |
+| Iterative (intermeans) | T = average of the two class means, repeated until stable | two classes of reasonable size |
+| Percentile (p-tile) | T so that a known fraction of pixels is object | known object area (print, fixed parts) |
+| Otsu, triangle, entropy | criteria computed from the histogram (13.3, 13.4) | nothing extra |
+
+**Iterative intermeans** (Ridler and Calvard, 1978) step by step: start with T = image mean; split the pixels at T; compute the mean of each side; set T to the average of the two means; repeat until T stops changing. On the well-lit plate (`sample-plate-good.png`): start at the mean 196.5, and after 4 rounds T = 124.6 (the first rounds split the plate itself, then T drops into the valley), halfway between the crack (mean 49.7) and the plate (mean 199.5).
+
+## 3. Margin: the valley width
+
+<ThreshLab methods={["manual"]} initialSource={0} sources={[{ label: "well-lit plate", src: "/images/sample-plate-good.png", gt: "/images/sample-plate-crack-mask.png", dark: true }, { label: "badly lit plate", src: "/images/sample-plate-poor.png", gt: "/images/sample-plate-crack-mask.png", dark: true }, { label: "printed label", src: "/images/sample-print-uneven.png", gt: "/images/sample-print-uneven-gt.png", dark: true }]} caption="Find the range of T that gives F1 = 1.000 on the well-lit plate, then try the same on the badly lit plate. The histogram shows why: a wide empty valley in the first, one overlapping hill in the second." />
+
+Real numbers for the crack (ground truth known):
+
+| Image | Crack grey values | Plate grey values | T range with no errors | Best F1 |
+| --- | --- | --- | --- | --- |
+| Well-lit plate | 39 to 64 | 182 to 217 | 64 to 181 | 1.000 |
+| Badly lit plate | up to 152 | from 72 | none | 0.104 (T = 103) |
+
+On the well-lit plate T can move by more than 100 levels without a single error: the inspection is **robust** to lighting drift, camera changes and noise. On the badly lit plate the crack's values lie inside the plate's range, and the best possible global T finds the crack poorly while marking far more plate. No choice of T helps; the fix is lighting (2.x), contrast that separates the classes, or local methods (13.5).
+
+The practical rule: **put T in the middle of the valley** and know how wide the valley is. The valley width is your safety margin.
+
+## 4. Industrial example
+
+A punching press checks that each punched hole is open by backlighting the sheet: holes are bright (about 240), metal is black (about 15). The set-up engineer records the hole and metal grey levels on 50 parts, finds the ranges 225–250 and 8–30, and sets T = 128, the middle of the valley. The margin of nearly 100 levels on each side means the check still works when the backlight ages and loses 30 % of its brightness (holes at 157–175 are still far above 128). The station also logs the two class means every shift: when the valley shrinks, the lamp is replaced before errors appear.
+
+## What you should remember from 13.2
+
+<Takeaways>
+<Takeaway n={1} title="Histogram first">Two separate hills: easy; overlapping hills: no global T works.</Takeaway>
+<Takeaway n={2} title="Methods">Physics, valley, iterative intermeans, percentile; Otsu and others next.</Takeaway>
+<Takeaway n={3} title="Margin">Put T in the middle of the valley; the valley width is the robustness.</Takeaway>
+<Takeaway n={4} title="Fix at the source">Overlap is best solved by lighting and optics, not by tuning T.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Background pixels range from 150 to 210, object pixels from 20 to 90. Which T gives the largest margin, and how large is it on each side?
+
+<Solution>
+
+The valley is 91–149; its middle is **T = 120**, with a margin of **30** levels to the object (90) and **29** to the background (150 is the first value that must stay background, and the rule is v ≤ T for dark objects).
+
+</Solution>
+
+**Q2.** Printed labels always have about 12 % ink. Which method gives T directly from that?
+
+<Solution>
+
+The **percentile (p-tile)** method: T = the 12th percentile of the grey values (for dark ink).
+
+</Solution>
+
+### Next: 13.3 Otsu's method
+
+The most used automatic threshold: maximise the separation between the two classes.
+
+## Code
+
+Two examples: iterative intermeans and percentile from scratch, then the margin of a threshold.
+
+### 1. Iterative intermeans and percentile
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-plate-good.png", cv2.IMREAD_GRAYSCALE)
+gt = cv2.imread("sample-plate-crack-mask.png", cv2.IMREAD_GRAYSCALE) > 0     # true crack pixels
+
+T = img.mean()
+for it in range(1, 100):                                    # Ridler–Calvard intermeans
+    T_new = (img[img <= T].mean() + img[img > T].mean()) / 2
+    print(f"round {it}: T = {T_new:.1f}")
+    if abs(T_new - T) < 0.5:
+        break
+    T = T_new
+
+p = np.percentile(img, 100 * gt.mean())                     # p-tile: crack area fraction known
+print(f"crack covers {gt.mean():.2%} of the image -> percentile T = {p:.0f}")
+print(f"crack values {img[gt].min()}..{img[gt].max()}, plate values {img[~gt].min()}..{img[~gt].max()}")
+```
+
+Output:
+
+```text
+round 1: T = 191.6
+round 2: T = 161.2
+round 3: T = 124.6
+round 4: T = 124.6
+crack covers 2.03% of the image -> percentile T = 180
+crack values 39..64, plate values 182..217
+```
+
+- Intermeans converges in a few rounds: each round moves T towards the middle between the class means. The first rounds are slow because the starting T (the mean, 196.5) splits the plate itself.
+- The percentile T lands at 180, at the top of the gap between crack (≤ 64) and plate (≥ 182): with the exact area fraction, `np.percentile` interpolates across the gap. It works here, but with a margin of only 2 levels; a slightly larger fraction would push T into the plate, a smaller one into the crack. p-tile depends on the area fraction being exactly right.
+
+### 2. Margin of a global threshold
+
+```python
+import numpy as np
+import cv2
+
+def f1(mask, truth):
+    tp = (mask & truth).sum()
+    return 2 * tp / (mask.sum() + truth.sum())
+
+for name in ["sample-plate-good.png", "sample-plate-poor.png"]:
+    im = cv2.imread(name, cv2.IMREAD_GRAYSCALE)
+    scores = np.array([f1(im <= t, gt) for t in range(256)])
+    perfect = np.flatnonzero(scores == 1.0)
+    rng = f"{perfect.min()}..{perfect.max()}" if perfect.size else "none"
+    print(f"{name}: T with no errors: {rng} | best T {scores.argmax()} with F1 {scores.max():.3f}")
+```
+
+Output:
+
+```text
+sample-plate-good.png: T with no errors: 64..181 | best T 64 with F1 1.000
+sample-plate-poor.png: T with no errors: none | best T 103 with F1 0.104
+```
+
+- Scanning all 256 thresholds against ground truth is cheap and shows the margin directly. In production you rarely have ground truth for every image, but you can have it for a set-up sample.
+- `argmax` returns the first best T (64, the low edge of the valley); the middle of the valley (about 122) is the robust choice.
+
+## OpenCV API notes
+
+**Fixed T**: `cv2.threshold(img, T, 255, cv2.THRESH_BINARY_INV)` for dark objects.
+
+**No intermeans or p-tile function**: compute T with NumPy (`img.mean()`, `np.percentile`) and pass it to `cv2.threshold`.
+
+**Histogram**: `cv2.calcHist([img], [0], None, [256], [0, 256])` or `np.bincount(img.ravel(), minlength=256)`; smooth it (e.g. `np.convolve` with a short box) before looking for a valley.
+
+**Float images**: `cv2.threshold` accepts float32; T can then be fractional.
+
+## Where it fails
+
+- **Overlapping classes**: no T separates them (badly lit plate).
+- **Very small objects**: their hill is invisible in the histogram; valley and intermeans methods follow the large background.
+- **Uneven lighting**: different T needed in different places (13.5, 15.3).
+- **Changing scenes**: a fixed T drifts out of the valley when lighting changes; monitor the class means.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Tuning T on one image** without checking the margin on many.
+- **Putting T at the edge of the valley** (the first value that works) instead of the middle.
+- **Expecting a threshold to fix bad lighting**.
+- **Using p-tile when the object area varies** (a defect changes the area).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Intermeans and the two-class model
+
+The iterative intermeans method converges to a T where T equals the average of the two class means. For two Gaussian classes with equal spread and equal size, this is also the minimum-error threshold. When the classes differ in size or spread, the minimum-error T moves towards the smaller or narrower class; Kittler and Illingworth (1986) give a method that fits two Gaussians and picks that T [2].
+
+### Survey
+
+Sezgin and Sankur (2004) compared about 40 global and local thresholding methods on non-destructive testing and document images; their survey is the standard overview of the field [3].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The histogram has two hills separated by an empty valley from 70 to 180. Where should T go?",
+      options: ["70", "125", "180", "At the highest peak"],
+      answer: 1,
+      explanation: "The middle of the valley gives the largest margin on both sides.",
+    },
+    {
+      question: "Iterative intermeans sets T to…",
+      options: ["The image mean", "The average of the two class means, repeated until stable", "The median", "The histogram peak"],
+      answer: 1,
+      explanation: "Split at T, average the class means, repeat.",
+    },
+    {
+      question: "When can no global threshold separate object and background?",
+      options: ["When the image is large", "When their grey-value ranges overlap", "When the object is dark", "When T is even"],
+      answer: 1,
+      explanation: "Any T then puts some object pixels on the background side or vice versa.",
+    },
+    {
+      question: "The percentile method needs to know…",
+      options: ["The noise level", "The fraction of the image covered by objects", "The camera gain", "Nothing"],
+      answer: 1,
+      explanation: "T is the grey value below which that fraction of pixels lies.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Pixels: 20, 22, 25, 30, 200, 205, 210, 215. Run iterative intermeans starting from the mean.
+
+<Solution>
+
+Mean = 927 / 8 = **115.875**. Dark side: 20, 22, 25, 30 → 24.25; bright side: 200, 205, 210, 215 → 207.5. New T = (24.25 + 207.5) / 2 = **115.875**: unchanged, so it has converged after one round.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Simulate an ageing lamp: scale `sample-plate-good.png` by 0.6, 0.4 and 0.25 (`cv2.convertScaleAbs(img, alpha=...)`). For each, report the F1 of the fixed threshold T = 122 and of the intermeans threshold recomputed on the darker image.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+def intermeans(im):
+    T = im.mean()
+    while True:
+        T_new = (im[im <= T].mean() + im[im > T].mean()) / 2
+        if abs(T_new - T) < 0.5:
+            return T_new
+        T = T_new
+
+for a in (0.6, 0.4, 0.25):
+    dim = cv2.convertScaleAbs(img, alpha=a)
+    T = intermeans(dim)
+    print(f"alpha {a}: fixed T=122 F1 {f1(dim <= 122, gt):.3f} | intermeans T={T:.1f} F1 {f1(dim <= T, gt):.3f}")
+```
+
+Output:
+
+```text
+alpha 0.6: fixed T=122 F1 0.044 | intermeans T=74.8 F1 1.000
+alpha 0.4: fixed T=122 F1 0.040 | intermeans T=49.8 F1 1.000
+alpha 0.25: fixed T=122 F1 0.040 | intermeans T=31.2 F1 1.000
+```
+
+At 60 % brightness the darkest plate pixels (182 · 0.6 ≈ 109) already fall below the fixed T and are counted as crack; at 40 % the whole plate does. The adaptive intermeans T follows the lamp. In practice, combine both: an automatic T plus an alarm when the class means drift.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 10.3 (basic global thresholding).
+2. J. Kittler, J. Illingworth, "Minimum error thresholding", *Pattern Recognition* 19(1), 41–47, 1986.
+3. M. Sezgin, B. Sankur, "Survey over image thresholding techniques and quantitative performance evaluation", *Journal of Electronic Imaging* 13(1), 146–165, 2004.
+4. T. W. Ridler, S. Calvard, "Picture thresholding using an iterative selection method", *IEEE Transactions on Systems, Man, and Cybernetics* 8(8), 630–632, 1978.
+5. OpenCV 4.13.0 documentation: `threshold`, `calcHist`. https://docs.opencv.org/4.13.0/

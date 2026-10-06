@@ -1,0 +1,408 @@
+export const meta = {
+  number: "5.4",
+  title: "Statistics (mean, variance, Gaussian)",
+  minutes: 40,
+  objectives: [
+    "Compute and interpret mean, median, variance and standard deviation of pixel values",
+    "Use the Gaussian distribution and the 68–95–99.7 rule to set thresholds",
+    "Predict false alarms of a kσ threshold on a whole image",
+    "Use robust statistics (median, MAD) and local statistics (local mean and std)",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 5.4 (Module 5 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 5.4 Statistics (mean, variance, Gaussian)
+
+<Definition term="Statistics of an image">a few numbers that summarise many pixel values: where they are centred (mean, median), how much they spread (variance, standard deviation), and what shape their spread has (often a Gaussian bell curve).</Definition>
+
+A "uniform" grey surface never gives one value: noise (2.5) spreads it over a range. To decide whether a pixel is a **defect** or just **noise**, you need to know how big that spread normally is. That is statistics.
+
+## 1. An analogy
+
+Weighing 1000 bolts from the same box. Most weigh close to 20.0 g, a few 19.8 or 20.2, very few 19.6. The **average** tells you the typical weight, the **spread** how consistent production is. A bolt of 18.5 g is so far outside the usual spread that it is probably a different part: an outlier. Pixel values of a flat surface behave exactly like the bolts.
+
+## 2. Centre: mean and median
+
+- **Mean** μ = (sum of values) / n. Uses every value; one extreme value pulls it.
+- **Median**: the middle value after sorting. Ignores how extreme the extremes are.
+
+## 3. Spread: variance and standard deviation
+
+**Variance** is the average squared distance from the mean; the **standard deviation** σ is its square root, in the same units as the pixels:
+
+<Equation terms={[{ value: "σ²" }, { op: "=", value: "mean of (x − μ)²" }, { op: "→", value: "σ = √σ²", result: true }]} />
+
+A 40 × 40 patch of flat background in a dark, high-gain image *(Code example 1)*: mean **23.74**, variance 15.09, **σ = 3.88**, values from 11 to 38. That σ is the image's noise level there.
+
+Dividing by n gives the "population" σ (NumPy's default, `ddof=0`, and OpenCV's `meanStdDev`); dividing by n − 1 (`ddof=1`) gives the slightly larger "sample" estimate. For 1600 pixels the difference is negligible (3.88 vs 3.89).
+
+## 4. The Gaussian (normal) distribution
+
+Sensor noise from many small independent causes adds up to a **bell curve**, the Gaussian, fully described by μ and σ:
+
+<Equation terms={[{ value: "p(x)" }, { op: "=", value: "1 / (σ√(2π)) · exp(−(x − μ)² / (2σ²))", result: true }]} />
+
+Its famous rule, checked on one million simulated values *(Code example 2)*:
+
+| Range | Share of values (theory) | Measured |
+| --- | --- | --- |
+| μ ± 1σ | 68.27 % | 68.37 % |
+| μ ± 2σ | 95.45 % | 95.45 % |
+| μ ± 3σ | 99.73 % | 99.72 % |
+
+The Gaussian appears all over image processing: noise models, the Gaussian blur kernel (Part C), and the error model behind least squares (5.6).
+
+## 5. Thresholds and false alarms
+
+A natural defect rule: "flag any pixel more than 3σ from the mean". But 0.27 % of perfectly good pixels are beyond 3σ. On a **5 MP** image that is about **13 852 false defect pixels in a flawless part** *(Code example 2)*.
+
+<Columns>
+<Panel title="Per pixel" tone="warn">
+
+Even 4σ (0.006 %) gives about 300 false pixels per 5 MP image, and 5σ about 3. Single-pixel thresholds alone are noisy.
+
+</Panel>
+<Panel title="Per region" tone="good">
+
+Real defects cover **many** neighbouring pixels. Require a minimum area, or average first (5.1: averaging n pixels reduces σ by √n), then threshold. False alarms drop by orders of magnitude.
+
+</Panel>
+</Columns>
+
+## 6. Robust statistics: when outliers are present
+
+Dirt, dust and defects are exactly the values you want to find, but they also distort μ and σ, so the threshold moves. 400 pixels of a clean surface (σ = 5), then with 5 % dark dirt *(Code example 3)*:
+
+| Data | Mean | Std | Median | 1.4826 × MAD |
+| --- | --- | --- | --- | --- |
+| Clean | 149.9 | 5.0 | 150.0 | 5.5 |
+| 5 % dirt | 142.4 | **33.0** | 149.6 | **5.8** |
+
+The std jumps from 5 to 33: a 3σ threshold would now be ±99 levels and miss most defects. The **median** and the **MAD** (median absolute deviation, scaled by 1.4826 so it estimates σ for Gaussian data) barely move. Use robust statistics to learn "normal" from data that may contain defects.
+
+## 7. Try it
+
+<GaussLab caption="4000 simulated pixel values of a flat surface. Add dark dirt and compare how mean/std and median/MAD set the ±kσ defect limits." />
+
+Things to try: dirt 10 % with "mean and std" (the band widens and the dirt bar may even fall inside it), then switch to "median and MAD"; k = 3 with no dirt (a few red bars from pure noise); k = 5.
+
+## 8. Local statistics
+
+Mean and σ can be computed in a **window** around every pixel (with a box filter, 5.1 and Part C). The **local standard deviation** measures texture or roughness: it is high on edges, scratches and rough patches, low on smooth areas. A rough 40 × 50 patch in a smooth texture *(Code example 4)*: local σ typically **6.0**, up to **19.8** on the patch, and "local σ > 3 × typical" outlines it.
+
+<Flow
+  steps={[
+    { label: "Image", tone: "world" },
+    { label: "blur(x) → local mean", tone: "process" },
+    { label: "blur(x²) − (local mean)² → local variance", tone: "process" },
+    { label: "√ → local σ map: roughness, texture defects", tone: "result" },
+  ]}
+/>
+
+## 9. Industrial example
+
+Learning what "good" looks like for a painted surface:
+
+<Flow
+  steps={[
+    { label: "50 images of good parts", tone: "data" },
+    { label: "Per pixel: median and robust σ over the 50 images", tone: "process" },
+    { label: "New part: z = (value − median) / σ per pixel", tone: "process" },
+    { label: "Defect = region of ≥ 20 px with |z| > 4", tone: "result" },
+  ]}
+/>
+
+This "golden template with tolerance" handles uneven lighting (each pixel has its own normal value) and noise (each has its own σ), and the area rule keeps false alarms down.
+
+## What you should remember from 5.4
+
+<Takeaways>
+<Takeaway n={1} title="Centre">Mean uses all values; median resists outliers.</Takeaway>
+<Takeaway n={2} title="Spread">σ = √(mean of squared deviations): the noise level, in grey levels.</Takeaway>
+<Takeaway n={3} title="Gaussian">68–95–99.7 % within 1–2–3σ.</Takeaway>
+<Takeaway n={4} title="False alarms">3σ per pixel = 0.27 % of good pixels; use areas or averaging.</Takeaway>
+<Takeaway n={5} title="Robust and local">Median/MAD when defects are present; local σ for texture and roughness.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Values 10, 12, 11, 13, 54. Mean and median?
+
+<Solution>
+
+Mean = 100 / 5 = **20**; median = **12**. The single 54 pulls the mean far from the typical values.
+
+</Solution>
+
+**Q2.** Noise σ = 4 around a mean of 100. Between which values do about 95 % of pixels lie?
+
+<Solution>
+
+μ ± 2σ = **92 to 108**.
+
+</Solution>
+
+**Q3.** How many false pixels does a 3σ threshold give on a 1 MP image of a perfect part?
+
+<Solution>
+
+0.27 % of 1 000 000 ≈ **2700** pixels.
+
+</Solution>
+
+### Next: 5.5 Derivatives as differences
+
+How a change of brightness becomes a number: the basis of edge detection.
+
+## Code
+
+Four examples: mean and σ of a flat patch, the 68–95–99.7 rule and false alarms, robust statistics, and a local σ map. Copy the sample images next to the script.
+
+### 1. From scratch and OpenCV: mean and standard deviation
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-noise-dark-gain.png", cv2.IMREAD_GRAYSCALE)
+patch = img[110:150, 230:270]                              # a 40 x 40 area of flat background
+m = patch.mean()
+var = ((patch - m) ** 2).mean()                             # average squared distance from the mean
+print(f"by hand : mean {m:.2f}, variance {var:.2f}, std {np.sqrt(var):.2f}")
+mean_cv, std_cv = cv2.meanStdDev(patch)
+print(f"OpenCV  : mean {mean_cv[0, 0]:.2f}, std {std_cv[0, 0]:.2f}")
+print(f"NumPy   : std (ddof=0) {patch.std():.2f}, std (ddof=1) {patch.std(ddof=1):.2f}")
+print(f"median {np.median(patch):.1f}, min {patch.min()}, max {patch.max()}")
+```
+
+Output:
+
+```text
+by hand : mean 23.74, variance 15.09, std 3.88
+OpenCV  : mean 23.74, std 3.88
+NumPy   : std (ddof=0) 3.88, std (ddof=1) 3.89
+median 24.0, min 11, max 38
+```
+
+- `patch - m` with a float `m` gives a float array, so no `uint8` wrap-around (3.2).
+- `cv2.meanStdDev(src, mask=None)` returns one mean and one σ **per channel** as (channels, 1) arrays; a `mask` restricts it to a region.
+
+### 2. From scratch: the 68–95–99.7 rule and false alarms
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=1)
+x = rng.normal(loc=100, scale=4, size=1_000_000)          # one million noisy values, mean 100, sigma 4
+for k in [1, 2, 3]:
+    print(f"within {k} sigma: {100 * np.mean(np.abs(x - 100) <= k * 4):5.2f} %")
+w, h = 2448, 2048                                         # a 5 MP camera
+false = np.mean(np.abs(x - 100) > 3 * 4) * w * h
+print(f"pixels beyond 3 sigma in one flawless 5 MP image: about {false:,.0f}")
+```
+
+Output:
+
+```text
+within 1 sigma: 68.37 %
+within 2 sigma: 95.45 %
+within 3 sigma: 99.72 %
+pixels beyond 3 sigma in one flawless 5 MP image: about 13,852
+```
+
+- `np.mean(condition)` is the fraction of True values.
+- `1_000_000`: underscores make long numbers readable in Python; `{false:,.0f}` prints thousands separators.
+
+### 3. From scratch: robust statistics
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=2)
+good = rng.normal(150, 5, 400)                             # 400 pixels of a clean surface
+bad = good.copy()
+bad[:20] = 0                                               # 5 % of the pixels hit by dark dirt
+for name, v in [("clean", good), ("5 % dirt", bad)]:
+    mad = np.median(np.abs(v - np.median(v)))              # median absolute deviation
+    print(f"{name:9s}: mean {v.mean():6.1f}  std {v.std():5.1f}  |  median {np.median(v):6.1f}  1.4826*MAD {1.4826 * mad:4.1f}")
+```
+
+Output:
+
+```text
+clean    : mean  149.9  std   5.0  |  median  150.0  1.4826*MAD  5.5
+5 % dirt : mean  142.4  std  33.0  |  median  149.6  1.4826*MAD  5.8
+```
+
+- The factor 1.4826 makes the MAD equal σ for Gaussian data (1 / 0.6745, the 75 % point of the standard normal).
+- Even on clean data, robust estimates are a bit noisier than mean/std (5.5 vs 5.0 here): the price of robustness.
+
+### 4. OpenCV: a local standard deviation map
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(seed=3)
+img = rng.normal(128, 6, (200, 320)).astype(np.float32)                      # fine, even texture
+img[80:120, 200:250] = 128 + rng.normal(0, 18, (40, 50))                     # a rougher patch (a defect)
+k = (15, 15)
+mean = cv2.blur(img, k)                                                      # local mean
+var = cv2.blur(img * img, k) - mean * mean                                   # local variance = E[x^2] - E[x]^2
+std = np.sqrt(np.maximum(var, 0))
+print(f"local std: typical {np.median(std):.1f}, maximum {std.max():.1f}")
+ys, xs = np.nonzero(std > 3 * np.median(std))
+print(f"rough area found: rows {ys.min()}-{ys.max()}, columns {xs.min()}-{xs.max()}")
+```
+
+Output:
+
+```text
+local std: typical 6.0, maximum 19.8
+rough area found: rows 86-113, columns 204-244
+```
+
+- `cv2.blur(img, (15, 15))` is the mean over a 15 × 15 window around each pixel.
+- Variance = mean of squares − square of mean; `np.maximum(var, 0)` removes tiny negative values from float rounding.
+- Work in `float32`: `img * img` in `uint8` would overflow.
+- The found area is a little smaller than the true patch (rows 80–119): windows that only partly cover the patch are less rough.
+
+## OpenCV API notes
+
+**`cv2.mean(src, mask)`** → per-channel mean (4 values); **`cv2.meanStdDev(src, mask)`** → (means, stddevs), population σ; **`cv2.minMaxLoc(src, mask)`** → min, max and their (x, y) locations; **`cv2.calcHist`** for histograms (Part B).
+
+**Local statistics**: `cv2.blur` / `cv2.boxFilter` (mean), `cv2.sqrBoxFilter` (mean of squares, same window), `cv2.GaussianBlur` for smoothly weighted windows. `cv2.integral` gives sums over any rectangle in constant time.
+
+**NumPy**: `mean`, `median`, `std(ddof=…)`, `var`, `percentile`, all with `axis=` for per-row, per-column or per-frame statistics.
+
+## Where it fails
+
+- **Not all noise is Gaussian**: photon noise at low light is Poisson (2.5), salt-and-pepper noise is impulsive, quantisation (3.2) is uniform. Check a histogram before trusting σ-based rules.
+- **σ depends on brightness** for real sensors (shot noise grows with signal). A single global σ is wrong for an image with dark and bright parts; use local or brightness-dependent noise models.
+- **Correlated noise** (after demosaicing, compression or filtering) does not average down by √n.
+- **Small samples**: σ from 10 pixels is itself uncertain by about ±25 %.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Computing σ in `uint8`** (`(patch - m)**2` with integer `m`): wrap-around gives nonsense.
+- **Learning "normal" σ from data that contains defects** with mean/std instead of median/MAD.
+- **Per-pixel 3σ thresholds** on megapixel images and wondering about false alarms.
+- **Comparing `np.std` (ddof=0) with tools that use n − 1** and suspecting a bug.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The central limit theorem
+
+The sum (or mean) of many independent random effects tends to a Gaussian, whatever their individual distributions. That is why sensor read noise, thermal noise and the sum of many photons all look Gaussian, and why averages of pixels are Gaussian even when single pixels are not [1].
+
+### Standard error
+
+The mean of n independent values with spread σ has spread σ/√n, the **standard error**. It tells you how precise an averaged measurement (a mean grey level, an edge position averaged along a line) is.
+
+### Robust estimators
+
+The median has a "breakdown point" of 50 %: up to half the data can be arbitrarily wrong before it fails; the mean breaks with a single bad value. M-estimators and RANSAC (Part F) bring the same robustness to fitting lines and models [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which is least affected by a few extreme values?",
+      options: ["Mean", "Standard deviation", "Median", "Variance"],
+      answer: 2,
+      explanation: "The median only depends on the order of the values.",
+    },
+    {
+      question: "About what share of Gaussian values lie within ±2σ?",
+      options: ["68 %", "95 %", "99.7 %", "50 %"],
+      answer: 1,
+      explanation: "68–95–99.7.",
+    },
+    {
+      question: "A 3σ per-pixel threshold on a perfect 10 MP image flags roughly…",
+      options: ["0 pixels", "about 27 pixels", "about 27 000 pixels", "all pixels"],
+      answer: 2,
+      explanation: "0.27 % of 10 million ≈ 27 000.",
+    },
+    {
+      question: "Why use the MAD instead of the std to estimate noise on a surface with dirt?",
+      options: ["It is faster", "Dirt pixels inflate the std but hardly change the MAD", "MAD is always smaller", "It works in uint8"],
+      answer: 1,
+      explanation: "Robust statistics ignore the extreme values that you want to detect.",
+    },
+    {
+      question: "Local standard deviation is high on…",
+      options: ["Flat, smooth areas", "Edges, scratches and rough texture", "Only dark areas", "Only bright areas"],
+      answer: 1,
+      explanation: "It measures how much values vary inside the window.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Compute mean, variance and σ (divide by n) of the pixel values 4, 8, 6, 2.
+
+<Solution>
+
+Mean = 20 / 4 = 5. Deviations −1, 3, 1, −3; squares 1, 9, 1, 9; variance = 20 / 4 = **5**; σ = √5 ≈ **2.24**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Average 16 independent noisy versions of a flat value 100 (σ = 8, seed 4), each of size 200 × 200. Measure σ of a single version and of the average, and compare with σ / √16.
+
+<Solution>
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=4)
+stack = rng.normal(100, 8, (16, 200, 200))
+print(f"single frame std : {stack[0].std():.2f}")
+print(f"average of 16    : {stack.mean(axis=0).std():.2f}  (expected 8 / sqrt(16) = {8 / 4:.2f})")
+```
+
+Output:
+
+```text
+single frame std : 7.99
+average of 16    : 2.00  (expected 8 / sqrt(16) = 2.00)
+```
+
+The standard error σ/√n in action: 16 frames, 4× less noise.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Your defect detector uses "pixel < mean − 3·std of the whole image". On parts with large dark defects it suddenly misses defects. Why, and what do you change?
+
+<Solution>
+
+Large dark defects lower the mean and greatly increase the std of the whole image, so the threshold mean − 3·std drops far below the defect values: the defect protects itself. Use robust statistics (median and MAD), ideally learned from good parts or from a local neighbourhood, and add a minimum-area rule.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Section 2.6 (probabilistic methods) and Section 5.2 (noise models).
+2. P. J. Huber and E. M. Ronchetti, *Robust Statistics*, 2nd ed., Wiley, 2009.
+3. EMVA Standard 1288, *Standard for Characterization of Image Sensors and Cameras*, Release 4.0, 2021 (noise model and its measurement).
+4. OpenCV 4.13.0 documentation, *Operations on arrays* (`mean`, `meanStdDev`, `minMaxLoc`): [docs.opencv.org/4.13.0/d2/de8/group__core__array.html](https://docs.opencv.org/4.13.0/d2/de8/group__core__array.html).

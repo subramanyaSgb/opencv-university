@@ -1,0 +1,293 @@
+export const meta = {
+  number: "21.2",
+  title: "Phase correlation",
+  minutes: 25,
+  objectives: [
+    "Explain the Fourier shift theorem and why the phase difference encodes a translation",
+    "Compute phase correlation with NumPy and with cv2.phaseCorrelate",
+    "Read the response value and use a window against border effects",
+    "Know its strengths (speed, brightness invariance) and limits (rotation, scale, sub-pixel bias)",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 21.2 (Module 21).
+  Lab: RegisterLab (mode phase).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 21.2 Phase correlation
+
+<Definition term="Phase correlation">a method that finds the translation between two images in one step: compute both Fourier transforms, keep only the phase difference between them, and transform back. The result is an image that is almost zero everywhere except for a sharp peak at the shift.</Definition>
+
+The brute-force search of 21.1 tries every shift. Kuglin and Hines (1975) [1] noticed that the Fourier transform contains the answer directly: shifting an image does not change the magnitude of its spectrum, only the phase, and by a known amount per frequency. Phase correlation is fast (three FFTs), largely insensitive to brightness and contrast changes, and works for shifts of any size within the image.
+
+## 1. An analogy
+
+Two recordings of the same song, one started a few seconds later. Every note is delayed by the same time. For a slow bass note, the delay is a small fraction of its period; for a fast high note, a large fraction. Measuring that phase lag for every note and asking "which delay explains all of them at once" gives the delay exactly, regardless of how loud either recording is.
+
+## 2. The shift theorem
+
+<Flow
+  steps={[
+    { label: "Images a and b, with b(x) = a(x − d)", tone: "data" },
+    { label: "FFT: B(u) = A(u) · e^(−i2π u·d)", tone: "process" },
+    { label: "Normalised cross-power spectrum: R = B · A* / |B · A*| = e^(−i2π u·d)", tone: "process" },
+    { label: "Inverse FFT of R: a delta peak at d", tone: "result" },
+  ]}
+/>
+
+Dividing by the magnitude throws away how strong each frequency is and keeps only the phase. Every frequency then votes with equal weight for the same shift, and the inverse transform of e^(−i2π u·d) is a single spike at d. Plain cross-correlation (without the normalisation) gives a broad hill dominated by low frequencies; the normalisation makes the peak sharp.
+
+Because amplitude is discarded, a brightness gain alone does not change the result in theory. In practice an offset changes the jump between opposite image borders (the FFT wraps the image around), and that does affect the peak; a window (Section 3) removes most of the effect. Measured on the scene, shifted by (2.3, 0.7) pixels:
+
+| Second image | Estimated shift | Response (peak height) |
+| --- | --- | --- |
+| Shifted (5, −3) | (5.00, −3.00) | 0.99 |
+| Shifted (2.3, 0.7) | (2.20, 0.76) | 1.03 |
+| Same, gain 0.6 and offset +40 | (2.14, 0.79) | 0.68 (0.95 with a window) |
+| Same, noise σ = 20 | (2.19, 0.71) | 0.57 (0.87 with a window) |
+| Shifted (10.5, −4.25) | (10.17, −4.22) | 0.98 |
+| Shifted (2.3, 0.7) and rotated 2° | (2.25, 3.48) | 0.43 |
+| Shifted (2.3, 0.7) and rotated 5° | (2.52, 7.74) | 0.91 |
+
+Integer shifts come out exact. Fractional shifts are found to within about 0.1–0.35 pixel: OpenCV refines the peak position with a weighted centroid, which is biased for half-pixel shifts (the 10.5 case). Rotation breaks the model: the shift is no longer the same everywhere, and the estimate drifts by several pixels. The response (the height of the peak, about 1 for a perfect match) drops with noise and with brightness changes and is a useful confidence value, but not a guarantee: at 5° of rotation it is still high (0.91) while the estimate is 7 pixels off.
+
+<RegisterLab mode="phase" caption="Phase correlation between the scene and a shifted copy with noise and a brightness change. Move the shift sliders (including fractions): the bright dot in the correlation surface moves with the shift and the estimate follows. Raise the noise until the peak height drops below about 0.1 and the estimate becomes unreliable; change the brightness gain: the estimate hardly moves."/>
+
+## 3. Practical details
+
+- **Windowing**: the FFT treats the image as periodic, so the left and right borders meet. A Hanning window (`cv2.createHanningWindow`) fades the borders and removes the false "border" peak; with images that are not periodic it often improves robustness, at the cost of using less of the image.
+- **Range**: shifts up to half the image size in each direction; larger shifts wrap around and are reported with the wrong sign.
+- **Overlap**: only the overlapping region contributes; with large shifts the peak gets weaker.
+- **Sub-pixel**: centroid fitting gives about 0.1 pixel; upsampled cross-correlation (Guizar-Sicairos et al. [3]) or a follow-up ECC (21.3) gives 0.01 pixel.
+- **Rotation and scale**: convert both magnitude spectra to log-polar coordinates (16.5); there, rotation and scale become translations that phase correlation can find (the Fourier–Mellin method [2]), then find the translation in a second step.
+
+## 4. Industrial example
+
+Phase correlation is the standard first step for aligning images whose motion is mostly a shift: consecutive frames of a vibrating camera (video stabilisation, 39.7), tiles of a microscope scan stage, strips of a line-scan web inspection, and successive images of a part in a fixture. It runs in a few milliseconds per megapixel with optimised FFTs, its response value flags frames that do not match (wrong part, motion blur, occlusion), and its tolerance of brightness changes copes with flickering illumination (use a window).
+
+## What you should remember from 21.2
+
+<Takeaways>
+<Takeaway n={1} title="Principle">A shift only changes the phase of the spectrum, by e^(−i2π u·d).</Takeaway>
+<Takeaway n={2} title="Method">FFT both, normalise the cross-power spectrum, inverse FFT, find the peak.</Takeaway>
+<Takeaway n={3} title="Strengths">One step, any shift within half the image, largely ignores brightness changes; response = confidence.</Takeaway>
+<Takeaway n={4} title="Limits">Translation only (Fourier–Mellin for rotation and scale); sub-pixel about 0.1 px.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 512 × 512 image. What is the largest shift phase correlation can report without ambiguity?
+
+<Solution>
+
+±256 pixels in each direction (half the size); a shift of +300 looks like −212.
+
+</Solution>
+
+**Q2.** Why does dividing by the magnitude make the peak sharp?
+
+<Solution>
+
+Without it, strong low frequencies dominate and their inverse transform is a broad hill. With all magnitudes set to 1, every frequency contributes equally, and the sum of equal-weight waves that agree at d is a narrow spike there.
+
+</Solution>
+
+### Next: 21.3 ECC
+
+Iterative alignment for rotation, scale, affine and perspective motion, to a hundredth of a pixel.
+
+## Code
+
+Two examples: phase correlation from scratch against OpenCV, then its behaviour under brightness changes, noise and rotation.
+
+### 1. From scratch and with OpenCV
+
+```python
+import numpy as np
+import cv2
+
+a = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+
+def moved(dx, dy, angle=0.0, gain=1.0, offset=0.0, noise=0.0):
+    M = cv2.getRotationMatrix2D((160, 100), angle, 1.0)
+    M[:, 2] += (dx, dy)
+    m = cv2.warpAffine(a, M, (320, 200), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT) * gain + offset
+    return (m + np.random.default_rng(0).normal(0, noise, m.shape)).astype(np.float32)
+
+b = moved(5, -3)
+A, B = np.fft.fft2(a), np.fft.fft2(b)
+R = B * np.conj(A)
+R /= np.abs(R) + 1e-12                                              # keep only the phase
+surface = np.real(np.fft.ifft2(R))
+py, px = np.unravel_index(np.argmax(surface), surface.shape)
+wrap = lambda v, n: v - n if v > n // 2 else v
+print("NumPy peak:", (int(wrap(px, 320)), int(wrap(py, 200))), "height", round(float(surface.max()), 3))
+(sx, sy), response = cv2.phaseCorrelate(a, b)
+print(f"cv2.phaseCorrelate: ({sx:.2f}, {sy:.2f}), response {response:.3f}")
+```
+
+Output:
+
+```text
+NumPy peak: (5, -3) height 0.968
+cv2.phaseCorrelate: (5.00, -3.00), response 0.986
+```
+
+- `cv2.phaseCorrelate(src1, src2)` returns the shift of src2 relative to src1 (src2 ≈ src1 moved by (sx, sy)), with sub-pixel refinement, and the response.
+- Inputs must be float32 or float64, single channel, same size.
+
+### 2. Brightness, noise and rotation
+
+```python
+import numpy as np
+import cv2
+
+window = cv2.createHanningWindow((320, 200), cv2.CV_32F)
+cases = {"shift (2.3, 0.7)": moved(2.3, 0.7), "+ gain 0.6, offset 40": moved(2.3, 0.7, gain=0.6, offset=40),
+         "+ noise 20": moved(2.3, 0.7, noise=20), "+ rotation 2 deg": moved(2.3, 0.7, angle=2)}
+for name, b in cases.items():
+    (sx, sy), r = cv2.phaseCorrelate(a, b)
+    (wx, wy), rw = cv2.phaseCorrelate(a, b, window)
+    print(f"{name:22s} ({sx:5.2f}, {sy:5.2f}) r={r:.2f} | with window ({wx:5.2f}, {wy:5.2f}) r={rw:.2f}")
+```
+
+Output:
+
+```text
+shift (2.3, 0.7)       ( 2.20,  0.76) r=1.03 | with window ( 2.24,  0.75) r=1.03
++ gain 0.6, offset 40  ( 2.14,  0.79) r=0.68 | with window ( 2.21,  0.74) r=0.95
++ noise 20             ( 2.19,  0.71) r=0.57 | with window ( 2.26,  0.74) r=0.87
++ rotation 2 deg       ( 2.25,  3.48) r=0.43 | with window ( 2.38,  3.52) r=0.81
+```
+
+- The window helps every case here: it hides the wrap-around jump at the borders. The response can slightly exceed 1 after sub-pixel refinement; treat it as a relative confidence.
+
+## OpenCV API notes
+
+**`cv2.phaseCorrelate(src1, src2, window=None)`** → ((dx, dy), response):
+- `src1`, `src2`: float32 or float64, one channel, same size. Convert colour images to grey first.
+- `window`: optional, same size, float; `cv2.createHanningWindow((w, h), cv2.CV_32F)`.
+- Uses `cv2.getOptimalDFTSize`-padded DFTs internally, finds the peak and refines it with a weighted centroid around it.
+
+**Apply the result**: `M = np.float32([[1, 0, -dx], [0, 1, -dy]])`, `cv2.warpAffine(src2, M, size)` moves src2 back onto src1.
+
+**Related**: `cv2.dft`, `cv2.mulSpectrums(B, A, 0, conjB=...)` to build it yourself; `cv2.logPolar` / `cv2.warpPolar` for Fourier–Mellin.
+
+## Where it fails
+
+- **Rotation or scale** beyond about 1–2° or a few percent: the peak smears and moves.
+- **Little texture or periodic patterns**: weak or multiple peaks (a grid gives a grid of peaks).
+- **Small overlap**: large shifts relative to the image size give weak peaks.
+- **Non-rigid or local motion**: one global shift cannot describe it; use tiles or optical flow.
+- **Strong noise**: the response falls towards the noise floor (about 0.1 or below means "no confident match").
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Passing uint8 images**: `phaseCorrelate` needs float32/float64.
+- **Sign confusion**: the result is the shift of the second image relative to the first; undo it with the negative.
+- **Ignoring the response**: accepting a shift from a failed match.
+- **Using it for rotated parts**: estimate rotation first (Fourier–Mellin or features), or use ECC.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Fourier–Mellin
+
+Reddy and Chatterji [2] take the magnitude spectra of both images (which ignore translation), resample them to log-polar coordinates, and phase-correlate those: the peak gives rotation and log-scale. After undoing rotation and scale, a second phase correlation gives the translation. It needs good texture and suffers from the interpolation in log-polar resampling.
+
+### Efficient sub-pixel registration
+
+Guizar-Sicairos, Thurman and Fienup [3] locate the peak first at whole pixels, then compute the inverse DFT only in a small neighbourhood of the peak at an upsampling factor of, say, 100, with a matrix-multiply DFT. This gives 0.01-pixel accuracy at little extra cost; scikit-image's `phase_cross_correlation` implements it.
+
+### Noise model
+
+Normalising every frequency to magnitude 1 also amplifies frequencies that contain mostly noise. Weighting or low-pass filtering the cross-power spectrum before the inverse transform improves robustness to noise at some cost in peak sharpness.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "How does a pure translation change the Fourier transform of an image?",
+      options: ["Magnitudes change", "Only the phase changes, linearly with frequency", "Nothing changes", "Frequencies are rotated"],
+      answer: 1,
+      explanation: "B(u) = A(u) · e^(−i2π u·d).",
+    },
+    {
+      question: "Why is phase correlation, in theory, insensitive to a brightness gain?",
+      options: ["It uses the median", "The normalisation discards magnitudes", "It works on edges", "It clips the image"],
+      answer: 1,
+      explanation: "A gain scales magnitudes, not phases.",
+    },
+    {
+      question: "What does a low response value (e.g. 0.05) mean?",
+      options: ["A large shift", "No confident match", "A perfect match", "Negative shift"],
+      answer: 1,
+      explanation: "The peak barely rises above the noise.",
+    },
+    {
+      question: "Which method extends phase correlation to rotation and scale?",
+      options: ["Fourier–Mellin (log-polar spectra)", "Median filtering", "Histogram equalisation", "Bilateral filtering"],
+      answer: 0,
+      explanation: "Rotation and scale become shifts in log-polar coordinates.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+1-D signals of length 8: a = 0, 0, 5, 0, 0, 0, 0, 0 and b = 0, 0, 0, 0, 5, 0, 0, 0. At frequency u = 1 (one cycle per 8 samples), what is the phase difference between B and A, and which shift does it imply?
+
+<Solution>
+
+A shift by d multiplies frequency u by e^(−i2π u d / 8). b is a shifted by **2**, so the phase difference at u = 1 is −2π · 2 / 8 = **−π/2** (−90°). From −90° at one cycle per 8 samples: d = 90/360 × 8 = 2. (Alone, one frequency is ambiguous by multiples of 8; all frequencies together give d = 2 uniquely.)
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Video-stabilisation style: generate 5 frames with random shifts of up to ±10 pixels (seed 1) and noise σ = 5, estimate each shift with phase correlation against the first frame, and report the largest error.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(1)
+true = rng.uniform(-10, 10, (5, 2))
+errors = []
+for dx, dy in true:
+    b = moved(dx, dy, noise=5)
+    (sx, sy), r = cv2.phaseCorrelate(a, b)
+    errors.append(np.hypot(sx - dx, sy - dy))
+print("errors (px):", np.round(errors, 2).tolist(), "| max", round(float(max(errors)), 2))
+```
+
+Output:
+
+```text
+errors (px): [0.02, 0.02, 0.23, 0.09, 0.22] | max 0.23
+```
+
+All shifts are found to within a quarter of a pixel in one step each; for sub-pixel accuracy, follow with ECC (21.3).
+
+</Solution>
+
+## References
+
+1. C. D. Kuglin, D. C. Hines, "The phase correlation image alignment method", *Proc. IEEE Int. Conf. Cybernetics and Society*, 163–165, 1975.
+2. B. S. Reddy, B. N. Chatterji, "An FFT-based technique for translation, rotation, and scale-invariant image registration", *IEEE Trans. Image Processing* 5(8), 1266–1271, 1996.
+3. M. Guizar-Sicairos, S. T. Thurman, J. R. Fienup, "Efficient subpixel image registration algorithms", *Optics Letters* 33(2), 156–158, 2008.
+4. OpenCV 4.13.0 documentation: `phaseCorrelate`, `createHanningWindow`, `dft`. https://docs.opencv.org/4.13.0/

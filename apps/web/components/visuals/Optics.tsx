@@ -1,7 +1,7 @@
 /** Schematic optics drawings for Module 2. Illustrations, not to scale unless stated. */
 import type { ReactNode } from "react";
 
-function Fig({ label, caption, children, vb = "0 0 560 240" }: { label: string; caption?: string; children: ReactNode; vb?: string }) {
+export function Fig({ label, caption, children, vb = "0 0 560 240" }: { label: string; caption?: string; children: ReactNode; vb?: string }) {
   return (
     <figure className="vis sk op">
       <svg viewBox={vb} role="img" aria-label={label}>
@@ -17,7 +17,7 @@ function Fig({ label, caption, children, vb = "0 0 560 240" }: { label: string; 
   );
 }
 
-function Lamp({ x, y }: { x: number; y: number }) {
+export function Lamp({ x, y }: { x: number; y: number }) {
   return (
     <g>
       {[0, 45, 90, 135, 180, 225, 270, 315].map((a) => (
@@ -29,7 +29,7 @@ function Lamp({ x, y }: { x: number; y: number }) {
   );
 }
 
-function Camera({ x, y, flip = false }: { x: number; y: number; flip?: boolean }) {
+export function Camera({ x, y, flip = false }: { x: number; y: number; flip?: boolean }) {
   const s = flip ? -1 : 1;
   return (
     <g transform={`translate(${x} ${y}) scale(${s} 1)`}>

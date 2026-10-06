@@ -1,0 +1,329 @@
+export const meta = {
+  number: "10.6",
+  title: "White balance and colour constancy",
+  minutes: 25,
+  objectives: [
+    "Explain why a camera needs white balance and the eye mostly does not",
+    "Apply the von Kries model: one gain per channel",
+    "Compare grey world, white patch and reference-card white balance and their failure cases",
+    "Set up white balance for a production station so colours stay stable",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 10.6 (Module 10 plan).
+  WbLab uses lib/wb-ops.ts (linear reflectances × illuminant gains, clipping at 255).
+  Reference tail: examples 1–2 are compared automatically; example 3 needs opencv-contrib and is skipped otherwise.
+*/}
+
+# 10.6 White balance and colour constancy
+
+<Definition term="White balance">scaling the colour channels of an image so that surfaces that are neutral (white or grey) in reality also come out neutral (R = G = B) in the image, removing the colour cast of the light source.</Definition>
+
+The same white sheet reflects reddish light under a halogen lamp and bluish light in shade. People hardly notice (colour constancy, 9.4); a camera records exactly what arrives. Every colour measurement (10.3), every hue range (10.2) and every colour classifier depends on getting this right first.
+
+## 1. An analogy
+
+Tuning an orchestra before a concert. Every instrument plays the same reference note (the oboe's A), and each musician adjusts until they match. White balance tunes the three colour channels to the same reference: something known to be white or grey.
+
+## 2. The von Kries model
+
+<Flow
+  steps={[
+    { label: "Surface reflectance (B, G, R)", tone: "world" },
+    { label: "× light colour (B, G, R) = what the camera sees", tone: "data" },
+    { label: "Estimate the light from the image or a reference", tone: "process" },
+    { label: "× gains (G/B, 1, G/R): neutral things become neutral", tone: "result" },
+  ]}
+/>
+
+With a linear camera, each channel's value is roughly reflectance × illumination in that channel. Dividing by an estimate of the illumination, one **gain per channel**, removes the cast. This diagonal model goes back to von Kries (1902) and is what camera white balance does [1]. Usually G is kept fixed and B and R are scaled.
+
+How to estimate the illumination:
+
+| Method | Assumption | Fails when |
+| --- | --- | --- |
+| **Grey world** | the average of the scene is grey | one colour dominates (green background, red product) |
+| **White patch** (max-RGB) | the brightest point is white | the brightest point is clipped, coloured, or a specular highlight of a coloured surface |
+| **Percentile white patch** | the top 1 % of each channel is white-ish | no white in the scene |
+| **Reference card** | a known white or grey card is in the image | the card is dirty, shadowed or missing |
+| **Learning-based** | statistics learned from many images | unusual scenes |
+
+## 3. Try the methods
+
+<WbLab caption="A scene under different lights, corrected with different methods. The grey card's remaining colour cast shows how well each method works. Try the green background and high exposure to break the automatic methods." />
+
+Things to try:
+
+- Warm light, no correction: the grey card is clearly orange (cast 100 %).
+- Grey world on the mixed scene: much better (about 27 %), but not perfect.
+- **Mostly green background**: grey world over-corrects (the cast grows above 100 %); the reference card still works.
+- Exposure 1.6×: the white card clips in R; white patch and even the reference card now go wrong. Clipping destroys white balance.
+
+## 4. White balance in a production station
+
+1. **Use controlled, constant lighting** (LED, fixed colour temperature, shielded from daylight). Then white balance is done **once**, not per image.
+2. **Balance on a reference**: a white or 18 % grey target in the field of view (or put in for set-up), exposed **below** saturation.
+3. **Set the camera's white balance to manual** with fixed gains (automatic white balance on industrial cameras changes with image content, which makes colours drift between parts).
+4. **Check periodically**: measure the reference area in production images and alarm on drift (LED ageing, dirty diffuser).
+5. **Order of operations**: black-level/dark correction → white balance on linear data → colour matrix → gamma or colour-space conversion.
+
+## 5. Industrial example
+
+A food-sorting line classifies apples by colour. The camera ran with auto white balance; on batches of very red apples, the camera "corrected" the reddish scene towards grey, and red apples were classified as less ripe than on mixed batches: a grey-world failure built into the camera. The fix: auto white balance off, gains set once on a grey reference tile mounted at the edge of the belt, and the tile's mean colour logged every minute. When the tile's B/G ratio drifted by 3 % over months (LED ageing), maintenance replaced the light module before the classification was affected.
+
+## What you should remember from 10.6
+
+<Takeaways>
+<Takeaway n={1} title="Why">Cameras record the light's colour; white balance removes it so neutrals stay neutral.</Takeaway>
+<Takeaway n={2} title="Model">One gain per channel (von Kries), on linear values, usually G fixed.</Takeaway>
+<Takeaway n={3} title="Estimates">Grey world, white patch, percentile, reference card: each has a failure case.</Takeaway>
+<Takeaway n={4} title="Clipping">Saturated channels make white balance wrong.</Takeaway>
+<Takeaway n={5} title="Production">Fixed light, manual gains from a reference, periodic checks; no auto white balance.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A grey card measures (B, G, R) = (60, 90, 120). Which gains make it neutral (G fixed)?
+
+<Solution>
+
+B gain = 90/60 = **1.5**, R gain = 90/120 = **0.75**.
+
+</Solution>
+
+**Q2.** Why does grey world fail on an image that is mostly a green lawn?
+
+<Solution>
+
+The average is green, so grey world assumes the light is green and reduces G relative to B and R: everything turns magenta, including truly grey objects.
+
+</Solution>
+
+### Next: 10.7 Colour detection with inRange
+
+Putting Module 10 together: finding coloured objects reliably.
+
+## Code
+
+Three examples: the three estimates from scratch, robust versions with OpenCV functions, and contrib's xphoto white balancers.
+
+### 1. From scratch: grey world, white patch, white card
+
+```python
+import numpy as np
+import cv2
+
+# A test scene in linear values (B, G, R): white card, grey card, red, blue, cardboard
+patches = {"white": (0.8, 0.8, 0.8), "grey": (0.4, 0.4, 0.4), "red": (0.1, 0.1, 0.6), "blue": (0.6, 0.2, 0.1), "cardboard": (0.15, 0.3, 0.45)}
+scene = np.zeros((40, 200, 3), np.float32)
+for i, refl in enumerate(patches.values()):
+    scene[:, i * 40:(i + 1) * 40] = refl
+light = np.array([0.6, 0.9, 1.2], np.float32)                    # warm light: little blue, much red
+img = np.clip(scene * light * 255, 0, 255)                        # what a linear camera sees
+
+def cast(px):                                                      # 0 = neutral
+    return float(px.max() / px.min() - 1)
+
+grey_px = lambda im: im[20, 60]                                   # centre of the grey card
+est = {
+    "none": np.array([1.0, 1.0, 1.0]),
+    "grey world": img.reshape(-1, 3).mean(0),                     # assume the scene averages to grey
+    "white patch": img.reshape(-1, 3).max(0),                     # assume the brightest point is white
+    "white card": img[20, 20],                                    # a known white reference
+}
+for name, e in est.items():
+    gains = e[1] / e                                              # keep G, scale B and R to match it
+    out = img * gains
+    print(f"{name:11s}: gains B,G,R {[round(float(v), 2) for v in gains]} | grey card {np.round(grey_px(out)).astype(int).tolist()} | cast {cast(grey_px(out)):.2f}")
+```
+
+Output:
+
+```text
+none       : gains B,G,R [1.0, 1.0, 1.0] | grey card [61, 92, 122] | cast 1.00
+grey world : gains B,G,R [1.32, 1.0, 0.57] | grey card [81, 92, 70] | cast 0.31
+white patch: gains B,G,R [1.5, 1.0, 0.75] | grey card [92, 92, 92] | cast 0.00
+white card : gains B,G,R [1.5, 1.0, 0.75] | grey card [92, 92, 92] | cast 0.00
+```
+
+- Here the white card is the brightest thing in every channel, so white patch and the card agree exactly. Grey world is pulled by the red and blue parts.
+- The gains are applied to **linear** values; on gamma-encoded images the result is only approximate.
+
+### 2. OpenCV: grey world vs a robust white patch on a green scene
+
+```python
+import numpy as np
+import cv2
+
+def grey_world(bgr):
+    b, g, r, _ = cv2.mean(bgr)
+    return cv2.merge([cv2.multiply(c, float(s)) for c, s in zip(cv2.split(bgr.astype(np.float32)), (g / b, 1.0, g / r))])
+
+def white_patch(bgr, pct=99):
+    """Robust white patch: scale so that the pct-th percentile of each channel becomes equal (ignores a few hot pixels)."""
+    p = [np.percentile(c, pct) for c in cv2.split(bgr)]
+    return cv2.merge([cv2.multiply(c.astype(np.float32), float(p[1] / pc)) for c, pc in zip(cv2.split(bgr), p)])
+
+leaves = np.zeros((40, 400, 3), np.float32)
+leaves[:] = (0.08, 0.45, 0.12)                                     # a large green background
+leaves[:, :200] = scene                                            # with the test patches on the left
+cam = np.clip(leaves * light * 255, 0, 255)
+for name, fn in [("grey world", grey_world), ("white patch 99 %", white_patch)]:
+    for label, im in [("patches only", img), ("with green background", cam)]:
+        out = fn(im)
+        print(f"{name:16s} | {label:21s} | grey card {np.round(out[20, 60]).astype(int).tolist()} | cast {cast(out[20, 60]):.2f}")
+```
+
+Output:
+
+```text
+grey world       | patches only          | grey card [81, 92, 70] | cast 0.31
+grey world       | with green background | grey card [152, 92, 126] | cast 0.65
+white patch 99 % | patches only          | grey card [92, 92, 92] | cast 0.00
+white patch 99 % | with green background | grey card [92, 92, 92] | cast 0.00
+```
+
+- With the green background, grey world turns the grey card magenta (B and R boosted, cast 0.65).
+- The percentile white patch is unaffected because the white card is still in the image and not clipped. Without a white object, it would fail too.
+- `cv2.multiply(plane, float(s))` scales a plane by a Python number; NumPy scalars must be converted with `float()`.
+
+### 3. Contrib: xphoto white balancers
+
+```python
+# Needs opencv-contrib-python(-headless) 4.13.0.92
+cam8 = cam.astype(np.uint8)
+for name, wb in [("xphoto grayworld", cv2.xphoto.createGrayworldWB()), ("xphoto simple", cv2.xphoto.createSimpleWB())]:
+    out = wb.balanceWhite(cam8)
+    print(f"{name:16s}: grey card {out[20, 60].tolist()} | cast {cast(out[20, 60].astype(float)):.2f}")
+```
+
+Output:
+
+```text
+xphoto grayworld: grey card [61, 35, 61] | cast 0.74
+xphoto simple   : grey card [113, 109, 109] | cast 0.04
+```
+
+- The contrib grey-world balancer fails on the green scene just like ours (it ignores saturated pixels but keeps the grey-world assumption).
+- `SimpleWB` stretches each channel's histogram to the full range (ignoring a small percentage of outliers): it removes this cast well here, but also changes contrast.
+
+## OpenCV API notes
+
+**Building blocks**: `cv2.mean(img[, mask])`, `cv2.split` / `cv2.merge`, `cv2.multiply(src, scalar)`, `cv2.transform(img, np.diag(gains))` for all channels at once, `np.percentile`.
+
+**Contrib (xphoto)**: `cv2.xphoto.createSimpleWB()`, `createGrayworldWB()` (`setSaturationThreshold`), `createLearningBasedWB(model)`; `wb.balanceWhite(img)`.
+
+**Camera side**: industrial cameras expose `BalanceRatioSelector`/`BalanceRatio` and `BalanceWhiteAuto` (GenICam); set auto to Off and write fixed ratios. `cv2.VideoCapture` offers `CAP_PROP_AUTO_WB` and `CAP_PROP_WB_TEMPERATURE` on some backends.
+
+## Where it fails
+
+- **Mixed lighting**: daylight from a window and LEDs from above give different casts in different image regions; one set of gains cannot fix both.
+- **Clipping**: saturated channels cannot be balanced.
+- **Gamma-encoded data**: per-channel gains are exact only on linear values.
+- **Narrow-band light** (sodium lamps, single-colour LEDs): some colours cannot be recovered at all, because they reflect no light in the available band.
+- **Metamerism**: white balance fixes neutrals; other colours may still shift between lights (needs a full colour matrix, 10.3).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Leaving auto white balance on** in a measuring station.
+- **Balancing on a clipped white**.
+- **Grey world on scenes dominated by one colour**.
+- **Balancing once, then letting ambient light (daylight) change the cast**.
+- **Applying gains after gamma encoding** and expecting exact neutrals.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Colour constancy algorithms
+
+Grey world (Buchsbaum, 1980) and max-RGB (Land's Retinex theory) are two special cases of the **shades of grey** family (Finlayson & Trezzi, 2004), which estimates the illuminant with a Minkowski p-norm of the pixel values: p = 1 is grey world, p = ∞ is max-RGB, and values around p = 6 work better on average. **Grey edge** methods (van de Weijer et al., 2007) apply the same idea to image derivatives, assuming the average edge is grey [2], [3].
+
+### Beyond the diagonal model
+
+The von Kries diagonal model is exact only if the camera's three channels are narrow-band. Real sensors overlap, so a full 3 × 3 colour correction matrix, fitted on a colour chart under the station's light, corrects better; colour-science work often applies the diagonal adaptation in a sharpened cone space (Bradford transform) instead of camera RGB [1].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The von Kries model corrects colour casts with…",
+      options: ["A gamma curve", "One gain per colour channel", "A blur", "A threshold"],
+      answer: 1,
+      explanation: "A diagonal scaling of the channels.",
+    },
+    {
+      question: "Grey world assumes that…",
+      options: ["The brightest pixel is white", "The scene average is neutral grey", "There is a grey card in the image", "The light is white"],
+      answer: 1,
+      explanation: "It fails when one colour dominates.",
+    },
+    {
+      question: "Why is auto white balance a problem in a colour-measuring station?",
+      options: ["It is slow", "It changes the gains with image content, so the same part gets different colours", "It reduces resolution", "It only works at night"],
+      answer: 1,
+      explanation: "Fix the gains from a reference instead.",
+    },
+    {
+      question: "What breaks white balance on a white reference card?",
+      options: ["The card being in focus", "Clipping (saturated channels) on the card", "Using float32", "A small card"],
+      answer: 1,
+      explanation: "Clipped values no longer show the true ratios.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Under a cool light, a white card measures (B, G, R) = (220, 200, 160). Compute the gains, and correct a red part measured as (40, 50, 120).
+
+<Solution>
+
+Gains: B = 200/220 ≈ **0.909**, G = 1, R = 200/160 = **1.25**. Red part: (40 · 0.909, 50, 120 · 1.25) ≈ **(36, 50, 150)**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Make a version of `img` from example 1 that is overexposed (multiply by 1.8 and clip at 255) and compute the white-card gains again. What happens to the grey card's cast after correction?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+over = np.clip(scene * light * 255 * 1.8, 0, 255)
+e = over[20, 20]                                                   # white card, now clipped in R
+g = e[1] / e
+print("white card:", np.round(e).astype(int).tolist(), "| gains", [round(float(v), 2) for v in g],
+      "| grey card", np.round(over[20, 60] * g).astype(int).tolist(), "| cast", round(cast(over[20, 60] * g), 2))
+```
+
+Output:
+
+```text
+white card: [220, 255, 255] | gains [1.16, 1.0, 1.0] | grey card [127, 165, 220] | cast 0.73
+```
+
+Overexposed, the white card clips in **both** G and R (true values 330 and 441 are cut to 255), so the card looks only slightly yellow and the gains barely change the image: the grey card stays strongly orange (cast 0.73). Clipping anywhere in the reference corrupts the gains: expose the reference below saturation.
+
+</Solution>
+
+## References
+
+1. J. von Kries, "Chromatic adaptation", 1902; discussed in M. D. Fairchild, *Color Appearance Models*, 3rd ed., Wiley, 2013, Chapter 9.
+2. G. Buchsbaum, "A spatial processor model for object colour perception", *Journal of the Franklin Institute* 310(1), 1980.
+3. G. D. Finlayson, E. Trezzi, "Shades of Gray and Colour Constancy", *IS&T/SID Color Imaging Conference*, 2004; J. van de Weijer, T. Gevers, A. Gijsenij, "Edge-Based Color Constancy", *IEEE Transactions on Image Processing* 16(9), 2007.
+4. E. H. Land, "The Retinex Theory of Color Vision", *Scientific American* 237(6), 1977.
+5. OpenCV 4.13.0 documentation, xphoto module (white balance). https://docs.opencv.org/4.13.0/

@@ -1,0 +1,14 @@
+{
+  "number": 13,
+  "title": "Thresholding",
+  "summary": "Binary images, global thresholds, Otsu, triangle and entropy methods, adaptive thresholds, hysteresis and multi-level thresholds, and how to measure the quality of a segmentation.",
+  "chapters": [
+    { "number": "13.1", "slug": "13.1-binary-images", "title": "Binary images" },
+    { "number": "13.2", "slug": "13.2-global-threshold", "title": "Global threshold" },
+    { "number": "13.3", "slug": "13.3-otsus-method", "title": "Otsu's method" },
+    { "number": "13.4", "slug": "13.4-triangle-and-entropy-methods", "title": "Triangle and entropy methods" },
+    { "number": "13.5", "slug": "13.5-adaptive-thresholds", "title": "Adaptive thresholds (mean, Gaussian, Niblack, Sauvola)" },
+    { "number": "13.6", "slug": "13.6-hysteresis-and-multi-level", "title": "Hysteresis and multi-level thresholds" },
+    { "number": "13.7", "slug": "13.7-measuring-quality", "title": "Measuring quality" }
+  ]
+}

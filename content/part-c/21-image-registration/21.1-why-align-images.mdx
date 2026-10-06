@@ -1,0 +1,298 @@
+export const meta = {
+  number: "21.1",
+  title: "Why align images",
+  minutes: 20,
+  objectives: [
+    "Explain what image registration is and where it is needed",
+    "Measure how sub-pixel misalignment creates false differences and blur",
+    "Choose a motion model: translation, Euclidean, similarity, affine, homography",
+    "Distinguish intensity-based from feature-based registration and register a translation by brute force",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 21.1 (first chapter of Module 21).
+  New lab: RegisterLab (lib/reg-ops.ts; phase correlation equals cv2.phaseCorrelate on integer shifts, ECC Euclidean equals cv2.findTransformECC within 0.05 px).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 21.1 Why align images
+
+<Definition term="Image registration">finding the geometric transformation that maps one image of a scene onto another, so that the same scene point lands on the same pixel in both. The two images may differ in time, viewpoint, camera, or even type of sensor.</Definition>
+
+Many methods in this course compare or combine two images pixel by pixel: frame differencing (14.5), averaging frames against noise (2.5), flat-field correction (15.3), multi-frame super-resolution (19.6), blending (20.3). All of them silently assume that pixel (x, y) shows the same point in both images. On a real line, parts arrive a little shifted and rotated, cameras vibrate, and two cameras never see from exactly the same place. Registration restores the assumption.
+
+## 1. An analogy
+
+Laying a transparent sheet with last year's map over this year's map to see which roads are new. If the sheet is shifted by a few millimetres, every road shows up twice and the whole map looks "changed". First you slide and turn the sheet until the old roads lie exactly on the new ones; only then do the real differences stand out.
+
+## 2. What misalignment costs
+
+<Flow
+  steps={[
+    { label: "Reference image (golden part, previous frame)", tone: "data" },
+    { label: "Current image: same scene, slightly moved", tone: "data" },
+    { label: "Estimate the transform (registration)", tone: "process" },
+    { label: "Warp the current image into the reference frame, then compare or combine", tone: "result" },
+  ]}
+/>
+
+The scene shifted horizontally by a fraction of a pixel and subtracted from itself; pixels with a difference above 30 grey levels would be reported as "changed":
+
+| Shift | Pixels above 30 | Largest difference |
+| --- | --- | --- |
+| 0 | 0 | 0 |
+| 0.25 px | 603 | 52 |
+| 0.5 px | 820 | 104 |
+| 1 px | 960 | 208 |
+| 2 px | 1 867 | 208 |
+
+A quarter of a pixel is enough to produce hundreds of false "defects" along every strong edge. For a golden-template comparison, alignment must be better than about a tenth of a pixel.
+
+Averaging is affected too. Eight frames with random shifts of up to ±1.5 pixels, averaged, turn the sharp edge of the disc (from about 47 to 241 between two neighbouring pixels) into a ramp over four pixels (51, 101, 160, 211, 230). The noise drops, but so does the sharpness: averaging needs registration first.
+
+## 3. Motion models
+
+How the two images can differ decides the transform to estimate (16):
+
+| Model | Parameters | Allows | Typical cause |
+| --- | --- | --- | --- |
+| Translation | 2 | shift | conveyor position, camera vibration |
+| Euclidean (rigid) | 3 | shift + rotation | parts rotated on a table |
+| Similarity | 4 | + uniform scale | small changes in distance |
+| Affine | 6 | + shear, different scales | weak perspective, scanner skew |
+| Homography | 8 | full perspective of a plane | camera viewing a flat object from a new angle (16.3) |
+| Non-rigid | many | local deformation | flexible materials, lens distortion, tissue |
+
+Use the simplest model that fits: more parameters need more image structure to be determined, take longer to estimate and can fit noise.
+
+<RegisterLab mode="manual" caption="The second image is the scene rotated by 2° and shifted by (6, −4) pixels, with noise. Move your estimate sliders until the overlay turns grey (red and cyan fringes mark misalignment) and the correlation approaches 1. Notice how hard the last half pixel and the last half degree are by eye: the next chapters let the computer do it."/>
+
+## 4. Two families of methods
+
+- **Intensity-based (direct)**: compare all pixel values and search for the transform that makes them agree best, using a similarity measure: sum of squared differences (SSD), correlation coefficient, or, for different sensors, mutual information. Phase correlation (21.2) and ECC (21.3) are in this family. Accurate to a small fraction of a pixel; need a good starting point or a pyramid (20.1) for large motions.
+- **Feature-based**: find distinctive points in both images (33, 34), match them, and fit the transform to the matches with RANSAC (26.3, 34.5). Handle large motions, rotations and scale changes; less accurate per point, but robust.
+
+A common pipeline uses both: features for a rough estimate, intensity-based refinement for sub-pixel accuracy.
+
+The simplest intensity-based method is a brute-force search: try every integer shift in a window and keep the one with the smallest SSD. It is slow (one full comparison per candidate) and limited to whole pixels, but it shows the idea, and the code below finds a shift of (−5, 3) exactly.
+
+## 5. Industrial example
+
+In print inspection, every printed sheet is compared with a golden reference image. The sheet position varies by a few pixels and a fraction of a degree, so each image is first registered to the reference (often on a few fiducial marks, then refined on the whole image), and only then subtracted. In PCB and wafer inspection, the same die-to-die or die-to-database comparison runs at sub-pixel registration accuracy; the residual misalignment sets the smallest defect that can be found without false alarms on edges.
+
+## What you should remember from 21.1
+
+<Takeaways>
+<Takeaway n={1} title="Purpose">Make the same scene point land on the same pixel before comparing or combining images.</Takeaway>
+<Takeaway n={2} title="Precision">A quarter-pixel error already creates false differences at every edge.</Takeaway>
+<Takeaway n={3} title="Model">Translation, Euclidean, similarity, affine, homography: use the simplest that fits.</Takeaway>
+<Takeaway n={4} title="Methods">Intensity-based (accurate) and feature-based (robust); often combined.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A camera sees parts that may be shifted and rotated on a flat conveyor, at a fixed distance. Which motion model?
+
+<Solution>
+
+**Euclidean** (3 parameters: rotation and translation); the scale does not change at a fixed distance and the view is perpendicular.
+
+</Solution>
+
+**Q2.** Brute-force search over shifts of ±20 pixels in x and y: how many candidate comparisons?
+
+<Solution>
+
+41 × 41 = **1 681** full-image comparisons, each over every pixel: why faster methods (21.2) or pyramids (20.1) are used.
+
+</Solution>
+
+### Next: 21.2 Phase correlation
+
+Find a translation in one step from the Fourier transforms of the two images.
+
+## Code
+
+Two examples: false differences from sub-pixel shifts, then registration by brute-force SSD search.
+
+### 1. False differences
+
+```python
+import numpy as np
+import cv2
+
+scene = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+for d in (0, 0.25, 0.5, 1, 2):
+    M = np.float32([[1, 0, d], [0, 1, 0]])                           # shift right by d pixels
+    moved = cv2.warpAffine(scene, M, (320, 200), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    diff = np.abs(moved - scene)[5:-5, 5:-5]                         # ignore the border
+    print(f"shift {d:4.2f} px: {int((diff > 30).sum()):5d} pixels above 30, max {diff.max():5.1f}")
+```
+
+Output:
+
+```text
+shift 0.00 px:     0 pixels above 30, max   0.0
+shift 0.25 px:   603 pixels above 30, max  52.0
+shift 0.50 px:   820 pixels above 30, max 104.0
+shift 1.00 px:   960 pixels above 30, max 208.0
+shift 2.00 px:  1867 pixels above 30, max 208.0
+```
+
+### 2. Brute-force translation search
+
+```python
+import numpy as np
+import cv2
+
+current = np.roll(scene, (3, -5), axis=(0, 1))                      # the "current" image: 3 down, 5 left
+
+def ssd_search(ref, cur, r=8, margin=20):
+    best = None
+    for dy in range(-r, r + 1):
+        for dx in range(-r, r + 1):
+            back = np.roll(cur, (-dy, -dx), axis=(0, 1))             # undo the candidate shift
+            ssd = float(((back - ref)[margin:-margin, margin:-margin] ** 2).mean())
+            if best is None or ssd < best[0]:
+                best = (ssd, dx, dy)
+    return best
+
+ssd, dx, dy = ssd_search(scene, current)
+print(f"best shift: dx = {dx}, dy = {dy}, SSD = {ssd}")
+```
+
+Output:
+
+```text
+best shift: dx = -5, dy = 3, SSD = 0.0
+```
+
+- 289 candidates, each a full-image comparison; the margin keeps the wrapped-around border of `np.roll` out of the score.
+
+## OpenCV API notes
+
+Registration functions in OpenCV, by family:
+
+- **Translation**: `cv2.phaseCorrelate` (21.2); `cv2.matchTemplate` for a template inside a larger image (32).
+- **Intensity-based, sub-pixel**: `cv2.findTransformECC` with `MOTION_TRANSLATION`, `MOTION_EUCLIDEAN`, `MOTION_AFFINE` or `MOTION_HOMOGRAPHY` (21.3).
+- **Feature-based**: detectors and matchers (`cv2.ORB_create`, `cv2.SIFT_create`, `cv2.BFMatcher`), then `cv2.estimateAffinePartial2D`, `cv2.estimateAffine2D` or `cv2.findHomography` with RANSAC (34.5).
+- **Applying the result**: `cv2.warpAffine` / `cv2.warpPerspective`, with `WARP_INVERSE_MAP` when the matrix maps reference pixels into the moving image (16).
+
+## Where it fails
+
+- **Changing content**: parts that are actually different (defects, moving objects) bias intensity-based methods; use robust measures or masks.
+- **Repetitive patterns**: a grid of identical holes matches at many shifts; the search may lock onto the wrong period.
+- **Large motion with local methods**: start from a pyramid level or a feature-based estimate.
+- **Wrong model**: fitting a translation to a rotated image leaves errors growing towards the image corners.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Comparing images without registration** and blaming the threshold for edge false alarms.
+- **Whole-pixel alignment only** when the comparison needs sub-pixel accuracy.
+- **Mixing up the direction** of the transform (reference → current or current → reference) when warping.
+- **Too complex a model** for little image structure: affine or homography fits drift.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Surveys
+
+Zitová and Flusser [1] survey registration methods by feature space, similarity measure, transform model and search strategy. Szeliski's book covers direct (pixel-based) alignment and its link to optical flow [2].
+
+### Sub-pixel accuracy
+
+Intensity-based methods reach 0.01 to 0.1 pixel on well-textured images because they use every pixel's gradient. The limits are noise, interpolation errors, and changes between the images that the model does not describe (lighting, deformation).
+
+### Image registration and optical flow
+
+Optical flow (40.3) is registration with a separate small translation for every pixel or patch: a non-rigid model with very many parameters, held together by smoothness assumptions.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why does a 0.25-pixel misalignment matter for golden-template inspection?",
+      options: ["It changes the colours", "It produces false differences along every strong edge", "It slows down the camera", "It does not matter"],
+      answer: 1,
+      explanation: "In the example, 603 pixels exceeded the threshold.",
+    },
+    {
+      question: "How many parameters does a Euclidean (rigid) 2-D transform have?",
+      options: ["2", "3", "6", "8"],
+      answer: 1,
+      explanation: "Rotation angle and two translations.",
+    },
+    {
+      question: "Which family typically reaches the best sub-pixel accuracy?",
+      options: ["Feature-based", "Intensity-based (direct)", "Manual alignment", "Histogram matching"],
+      answer: 1,
+      explanation: "They use all pixels and their gradients.",
+    },
+    {
+      question: "A camera views a flat label from a different angle. Which model?",
+      options: ["Translation", "Euclidean", "Homography", "None"],
+      answer: 2,
+      explanation: "Perspective view of a plane.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Averaging 16 registered frames divides the noise by 4. If the frames are misregistered by random shifts of ±1 pixel, what else happens, and what limits the useful number of frames?
+
+<Solution>
+
+Edges are blurred over about 2 pixels, like a box blur of the shift range. More frames reduce noise further but not the blur; the residual misregistration sets the sharpness, so better registration, not more frames, is what helps.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Make the brute-force search faster with a pyramid: search ±8 pixels on level 2 of `cv2.pyrDown` (the shift there is a quarter), then refine ±2 pixels around the scaled-up result on level 0. Test with a shift of (−21, 13).
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+current = np.roll(scene, (13, -21), axis=(0, 1))
+small_ref, small_cur = cv2.pyrDown(cv2.pyrDown(scene)), cv2.pyrDown(cv2.pyrDown(current))
+_, dx2, dy2 = ssd_search(small_ref, small_cur, r=8, margin=6)
+coarse = (4 * dx2, 4 * dy2)
+best = None
+for dy in range(coarse[1] - 2, coarse[1] + 3):
+    for dx in range(coarse[0] - 2, coarse[0] + 3):
+        ssd = float(((np.roll(current, (-dy, -dx), axis=(0, 1)) - scene)[30:-30, 30:-30] ** 2).mean())
+        if best is None or ssd < best[0]:
+            best = (ssd, dx, dy)
+print("level 2:", (dx2, dy2), "-> coarse", coarse, "-> refined", best[1:])
+```
+
+Output:
+
+```text
+level 2: (-5, 3) -> coarse (-20, 12) -> refined (-21, 13)
+```
+
+289 small comparisons plus 25 full ones, instead of a full ±24 search with 2 401 full comparisons. The refinement window is ±2 because the coarse estimate is only good to about ±2 pixels at full resolution.
+
+</Solution>
+
+## References
+
+1. B. Zitová, J. Flusser, "Image registration methods: a survey", *Image and Vision Computing* 21(11), 977–1000, 2003.
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022: Chapter 9 (motion estimation).
+3. OpenCV 4.13.0 documentation: `phaseCorrelate`, `findTransformECC`, `warpAffine`, `estimateAffine2D`. https://docs.opencv.org/4.13.0/

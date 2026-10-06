@@ -1,0 +1,276 @@
+export const meta = {
+  number: "24.3",
+  title: "Area, perimeter, centroid",
+  minutes: 20,
+  objectives: [
+    "Compute a contour's area, perimeter and centroid with OpenCV",
+    "Understand the differences between pixel counts and polygon areas, and why digital perimeters are too long",
+    "Combine area and perimeter into circularity and convert pixel values to millimetres",
+    "Compute the centroid correctly (from moments, not from the contour points)",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 24.3 (Module 24).
+  Lab: ContourLab (centroid layer, property table).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 24.3 Area, perimeter, centroid
+
+<Definition term="Area, perimeter and centroid">the three basic measurements of a shape. Area is the size of the region it encloses, perimeter the length of its outline, and the centroid its centre of mass: the average position of all its points. In OpenCV they come from `cv2.contourArea`, `cv2.arcLength` and `cv2.moments`.</Definition>
+
+These three numbers solve a large share of inspection tasks: rejecting fragments and noise by area, checking a part's size, telling round from irregular shapes by their perimeter, and locating parts for a robot by their centroid. They are also easy to get subtly wrong on a pixel grid, which is the main subject of this chapter.
+
+## 1. An analogy
+
+Measuring a lawn: the area tells you how much seed to buy, the perimeter how much edging, and the centroid where to stand so that the lawn is balanced around you. Measuring with square paving stones (pixels) instead of a tape measure makes each of these slightly off, in a predictable way.
+
+## 2. The three measurements
+
+<Flow
+  steps={[
+    { label: "Contour (from findContours)", tone: "data" },
+    { label: "Area: polygon area (shoelace formula) = cv2.contourArea", tone: "process" },
+    { label: "Perimeter: sum of segment lengths = cv2.arcLength(c, True)", tone: "process" },
+    { label: "Centroid: (m10/m00, m01/m00) from cv2.moments", tone: "result" },
+  ]}
+/>
+
+**Area.** The shoelace formula sums x·y' − x'·y over the polygon's edges: for the 4 × 4 square of 24.1 it gives 9. The polygon runs through the centres of the boundary pixels, so it misses half a pixel all round. A useful rule: **pixel count ≈ contour area + perimeter / 2**.
+
+**Perimeter.** The length of the polygon. On a pixel grid, a smooth curve becomes a staircase of horizontal, vertical and diagonal steps, and the staircase is longer than the curve.
+
+**Centroid.** The average position of all pixels inside the shape, computed from the moments m00 (area), m10 (sum of x) and m01 (sum of y): cx = m10/m00, cy = m01/m00 (24.6). It is *not* the average of the contour points: those are spread unevenly along the outline.
+
+Discs drawn with radius r, measured:
+
+| r | Pixels | Contour area | π r² | Area + P/2 | Perimeter | 2π r | 4πA/P² |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 10 | 317 | 288 | 314.2 | 321.0 | 65.9 | 62.8 | 0.832 |
+| 30 | 2 821 | 2 736 | 2 827.4 | 2 834.9 | 197.8 | 188.5 | 0.879 |
+| 60 | 11 289 | 11 120 | 11 309.7 | 11 317.8 | 395.6 | 377.0 | 0.893 |
+
+- The pixel count matches π r² best; the contour area is smaller by about half the perimeter.
+- The digital perimeter is about 5 % too long, at every size: the staircase effect does not go away with resolution.
+- So the circularity 4πA/P² of a perfect disc comes out at 0.83–0.89, not 1. Compare shapes with the same measurement method and similar sizes, or calibrate the threshold on good parts.
+
+For the L-bracket, the centroid from moments is (135.43, 47.93); the mean of its pixel coordinates is (135.52, 48.02), the same within 0.1 pixel; the mean of its 269 contour points is (136.86, 49.39), off by about 2 pixels.
+
+<ContourLab initialMode="external" layers={["centroid", "rect"]} initialSelected={3} caption="Click any part: area, perimeter, centroid (white dot) and circularity appear below. Compare the oval, the washer and the star: circularity drops from about 0.8 to well below as shapes get less round. The centroid of the L-bracket lies near the inner corner, inside the bounding box but close to the edge of the material."/>
+
+## 3. From pixels to millimetres
+
+With a calibrated scale s (mm per pixel, 2.4, 41.6): length in mm = s × length in pixels, area in mm² = s² × area in pixels. A part with a contour area of 2 300.5 px² at 0.05 mm/px has 2 300.5 × 0.0025 = 5.75 mm². Perspective, lens distortion and non-square pixels break this simple scaling; Chapter 41 handles them.
+
+For accurate sizes, decide on one convention and calibrate it: measure a reference part of known size with the same pipeline (threshold, cleaning, contour, measurement), and use the ratio. This absorbs the half-pixel offsets and the threshold's effect on the boundary position.
+
+## 4. Industrial example
+
+A pellet or tablet inspection system thresholds back-lit images, finds contours and rejects any object with an area outside ±8 % of nominal (broken or doubled tablets) or a circularity below the value measured on good tablets (chipped edges). The centroid of each good tablet goes to the reject air-jet controller, which fires when the tablet passes. All three numbers come from one `cv2.moments` call per contour.
+
+## What you should remember from 24.3
+
+<Takeaways>
+<Takeaway n={1} title="Area">contourArea (polygon through pixel centres) ≈ pixel count − perimeter/2.</Takeaway>
+<Takeaway n={2} title="Perimeter">arcLength(c, True); digital perimeters are about 5 % too long on curves.</Takeaway>
+<Takeaway n={3} title="Centroid">m10/m00, m01/m00 from moments; never the mean of contour points.</Takeaway>
+<Takeaway n={4} title="Units">mm = s · px, mm² = s² · px²; calibrate with a reference part.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A contour has area 1 500 px² and perimeter 160 px. About how many pixels does the filled region contain? At 0.1 mm/px, what is its area in mm²?
+
+<Solution>
+
+About 1 500 + 160/2 = **1 580 pixels**. Area 1 500 × 0.01 = **15 mm²** (contour area) or about 15.8 mm² (pixel count); state which one you use.
+
+</Solution>
+
+**Q2.** Why is the circularity of a digitised disc below 1?
+
+<Solution>
+
+The digital perimeter is too long (staircase, about +5 %), and the contour area slightly too small, so 4πA/P² falls to about 0.83–0.89.
+
+</Solution>
+
+### Next: 24.4 Bounding shapes
+
+Rectangles, rotated rectangles, circles and ellipses that enclose or fit a contour.
+
+## Code
+
+Two examples: discs of known size, then the centroid of the L-bracket.
+
+### 1. Area and perimeter of discs
+
+```python
+import numpy as np
+import cv2
+
+for r in (10, 30, 60):
+    img = np.zeros((200, 200), np.uint8)
+    cv2.circle(img, (100, 100), r, 255, -1)
+    c = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0][0]
+    A, P = cv2.contourArea(c), cv2.arcLength(c, True)
+    print(f"r {r:2d}: pixels {int((img > 0).sum()):5d} | contour area {A:7.0f} | pi r^2 {np.pi * r * r:7.1f}"
+          f" | area + P/2 {A + P / 2:7.1f} | perimeter {P:5.1f} vs {2 * np.pi * r:5.1f} | circularity {4 * np.pi * A / P ** 2:.3f}")
+```
+
+Output:
+
+```text
+r 10: pixels   317 | contour area     288 | pi r^2   314.2 | area + P/2   321.0 | perimeter  65.9 vs  62.8 | circularity 0.832
+r 30: pixels  2821 | contour area    2736 | pi r^2  2827.4 | area + P/2  2834.9 | perimeter 197.8 vs 188.5 | circularity 0.879
+r 60: pixels 11289 | contour area   11120 | pi r^2 11309.7 | area + P/2 11317.8 | perimeter 395.6 vs 377.0 | circularity 0.893
+```
+
+### 2. Centroid
+
+```python
+import numpy as np
+import cv2
+
+parts = cv2.imread("sample-parts.png", cv2.IMREAD_GRAYSCALE)
+contours, _ = cv2.findContours(parts, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+bracket = contours[3]                                                # the L-bracket
+m = cv2.moments(bracket)
+print(f"moments centroid: ({m['m10'] / m['m00']:.2f}, {m['m01'] / m['m00']:.2f}) | m00 = area = {m['m00']}")
+mask = np.zeros_like(parts)
+cv2.drawContours(mask, [bracket], 0, 255, cv2.FILLED)
+ys, xs = np.nonzero(mask)
+print(f"mean of pixels:   ({xs.mean():.2f}, {ys.mean():.2f})")
+print(f"mean of contour points: {np.round(bracket.reshape(-1, 2).mean(axis=0), 2).tolist()}")
+print(f"area at 0.05 mm/px: {cv2.contourArea(bracket) * 0.05 ** 2:.2f} mm^2")
+```
+
+Output:
+
+```text
+moments centroid: (135.43, 47.93) | m00 = area = 2300.5
+mean of pixels:   (135.52, 48.02)
+mean of contour points: [136.86, 49.39]
+area at 0.05 mm/px: 5.75 mm^2
+```
+
+## OpenCV API notes
+
+- **`cv2.contourArea(contour, oriented=False)`**: polygon area; `oriented=True` returns a signed area (its sign gives the contour's direction).
+- **`cv2.arcLength(curve, closed)`**: `closed=True` for contours (includes the segment back to the start).
+- **`cv2.moments(array, binaryImage=False)`**: works on a contour (polygon moments) or on an image (pixel moments; with `binaryImage=True` all non-zero pixels count as 1). m00 is the area; m00 = 0 for degenerate contours (guard the division).
+- Pixel counts: `cv2.countNonZero(mask)` or the stats of `cv2.connectedComponentsWithStats` (25.2).
+
+## Where it fails
+
+- **Small objects**: a few pixels; relative errors of area and perimeter are large.
+- **Perimeter on noisy outlines**: grows with every bump; smooth the contour or use the convex hull's perimeter for robust size.
+- **Threshold dependence**: the boundary position, and therefore every measurement, moves with the threshold (13, 22.5).
+- **Perspective and distortion**: pixel-to-mm conversion is not uniform across the image without calibration (41).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Centroid as the mean of contour points**.
+- **Dividing by m00 = 0** for one-pixel or line contours.
+- **Mixing pixel counts and contour areas** in the same tolerance.
+- **Expecting circularity 1 for a perfect circle** on a pixel grid.
+- **Converting area with s instead of s²**.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Better digital perimeters
+
+The length of an 8-connected chain overestimates the length of the underlying curve. Weighted estimators count straight and diagonal steps with corrected weights (for example 0.948 and 1.343 instead of 1 and √2, Kulpa 1977), which cuts the error for random orientations to about 1 % [1]. Fitting smooth curves to sub-pixel edge points (22.5) is better still.
+
+### Green's theorem
+
+The shoelace area and all polygon moments follow from Green's theorem: an integral over the region becomes an integral along its boundary. That is why OpenCV can compute exact polygon moments from the contour points alone, without visiting the pixels inside.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "cv2.contourArea of a filled 10 × 10 pixel square is about…",
+      options: ["100", "81", "121", "40"],
+      answer: 1,
+      explanation: "The polygon through pixel centres is 9 × 9.",
+    },
+    {
+      question: "The digital perimeter of a disc compared with 2πr is…",
+      options: ["Exact", "About 5 % too long", "About 50 % too long", "Too short"],
+      answer: 1,
+      explanation: "The staircase is longer than the curve.",
+    },
+    {
+      question: "How do you compute the centroid of a contour?",
+      options: ["Mean of its points", "m10/m00, m01/m00 from cv2.moments", "Centre of the bounding box", "Median of its points"],
+      answer: 1,
+      explanation: "The contour-point mean is biased by uneven spacing.",
+    },
+    {
+      question: "An area of 400 px² at 0.2 mm/px is…",
+      options: ["80 mm²", "16 mm²", "2 000 mm²", "400 mm²"],
+      answer: 1,
+      explanation: "400 × 0.2² = 16.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A contour with corners (0, 0), (6, 0), (6, 4), (0, 4). Compute its area (shoelace) and perimeter, and the number of pixels its filled region contains.
+
+<Solution>
+
+Area 6 × 4 = **24**, perimeter 2 × (6 + 4) = **20**. The filled region covers pixels x = 0…6, y = 0…4: 7 × 5 = **35** pixels = 24 + 20/2 + 1 (the "+1" is exact for a rectangle; the rule area + P/2 is approximate).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Compute the circularity of all six parts and sort them from roundest to least round.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+names = ["oval", "star", "bar", "L-bracket", "washer", "plate"]                # order of the external contours
+circ = {n: 4 * np.pi * cv2.contourArea(c) / cv2.arcLength(c, True) ** 2 for n, c in zip(names, contours)}
+for n, v in sorted(circ.items(), key=lambda t: -t[1]):
+    print(f"{n:9s} {v:.3f}")
+```
+
+Output:
+
+```text
+washer    0.885
+oval      0.803
+plate     0.776
+bar       0.536
+L-bracket 0.398
+star      0.250
+```
+
+The washer's outer border is the roundest; the oval follows; the near-square plate scores 0.78 (a perfect square gives π/4 ≈ 0.785); the elongated bar, the L-bracket and the spiky star are far from round. Holes do not matter here because only the outer contours are used.
+
+</Solution>
+
+## References
+
+1. Z. Kulpa, "Area and perimeter measurement of blobs in discrete binary pictures", *Computer Graphics and Image Processing* 6(5), 434–451, 1977.
+2. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 11 (boundary and region descriptors).
+3. OpenCV 4.13.0 documentation: `contourArea`, `arcLength`, `moments`. https://docs.opencv.org/4.13.0/

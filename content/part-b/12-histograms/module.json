@@ -1,0 +1,13 @@
+{
+  "number": 12,
+  "title": "Histograms",
+  "summary": "What a histogram shows, equalization, CLAHE, histogram matching, back-projection and 2D histograms.",
+  "chapters": [
+    { "number": "12.1", "slug": "12.1-what-a-histogram-shows", "title": "What a histogram shows" },
+    { "number": "12.2", "slug": "12.2-equalization", "title": "Equalization" },
+    { "number": "12.3", "slug": "12.3-clahe", "title": "CLAHE" },
+    { "number": "12.4", "slug": "12.4-histogram-matching", "title": "Histogram matching" },
+    { "number": "12.5", "slug": "12.5-back-projection", "title": "Back-projection" },
+    { "number": "12.6", "slug": "12.6-2d-histograms", "title": "2D histograms" }
+  ]
+}

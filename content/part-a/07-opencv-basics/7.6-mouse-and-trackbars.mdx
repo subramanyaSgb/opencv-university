@@ -1,0 +1,384 @@
+export const meta = {
+  number: "7.6",
+  title: "Mouse and trackbars",
+  minutes: 30,
+  objectives: [
+    "Write mouse callbacks for clicking pixels and dragging regions of interest",
+    "Build a trackbar tuner to find thresholds and parameters interactively",
+    "Use cv2.selectROI for quick region selection",
+    "Keep the GUI logic testable and move tuned values into configuration",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 7.6 (Module 7 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 (headless) with NumPy 2.5.3.
+  The window examples need a desktop and opencv-python with GUI; they are not run by the automatic checks.
+*/}
+
+# 7.6 Mouse and trackbars
+
+<Definition term="HighGUI interaction">OpenCV's simple tools for interacting with an image window: mouse callbacks report clicks and drags with pixel coordinates, and trackbars are sliders that change a parameter while you watch the result.</Definition>
+
+Finding the right threshold, checking a pixel's value, or marking the inspection zone on a new part are everyday commissioning tasks. A 40-line tool with a window, a mouse callback and two trackbars often saves hours of guessing numbers.
+
+## 1. An analogy
+
+A sound mixing desk. You move a fader and immediately hear the result; when it sounds right, you write the fader position on the setup sheet. Trackbars are faders for image parameters, and the setup sheet is your configuration file.
+
+## 2. Mouse callbacks
+
+<Flow
+  steps={[
+    { label: "cv2.namedWindow(\"tool\")", tone: "process" },
+    { label: "cv2.setMouseCallback(\"tool\", on_mouse)", tone: "process" },
+    { label: "OpenCV calls on_mouse(event, x, y, flags, param) for every mouse event", tone: "process" },
+    { label: "events processed while cv2.waitKey runs", tone: "result" },
+  ]}
+/>
+
+| Event | When |
+| --- | --- |
+| `EVENT_LBUTTONDOWN` / `EVENT_LBUTTONUP` | left button pressed / released |
+| `EVENT_MOUSEMOVE` | the mouse moves (with `flags & EVENT_FLAG_LBUTTON` while dragging) |
+| `EVENT_RBUTTONDOWN`, `EVENT_LBUTTONDBLCLK`, `EVENT_MOUSEWHEEL` | right click, double click, wheel |
+
+(x, y) are **image** coordinates (column, row) of the window's image, even if the window is resized. A click is "down and up at the same place"; a drag is "down here, up there". Normalise drags in any direction to (x, y, w, h) *(Code example 1)*.
+
+## 3. Trackbars
+
+`cv2.createTrackbar(name, window, value, max, callback)` adds a slider from 0 to max; `cv2.getTrackbarPos(name, window)` reads it. Trackbars are integers only: for 0–1 floats use 0–100 and divide; for odd kernel sizes map k → 2k + 1.
+
+Two common patterns:
+
+- **Callback**: the function runs whenever the slider moves (keep it fast).
+- **Polling**: a loop reads all trackbar positions, recomputes and shows the result, then `waitKey(30)` *(Code example 3)*. Simpler when several sliders interact.
+
+## 4. Try it
+
+<TunerLab caption="A browser version of the chapter's tuning tool: two threshold sliders (cv2.inRange), click to read a pixel, drag a rectangle to get its mean." />
+
+On the sample scene: lower 200, upper 255 selects the bright disc and the text, plus noisy pixels at the bright end of the gradient (7979 pixels, exactly what OpenCV counts); 230 removes most of the gradient. Clicking the disc reads about 242; a rectangle inside the dark rectangle has a mean around 15.
+
+## 5. Quick ROI selection
+
+`cv2.selectROI(window, img, showCrosshair=True)` opens an interactive rectangle selection and returns (x, y, w, h) after Enter or Space; `cv2.selectROIs` selects several. Perfect for one-off tasks (cropping a training example, measuring a region). For a tool used every day, a custom callback (with saving to file) is more convenient.
+
+## 6. Keep logic testable
+
+Callbacks are ordinary Python functions. Put the logic (normalising a drag, computing a mask) in functions that do not touch windows, and call them in tests with simulated events *(Code example 1)*. The GUI part then shrinks to wiring: `setMouseCallback`, `createTrackbar`, `imshow`, `waitKey`.
+
+## 7. Industrial example
+
+Commissioning a new part type on a running line:
+
+<Flow
+  steps={[
+    { label: "Tool loads a reference image of the new part", tone: "world" },
+    { label: "Engineer drags the inspection zones; trackbars tune the thresholds", tone: "process" },
+    { label: "Key 's' saves zones + thresholds to part_123.json", tone: "data" },
+    { label: "The headless line program loads part_123.json: no GUI on the line PC", tone: "result" },
+  ]}
+/>
+
+Tuned values belong in a versioned configuration file, never as numbers edited into the production code.
+
+## What you should remember from 7.6
+
+<Takeaways>
+<Takeaway n={1} title="Mouse">setMouseCallback(window, fn); fn(event, x, y, flags, param) with image coordinates.</Takeaway>
+<Takeaway n={2} title="Drag">Down → up; normalise to (x, y, w, h) and clip to the image.</Takeaway>
+<Takeaway n={3} title="Trackbars">Integer sliders; poll in a loop or use a callback; map to floats/odd sizes yourself.</Takeaway>
+<Takeaway n={4} title="Quick">cv2.selectROI for one-off regions.</Takeaway>
+<Takeaway n={5} title="Config">Testable logic, GUI only for tuning; save results to a file for the headless program.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A user drags from (200, 150) to (120, 60). What ROI (x, y, w, h) do you store?
+
+<Solution>
+
+x = 120, y = 60, w = 80, h = 90.
+
+</Solution>
+
+**Q2.** You need a blur kernel size slider that only gives odd values 1–31. How?
+
+<Solution>
+
+Trackbar 0–15, kernel size k = 2·pos + 1.
+
+</Solution>
+
+**Q3.** Your mouse callback prints nothing. What is probably missing?
+
+<Solution>
+
+A loop calling `cv2.waitKey(…)`: events are only dispatched while `waitKey` runs. (Also check that the window name in `setMouseCallback` matches the one in `imshow`.)
+
+</Solution>
+
+### Next: 7.7 Measuring speed
+
+How fast is your pipeline really, and where does the time go?
+
+## Code
+
+Three examples: callback logic tested without a window, a pixel and ROI inspector, and a trackbar threshold tuner. Copy the sample images next to the script.
+
+### 1. From scratch: a mouse callback, tested with simulated events
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+state = {"start": None, "roi": None, "clicked": None}
+
+def on_mouse(event, x, y, flags, param):
+    """Mouse callback: OpenCV calls it with the event type and the pixel position (x, y)."""
+    if event == cv2.EVENT_LBUTTONDOWN:
+        state["start"] = (x, y)
+    elif event == cv2.EVENT_LBUTTONUP and state["start"] is not None:
+        (x0, y0), state["start"] = state["start"], None
+        if abs(x - x0) < 3 and abs(y - y0) < 3:                     # a click, not a drag
+            state["clicked"] = (x, y, int(img[y, x]))
+        else:                                                       # a drag: normalise to (x, y, w, h)
+            xa, xb, ya, yb = sorted((x0, x)) + sorted((y0, y))
+            state["roi"] = (xa, ya, xb - xa, yb - ya)
+
+# Simulate what OpenCV would send: a click on the disc, then a drag from bottom-right to top-left
+for ev, x, y in [(cv2.EVENT_LBUTTONDOWN, 70, 100), (cv2.EVENT_LBUTTONUP, 70, 100),
+                 (cv2.EVENT_LBUTTONDOWN, 210, 140), (cv2.EVENT_MOUSEMOVE, 180, 120), (cv2.EVENT_LBUTTONUP, 150, 60)]:
+    on_mouse(ev, x, y, 0, None)
+x, y, w, h = state["roi"]
+print("clicked (x, y, value):", state["clicked"])
+print("dragged ROI (x, y, w, h):", state["roi"], "| mean inside:", round(float(img[y:y + h, x:x + w].mean()), 1))
+
+def apply(lo, hi):                                                  # what a trackbar callback would do
+    return cv2.inRange(img, lo, hi)
+for lo in [150, 200, 230]:
+    print(f"inRange({lo}, 255): {int(np.count_nonzero(apply(lo, 255)))} pixels")
+```
+
+Output:
+
+```text
+clicked (x, y, value): (70, 100, 242)
+dragged ROI (x, y, w, h): (150, 60, 60, 80) | mean inside: 14.6
+inRange(150, 255): 23773 pixels
+inRange(200, 255): 7979 pixels
+inRange(230, 255): 6637 pixels
+```
+
+- A dictionary (`state`) shared with the callback stores what happened; in larger tools use a small class.
+- `img[y, x]`: rows first (3.4), even though the callback gives (x, y).
+- `cv2.inRange(src, lo, hi)` returns 255 where lo ≤ value ≤ hi (inclusive), else 0.
+
+### 2. OpenCV: a pixel and ROI inspector window (needs a desktop)
+
+```python
+# Needs a desktop (opencv-python with GUI): not run by the automatic checks
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+view = img.copy()
+start = None
+
+def on_mouse(event, x, y, flags, param):
+    global view, start
+    if event == cv2.EVENT_LBUTTONDOWN:
+        start = (x, y)
+    elif event == cv2.EVENT_MOUSEMOVE and start is not None:          # live rectangle while dragging
+        view = img.copy()
+        cv2.rectangle(view, start, (x, y), (0, 255, 255), 1)
+    elif event == cv2.EVENT_LBUTTONUP and start is not None:
+        x0, x1 = sorted((start[0], x)); y0, y1 = sorted((start[1], y))
+        view = img.copy()
+        if x1 - x0 > 2 and y1 - y0 > 2:
+            roi = img[y0:y1, x0:x1]
+            print(f"ROI ({x0}, {y0}, {x1 - x0}, {y1 - y0}) mean BGR = {roi.mean(axis=(0, 1)).round(1)}")
+            cv2.rectangle(view, (x0, y0), (x1, y1), (0, 255, 0), 2)
+        else:
+            print(f"pixel ({x}, {y}) = {img[y, x]} (B, G, R)")
+        start = None
+
+cv2.namedWindow("inspector", cv2.WINDOW_NORMAL)
+cv2.setMouseCallback("inspector", on_mouse)
+while True:
+    cv2.imshow("inspector", view)
+    if cv2.waitKey(20) & 0xFF in (ord("q"), 27):
+        break
+cv2.destroyAllWindows()
+```
+
+Typical use: click a pixel → its B, G, R values are printed; drag a rectangle → its mean colour is printed and the box stays green. **q** or **Esc** quits.
+
+### 3. OpenCV: a trackbar threshold tuner (needs a desktop)
+
+```python
+# Needs a desktop (opencv-python with GUI): not run by the automatic checks
+import json
+import numpy as np
+import cv2
+
+gray = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+cv2.namedWindow("tuner", cv2.WINDOW_NORMAL)
+cv2.createTrackbar("lower", "tuner", 200, 255, lambda v: None)    # callback not needed: we poll
+cv2.createTrackbar("upper", "tuner", 255, 255, lambda v: None)
+cv2.createTrackbar("blur (2k+1)", "tuner", 0, 7, lambda v: None)
+while True:
+    lo = cv2.getTrackbarPos("lower", "tuner")
+    hi = cv2.getTrackbarPos("upper", "tuner")
+    k = 2 * cv2.getTrackbarPos("blur (2k+1)", "tuner") + 1          # odd kernel sizes only
+    src = cv2.GaussianBlur(gray, (k, k), 0) if k > 1 else gray
+    mask = cv2.inRange(src, min(lo, hi), max(lo, hi))
+    cv2.imshow("tuner", np.hstack([gray, mask]))                    # image and mask side by side
+    key = cv2.waitKey(30) & 0xFF
+    if key == ord("s"):                                            # save the tuned values
+        json.dump({"lower": lo, "upper": hi, "blur": k}, open("threshold.json", "w"), indent=2)
+        print("saved", lo, hi, k)
+    if key in (ord("q"), 27):
+        break
+cv2.destroyAllWindows()
+```
+
+Typical use: move the sliders until the mask shows exactly the objects you want, press **s** to write `threshold.json`, then load that file in the production program.
+
+- `np.hstack` puts the image and the mask next to each other (both must have the same height and dtype).
+- Polling every 30 ms is fast enough for a tuning tool and keeps the code simple.
+
+## OpenCV API notes
+
+**Mouse**: `cv2.setMouseCallback(winname, onMouse, param=None)`; events `EVENT_MOUSEMOVE`, `EVENT_LBUTTONDOWN/UP/DBLCLK`, `EVENT_RBUTTONDOWN/UP`, `EVENT_MBUTTONDOWN/UP`, `EVENT_MOUSEWHEEL` (`cv2.getMouseWheelDelta(flags)`); flags `EVENT_FLAG_LBUTTON`, `EVENT_FLAG_CTRLKEY`, `EVENT_FLAG_SHIFTKEY`, `EVENT_FLAG_ALTKEY`.
+
+**Trackbars**: `cv2.createTrackbar(name, winname, value, count, onChange)`, `cv2.getTrackbarPos`, `cv2.setTrackbarPos`, `cv2.setTrackbarMin`, `cv2.setTrackbarMax`.
+
+**ROI selection**: `cv2.selectROI(windowName, img, showCrosshair=True, fromCenter=False)` → (x, y, w, h) (all zeros if cancelled); `cv2.selectROIs` for several.
+
+## Where it fails
+
+- **No GUI** in headless builds, Docker, notebooks and remote servers: build tuning tools for the engineer's desktop, or as web pages (like this course's labs).
+- **Scaled windows**: callback coordinates are image coordinates, but on high-DPI screens or `WINDOW_NORMAL` windows precise clicking is hard: zoom (crop and enlarge) for pixel work.
+- **Slow callbacks** freeze the window: keep work in callbacks small, or recompute in the main loop.
+- **Trackbar ranges** are integers from 0 (or a set minimum): plan the mapping.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Indexing `img[x, y]`** with the callback's (x, y): it must be `img[y, x]`.
+- **No `waitKey` loop**: callbacks never fire.
+- **Different window names** in `namedWindow`/`setMouseCallback` and `imshow`.
+- **Leaving tuned numbers in the code** instead of a configuration file.
+- **Kernel sizes from trackbars that can be even or 0**.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Beyond HighGUI
+
+HighGUI is deliberately minimal. For real applications, display frames in a GUI toolkit (Qt via PySide/PyQt, Tkinter) or a web front end: they offer zoom, pixel readouts, buttons, tables and proper text. OpenCV built with Qt support adds a toolbar to HighGUI windows (zoom, pan, pixel value display) [1].
+
+### Annotation tools
+
+For marking many images (training data, defect catalogues), dedicated tools such as CVAT or Label Studio save time, store labels in standard formats and support teams [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A mouse callback receives (x, y). Which pixel is it in NumPy?",
+      options: ["img[x, y]", "img[y, x]", "img[x][y]", "img[(x, y)]"],
+      answer: 1,
+      explanation: "Rows first: img[y, x].",
+    },
+    {
+      question: "When are mouse callbacks and trackbar changes processed?",
+      options: ["Immediately in a background thread", "While cv2.waitKey is running", "Only at program end", "Only after imshow"],
+      answer: 1,
+      explanation: "HighGUI handles window events inside waitKey.",
+    },
+    {
+      question: "A trackbar gives integers 0–100. You need a float 0.0–1.0. Use…",
+      options: ["pos", "pos / 100", "pos * 100", "float(pos) - 100"],
+      answer: 1,
+      explanation: "Map the integer range yourself.",
+    },
+    {
+      question: "Quickest way to get one rectangle from a user once?",
+      options: ["A custom callback", "cv2.selectROI", "A trackbar", "cv2.findContours"],
+      answer: 1,
+      explanation: "selectROI returns (x, y, w, h) after the user confirms.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A trackbar named "k" ranges 0–10 and should control a Gaussian kernel size 3, 5, 7, …. Give the formula and the size at positions 0 and 10.
+
+<Solution>
+
+size = 2·pos + 3 → position 0: **3**, position 10: **23**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Write `clamp_roi(x0, y0, x1, y1, width, height)` that turns any two drag points (possibly outside the image) into a valid (x, y, w, h) inside the image, or `None` if the result is empty. Test it on a drag fully inside, one partly outside, and one fully outside a 320 × 200 image.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+def clamp_roi(x0, y0, x1, y1, width, height):
+    xa, xb = sorted((x0, x1))
+    ya, yb = sorted((y0, y1))
+    xa, ya = max(0, xa), max(0, ya)
+    xb, yb = min(width, xb), min(height, yb)
+    if xb <= xa or yb <= ya:
+        return None
+    return (xa, ya, xb - xa, yb - ya)
+
+for drag in [(50, 40, 10, 90), (300, 190, 400, 250), (400, 300, 500, 350)]:
+    print(drag, "->", clamp_roi(*drag, 320, 200))
+```
+
+Output:
+
+```text
+(50, 40, 10, 90) -> (10, 40, 40, 50)
+(300, 190, 400, 250) -> (300, 190, 20, 10)
+(400, 300, 500, 350) -> None
+```
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+An engineer tuned thresholds with a trackbar tool on a laptop next to the line, then the line PC gives different results with the same numbers. What could differ?
+
+<Solution>
+
+The images: the laptop tool used saved images (perhaps JPEG, other exposure, other lighting time, BGR vs RGB load path, 7.3), while the line uses live frames. Or preprocessing: the tool blurred, the line did not. Tune on images captured by the line camera with the line's settings, save every parameter (not only the thresholds) to the configuration file, and share the preprocessing code between tool and line program.
+
+</Solution>
+
+## References
+
+1. OpenCV 4.13.0 documentation, *High-level GUI* (`setMouseCallback`, `createTrackbar`, `selectROI`) and the *Qt New Functions* page: [docs.opencv.org/4.13.0/d7/dfc/group__highgui.html](https://docs.opencv.org/4.13.0/d7/dfc/group__highgui.html).
+2. CVAT: Computer Vision Annotation Tool: [github.com/cvat-ai/cvat](https://github.com/cvat-ai/cvat).
+3. OpenCV 4.13.0 tutorials, *Mouse as a Paint-Brush* and *Trackbar as the Color Palette* (Python tutorials, GUI features).

@@ -1,0 +1,13 @@
+{
+  "number": 15,
+  "title": "Preprocessing pipelines",
+  "summary": "Why images are preprocessed, the rules for ordering steps, illumination correction, preprocessing for OCR and for deep learning, and data augmentation.",
+  "chapters": [
+    { "number": "15.1", "slug": "15.1-why-preprocess", "title": "Why preprocess" },
+    { "number": "15.2", "slug": "15.2-step-order-rules", "title": "Step order rules" },
+    { "number": "15.3", "slug": "15.3-illumination-correction", "title": "Illumination correction" },
+    { "number": "15.4", "slug": "15.4-preprocessing-for-ocr", "title": "Preprocessing for OCR" },
+    { "number": "15.5", "slug": "15.5-preprocessing-for-deep-learning", "title": "Preprocessing for deep learning" },
+    { "number": "15.6", "slug": "15.6-augmentation", "title": "Augmentation" }
+  ]
+}

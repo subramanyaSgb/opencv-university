@@ -1,0 +1,333 @@
+export const meta = {
+  number: "9.4",
+  title: "Colour perception and colour blindness",
+  minutes: 30,
+  objectives: [
+    "Explain trichromacy, metamerism and opponent colours",
+    "Know the types and frequency of colour vision deficiency",
+    "Simulate protanopia, deuteranopia and tritanopia on images with OpenCV",
+    "Design HMI colours that work for everyone, measured with ΔE",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 9.4 (Module 9 plan).
+  CVD matrices: Machado, Oliveira & Fernandes (2009), severity 1.0, applied in linear RGB (values checked against
+  the published table as reproduced in the palettecore R package). Prevalence: Birch (2012).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 9.4 Colour perception and colour blindness
+
+<Definition term="Colour perception">the brain's interpretation of the signals of three cone types (S, M, L). Colour is not a property of light alone: two different spectra can look identical, and the same object looks the same colour under different lights.</Definition>
+
+Cameras measure colour with three filters (2.7, Bayer), screens show it with three primaries, and operators judge it with three cone types. This chapter explains how the eye's part works, why roughly one man in twelve sees some colours differently, and how to design screens and status colours that everybody reads correctly.
+
+## 1. An analogy
+
+Three microphones, each listening to a different part of the audio spectrum. You never hear the full spectrum: only three volume readings. Many different sounds can give the same three readings and would be indistinguishable. If one microphone is missing or tuned wrongly, some sounds that others tell apart become identical. That is colour vision, and colour vision deficiency.
+
+## 2. Three cones, three numbers
+
+- Each cone type (S, M, L; peaks near 420, 534 and 564 nm, 9.1) integrates the light spectrum weighted by its sensitivity: **three numbers per point** of the retina.
+- **Metamerism**: different spectra with the same three numbers look identical. That is why an RGB screen can show "yellow" without emitting yellow light (red + green light give the same cone signals), and why two paint samples can match under daylight but not under LED light.
+- Cameras do the same with their RGB filters, but their filters are not the cone curves: a camera can see two colours as different that look equal to the eye, and the reverse.
+
+## 3. Opponent colours
+
+After the cones, the retina recombines the signals into three **opponent channels** [1]:
+
+<Flow
+  steps={[
+    { label: "Cones: S, M, L", tone: "data" },
+    { label: "Light–dark: L + M", tone: "process" },
+    { label: "Red–green: L − M", tone: "process" },
+    { label: "Blue–yellow: S − (L + M)", tone: "result" },
+  ]}
+/>
+
+This explains why nobody sees a "reddish green" or a "bluish yellow" (they are opposite ends of one channel), and it is the structure of colour spaces like CIELAB (L\*, a\* = red–green, b\* = blue–yellow, 10.3).
+
+**Colour constancy**: the visual system also discounts the colour of the illumination: a white sheet looks white under warm lamps and under daylight. Cameras need white balance for that (2.8, 10.6), and operators do not notice when it is wrong.
+
+## 4. Colour vision deficiency
+
+| Type | Cause | Effect | Frequency |
+| --- | --- | --- | --- |
+| Protanomaly / protanopia | L cones altered / missing | reds dark and confused with greens | red-green deficiencies together: about 8 % of men and 0.5 % of women of Northern European ancestry, lower in many other populations [2] |
+| Deuteranomaly / deuteranopia | M cones altered / missing | greens and reds confused (the most common type) | |
+| Tritanomaly / tritanopia | S cones altered / missing | blue–green and yellow–violet confused | rare (well under 0.1 %) |
+| Achromatopsia | no working cones | no colour at all | very rare |
+
+Red-green deficiencies are inherited on the X chromosome, which is why they are far more common in men. Most affected people are **anomalous trichromats** (shifted cones, milder) rather than dichromats; the simulations below show the strongest (dichromat) case.
+
+## 5. See it
+
+<CvdLab caption="An inspection overview with OK, NOK and warning colours, simulated for normal vision and three colour vision deficiencies. ΔE measures how different OK and NOK look." />
+
+Things to try: green/red palette with **deuteranopia**: OK and NOK become two similar olive tones (ΔE ≈ 12). Switch to the **Okabe-Ito** blue/orange palette: clearly different for normal, protan and deutan vision. Then click **Add shapes and labels**: now even the worst case is readable.
+
+## 6. Designing for everyone
+
+- **Never use colour as the only signal.** Add a shape (✓, ✕, !), a label, a position or a pattern. This is also an accessibility requirement in WCAG 2.x guideline 1.4.1 ("Use of Color") [3].
+- **Avoid red vs green** as the only distinction. Prefer blue vs orange, or vary lightness strongly (dark red vs light green differ in L\* even for dichromats).
+- **Use a colour-blind-safe palette**, such as Okabe and Ito's eight colours [4].
+- **Check with simulation** (example 2) and with a colleague who has a colour vision deficiency, if possible.
+- **For inspection of colour** (cable colours, LED colours, paint): rely on the camera and calibrated measurements; people with CVD should not be the colour reference, and nobody should judge colour under uncontrolled light.
+
+## 7. Industrial example
+
+An assembly line shows each finished board as a green (OK) or red (NOK) tile on a large screen at the end of the line. Two operators on the night shift repeatedly miss NOK boards; one of them mentions in a review that he is "a bit colour-blind". A simulation of the HMI confirms that for deuteranopia the two tiles differ by ΔE ≈ 12, while the screen is viewed from three metres. The HMI is changed to blue ✓ and orange ✕ tiles with a large symbol, and NOK boards also trigger a short sound. The change helps everybody: the symbols are readable from further away, and the sound catches the cases when nobody is looking.
+
+## What you should remember from 9.4
+
+<Takeaways>
+<Takeaway n={1} title="Three numbers">Colour = three cone signals; different spectra can match (metamerism).</Takeaway>
+<Takeaway n={2} title="Opponent channels">Light–dark, red–green, blue–yellow: the structure behind CIELAB.</Takeaway>
+<Takeaway n={3} title="CVD is common">About 8 % of men (red-green); design for it.</Takeaway>
+<Takeaway n={4} title="Redundant signals">Colour plus shape, text or position; avoid red/green alone.</Takeaway>
+<Takeaway n={5} title="Check">Simulate (Machado matrices in linear RGB) and measure ΔE.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Why can an RGB monitor show yellow without emitting light at yellow wavelengths?
+
+<Solution>
+
+Metamerism: a mix of red and green light produces nearly the same L, M and S cone signals as spectral yellow light, so it looks the same.
+
+</Solution>
+
+**Q2.** A team of 50 operators is about half men, half women. How many are likely to have a red-green deficiency (Northern European population)?
+
+<Solution>
+
+25 × 8 % + 25 × 0.5 % ≈ 2 + 0.1 ≈ **2 people**.
+
+</Solution>
+
+**Q3.** What is the simplest change to make an OK/NOK display usable for everyone?
+
+<Solution>
+
+Add a non-colour cue: a symbol (✓/✕), text or a position, and preferably change red/green to a safe pair such as blue/orange.
+
+</Solution>
+
+### Next: 9.5 Colour maps for displays
+
+False colour for heights, temperatures and differences: which colour maps tell the truth and which ones invent edges.
+
+## Code
+
+Two examples: simulating colour vision deficiency on status colours from scratch, and on images with OpenCV, with ΔE to compare palettes.
+
+### 1. From scratch: what a dichromat sees
+
+```python
+import numpy as np
+import cv2
+
+M = {  # Machado, Oliveira, Fernandes (2009), severity 1.0, applied to linear RGB
+    "protanopia":   np.array([[0.152286, 1.052583, -0.204868], [0.114503, 0.786281, 0.099216], [-0.003882, -0.048116, 1.051998]]),
+    "deuteranopia": np.array([[0.367322, 0.860646, -0.227968], [0.280085, 0.672501, 0.047413], [-0.011820, 0.042940, 0.968881]]),
+    "tritanopia":   np.array([[1.255528, -0.076749, -0.178779], [-0.078411, 0.930809, 0.147602], [0.004733, 0.691367, 0.303900]]),
+}
+
+def to_linear(rgb):
+    c = np.asarray(rgb, np.float64) / 255
+    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+def to_srgb(lin):
+    lin = np.clip(lin, 0, 1)
+    return np.round(255 * np.where(lin <= 0.0031308, 12.92 * lin, 1.055 * lin ** (1 / 2.4) - 0.055)).astype(int)
+
+ok_green, nok_red = (40, 180, 60), (220, 40, 40)                # RGB status colours of an HMI
+for name, m in M.items():
+    g, r = to_srgb(m @ to_linear(ok_green)), to_srgb(m @ to_linear(nok_red))
+    print(f"{name:12s}: OK green -> {tuple(g.tolist())}, NOK red -> {tuple(r.tolist())}")
+```
+
+Output:
+
+```text
+protanopia  : OK green -> (183, 163, 44), NOK red -> (100, 89, 37)
+deuteranopia: OK green -> (168, 152, 71), NOK red -> (143, 128, 30)
+tritanopia  : OK green -> (0, 175, 155), NOK red -> (243, 0, 43)
+```
+
+- The matrices act on **linear** light (9.2): decode sRGB first, apply the 3 × 3 matrix, encode again.
+- For protanopia the red becomes a dark olive, much darker than the green: a lightness difference remains. For deuteranopia both become similar olive tones: the worst case.
+
+### 2. OpenCV: simulate images and compare palettes with ΔE
+
+```python
+import numpy as np
+import cv2
+
+def simulate(bgr_u8, m):
+    """Simulate a colour vision deficiency on a BGR uint8 image (linear-light Machado model)."""
+    rgb = cv2.cvtColor(bgr_u8, cv2.COLOR_BGR2RGB).astype(np.float32) / 255
+    lin = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4).astype(np.float32)
+    sim = np.clip(cv2.transform(lin, m.astype(np.float32)), 0, 1)          # 3x3 matrix on every pixel
+    srgb = np.where(sim <= 0.0031308, 12.92 * sim, 1.055 * sim ** (1 / 2.4) - 0.055)
+    return cv2.cvtColor(np.round(255 * srgb).astype(np.uint8), cv2.COLOR_RGB2BGR)
+
+def delta_e(bgr1, bgr2):
+    lab = cv2.cvtColor(np.array([[bgr1, bgr2]], np.uint8).astype(np.float32) / 255, cv2.COLOR_BGR2Lab)[0]
+    return float(np.linalg.norm(lab[0] - lab[1]))                          # CIE76 colour difference
+
+pairs = {"red / green": ((40, 40, 220), (60, 180, 40)), "orange / blue": ((0, 159, 230), (178, 114, 0))}   # BGR
+for pname, (c1, c2) in pairs.items():
+    row = [f"normal {delta_e(c1, c2):5.1f}"]
+    for name, m in M.items():
+        s = simulate(np.array([[c1, c2]], np.uint8), m)[0]
+        row.append(f"{name[:5]} {delta_e(s[0], s[1]):5.1f}")
+    print(f"{pname:13s} ΔE: " + " | ".join(row))
+
+img = cv2.imread("sample-color.png")
+deut = simulate(img, M["deuteranopia"])
+print("sample-color as seen with deuteranopia:", deut.shape, deut.dtype, "| mean BGR", [round(v, 1) for v in cv2.mean(deut)[:3]])
+```
+
+Output:
+
+```text
+red / green   ΔE: normal 127.3 | prota  41.4 | deute  11.8 | trita 130.1
+orange / blue ΔE: normal 120.2 | prota 109.4 | deute 121.6 | trita  78.8
+sample-color as seen with deuteranopia: (200, 320, 3) uint8 | mean BGR [46.5, 67.4, 66.1]
+```
+
+- `cv2.transform(src, m)` multiplies every pixel's channel vector by the matrix `m`: the fast way to apply any 3 × 3 colour matrix to an image. The channels here are in RGB order, matching the matrices.
+- `cv2.cvtColor` to Lab on float32 images in 0…1 gives L\* in 0…100 and a\*, b\* in their natural range, so the Euclidean distance is the CIE76 ΔE (≈ 2.3 is a just-noticeable difference).
+- Blue/orange keeps ΔE above 75 in all three simulations; red/green drops to 12 for deuteranopia.
+
+## OpenCV API notes
+
+**Per-pixel colour matrices**: `cv2.transform(src, m)`: `m` is 3 × 3 (or 3 × 4 with an offset column); works on float32 and uint8 images (with saturation).
+
+**Colour spaces**: `cv2.cvtColor(img, cv2.COLOR_BGR2Lab)` (sRGB input, D65); for 8-bit images L\*, a\*, b\* are scaled to 0–255 (L·255/100, a + 128, b + 128), for float32 images they are not scaled. `cv2.COLOR_LBGR2Lab` takes linear BGR.
+
+**Channel order**: `cv2.COLOR_BGR2RGB` before applying matrices defined for RGB (most colour-science matrices).
+
+## Where it fails
+
+- **Simulation is an approximation**: it models the average dichromat; anomalous trichromats see something between normal and simulated, and individuals vary.
+- **Screens differ**: simulations assume an sRGB display; wide-gamut or uncalibrated screens change the colours.
+- **ΔE76 is not perfectly uniform**: for small differences use CIEDE2000 (10.3).
+- **Colour inspection needs calibration**: camera colour depends on light and white balance; perception studies do not replace a calibrated measurement.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Red vs green as the only difference** between OK and NOK.
+- **Applying CVD matrices to gamma-encoded values** instead of linear light.
+- **Using BGR images with RGB matrices** without converting.
+- **Assuming operators see what you see**, colours and contrasts alike.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### How the simulation works
+
+Dichromat models first convert linear RGB to cone responses (LMS). A dichromat lacks one cone type, so all colours that differ only in that cone's signal collapse onto a plane in LMS space; the model projects each colour onto that plane, using colours that dichromats are known to see like normal observers (from people with one normal and one affected eye) to choose the plane [5]. Machado et al. derive their matrices from a physiological model of shifted cone sensitivities, which also gives intermediate severities for anomalous trichromacy [6].
+
+### Daltonisation
+
+"Daltonisation" algorithms recolour images for people with CVD: they compute what is lost in the simulation (original − simulated) and redistribute that difference into channels the viewer can see. They help with natural images; for HMIs, choosing good colours and redundant cues is simpler and more reliable.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Two different light spectra that look identical are called…",
+      options: ["Complementary", "Metamers", "Opponents", "Isoluminant"],
+      answer: 1,
+      explanation: "They produce the same three cone signals.",
+    },
+    {
+      question: "The most common colour vision deficiency affects…",
+      options: ["S cones (blue)", "M cones (green)", "Rods", "All cones"],
+      answer: 1,
+      explanation: "Deuteranomaly/deuteranopia is the most common type.",
+    },
+    {
+      question: "Why apply CVD simulation matrices in linear RGB?",
+      options: ["It is faster", "Cones respond to light, which is linear; sRGB codes are gamma-encoded", "OpenCV requires it", "It does not matter"],
+      answer: 1,
+      explanation: "Decode, apply, encode.",
+    },
+    {
+      question: "Which design rule helps colour-blind and normal-sighted operators alike?",
+      options: ["Use brighter reds", "Never use colour as the only signal", "Use only grey", "Use larger screens"],
+      answer: 1,
+      explanation: "Add shape, text, position or sound.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Name the three opponent channels and, for each, a pair of colours that lie at its two ends.
+
+<Solution>
+
+Light–dark (white–black), red–green, blue–yellow.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using `simulate` and `delta_e` from example 2, test a "dark red / light green" pair, BGR (20, 20, 140) and (150, 230, 150), for normal vision and deuteranopia. Is lightness enough to keep them apart?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+c1, c2 = (20, 20, 140), (150, 230, 150)
+print(f"normal {delta_e(c1, c2):.1f}")
+s = simulate(np.array([[c1, c2]], np.uint8), M["deuteranopia"])[0]
+print(f"deuteranopia {delta_e(s[0], s[1]):.1f} | L* {[round(float(v), 1) for v in cv2.cvtColor(s[np.newaxis].astype(np.float32) / 255, cv2.COLOR_BGR2Lab)[0][:, 0]]}")
+```
+
+Output:
+
+```text
+normal 103.5
+deuteranopia 50.8 | L* [33.3, 83.3]
+```
+
+Yes: the colours become similar hues for a deuteranope, but their lightness differs by 50 L\* units, so they remain easy to tell apart. Strong lightness differences survive every type of colour vision deficiency.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A cable-assembly check requires workers to verify wire colours (red, green, brown, orange) by eye. What do you propose?
+
+<Solution>
+
+Colour judgement by people is unreliable (CVD in about 8 % of men, lighting, fatigue). Use a colour camera with controlled lighting and white balance and classify each wire's colour by measured values (10.x), showing the result as text ("pin 3: BROWN ✓"). If people must check, use a defined light source, a reference colour card, screening for colour vision, and add wire markings that are not colour-based where the product allows it.
+
+</Solution>
+
+## References
+
+1. B. A. Wandell, *Foundations of Vision*, Sinauer, 1995 (trichromacy, opponent processes).
+2. J. Birch, "Worldwide prevalence of red-green color deficiency", *Journal of the Optical Society of America A* 29(3), 2012.
+3. W3C, *Web Content Accessibility Guidelines (WCAG) 2.1*, Success Criterion 1.4.1 Use of Color. https://www.w3.org/TR/WCAG21/
+4. M. Okabe, K. Ito, "Color Universal Design (CUD): How to make figures and presentations that are friendly to colorblind people", 2002/2008. https://jfly.uni-koeln.de/color/
+5. F. Viénot, H. Brettel, J. D. Mollon, "Digital video colourmaps for checking the legibility of displays by dichromats", *Color Research & Application* 24(4), 1999.
+6. G. M. Machado, M. M. Oliveira, L. A. F. Fernandes, "A Physiologically-based Model for Simulation of Color Vision Deficiency", *IEEE Transactions on Visualization and Computer Graphics* 15(6), 2009.

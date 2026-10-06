@@ -1,0 +1,384 @@
+export const meta = {
+  number: "8.4",
+  title: "Contrib modules",
+  minutes: 25,
+  objectives: [
+    "Explain what opencv_contrib is and how it differs from the main repository",
+    "Name useful contrib modules (ximgproc, xfeatures2d, xphoto, tracking, face, quality, wechat_qrcode …)",
+    "Install contrib correctly with pip, and know when a custom build with OPENCV_ENABLE_NONFREE is needed",
+    "Decide whether a contrib dependency is acceptable in a production system",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 8.4 (Module 8 plan).
+  Reference tail: example 1 runs on the course package. Blocks starting with "# Needs opencv-contrib" were run on
+  opencv-contrib-python-headless 4.13.0.92 (same version as the course package); the verifier skips them when the
+  contrib modules are not installed.
+*/}
+
+# 8.4 Contrib modules
+
+<Definition term="opencv_contrib">OpenCV's second repository of extra modules: newer, more specialised or less stable algorithms (and a few patented ones), built together with the main library only when you ask for them.</Definition>
+
+Sooner or later a tutorial uses `cv2.ximgproc.guidedFilter` or `cv2.xfeatures2d.SURF_create` and your installation says `AttributeError` or "patented". This chapter explains why, and how to decide whether you need contrib at all.
+
+## 1. An analogy
+
+A car manufacturer's standard model and its accessory catalogue. The standard model (main OpenCV) is tested, supported, and the same for everyone. The accessory catalogue (contrib) has roof boxes, special lights, racing seats: useful, sometimes experimental, not all equally well supported. A few accessories are only legal in some countries (non-free algorithms) and are not fitted at the factory; you must install them yourself.
+
+## 2. Two repositories, one library
+
+<Flow
+  steps={[
+    { label: "opencv (main): core, imgproc, features2d, calib3d, dnn …", tone: "data" },
+    { label: "opencv_contrib: ximgproc, xfeatures2d, xphoto, tracking, face …", tone: "process" },
+    { label: "Built together (same version tag)", tone: "process" },
+    { label: "One cv2 with extra sub-namespaces: cv2.ximgproc, cv2.xfeatures2d …", tone: "result" },
+  ]}
+/>
+
+- Contrib modules live in their own repository and are compiled into the same library by pointing the build at them (`OPENCV_EXTRA_MODULES_PATH`).
+- The versions must match: contrib 4.13.0 with main 4.13.0.
+- Both are open source under the Apache 2.0 licence (since OpenCV 4.5.0). Some algorithms are marked **non-free** (patent restrictions) and are excluded unless the build sets `OPENCV_ENABLE_NONFREE=ON`.
+- Algorithms graduate to main when they are mature or their patents expire: SIFT (4.4.0), ArUco detection (4.7.0), the MIL, GOTURN, DaSiamRPN, Nano and ViT trackers.
+
+## 3. A tour of useful contrib modules
+
+| Module | What you get | Typical industrial use |
+| --- | --- | --- |
+| `ximgproc` | Guided filter, fast global smoother, edge-aware filters, thinning (skeletons), superpixels, structured edge detection, fast line detector | Smoothing without blurring edges; centre lines of cracks and wires |
+| `xfeatures2d` | SURF (non-free), BRIEF, FREAK, DAISY, LATCH, BEBLID descriptors; VGG and BoostDesc | Feature matching research and comparison |
+| `xphoto` | White balance (simple, grayworld, learning-based), inpainting variants, denoising | Colour correction of inspection images |
+| `tracking` | CSRT and KCF object trackers (others moved to main) | Following an object across video frames |
+| `bgsegm` | More background subtractors (GSOC, CNT, LSBP, GMG, MOG) | People and vehicle counting |
+| `face` | Facial landmarks, LBPH / Eigen / Fisher face recognisers | Access control demos |
+| `quality` | Image quality metrics: PSNR, SSIM, GMSD, BRISQUE (no-reference) | Monitoring camera image quality |
+| `wechat_qrcode` | CNN-based QR code detector and decoder, robust to blur and small codes | Reading damaged QR codes |
+| `text` | Scene text detection and recognition (ER filters, OCR wrappers) | Reading labels (today usually with DNN models, 8.7) |
+| `optflow`, `stereo`, `rgbd`, `structured_light`, `surface_matching` | Extra motion, 3-D and depth algorithms | 3-D inspection, robotics |
+| `cuda*` | GPU versions of many functions (only in CUDA builds, 8.5) | High-throughput processing |
+
+Contrib also contains an `aruco` module: the core marker detection moved to main `objdetect`, while extra pieces stay in contrib.
+
+## 4. Where does it live?
+
+Sort each algorithm: in the normal pip package, in the contrib pip package, or only in a custom build.
+
+<TaskSorter
+  kinds={[
+    { key: "main", label: "main (opencv-python)" },
+    { key: "contrib", label: "contrib (opencv-contrib-python)" },
+    { key: "nonfree", label: "non-free: custom build only" },
+  ]}
+  tasks={[
+    { task: "SIFT keypoints and descriptors", answer: "main", why: "Moved to features2d in 4.4.0 after the patent expired: cv2.SIFT_create()." },
+    { task: "SURF keypoints", answer: "nonfree", why: "xfeatures2d, marked non-free: 'This algorithm is patented and is excluded in this configuration' in every pip package." },
+    { task: "Guided filter (edge-preserving smoothing)", answer: "contrib", why: "cv2.ximgproc.guidedFilter." },
+    { task: "Skeleton / thinning of a binary shape", answer: "contrib", why: "cv2.ximgproc.thinning (Zhang-Suen or Guo-Hall)." },
+    { task: "ArUco marker detection", answer: "main", why: "cv2.aruco.ArucoDetector is in objdetect since 4.7.0." },
+    { task: "CSRT object tracker", answer: "contrib", why: "cv2.TrackerCSRT exists only with contrib; MIL, Nano, ViT, DaSiamRPN and GOTURN are in main." },
+    { task: "Standard QR code detection and decoding", answer: "main", why: "cv2.QRCodeDetector and QRCodeDetectorAruco are in objdetect." },
+    { task: "BRISQUE no-reference image quality score", answer: "contrib", why: "cv2.quality.QualityBRISQUE (needs its model files)." },
+    { task: "MOG2 background subtraction", answer: "main", why: "cv2.createBackgroundSubtractorMOG2 is in the video module; extra subtractors are in contrib bgsegm." },
+    { task: "Simple / grayworld white balance", answer: "contrib", why: "cv2.xphoto.createSimpleWB / createGrayworldWB." },
+  ]}
+  caption="Main, contrib or non-free? The answers were checked against the 4.13.0.92 pip packages."
+/>
+
+## 5. Installing contrib
+
+**With pip** (most cases): replace the package, never add a second one.
+
+```text
+pip uninstall -y opencv-python opencv-python-headless
+pip install opencv-contrib-python==4.13.0.92          # or opencv-contrib-python-headless for servers
+```
+
+**From source** (needed for non-free algorithms or CUDA, 8.5):
+
+```text
+git clone --branch 4.13.0 https://github.com/opencv/opencv.git
+git clone --branch 4.13.0 https://github.com/opencv/opencv_contrib.git
+cmake -S opencv -B build -D OPENCV_EXTRA_MODULES_PATH=../opencv_contrib/modules -D OPENCV_ENABLE_NONFREE=ON -D BUILD_opencv_python3=ON
+cmake --build build --parallel
+```
+
+You can also include only the modules you need with `-D BUILD_opencv_<name>=OFF` for the others, which keeps the build smaller.
+
+## 6. Should production code depend on contrib?
+
+<VsTable
+  left="Reasons to use it"
+  right="Reasons to be careful"
+  rows={[
+    ["The algorithm solves the problem and nothing in main does", "Less testing and maintenance than main; APIs change more often"],
+    ["It is a well-known method (guided filter, thinning, CSRT)", "Bigger package and more dependencies"],
+    ["The pip package is pinned like any other dependency", "Non-free code may need a patent licence for commercial use"],
+    ["Prototyping is fast: no source build", "Some modules are research code with known limits"],
+  ]}
+/>
+
+A practical rule: prototype with contrib freely; before production, check whether a main-module alternative is good enough, and if contrib stays, pin the exact version and test it like your own code.
+
+## 7. Industrial example
+
+A wire-harness inspection needs the centre line of each wire to measure bend radii. Thresholding gives wires about 12 pixels wide. `cv2.ximgproc.thinning` turns them into one-pixel skeletons, from which the bend radius is fitted. The team checked the alternative in main (an iterated morphological skeleton with `cv2.erode` and `cv2.dilate`, 15.x) and found it produced spurs; contrib's Zhang-Suen thinning was cleaner. They switched the line PCs to `opencv-contrib-python-headless==4.13.0.92` (one package only) and added a start-up check that `cv2.ximgproc` exists.
+
+## What you should remember from 8.4
+
+<Takeaways>
+<Takeaway n={1} title="What">Extra modules in a second repository, built into the same cv2.</Takeaway>
+<Takeaway n={2} title="Install">pip: opencv-contrib-python(-headless), as the only OpenCV package, same version.</Takeaway>
+<Takeaway n={3} title="Non-free">Patented algorithms (SURF) need a source build with OPENCV_ENABLE_NONFREE=ON.</Takeaway>
+<Takeaway n={4} title="Moves">Algorithms move to main over time; check the version before following a tutorial.</Takeaway>
+<Takeaway n={5} title="Production">Use contrib when it is clearly better; pin it and test it.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** `cv2.xfeatures2d.SURF_create()` fails with "This algorithm is patented and is excluded in this configuration" although `opencv-contrib-python` is installed. Why?
+
+<Solution>
+
+SURF is non-free; the pip packages are built without `OPENCV_ENABLE_NONFREE`. Use SIFT, ORB or AKAZE, or build OpenCV from source with the option (and check the licensing).
+
+</Solution>
+
+**Q2.** You need the CSRT tracker on a server without a screen. Which package?
+
+<Solution>
+
+`opencv-contrib-python-headless` (CSRT is in contrib; headless because there is no GUI), as the only OpenCV package.
+
+</Solution>
+
+### Next: 8.5 Building with CUDA, and cv2.cuda
+
+When the CPU is not enough: OpenCV's CUDA modules, building them, and moving images to the GPU.
+
+## Code
+
+Three examples: the guided filter from scratch, the same with `cv2.ximgproc`, and thinning. Examples 2 and 3 need `opencv-contrib-python(-headless)==4.13.0.92`.
+
+### 1. From scratch: the guided filter
+
+The guided filter [1] smooths an image while keeping strong edges. Inside each window it fits a straight-line model `output = a · guide + b`; where the guide is flat, `a` ≈ 0 and the output is the local mean (smoothing); across an edge the variance is large, `a` ≈ 1 and the edge is kept. `eps` sets what counts as "noise" (a variance).
+
+```python
+import numpy as np
+import cv2
+
+def box_mean(x, r):
+    """Mean over a (2r+1) x (2r+1) window with an integral image; edges use the reflected border."""
+    p = np.pad(x, r, mode="reflect")
+    s = np.pad(p.cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+    k = 2 * r + 1
+    return (s[k:, k:] - s[:-k, k:] - s[k:, :-k] + s[:-k, :-k]) / (k * k)
+
+def guided_filter(I, p, r, eps):
+    """He, Sun, Tang (2010): edge-preserving smoothing of p, guided by I (both float in 0..1)."""
+    mI, mp = box_mean(I, r), box_mean(p, r)
+    a = (box_mean(I * p, r) - mI * mp) / (box_mean(I * I, r) - mI * mI + eps)
+    b = mp - a * mI
+    return box_mean(a, r) * I + box_mean(b, r)
+
+rng = np.random.default_rng(3)
+I = np.full((60, 80), 0.2); I[:, 40:] = 0.8                     # a sharp vertical edge
+noisy = np.clip(I + rng.normal(0, 0.1, I.shape), 0, 1)
+gf = guided_filter(noisy, noisy, r=4, eps=0.01)
+box = box_mean(noisy, 4)
+print(f"noise std before {np.std(noisy[:, :30]):.3f} | after guided {np.std(gf[:, :30]):.3f} | after box {np.std(box[:, :30]):.3f}")
+print("edge row 30, columns 37..42 guided:", np.round(gf[30, 37:43], 2).tolist())
+print("edge row 30, columns 37..42 box:   ", np.round(box[30, 37:43], 2).tolist())
+```
+
+Output:
+
+```text
+noise std before 0.096 | after guided 0.047 | after box 0.013
+edge row 30, columns 37..42 guided: [0.23, 0.16, 0.19, 0.94, 0.86, 0.76]
+edge row 30, columns 37..42 box:    [0.33, 0.4, 0.46, 0.54, 0.61, 0.68]
+```
+
+- The box filter removes more noise but turns the edge into a ramp (0.33 → 0.68 over six pixels). The guided filter keeps a step (0.19 → 0.94 between two neighbours) and still halves the noise.
+- Larger `eps` smooths more and starts to soften weaker edges; `eps` ≈ noise variance (here 0.1² = 0.01) is a common starting point.
+
+### 2. Contrib: cv2.ximgproc.guidedFilter
+
+```python
+# Needs opencv-contrib-python(-headless) 4.13.0.92
+gf_cv = cv2.ximgproc.guidedFilter(guide=noisy.astype(np.float32), src=noisy.astype(np.float32), radius=4, eps=0.01)
+print("max |ours - cv2.ximgproc|:", f"{np.abs(gf_cv - gf).max():.4f}", "| interior:", f"{np.abs(gf_cv - gf)[8:-8, 8:-8].max():.6f}")
+```
+
+Output:
+
+```text
+max |ours - cv2.ximgproc|: 0.0084 | interior: 0.000008
+```
+
+- Inside the image both agree to float32 precision; the small difference near the border comes from a different border handling of the box means.
+- `guide` may be a colour image (3 channels) while `src` is gray: the edges of the colour image then steer the smoothing.
+
+### 3. Contrib: thinning to a skeleton
+
+```python
+# Needs opencv-contrib-python(-headless) 4.13.0.92
+shape = np.zeros((40, 60), np.uint8)
+cv2.rectangle(shape, (5, 15), (54, 24), 255, -1)               # a 10-pixel-thick bar
+cv2.circle(shape, (30, 20), 12, 255, -1)                         # with a round blob in the middle
+skel = cv2.ximgproc.thinning(shape, thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
+print("foreground pixels:", int(np.count_nonzero(shape)), "-> skeleton pixels:", int(np.count_nonzero(skel)))
+ys, xs = np.nonzero(skel)
+print("skeleton spans x", xs.min(), "to", xs.max(), "| rows used:", sorted(set(ys.tolist())))
+try:
+    cv2.xfeatures2d.SURF_create(400)
+except cv2.error as e:
+    print("SURF:", str(e).split("implemented) ", 1)[1].split(";")[0])
+```
+
+Output:
+
+```text
+foreground pixels: 711 -> skeleton pixels: 40
+skeleton spans x 10 to 49 | rows used: [19, 20]
+SURF: This algorithm is patented and is excluded in this configuration
+```
+
+- 711 pixels become a 40-pixel centre line along rows 19–20 (the bar's middle); thinning shortens the ends by about half the thickness (x 10 to 49 instead of 5 to 54).
+- `THINNING_GUOHALL` is the other algorithm; results differ slightly at junctions.
+
+## OpenCV API notes
+
+**ximgproc**: `guidedFilter(guide, src, radius, eps[, dst[, dDepth]])`, `createGuidedFilter`, `thinning(src[, dst[, thinningType]])` (8-bit binary input, foreground 255), `fastGlobalSmootherFilter`, `createFastLineDetector`, `createStructuredEdgeDetection` (needs a model file).
+
+**xphoto**: `createSimpleWB()`, `createGrayworldWB()`, `createLearningBasedWB()`; `wb.balanceWhite(img)`.
+
+**tracking**: `cv2.TrackerCSRT.create()`, `cv2.TrackerKCF.create()`; `tracker.init(frame, bbox)`, `ok, bbox = tracker.update(frame)`.
+
+**Checking at run time**: `hasattr(cv2, "ximgproc")`; the module list in `cv2.getBuildInformation()` ("To be built:"); "Non-free algorithms: YES/NO".
+
+**Docs**: contrib modules are listed in the same docs (`https://docs.opencv.org/4.13.0/`, "Extra modules").
+
+## Where it fails
+
+- **Model files**: several contrib functions (structured edges, BRISQUE, wechat_qrcode, face landmarks) need trained model files that are not in the pip package.
+- **Maintenance**: some modules are rarely updated; bugs may stay open longer than in main.
+- **Licences**: non-free algorithms may need patent licences; other dependencies (Tesseract for `text`) have their own licences.
+- **Package size and start-up**: the contrib wheel is larger; for embedded targets a custom build with only the needed modules is better.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Installing opencv-contrib-python next to opencv-python**: uninstall the other first.
+- **Mismatched versions** of main and contrib in a source build.
+- **Expecting SURF in pip packages**.
+- **Following an old tutorial** that imports a tracker or ArUco from contrib when it is now in main (or the reverse).
+- **Shipping contrib to production without a start-up check** that the needed module exists.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The guided filter as a local linear model
+
+For each window ω_k, the filter assumes `q_i = a_k I_i + b_k` and chooses `a_k, b_k` to minimise Σ((a_k I_i + b_k − p_i)² + ε a_k²). The solution is `a_k = cov(I, p) / (var(I) + ε)`, `b_k = mean(p) − a_k mean(I)`. Each pixel is in many windows, so the final output averages `a` and `b` over all windows that contain it. All terms are box means, so the cost is O(1) per pixel regardless of the radius [1].
+
+### Thinning algorithms
+
+Zhang-Suen [2] removes boundary pixels in two alternating sub-iterations with conditions on the 8 neighbours (number of foreground neighbours between 2 and 6, exactly one 0→1 transition around the pixel, and conditions that keep connectivity). It preserves topology (no new holes, no broken lines) but can leave 2-pixel-thick diagonal steps; Guo-Hall [3] uses different conditions and gives slightly thinner results at diagonals.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which pip package contains cv2.ximgproc?",
+      options: ["opencv-python", "opencv-python-headless", "opencv-contrib-python-headless", "None: it needs a source build"],
+      answer: 2,
+      explanation: "Both contrib packages (with and without GUI) contain ximgproc.",
+    },
+    {
+      question: "What does OPENCV_ENABLE_NONFREE=ON do?",
+      options: ["Enables CUDA", "Includes patented algorithms such as SURF in a source build", "Makes OpenCV free of charge", "Removes the GUI"],
+      answer: 1,
+      explanation: "Non-free code is excluded by default and from all pip packages.",
+    },
+    {
+      question: "Where is SIFT in OpenCV 4.13?",
+      options: ["xfeatures2d, non-free", "features2d (main)", "Only in OpenCV 3", "dnn"],
+      answer: 1,
+      explanation: "It moved to main in 4.4.0: cv2.SIFT_create().",
+    },
+    {
+      question: "The guided filter differs from a box filter because it…",
+      options: ["is slower for large radii", "keeps strong edges while smoothing flat regions", "only works on colour images", "needs a GPU"],
+      answer: 1,
+      explanation: "Its local linear model follows the guide's edges.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A team's `requirements.txt` contains both `opencv-python==4.13.0.92` and `opencv-contrib-python==4.13.0.92`. Sometimes `cv2.ximgproc` works after installation, sometimes not. Explain and fix.
+
+<Solution>
+
+Both packages install a `cv2` folder; whichever is installed last overwrites the other's files, so the result depends on installation order (and an uninstall of one can break both). Keep only `opencv-contrib-python==4.13.0.92` (it contains everything in `opencv-python`).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using `guided_filter` from example 1, test `eps` = 0.001, 0.01 and 0.1 on the same noisy edge. Print the noise left in the flat part (std of columns 0–29) and the step height across the edge (`gf[30, 40] − gf[30, 39]`). Which value keeps the edge and still removes noise?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+for eps in [0.001, 0.01, 0.1]:
+    g = guided_filter(noisy, noisy, r=4, eps=eps)
+    print(f"eps {eps:<6}: noise {np.std(g[:, :30]):.3f} | step {g[30, 40] - g[30, 39]:.2f}")
+```
+
+Output:
+
+```text
+eps 0.001 : noise 0.087 | step 0.84
+eps 0.01  : noise 0.047 | step 0.75
+eps 0.1   : noise 0.013 | step 0.39
+```
+
+`eps` = 0.01 (the noise variance) keeps most of the step (0.75 of the 0.84 seen at the smallest `eps`) and halves the noise. 0.001 hardly smooths (0.087 vs 0.096 before); 0.1 smooths strongly but cuts the edge step to 0.39.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Your inspection uses `cv2.xphoto.createSimpleWB()` for white balance. A colleague asks to remove the contrib dependency. What main-module alternative could you implement, and in how many lines?
+
+<Solution>
+
+A grey-world or white-patch white balance needs only NumPy and core: compute per-channel means (or a high percentile) over the image or a white reference area and scale each channel to match (`cv2.split`, `cv2.multiply`, `cv2.merge`; 10.6). About 5–10 lines. With a white reference target in the field of view, the white-patch method is also more stable than automatic methods.
+
+</Solution>
+
+## References
+
+1. K. He, J. Sun, X. Tang, "Guided Image Filtering", *ECCV* 2010; extended in *IEEE TPAMI* 35(6), 2013.
+2. T. Y. Zhang, C. Y. Suen, "A fast parallel algorithm for thinning digital patterns", *Communications of the ACM* 27(3), 1984.
+3. Z. Guo, R. W. Hall, "Parallel thinning with two-subiteration algorithms", *Communications of the ACM* 32(3), 1989.
+4. opencv_contrib repository and module list. https://github.com/opencv/opencv_contrib
+5. OpenCV 4.13.0 documentation, extra modules (ximgproc, xfeatures2d, xphoto, tracking). https://docs.opencv.org/4.13.0/
+6. OpenCV ChangeLog (4.4.0 SIFT, 4.5.0 Apache 2.0 licence, 4.7.0 ArUco). https://github.com/opencv/opencv/wiki/ChangeLog

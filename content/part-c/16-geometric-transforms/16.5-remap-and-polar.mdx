@@ -1,0 +1,281 @@
+export const meta = {
+  number: "16.5",
+  title: "Remap and polar",
+  minutes: 25,
+  objectives: [
+    "Use cv2.remap with explicit maps for any pixel-to-pixel mapping",
+    "Build maps with NumPy (mirror, wave, lens-style distortion)",
+    "Unwrap round objects with cv2.warpPolar (linear and log-polar)",
+    "Know how centre errors and sampling affect polar unwrapping",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 16.5 (last chapter of Module 16).
+  New lab: PolarLab (lib/warp-ops unwrapPolar matches cv2.warpPolar + rotate on recorded tests, incl. log mode rho = exp(x/K) - 1).
+  New sample: sample-ring-text.png.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 16.5 Remap and polar
+
+<Definition term="Remap">the most general warp: two images (maps) that say, for every output pixel, which x and which y to read in the input. Any geometric transform, including ones no matrix can describe, can be written as a pair of maps.</Definition>
+
+Affine and perspective warps are rules with a few parameters. Some mappings have no compact rule: lens distortion, a curved label, a bent sheet, or turning a ring into a strip. `cv2.remap` takes the mapping pixel by pixel. Polar unwrapping is so common (caps, bearings, O-rings, dials, tyres) that OpenCV has a dedicated call, `warpPolar`, built on the same idea.
+
+## 1. An analogy
+
+A seating plan for an orchestra: for every seat on the new stage (output pixel) the plan names the old seat (input position) whose musician sits there. The plan can be anything; the orchestra just follows it.
+
+## 2. Maps
+
+<Flow
+  steps={[
+    { label: "Output grid (w × h)", tone: "data" },
+    { label: "map_x[y, x], map_y[y, x]: where to read in the input (float32)", tone: "process" },
+    { label: "cv2.remap(src, map_x, map_y, interpolation, borderMode)", tone: "process" },
+    { label: "out[y, x] = src(map_y[y, x], map_x[y, x]) interpolated", tone: "result" },
+  ]}
+/>
+
+- Maps are **inverse** maps, like all OpenCV warps (16.1): they go from output to input.
+- A mirror is `map_x = w − 1 − x`, `map_y = y`; it gives exactly `cv2.flip`.
+- For repeated use (every video frame), convert float maps once with `cv2.convertMaps` to a fixed-point format; remapping then runs faster. `cv2.initUndistortRectifyMap` (Part H) builds such maps for lens undistortion.
+
+## 3. Polar unwrapping
+
+A ring of text (`sample-ring-text.png`) cannot be read by OCR directly. In polar coordinates (angle φ, radius ρ around the centre), the ring becomes a straight band:
+
+```text
+x = cx + ρ · cos φ
+y = cy + ρ · sin φ
+```
+
+`cv2.warpPolar(img, (radius_bins, angle_bins), centre, max_radius, WARP_POLAR_LINEAR)` returns an image whose rows are angles and columns radii; `cv2.rotate(..., ROTATE_90_COUNTERCLOCKWISE)` turns it into a strip with the angle running left to right (clockwise on screen, from the +x axis) and the outer radius at the top. With 720 angle bins the 82-pixel text radius is sampled at about 1.4 output pixels per input pixel along the circle.
+
+<PolarLab caption="The ring unwraps into a straight line of text. Move the centre away by a few pixels: the text band starts to wave, because the radius to the ring now changes with the angle. Log-polar stretches small radii and squeezes large ones." />
+
+**The centre matters.** With the correct centre, the text's ink stays between rows 19.5 and 37.5 of the strip in every column; with the centre 8 pixels off, the band wanders between rows 16 and 43.5: the ring's radius as seen from the wrong centre varies by ±8 pixels around the circle. Find the centre precisely first (Hough circles or a circle fit on the ring's edge, Part D) before unwrapping.
+
+**Log-polar** (`WARP_POLAR_LOG`) spaces the radius logarithmically: scaling the input about the centre becomes a shift along the radius axis, and rotation a shift along the angle axis. That property is used for rotation- and scale-invariant matching (Part E).
+
+## 4. Industrial example
+
+A bearing-seal inspection checks the printed code and the lip of rubber seals. The seal is located with a circle fit, then `warpPolar` with 1 440 angle bins unwraps the annulus between radii 30 and 50 mm into a strip. The lip defects become straight-line anomalies (a nick is a short dark column), easy to find with a row profile and a 1-D threshold; the code is read from the strip with the OCR pipeline of 15.4. Because the angle of the strip's start is arbitrary, the strip is extended by its first 10 % at the end so that text crossing 0° is not cut in two.
+
+## What you should remember from 16.5
+
+<Takeaways>
+<Takeaway n={1} title="Remap">Two float maps say where each output pixel reads in the input.</Takeaway>
+<Takeaway n={2} title="Build maps">With NumPy (meshgrid); convertMaps for speed when reused.</Takeaway>
+<Takeaway n={3} title="Polar">warpPolar + rotate: rings become strips; log-polar turns scale into shift.</Takeaway>
+<Takeaway n={4} title="Centre">An off-centre unwrap makes the band wave; locate the centre precisely.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Write map_x and map_y for flipping an image upside down (h rows).
+
+<Solution>
+
+`map_x[y, x] = x`, `map_y[y, x] = h − 1 − y`.
+
+</Solution>
+
+**Q2.** A ring of radius 100 px is unwrapped into 360 angle bins. How many output pixels per input pixel along the circle?
+
+<Solution>
+
+Circumference 2π · 100 ≈ 628 px, spread over 360 bins: about **0.57**: the strip is sampled more coarsely than the ring (use more bins, e.g. 720 or more).
+
+</Solution>
+
+### Next: Module 17, Convolution and kernels
+
+From moving pixels to combining neighbours: the kernel and how a filter is computed.
+
+## Code
+
+Two examples: remap with maps built in NumPy, then polar unwrapping and its inverse.
+
+### 1. Maps
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-ring-text.png", cv2.IMREAD_GRAYSCALE)        # 240 x 240
+h, w = img.shape
+mx, my = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+
+mirror = cv2.remap(img, w - 1 - mx, my, cv2.INTER_LINEAR)
+print("remap mirror == flip:", np.array_equal(mirror, cv2.flip(img, 1)))
+
+wave = cv2.remap(img, mx + 4 * np.sin(my / 10), my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+print("wave: rows shifted by up to 4 px, changed pixels:", f"{(wave != img).mean():.1%}")
+
+fx, fy = cv2.convertMaps(w - 1 - mx, my, cv2.CV_16SC2)              # fixed-point maps for repeated use
+print("fixed-point maps:", fx.shape, fx.dtype, fy.shape, fy.dtype, "| same result:", np.array_equal(cv2.remap(img, fx, fy, cv2.INTER_LINEAR), mirror))
+```
+
+Output:
+
+```text
+remap mirror == flip: True
+wave: rows shifted by up to 4 px, changed pixels: 10.4%
+fixed-point maps: (240, 240, 2) int16 (240, 240) uint16 | same result: True
+```
+
+- `meshgrid` gives the identity maps; any formula of x and y on top of them is a new warp.
+- `CV_16SC2` maps store integer positions plus a fractional index table; remapping with them is faster and gives the same result here.
+
+### 2. Polar unwrapping
+
+```python
+import numpy as np
+import cv2
+
+u = cv2.warpPolar(img, (110, 720), (120, 120), 110, cv2.WARP_POLAR_LINEAR + cv2.INTER_LINEAR)
+strip = cv2.rotate(u, cv2.ROTATE_90_COUNTERCLOCKWISE)                # angle left to right, outer radius on top
+print("warpPolar output:", u.shape, "-> strip", strip.shape)
+
+def ink_rows(s):                                                      # mean row of dark pixels, per column
+    ink = s < 80
+    rows = [np.nonzero(ink[:, c])[0].mean() for c in range(s.shape[1]) if ink[:, c].any()]
+    return round(float(min(rows)), 1), round(float(max(rows)), 1)
+
+for d in (0, 8):
+    s = cv2.rotate(cv2.warpPolar(img, (110, 720), (120 + d, 120), 110, cv2.WARP_POLAR_LINEAR + cv2.INTER_LINEAR), cv2.ROTATE_90_COUNTERCLOCKWISE)
+    print(f"centre off by {d} px: ink between rows {ink_rows(s)}")
+
+back = cv2.warpPolar(u, (w, h), (120, 120), 110, cv2.WARP_POLAR_LINEAR + cv2.WARP_INVERSE_MAP + cv2.INTER_LINEAR)
+inside = (mx - 120) ** 2 + (my - 120) ** 2 < 100 ** 2
+print(f"round trip (unwrap, wrap back), mean abs error inside r < 100: {np.abs(back.astype(int) - img)[inside].mean():.2f}")
+```
+
+Output:
+
+```text
+warpPolar output: (720, 110) -> strip (110, 720)
+centre off by 0 px: ink between rows (19.5, 37.5)
+centre off by 8 px: ink between rows (16.0, 43.5)
+round trip (unwrap, wrap back), mean abs error inside r < 100: 1.62
+```
+
+- `dsize` is (radius bins, angle bins): the raw output has angles as rows.
+- `WARP_INVERSE_MAP` turns a strip back into the round image; the small error comes from interpolating twice.
+
+## OpenCV API notes
+
+**`cv2.remap(src, map1, map2, interpolation, borderMode, borderValue)`**: maps float32 (same size as the output) or fixed-point from `cv2.convertMaps(map1, map2, cv2.CV_16SC2)`.
+
+**`cv2.warpPolar(src, dsize, center, maxRadius, flags)`**: `flags` = interpolation + `WARP_POLAR_LINEAR` or `WARP_POLAR_LOG` (+ `WARP_INVERSE_MAP`, `WARP_FILL_OUTLIERS`). In log mode OpenCV uses ρ = exp(x / K) − 1 with K = width / ln(maxRadius). (`linearPolar` and `logPolar` are older, deprecated forms.)
+
+**Maps from models**: `cv2.initUndistortRectifyMap` (lens distortion and stereo rectification, Part H).
+
+## Where it fails
+
+- **Wrong centre** (waving band) or non-circular objects (ellipses from a tilted view: rectify first, 16.3).
+- **Under-sampling** at large radii with too few angle bins, and over-stretching near the centre.
+- **Large maps cost memory**: two float32 maps per output size; convert to fixed point for repeated use.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Forward maps** (input → output) passed to `remap` (it needs output → input).
+- **Maps of the wrong dtype** (float64 is rejected; use float32).
+- **Swapping dsize order** in `warpPolar` (radius bins first, then angle bins).
+- **Text cut at 0°**: wrap the strip around before reading.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Log-polar and invariance
+
+Under log-polar mapping about a fixed centre, a scaling by s becomes a shift by ln s along the radius axis and a rotation by θ a cyclic shift along the angle axis. Combined with the shift-invariance of the Fourier magnitude, this gives the Fourier–Mellin method for registering images that differ by rotation and scale (Part C, 21; Reddy and Chatterji 1996) [2]. The retina's sampling of the visual field is also roughly log-polar (9.1).
+
+### Remap and GPU textures
+
+Remapping is texture sampling: for each output pixel, read the input at a computed coordinate with bilinear filtering. GPUs do this in hardware, which is why lens correction and warps run in real time in camera ISPs (2.8) and with `cv2.cuda.remap`.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What do the maps passed to cv2.remap contain?",
+      options: ["The output value for each pixel", "For each output pixel, the x and y to read in the input", "The forward position of each input pixel", "A 3 × 3 matrix"],
+      answer: 1,
+      explanation: "They are inverse maps.",
+    },
+    {
+      question: "warpPolar with dsize (110, 720) returns an image with…",
+      options: ["720 columns of angles", "720 rows of angles and 110 columns of radii", "110 rows of angles", "A square"],
+      answer: 1,
+      explanation: "dsize is (radius bins, angle bins); rotate to get a strip.",
+    },
+    {
+      question: "The unwrapped text band waves up and down. Likely cause?",
+      options: ["Wrong interpolation", "The unwrap centre is off the ring's centre", "Too many angle bins", "Log mode"],
+      answer: 1,
+      explanation: "The radius to the ring then varies with angle.",
+    },
+    {
+      question: "In log-polar coordinates, scaling the image about the centre becomes…",
+      options: ["A rotation", "A shift along the radius axis", "Nothing", "A blur"],
+      answer: 1,
+      explanation: "log(s·ρ) = log s + log ρ.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+With centre (120, 120), which input pixel does the polar sample at φ = 90° (clockwise from +x, i.e. pointing down on screen) and ρ = 82 read?
+
+<Solution>
+
+x = 120 + 82 · cos 90° = **120**, y = 120 + 82 · sin 90° = **202**: straight below the centre (y grows downwards).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Unwrap the ring with 360, 720 and 1 440 angle bins and report, for each, the number of strip pixels per input pixel along the text circle (radius 82) and the strip size.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+for bins in (360, 720, 1440):
+    s = cv2.rotate(cv2.warpPolar(img, (110, bins), (120, 120), 110, cv2.WARP_POLAR_LINEAR + cv2.INTER_LINEAR), cv2.ROTATE_90_COUNTERCLOCKWISE)
+    print(f"{bins} bins: strip {s.shape}, {bins / (2 * np.pi * 82):.2f} strip pixels per input pixel at r = 82")
+```
+
+Output:
+
+```text
+360 bins: strip (110, 360), 0.70 strip pixels per input pixel at r = 82
+720 bins: strip (110, 720), 1.40 strip pixels per input pixel at r = 82
+1440 bins: strip (110, 1440), 2.79 strip pixels per input pixel at r = 82
+```
+
+Below 1 the strip loses detail along the text; well above 1 it only interpolates. About 1 to 1.5 at the radius of interest is a good choice.
+
+</Solution>
+
+## References
+
+1. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022: Section 3.6 (geometric transformations, mesh-based warping).
+2. B. S. Reddy, B. N. Chatterji, "An FFT-based technique for translation, rotation, and scale-invariant image registration", *IEEE Transactions on Image Processing* 5(8), 1266–1271, 1996.
+3. OpenCV 4.13.0 documentation: `remap`, `convertMaps`, `warpPolar`, `initUndistortRectifyMap`. https://docs.opencv.org/4.13.0/

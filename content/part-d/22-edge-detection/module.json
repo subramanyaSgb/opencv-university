@@ -1,0 +1,12 @@
+{
+  "number": 22,
+  "title": "Edge detection",
+  "summary": "Where brightness changes sharply: what an edge is, gradients with Sobel and Scharr, the Laplacian of Gaussian, Canny step by step, and edge positions to a fraction of a pixel.",
+  "chapters": [
+    { "number": "22.1", "slug": "22.1-what-an-edge-is", "title": "What an edge is" },
+    { "number": "22.2", "slug": "22.2-gradients-sobel-scharr", "title": "Gradients (Sobel, Scharr)" },
+    { "number": "22.3", "slug": "22.3-laplacian-and-log", "title": "Laplacian and LoG" },
+    { "number": "22.4", "slug": "22.4-canny-step-by-step", "title": "Canny step by step" },
+    { "number": "22.5", "slug": "22.5-sub-pixel-edges", "title": "Sub-pixel edges" }
+  ]
+}

@@ -1,0 +1,327 @@
+export const meta = {
+  number: "19.5",
+  title: "Deconvolution",
+  minutes: 25,
+  objectives: [
+    "Run Richardson–Lucy deconvolution and explain its multiplicative update",
+    "Use the number of iterations as regularisation and recognise semi-convergence",
+    "Compare iterative, Wiener and regularised least-squares deconvolution under Gaussian and shot noise",
+    "Understand what blind deconvolution does and why a wrong PSF is worse than none",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 19.5 (Module 19).
+  Lab: RestoreLab (mode restore, Richardson–Lucy).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 19.5 Deconvolution
+
+<Definition term="Deconvolution">estimating the sharp image f from the blurred image g = h * f + n. The Wiener filter (19.4) is one closed-form answer. Iterative methods improve an estimate step by step, can use better noise models and constraints (no negative light), and include blind deconvolution, which estimates the PSF as well.</Definition>
+
+The Wiener filter is linear and assumes additive Gaussian noise with a constant noise-to-signal ratio. Real images break both: light cannot be negative, and at low light the noise is shot noise, larger in bright areas (18.1). Richardson (1972) [1] and Lucy (1974) [2], working on astronomical images, derived an iterative method for exactly that case. It is still the standard in astronomy and fluorescence microscopy.
+
+## 1. An analogy
+
+Guessing what a crowd looked like from a long-exposure photo where everyone moved. Start with a guess. Blur your guess the same way the camera did and compare it with the photo. Where your blurred guess is too dark, the guess needs more people there; where it is too bright, fewer. Spread that correction back along the blur, adjust, and repeat.
+
+## 2. Richardson–Lucy
+
+<Flow
+  steps={[
+    { label: "Start: x₀ = flat image (or g)", tone: "data" },
+    { label: "Predict: blur the estimate, h * x", tone: "process" },
+    { label: "Compare: ratio g / (h * x), 1 where they agree", tone: "process" },
+    { label: "Correct: x ← x · (h̃ * ratio), h̃ = flipped PSF; repeat", tone: "result" },
+  ]}
+/>
+
+The update is multiplicative. A ratio of 1.2 at some pixel means "the observation is 20 % brighter than the blurred estimate predicts"; spreading that ratio back with the flipped PSF and multiplying raises the estimate in the places that could have caused it. Three properties follow:
+
+- **No negative values**: a positive estimate multiplied by positive ratios stays positive.
+- **Brightness is preserved**: the total sum of the estimate stays equal to that of the image (for a PSF that sums to 1).
+- **Maximum likelihood for Poisson noise**: each iteration increases the likelihood of the observed photon counts, so the method fits shot noise naturally.
+
+A tiny 1-D example. Observed g = 0, 30, 30, 30, 0 (a point of brightness 90 blurred by the motion PSF 1/3, 1/3, 1/3), starting from the flat estimate 18 everywhere. After one iteration the estimate is 10, 20, 30, 20, 10 (Exercise 1 works it through): still summing to 90, already peaked in the middle. Repeated iterations concentrate it further towards 0, 0, 90, 0, 0.
+
+## 3. Iterations are the regulariser
+
+Motion blur of 15 pixels on the test image, then noise; PSNR after n Richardson–Lucy iterations:
+
+| Iterations | 1 | 2 | 5 | 10 | 20 | 50 | 100 | 200 | Best Wiener |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Gaussian noise σ = 2 (input 20.9 dB) | 21.1 | 21.5 | 21.9 | 22.2 | 22.6 | 23.2 | **23.5** | 23.0 | 23.3 |
+| Shot noise, 50 photons at white (input 17.4 dB) | 20.7 | **20.7** | 20.0 | 18.5 | 15.9 | 12.2 | 9.9 | 8.3 | 18.0 |
+
+The quality first rises and then falls: **semi-convergence**. Early iterations restore the strong frequencies; later ones chase weaker and weaker frequencies, which are mostly noise, and the result fills with speckles and ringing. With mild noise the best result comes after about 100 iterations; with heavy noise after one or two. There is no automatic "done": the number of iterations has to be chosen, like K in the Wiener filter.
+
+With strong shot noise, Richardson–Lucy beats the Wiener filter clearly (20.7 against 18.0 dB): its noise model is the right one. With Gaussian noise the two are about equal.
+
+<RestoreLab mode="restore" initial="rl" initialPsf="motion" initialNoise={1} caption="Richardson–Lucy on a motion blur with a little noise. Move the iteration slider from 1 to 60 and watch PSNR: it rises, then falls as noise and ripples build up. Increase the noise and the best iteration count drops. Compare with the Wiener filter at its best K."/>
+
+## 4. Other approaches
+
+| Method | Idea | When |
+| --- | --- | --- |
+| Constrained least squares | Wiener-like, but penalises roughness (the Laplacian) instead of using K | Gaussian noise, no spectrum known (19.4 Go deeper) |
+| Total variation (TV) | penalises the sum of gradient magnitudes: piecewise-flat results with sharp edges | man-made scenes, documents, parts |
+| Damped / regularised RL | Richardson–Lucy plus a smoothness or TV term | microscopy, astronomy |
+| Blind deconvolution | estimates the PSF and the image together, alternating | unknown blur (camera shake) |
+| Learned deblurring | networks trained on blurred / sharp pairs (Part J) | photos, specific cameras |
+
+**Blind deconvolution** is much harder: blur and image can trade off (a blurred image is also a sharp image of a blurred scene). Methods add strong assumptions: natural images have sparse gradients, PSFs are small, non-negative and sum to 1. Fergus et al. (2006) [3] showed that this works for camera shake in photographs. In industry, the PSF is usually known or measurable (19.3), and non-blind methods are preferred.
+
+**A wrong PSF is worse than none.** Wiener restoration of the 15-pixel motion blur (noise σ = 2, K = 10⁻²) with an assumed length of 11, 13, 15, 17 and 19 pixels gives 19.2, 22.5, **23.3**, 19.9 and 19.3 dB. The blurred input had 20.9 dB: a length error of 2 pixels (13 %) can already make things worse than doing nothing.
+
+## 5. Industrial example
+
+Fluorescence and confocal microscopes ship with Richardson–Lucy deconvolution using a measured or computed PSF of the objective; it sharpens cell structures and is part of standard image analysis. Astronomical images and X-ray detectors (47.4) are restored the same way. In machine vision on production lines, deconvolution is rare: it is slower than the cycle time allows and its artefacts are hard to validate, so engineers prefer to fix the blur at the source (shorter exposure, better focus, a telecentric lens). Where it is used, the PSF is calibrated and the iteration count is fixed and validated on reference parts.
+
+## What you should remember from 19.5
+
+<Takeaways>
+<Takeaway n={1} title="Richardson–Lucy">x ← x · (h̃ * (g / (h * x))): positive, brightness-preserving, made for shot noise.</Takeaway>
+<Takeaway n={2} title="Stop early">Quality rises then falls; the iteration count is the regulariser.</Takeaway>
+<Takeaway n={3} title="Regularise">CLS, TV and damped RL penalise noise-like solutions.</Takeaway>
+<Takeaway n={4} title="PSF">Blind methods estimate it; a wrong PSF is worse than no restoration.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** At one pixel the blurred estimate h * x is 80 and the observation g is 100. What ratio enters the update, and in which direction does it push?
+
+<Solution>
+
+100 / 80 = **1.25**: the estimate is too dark there, so the pixels that contribute to it through the PSF are raised.
+
+</Solution>
+
+**Q2.** Why can Richardson–Lucy not produce negative pixel values, unlike the Wiener filter?
+
+<Solution>
+
+It starts positive and only multiplies by ratios of positive quantities. The Wiener filter is linear and freely produces negative values (ringing below 0).
+
+</Solution>
+
+### Next: 19.6 Super-resolution
+
+Getting more pixels than the sensor recorded: interpolation, multi-frame super-resolution and learned upscaling.
+
+## Code
+
+Two examples: Richardson–Lucy from scratch under two noise models, then the effect of a wrong PSF.
+
+### 1. Richardson–Lucy
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-clean.png", cv2.IMREAD_GRAYSCALE).astype(float)
+h, w = img.shape
+S = (256, 512)
+
+def otf(psf):
+    P = np.zeros(S)
+    s = psf.shape[0]
+    P[:s, :s] = psf
+    return np.fft.fft2(np.roll(P, (-(s // 2), -(s // 2)), (0, 1)))
+
+pad = lambda x: np.pad(x, ((0, S[0] - h), (0, S[1] - w)), mode="symmetric")
+conv = lambda x, T: np.real(np.fft.ifft2(np.fft.fft2(x) * T))
+psnr = lambda a: 10 * np.log10(255 ** 2 / np.mean((np.clip(np.rint(a), 0, 255) - img) ** 2))
+
+def motion(L):
+    p = np.zeros((L, L))
+    p[L // 2, :] = 1 / L
+    return p
+
+H = otf(motion(15))
+blur = conv(pad(img), H)[:h, :w]
+rng = np.random.default_rng(0)
+shot = rng.poisson(np.clip(blur, 0, None) / 255 * 50) * 255 / 50    # 50 photons at white
+gauss = blur + rng.normal(0, 2, blur.shape)
+
+def richardson_lucy(g, iterations, report):
+    gp = pad(np.clip(g, 0, None))
+    x = np.full_like(gp, gp.mean())                                 # flat start
+    scores = {}
+    for i in range(1, iterations + 1):
+        x = x * conv(gp / np.maximum(conv(x, H), 1e-6), np.conj(H))  # conj(H): the flipped PSF
+        if i in report:
+            scores[i] = round(float(psnr(x[:h, :w])), 1)
+    return scores
+
+for name, g in [("gaussian sigma 2", gauss), ("shot 50 photons", shot)]:
+    print(f"{name}: input {psnr(g):.1f} dB | RL {richardson_lucy(g, 200, (1, 2, 5, 20, 100, 200))}")
+```
+
+Output:
+
+```text
+gaussian sigma 2: input 20.9 dB | RL {1: 21.1, 2: 21.5, 5: 21.9, 20: 22.6, 100: 23.5, 200: 23.0}
+shot 50 photons: input 17.4 dB | RL {1: 20.7, 2: 20.7, 5: 20.0, 20: 15.9, 100: 9.9, 200: 8.3}
+```
+
+- Multiplying by `conj(H)` in the frequency domain is correlation with the PSF, i.e. convolution with the flipped PSF h̃.
+- For large images, run the iterations on `float32` arrays and use `cv2.dft` with an optimal size.
+
+### 2. A wrong PSF
+
+```python
+import numpy as np
+import cv2
+
+G = np.fft.fft2(pad(gauss))
+print(f"input: {psnr(gauss):.1f} dB")
+for L in (11, 13, 15, 17, 19):
+    HL = otf(motion(L))
+    out = np.real(np.fft.ifft2(G * np.conj(HL) / (np.abs(HL) ** 2 + 1e-2)))[:h, :w]
+    print(f"assumed length {L}: {psnr(out):.1f} dB")
+```
+
+Output:
+
+```text
+input: 20.9 dB
+assumed length 11: 19.2 dB
+assumed length 13: 22.5 dB
+assumed length 15: 23.3 dB
+assumed length 17: 19.9 dB
+assumed length 19: 19.3 dB
+```
+
+## OpenCV API notes
+
+OpenCV's main modules have no Richardson–Lucy or blind deconvolution function. Build them from:
+
+- **`cv2.dft` / `cv2.idft`**, **`cv2.mulSpectrums`** (with `conjB=True` for the correlation step) or **`cv2.filter2D`** with the PSF and the flipped PSF (`cv2.flip(psf, -1)`) for small PSFs.
+- **`cv2.divide`**, **`cv2.multiply`** for the ratio and update in float32.
+
+Other libraries: scikit-image (`skimage.restoration.richardson_lucy`, `wiener`, `unsupervised_wiener`), and microscopy tools (DeconvolutionLab2 for ImageJ, Huygens) for regularised and 3-D versions.
+
+## Where it fails
+
+- **Too many iterations**: noise amplification and ringing (semi-convergence).
+- **Wrong or spatially varying PSF**: artefacts worse than the blur.
+- **Saturated pixels**: their true values are unknown; they create dark rings. Mask them or exclude them from the ratio.
+- **Gaussian noise near zero**: Richardson–Lucy assumes non-negative data; subtract the camera offset correctly and clip negatives first.
+- **Speed**: two convolutions per iteration, hundreds of iterations for weak noise.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Running "until convergence"**: there is no useful convergence; choose the iteration count on test images.
+- **Forgetting to flip the PSF** in the correction step (matters for asymmetric PSFs).
+- **Starting from zeros**: the multiplicative update keeps zeros at zero forever.
+- **Applying it to compressed or gamma-encoded images** as if they were linear counts.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Expectation–maximisation
+
+Richardson–Lucy is the EM algorithm for Poisson-distributed observations of a blurred image (Shepp and Vardi derived the same update for emission tomography in 1982 [4]). Each iteration increases the likelihood; the maximum-likelihood solution itself is noisy, which is why stopping early, or adding a prior (TV regularisation, Dey et al. 2006), is necessary.
+
+### Accelerated and regularised versions
+
+Biggs and Andrews (1997) accelerate RL by extrapolating along the direction of recent updates, reaching the same quality in fewer iterations; MATLAB's `deconvlucy` uses this. Regularised variants add a TV or entropy term to the update, which stops the noise build-up so the iteration count matters less.
+
+### Blind deconvolution of camera shake
+
+Fergus et al. [3] estimate the blur kernel at coarse-to-fine scales from the statistics of image gradients, then deconvolve non-blindly. Levin et al. (2009) showed why naive maximum-a-posteriori estimation of both image and kernel favours the blurred image as "solution", and why the kernel must be estimated first.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Richardson–Lucy updates the estimate by…",
+      options: ["Adding the residual", "Multiplying by the back-projected ratio g / (h * x)", "Dividing by H", "Median filtering"],
+      answer: 1,
+      explanation: "x ← x · (h̃ * (g / (h * x))).",
+    },
+    {
+      question: "Which noise model is Richardson–Lucy derived for?",
+      options: ["Salt and pepper", "Poisson (shot) noise", "Uniform", "Quantization"],
+      answer: 1,
+      explanation: "It maximises the Poisson likelihood.",
+    },
+    {
+      question: "PSNR rises for 100 iterations, then falls. This is…",
+      options: ["A bug", "Semi-convergence: later iterations fit the noise", "Overflow", "Border effects only"],
+      answer: 1,
+      explanation: "Stopping early regularises.",
+    },
+    {
+      question: "With stronger noise, the best number of iterations…",
+      options: ["Increases", "Decreases", "Stays the same", "Is infinite"],
+      answer: 1,
+      explanation: "Noise is amplified sooner.",
+    },
+    {
+      question: "A motion PSF assumed 13 % too long typically gives…",
+      options: ["The same result", "Worse results than no restoration", "Better results", "A brighter image"],
+      answer: 1,
+      explanation: "In the example, 19.9 dB against 20.9 dB for the blurred input.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Observed g = 0, 30, 30, 30, 0; PSF 1/3, 1/3, 1/3 (zero outside the signal); start x = 18, 18, 18, 18, 18. Compute one Richardson–Lucy iteration.
+
+<Solution>
+
+Blur of x (zero beyond the ends): 12, 18, 18, 18, 12. Ratio g / (h * x): 0, 1.67, 1.67, 1.67, 0. Back-projection with the (symmetric) PSF: 0.56, 1.11, 1.67, 1.11, 0.56. New x = 18 × that: **10, 20, 30, 20, 10**. The total stays 90, and the estimate concentrates towards the middle; further iterations sharpen it towards 0, 0, 90, 0, 0.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+For the shot-noise image, compare the best Richardson–Lucy result (1–10 iterations) with the best Wiener result (K from 10⁻³ to 10⁻¹).
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+rl = richardson_lucy(shot, 10, range(1, 11))
+best_rl = max(rl.items(), key=lambda t: t[1])
+Gs = np.fft.fft2(pad(shot))
+wiener = {K: round(float(psnr(np.real(np.fft.ifft2(Gs * np.conj(H) / (np.abs(H) ** 2 + K)))[:h, :w])), 1)
+          for K in (1e-3, 3e-3, 1e-2, 3e-2, 1e-1)}
+best_w = max(wiener.items(), key=lambda t: t[1])
+print(f"best RL: {best_rl[1]} dB after {best_rl[0]} iterations | best Wiener: {best_w[1]} dB at K={best_w[0]:g}")
+```
+
+Output:
+
+```text
+best RL: 20.7 dB after 1 iterations | best Wiener: 18.0 dB at K=0.1
+```
+
+Under heavy shot noise, the method with the right noise model wins by almost 3 dB, and it needs only one or two iterations.
+
+</Solution>
+
+## References
+
+1. W. H. Richardson, "Bayesian-based iterative method of image restoration", *J. Optical Society of America* 62(1), 55–59, 1972.
+2. L. B. Lucy, "An iterative technique for the rectification of observed distributions", *Astronomical Journal* 79(6), 745–754, 1974.
+3. R. Fergus, B. Singh, A. Hertzmann, S. T. Roweis, W. T. Freeman, "Removing camera shake from a single photograph", *ACM Trans. Graphics (SIGGRAPH)* 25(3), 787–794, 2006.
+4. L. A. Shepp, Y. Vardi, "Maximum likelihood reconstruction for emission tomography", *IEEE Trans. Medical Imaging* 1(2), 113–122, 1982.
+5. D. S. C. Biggs, M. Andrews, "Acceleration of iterative image restoration algorithms", *Applied Optics* 36(8), 1766–1775, 1997.
+6. OpenCV 4.13.0 documentation: `dft`, `mulSpectrums`, `filter2D`. https://docs.opencv.org/4.13.0/

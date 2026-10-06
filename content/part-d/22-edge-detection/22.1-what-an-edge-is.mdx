@@ -1,0 +1,290 @@
+export const meta = {
+  number: "22.1",
+  title: "What an edge is",
+  minutes: 20,
+  objectives: [
+    "Define an edge as a place where brightness changes sharply, and name its physical causes",
+    "Recognise step, ramp, line and roof profiles and their first and second derivatives",
+    "Explain why derivatives amplify noise and why edge detection smooths first",
+    "Find an edge in a pixel row by its largest difference",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 22.1 (first chapter of Part D, Module 22).
+  Lab: DerivLab (from 5.5: row profile, first and second differences, noise, smoothing, sub-pixel edge).
+  New lab for the module: EdgeLab (lib/edge-ops.ts; Sobel/Scharr exact, Canny equal to cv2.Canny within 2 pixels), first used in 22.2.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 22.1 What an edge is
+
+<Definition term="Edge">a place in an image where the brightness changes sharply over a short distance. Edges outline objects, mark where surfaces bend or meet, and show where materials or lighting change. Most of the information people use to recognise shapes is in the edges.</Definition>
+
+Part D is about turning pixels into shapes: edges (22), morphology (23), contours (24), blobs (25), lines and circles (26), regions (27, 28) and shape descriptions (29). Edges come first because they are the boundary between "object" and "not object" in almost every pipeline: measuring a part's width, finding a crack, locating a label, reading a gauge needle.
+
+## 1. An analogy
+
+Running your finger over a table. On the flat top nothing changes. At the table's edge the height drops suddenly: you feel it even with your eyes closed. Edge detection does the same with brightness: it looks for places where the "height" of the image changes quickly, not for any particular brightness.
+
+## 2. Why edges appear
+
+<Flow
+  steps={[
+    { label: "Scene", tone: "world" },
+    { label: "Depth jump: object against background", tone: "process" },
+    { label: "Surface orientation changes: a fold, a corner of a box", tone: "process" },
+    { label: "Reflectance changes: print, paint, material", tone: "process" },
+    { label: "Illumination changes: shadow borders, highlights", tone: "result" },
+  ]}
+/>
+
+All four look the same to an edge detector: a brightness change. Which edges matter is a question for the application. A shadow edge is useful for 3-D shape but a nuisance for measuring a part; lighting (59.3) is often chosen precisely to make the wanted edges strong and the others weak.
+
+## 3. Edge profiles and derivatives
+
+Cut across an edge and look at the row of pixel values. Four typical shapes:
+
+| Profile | Values | First difference | Second difference |
+| --- | --- | --- | --- |
+| Ideal step | 50, 50, 150, 150 | one spike: +100 | +100, −100: a zero crossing at the edge |
+| Ramp (blurred step) | 50, 50, 70, 90, 110, 130, 150, 150 | +20 over the whole ramp | +20 at its start, −20 at its end |
+| Line (thin bright stripe) | 50, 50, 150, 50, 50 | +100 then −100 | +100, −200, +100 |
+| Roof (gradual peak) | 50, 100, 150, 100, 50 | +50, +50, −50, −50 | 0, −100, 0 |
+
+Two rules follow, and every edge detector uses one of them:
+
+- **The first derivative has an extremum at the edge** (gradient methods: Sobel, Scharr, Canny; 22.2, 22.4).
+- **The second derivative crosses zero at the edge** (Laplacian methods: LoG, zero crossings; 22.3).
+
+A thin line produces *two* edges (rising and falling) in the first derivative but one strong negative peak in the second; to find lines rather than edges, look for that (ridge detectors, 26).
+
+A real row of the scene across the left side of the white disc (row 100, columns 25–49):
+
+```text
+53, 50, 53, 64, 61, 49, 62, 42, 46, 47, 241, 253, 241, 234, 251, …
+```
+
+The differences of neighbouring pixels are −3, 3, 11, −3, −12, 13, −20, 4, 1, **194**, 12, −12, … The edge is between columns 34 and 35 (difference 194); the other differences, up to ±20, are noise.
+
+## 4. Noise and scale
+
+Differentiation amplifies noise: a difference of two noisy pixels has √2 times their noise, and Sobel's 3 × 3 combination (22.2) turns noise σ = 5 on a flat area into a gradient noise of about 17. On the other hand a step of 100 grey levels gives a Sobel response of 400. Edges stand out as long as their contrast is well above the noise; otherwise every detector first smooths the image (18.2), which lowers the noise and also widens the edge.
+
+How much to smooth defines the **scale** of the edges you find: little smoothing finds fine edges (texture, small text) and noise; strong smoothing finds only large, high-contrast boundaries. There is no single right scale; it follows from the size of the structures that matter (20.4).
+
+<DerivLab caption="A pixel row across an edge, with its first and second differences. Switch between step, ramp and line profiles, add noise, and then smooth before differencing: the first-difference peak and the second-difference zero crossing stay at the edge, while the noise in the derivatives falls. The amber marker is a sub-pixel edge estimate (22.5)." />
+
+## 5. Industrial example
+
+Dimensional gauging in machine vision is built on edges: the width of a shaft is the distance between two edges along a line across it, measured on a back-lit image where the edges are as strong and clean as possible. Inspection tools ("calipers", "edge probes" in commercial software) do exactly what Section 3 did: take a profile across the expected edge, smooth it, differentiate it, and report the position of the extremum, often to a tenth of a pixel or better (22.5).
+
+## What you should remember from 22.1
+
+<Takeaways>
+<Takeaway n={1} title="Edge">A sharp change in brightness; causes: depth, orientation, material, lighting.</Takeaway>
+<Takeaway n={2} title="First derivative">Peaks at the edge (gradient methods).</Takeaway>
+<Takeaway n={3} title="Second derivative">Crosses zero at the edge (Laplacian methods).</Takeaway>
+<Takeaway n={4} title="Noise and scale">Derivatives amplify noise; smoothing first sets the scale of the edges found.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Row 20, 20, 20, 80, 140, 140, 140. Where is the edge by the first difference, and where does the second difference cross zero?
+
+<Solution>
+
+First differences: 0, 0, 60, 60, 0, 0: the maximum spans the middle pixel (value 80), so the edge is at that pixel. Second differences: 0, 60, 0, −60, 0: the sign changes from +60 to −60 around the same position.
+
+</Solution>
+
+**Q2.** A shadow falls across a flat, uniformly painted part. Is there an edge in the image?
+
+<Solution>
+
+Yes: the brightness changes at the shadow border, although the part itself has no edge there. The detector cannot tell; lighting or the application must.
+
+</Solution>
+
+### Next: 22.2 Gradients (Sobel, Scharr)
+
+The first derivative in two dimensions: direction and strength of the brightness change at every pixel.
+
+## Code
+
+Two examples: the edge in a real row, then derivatives of the four profiles.
+
+### 1. An edge in a pixel row
+
+```python
+import numpy as np
+import cv2
+
+scene = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE).astype(int)
+row = scene[100, 25:50]
+d = np.diff(row)
+print("row:", row.tolist()[:15], "...")
+print("differences:", d.tolist()[:12], "...")
+k = int(np.argmax(np.abs(d)))
+print(f"largest difference {d[k]} between columns {25 + k} and {26 + k}")
+print("noise in the differences (std, excluding the edge):", round(float(np.delete(d, k).std()), 1))
+```
+
+Output:
+
+```text
+row: [53, 50, 53, 64, 61, 49, 62, 42, 46, 47, 241, 253, 241, 234, 251] ...
+differences: [-3, 3, 11, -3, -12, 13, -20, 4, 1, 194, 12, -12] ...
+largest difference 194 between columns 34 and 35
+noise in the differences (std, excluding the edge): 9.0
+```
+
+- Convert to `int` (or float) before `np.diff`: on uint8 the negative differences wrap around (14.3).
+
+### 2. Derivatives of edge profiles
+
+```python
+import numpy as np
+
+profiles = {
+    "step": [50, 50, 50, 150, 150, 150],
+    "ramp": [50, 50, 70, 90, 110, 130, 150, 150],
+    "line": [50, 50, 150, 50, 50],
+    "roof": [50, 100, 150, 100, 50],
+}
+for name, p in profiles.items():
+    p = np.array(p)
+    print(f"{name:5s} d1 {np.diff(p).tolist()} | d2 {np.diff(p, 2).tolist()}")
+```
+
+Output:
+
+```text
+step  d1 [0, 0, 100, 0, 0] | d2 [0, 100, -100, 0]
+ramp  d1 [0, 20, 20, 20, 20, 20, 0] | d2 [20, 0, 0, 0, 0, -20]
+line  d1 [0, 100, -100, 0] | d2 [100, -200, 100]
+roof  d1 [50, 50, -50, -50] | d2 [0, -100, 0]
+```
+
+## OpenCV API notes
+
+The functions of Module 22, in order:
+
+- **`cv2.Sobel`, `cv2.Scharr`, `cv2.spatialGradient`**: first derivatives (22.2).
+- **`cv2.Laplacian`** after **`cv2.GaussianBlur`**: second derivative, LoG (22.3).
+- **`cv2.Canny`**: the complete edge detector (22.4).
+- Sub-pixel edges: built from gradients and parabola fits; `cv2.cornerSubPix` for corners (22.5).
+
+All derivative functions need a signed or float output depth (`cv2.CV_16S`, `cv2.CV_32F`, `cv2.CV_64F`).
+
+## Where it fails
+
+- **Low contrast relative to noise**: edges disappear in the noise of the derivative.
+- **Blurred edges**: a wide ramp gives a weak, broad derivative peak; its position is still defined, its strength is low.
+- **Texture**: textured surfaces produce many edges that are not object boundaries.
+- **Edges are local**: a detector does not know which edges belong to which object; contours (24) and segmentation (27) do that.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Differentiating uint8 arrays**: negative values wrap.
+- **No smoothing on noisy images**: thousands of noise "edges".
+- **Too much smoothing**: nearby edges merge and small structures vanish.
+- **Treating every edge as an object boundary**: shadows, reflections and print produce edges too.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Edges in vision science
+
+Marr and Hildreth (1980) [1] proposed that early vision finds zero crossings of the Laplacian of Gaussian at several scales and combines them into a "raw primal sketch". Canny (1986) [2] instead defined criteria for a good detector (find all real edges, locate them accurately, answer once per edge) and derived the optimal filter for step edges in Gaussian noise. Both shape the methods of this module.
+
+### Edge models
+
+A blurred step convolved with a Gaussian PSF (19.3) has an error-function profile; its derivative is a Gaussian whose peak marks the edge and whose width is the blur σ. Measuring that width is how 19.3 and 50.4 estimate blur and MTF from an edge.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "At an ideal step edge, the first derivative…",
+      options: ["Is zero", "Has a peak", "Crosses zero", "Is constant"],
+      answer: 1,
+      explanation: "The second derivative crosses zero there.",
+    },
+    {
+      question: "Which of these causes an edge in an image?",
+      options: ["Only object boundaries", "Depth, surface orientation, reflectance and illumination changes", "Only colour changes", "Only shadows"],
+      answer: 1,
+      explanation: "All four produce brightness changes.",
+    },
+    {
+      question: "Why smooth before differentiating?",
+      options: ["To brighten the image", "Derivatives amplify noise", "To find more edges", "To change the image size"],
+      answer: 1,
+      explanation: "Smoothing lowers noise; it also sets the scale.",
+    },
+    {
+      question: "A thin bright line gives in the first difference…",
+      options: ["One positive peak", "A positive and a negative peak", "Nothing", "A zero crossing only"],
+      answer: 1,
+      explanation: "Rising edge then falling edge.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Row 100, 100, 100, 130, 160, 190, 220, 220, 220. Compute the first and second differences. Where is the edge, and how wide is it?
+
+<Solution>
+
+d1: 0, 0, 30, 30, 30, 30, 0, 0 (a ramp of four steps); d2: 0, 30, 0, 0, 0, −30, 0. The edge is the middle of the ramp, at the pixel with value 160; it is 4 pixels wide. The d2 zero crossing is not a single point here: the two non-zero values mark the ramp's start and end.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Add Gaussian noise (σ = 5, seed 0) to a step 50 → 150 of 20 pixels, and compare the noise in the first difference with the step's difference. Repeat after smoothing the row with a 1-D Gaussian of σ = 1.5 (`cv2.GaussianBlur` on a 1 × 20 array).
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+step = np.r_[np.full(10, 50.0), np.full(10, 150.0)]
+noisy = step + np.random.default_rng(0).normal(0, 5, 20)
+d = np.diff(noisy)
+print(f"raw: noise in d1 {d[:8].std():.2f} | edge d1 {d[9]:.1f}")
+smooth = cv2.GaussianBlur(noisy.reshape(1, -1), (0, 0), 1.5).ravel()
+ds = np.diff(smooth)
+print(f"smoothed: noise in d1 {ds[:6].std():.2f} | edge d1 {ds.max():.1f} at {int(np.argmax(ds))}")
+```
+
+Output:
+
+```text
+raw: noise in d1 4.26 | edge d1 103.2
+smoothed: noise in d1 0.48 | edge d1 25.7 at 9
+```
+
+Smoothing cuts the derivative noise by about 9 and also spreads the edge, lowering its peak from 103 to 26: the ratio of peak to noise still more than doubles (24 → 54), and the peak stays at position 9.
+
+</Solution>
+
+## References
+
+1. D. Marr, E. Hildreth, "Theory of edge detection", *Proc. Royal Society of London B* 207, 187–217, 1980.
+2. J. Canny, "A computational approach to edge detection", *IEEE Trans. PAMI* 8(6), 679–698, 1986.
+3. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 10 (point, line and edge detection).
+4. OpenCV 4.13.0 documentation: `Sobel`, `Laplacian`, `Canny`. https://docs.opencv.org/4.13.0/

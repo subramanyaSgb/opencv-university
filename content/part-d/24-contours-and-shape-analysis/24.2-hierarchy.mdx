@@ -1,0 +1,298 @@
+export const meta = {
+  number: "24.2",
+  title: "Hierarchy",
+  minutes: 20,
+  objectives: [
+    "Read OpenCV's hierarchy array: next, previous, first child, parent",
+    "Choose between RETR_EXTERNAL, RETR_LIST, RETR_CCOMP and RETR_TREE",
+    "Find holes, count holes per part and handle objects inside holes",
+    "Compute the true area of parts with holes",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 24.2 (Module 24).
+  Lab: ContourLab (tree mode).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 24.2 Hierarchy
+
+<Definition term="Contour hierarchy">the information about which contours lie inside which: an object's outer border, the borders of its holes, objects sitting inside those holes, and so on. OpenCV returns it as one row of four numbers per contour: the next and previous contour at the same level, the first child, and the parent (−1 where there is none).</Definition>
+
+A washer has two borders: the outer edge and the hole. A plate with two holes has three. A pin lying inside one of those holes is a separate object inside a hole inside an object. 24.1 listed contours; the hierarchy says how they belong together. It answers practical questions: does this part have its holes, how many, what is its area without the holes, and is anything stuck inside a hole?
+
+## 1. An analogy
+
+A family tree, or folders on a disk. The image is the top folder. Each part is a folder in it; each hole is a folder inside its part; an object lying in a hole is a folder inside the hole. OpenCV stores, for each folder, its next sibling, previous sibling, first sub-folder and parent folder.
+
+## 2. The four retrieval modes
+
+<Flow
+  steps={[
+    { label: "Binary image with nested regions", tone: "data" },
+    { label: "RETR_EXTERNAL: outer borders only", tone: "process" },
+    { label: "RETR_LIST: every border, no nesting", tone: "process" },
+    { label: "RETR_CCOMP: two levels (outer borders, and holes)", tone: "process" },
+    { label: "RETR_TREE: the full nesting, any depth", tone: "result" },
+  ]}
+/>
+
+The parts image with `RETR_TREE` (10 contours):
+
+<Tree
+  root="Image"
+  branches={[
+    { title: "Washer (#4)", items: ["hole (#5)"] },
+    { title: "Plate (#6)", items: ["round hole (#7)", "square hole (#8) → pin (#9) inside it"] },
+    { title: "No holes", items: ["oval (#0)", "star (#1)", "bar (#2)", "L-bracket (#3)"] },
+  ]}
+/>
+
+The rows for the plate branch, as `[next, previous, first child, parent]`:
+
+| Contour | Row | Meaning |
+| --- | --- | --- |
+| #6 plate | [−1, 4, 7, −1] | last top-level contour (next −1, previous #4 washer); first child #7; no parent |
+| #7 round hole | [8, −1, −1, 6] | sibling #8 follows; no children; parent #6 |
+| #8 square hole | [−1, 7, 9, 6] | last child of #6; first child #9 |
+| #9 pin | [−1, −1, −1, 8] | only child of the square hole |
+
+Levels alternate: outer border (depth 0), hole (1), object in a hole (2), hole in that object (3), and so on. An even depth is an object, an odd depth a hole.
+
+**RETR_CCOMP** squeezes everything into two levels: every outer border is top level, and each hole is a child of its object. The pin, though it lies in a hole, becomes a top-level contour of its own (with no parent). That is enough for "objects and their holes" and is often what you want. **RETR_LIST** gives the same 10 contours with all parent and child entries −1. **RETR_EXTERNAL** returns only the 6 outer borders: the holes and the pin are not reported at all.
+
+<ContourLab initialMode="tree" initialSelected={6} caption="The parts with RETR_TREE. The list on the right is indented by depth: click the plate (#6) and its holes; the pin (#9) is a child of the square hole. Switch to RETR_CCOMP: the pin moves to the top level. With RETR_LIST every row has −1 for child and parent; with RETR_EXTERNAL the holes and the pin disappear."/>
+
+## 3. Using the hierarchy
+
+- **Holes of a part**: start at its first child (`hierarchy[i][2]`) and follow `next` (`hierarchy[j][0]`) until −1.
+- **Is a contour a hole?** In TREE or CCOMP, it is a hole if its depth (number of parents) is odd.
+- **Net area of a part**: outer area minus the areas of its holes. Plate: 8 000 − 474 − 1 022 = **6 504** (contour areas through pixel centres). The pin, an object of its own, is not subtracted.
+- **Inspection logic**: "the washer must have exactly one hole of area 800 ± 60", "the plate must have two holes", "nothing may sit inside a hole" (any grandchild is a foreign object).
+
+## 4. Industrial example
+
+Gasket and stamping inspection checks that every punched hole is present: the part's contour must have the right number of child contours, each with the right area and position relative to the part's centroid. A missing hole means no child contour; a hole blocked by a slug shows up as a grandchild (an object inside the hole). The hierarchy turns these checks into a few lines of code, without any template matching.
+
+## What you should remember from 24.2
+
+<Takeaways>
+<Takeaway n={1} title="Row">[next, previous, first child, parent], −1 if none.</Takeaway>
+<Takeaway n={2} title="Modes">EXTERNAL (outer only), LIST (flat), CCOMP (objects + holes), TREE (full nesting).</Takeaway>
+<Takeaway n={3} title="Depth">Even depth = object, odd depth = hole.</Takeaway>
+<Takeaway n={4} title="Use">Count holes, net area = outer − holes, detect objects inside holes.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A contour's row is [−1, 3, −1, 2]. What do you know about it?
+
+<Solution>
+
+It has a parent (#2), so it is inside contour #2 (a hole, if #2 is an outer border); it has a previous sibling (#3) and no next sibling, so it is the last child of #2; it has no children.
+
+</Solution>
+
+**Q2.** Which retrieval mode do you use to count the holes of each part, if objects inside holes do not matter?
+
+<Solution>
+
+**RETR_CCOMP**: two levels, outer borders with their holes as children. (TREE also works.)
+
+</Solution>
+
+### Next: 24.3 Area, perimeter, centroid
+
+The first measurements of a contour.
+
+## Code
+
+Two examples: printing the tree, then holes and net areas.
+
+### 1. The tree
+
+```python
+import numpy as np
+import cv2
+
+parts = cv2.imread("sample-parts.png", cv2.IMREAD_GRAYSCALE)
+contours, hierarchy = cv2.findContours(parts, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+h = hierarchy[0]                                                    # shape (N, 4)
+
+def depth(i):
+    d = 0
+    while h[i][3] != -1:
+        i, d = h[i][3], d + 1
+    return d
+
+for i, c in enumerate(contours):
+    x, y, w, hh = cv2.boundingRect(c)
+    kind = "object" if depth(i) % 2 == 0 else "hole"
+    print(f"{'  ' * depth(i)}#{i} {kind:6s} row {h[i].tolist()} box ({x}, {y}, {w}, {hh}) area {cv2.contourArea(c)}")
+```
+
+Output:
+
+```text
+#0 object row [1, -1, -1, -1] box (228, 127, 75, 47) area 2622.0
+#1 object row [2, 0, -1, -1] box (147, 118, 56, 65) area 1362.0
+#2 object row [3, 1, -1, -1] box (22, 115, 96, 70) area 3043.0
+#3 object row [4, 2, -1, -1] box (115, 20, 61, 76) area 2300.5
+#4 object row [6, 3, 5, -1] box (17, 17, 77, 77) area 4406.0
+  #5 hole   row [-1, -1, -1, 4] box (38, 38, 35, 35) area 842.0
+#6 object row [-1, 4, 7, -1] box (200, 15, 101, 81) area 8000.0
+  #7 hole   row [8, -1, -1, 6] box (212, 42, 27, 27) area 474.0
+  #8 hole   row [-1, 7, 9, 6] box (254, 39, 33, 33) area 1022.0
+    #9 object row [-1, -1, -1, 8] box (265, 50, 11, 11) area 66.0
+```
+
+### 2. Holes per part and net area
+
+```python
+import numpy as np
+import cv2
+
+def children(i):
+    j, out = h[i][2], []
+    while j != -1:
+        out.append(int(j))
+        j = h[j][0]
+    return out
+
+for i, c in enumerate(contours):
+    if depth(i) % 2:                                                 # skip holes
+        continue
+    holes = children(i)
+    net = cv2.contourArea(c) - sum(cv2.contourArea(contours[j]) for j in holes)
+    inside = [k for j in holes for k in children(j)]                  # objects sitting in a hole
+    print(f"#{i}: {len(holes)} hole(s), net area {net:.1f}" + (f", objects inside holes: {inside}" if inside else ""))
+
+cc, hc = cv2.findContours(parts, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+pin = [i for i, c in enumerate(cc) if cv2.contourArea(c) == 66.0][0]
+print("with RETR_CCOMP the pin's row is", hc[0][pin].tolist())
+```
+
+Output:
+
+```text
+#0: 0 hole(s), net area 2622.0
+#1: 0 hole(s), net area 1362.0
+#2: 0 hole(s), net area 3043.0
+#3: 0 hole(s), net area 2300.5
+#4: 1 hole(s), net area 3564.0
+#6: 2 hole(s), net area 6504.0, objects inside holes: [9]
+#9: 0 hole(s), net area 66.0
+with RETR_CCOMP the pin's row is [4, 2, -1, -1]
+```
+
+## OpenCV API notes
+
+- **`hierarchy`** from `cv2.findContours`: shape (1, N, 4), int32: `[next, previous, first_child, parent]` per contour, in the same order as `contours`. `None` if there are no contours.
+- **Modes**: `RETR_EXTERNAL` (only the top level, children and parents −1), `RETR_LIST` (all contours, children and parents −1), `RETR_CCOMP` (two levels), `RETR_TREE` (full), `RETR_FLOODFILL` (for 32-bit label images).
+- **Drawing a part with its holes**: `cv2.drawContours(mask, contours, i, 255, -1, hierarchy=hierarchy, maxLevel=1)` fills contour i and leaves its holes empty.
+
+## Where it fails
+
+- **Holes touching the outline** (a C-shape instead of an O): they are not holes topologically; the outer contour goes around them and no child exists.
+- **Noise inside parts**: specks of black become holes; clean the mask (23.2).
+- **Touching parts**: one outer contour for two parts; their holes are children of the merged contour.
+- **Order**: do not assume parts come in reading order.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using RETR_EXTERNAL and then wondering where the holes are**.
+- **Treating every contour of RETR_LIST as an object** (holes included).
+- **Forgetting `hierarchy[0]`**: the array has an extra leading dimension.
+- **Subtracting objects-in-holes from the part's area**: only holes (odd depth) are subtracted.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Topology of binary images
+
+Suzuki and Abe [1] defined the "surroundness" relation between borders: outer borders and hole borders alternate along any path from the image frame inwards. With 8-connectivity for the foreground and 4-connectivity for the background (OpenCV's convention), every hole is enclosed by exactly one object and every object (except top-level ones) lies in exactly one hole, which makes the hierarchy a proper tree.
+
+### Euler number
+
+The Euler number of a binary image is the number of objects minus the number of holes; it is a classic topological shape feature (for the parts image: 7 objects − 3 holes = 4). It can be computed from the hierarchy or directly from 2 × 2 pixel patterns (bit-quad counting).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is hierarchy[i][3]?",
+      options: ["Next contour", "Previous contour", "First child", "Parent"],
+      answer: 3,
+      explanation: "[next, previous, first child, parent].",
+    },
+    {
+      question: "Which mode returns holes as children of their objects but at most two levels?",
+      options: ["RETR_EXTERNAL", "RETR_LIST", "RETR_CCOMP", "RETR_TREE"],
+      answer: 2,
+      explanation: "Objects inside holes become top-level again.",
+    },
+    {
+      question: "In RETR_TREE, a contour at depth 2 is…",
+      options: ["A hole", "An object inside a hole", "The image border", "Noise"],
+      answer: 1,
+      explanation: "Even depth = object, odd = hole.",
+    },
+    {
+      question: "The net area of a plate with two holes is…",
+      options: ["Outer area", "Outer area minus the two hole areas", "Sum of all three", "Hole areas"],
+      answer: 1,
+      explanation: "8 000 − 474 − 1 022 = 6 504 here.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A frame (square ring) contains a smaller square ring, which contains a dot. How many contours does RETR_TREE return, and what are their depths?
+
+<Solution>
+
+Five: outer frame border (0), frame hole (1), small ring border (2), small ring hole (3), dot (4).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Draw only the plate with its holes into an empty mask using `drawContours` with `hierarchy` and `maxLevel=1`, and count its white pixels. Compare with the net contour area.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+plate = np.zeros_like(parts)
+cv2.drawContours(plate, contours, 6, 255, cv2.FILLED, hierarchy=hierarchy, maxLevel=1)
+print("white pixels:", int((plate > 0).sum()), "| net contour area:", 8000 - 474 - 1022)
+```
+
+Output:
+
+```text
+white pixels: 6779 | net contour area: 6504
+```
+
+The drawn plate has 6 779 pixels, the contour arithmetic gives 6 504. Two conventions differ: polygon areas run through pixel centres, so the outer border loses half a pixel all round; and filling a hole contour paints its border pixels black, although those pixels belong to the plate. Pixel counts and contour areas therefore differ by an amount of the order of the perimeter; choose one convention and use it consistently (24.3).
+
+</Solution>
+
+## References
+
+1. S. Suzuki, K. Abe, "Topological structural analysis of digitized binary images by border following", *Computer Vision, Graphics, and Image Processing* 30(1), 32–46, 1985.
+2. OpenCV 4.13.0 documentation: `findContours`, `drawContours`, tutorial "Contours Hierarchy". https://docs.opencv.org/4.13.0/

@@ -1,0 +1,327 @@
+export const meta = {
+  number: "10.7",
+  title: "Colour detection with inRange",
+  minutes: 30,
+  objectives: [
+    "Build a complete colour-detection pipeline: smooth, convert, inRange, clean, label",
+    "Choose hue, saturation and value limits from measured samples, including red's wrap-around",
+    "Clean masks with morphology and reject small regions",
+    "Know the failure modes and how lighting and white balance prevent them",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 10.7 (last chapter of Module 10).
+  InRangeLab uses a deterministic synthetic scene (lib/inrange-ops.ts) with ground-truth object ids.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 10.7 Colour detection with inRange
+
+<Definition term="Colour detection">marking every pixel whose colour lies inside a chosen range, then turning the marked pixels into objects. In OpenCV the core step is `cv2.inRange`, usually on an HSV image.</Definition>
+
+This chapter puts Module 10 to work: white balance (10.6), the right colour space (10.2), and a range test, followed by the clean-up steps that make the result robust enough for a production line.
+
+## 1. An analogy
+
+Sorting coloured beads with a sieve made of three filters: one lets through only a band of hues, one only beads that are colourful enough, one only beads that are bright enough. A bead must pass all three. Then you count the clumps that came through and ignore the dust.
+
+## 2. The pipeline
+
+<Flow
+  steps={[
+    { label: "Image (white-balanced, not clipped)", tone: "world" },
+    { label: "Smooth slightly (GaussianBlur) → HSV", tone: "process" },
+    { label: "inRange: H band, S ≥ min, V ≥ min (two ranges for red)", tone: "process" },
+    { label: "Morphology: open (remove specks), close (fill holes)", tone: "process" },
+    { label: "Components / contours → filter by area → objects", tone: "result" },
+  ]}
+/>
+
+`cv2.inRange(src, lower, upper)` sets a pixel to **255 if every channel is within [lower, upper]** (inclusive), else 0. On HSV, the three conditions are: hue in a band, saturation at least a minimum, value at least a minimum.
+
+## 3. Tune it
+
+<InRangeLab caption="A shaded scene with orange, red, crimson and green caps, cardboard and a specular highlight. Tune the HSV range and watch the mask and the share of each object that is detected." />
+
+Things to try:
+
+- **orange** preset: the orange cap is found except its highlight; the cardboard is not (lower saturation). Lower S min to 60: the cardboard starts to appear.
+- **red (no wrap)**: the red cap is found, the crimson one not. **red (wraps)**: both.
+- Raise **V min** to 150: the darker right side of the scene drops out (shading).
+
+## 4. Choosing the limits
+
+1. **Collect samples**: draw ROIs on good examples of the colour under production conditions, on several parts and positions.
+2. **Measure**: H, S, V statistics in each ROI (percentiles, not min/max, to ignore outliers).
+3. **Set the hue band** a few units wider than the measured range; check that other colours stay outside.
+4. **Set S min and V min** to exclude greys, highlights and shadows: these are the most important limits.
+5. **Check on bad and neighbouring colours** (cardboard vs orange, crimson vs red).
+6. **Fix lighting and white balance** before tuning; ranges tuned under one light do not survive another.
+
+## 5. Making it robust
+
+| Problem | Remedy |
+| --- | --- |
+| Noisy, speckled mask | blur before converting; morphological opening |
+| Holes in objects (highlights, texture) | morphological closing; fill contours |
+| Objects touching | separate with distance transform / watershed (27.4) |
+| Small false regions | reject components below a minimum area |
+| Shading across the part | rely on H and S; keep V min low; flat-field the light (15.3) |
+| Colour drift over time | fixed light and white balance, periodic checks of a reference |
+| Two similar colours | Lab and ΔE to reference colours (10.3), or a classifier (36.x) |
+
+## 6. Industrial example
+
+A capping machine must verify that each bottle has a cap of the ordered colour (orange, red or green) at 300 bottles per minute. The station uses a diffuse LED ring and manual white balance on a grey tile. For each frame: Gaussian blur 5 × 5, HSV conversion, one inRange per expected colour (red with the two-range wrap), opening and closing with a 5 × 5 ellipse, and connected components with a minimum area of 2000 pixels in the cap ROI. The decision is "exactly one component of the ordered colour, centred within ±15 pixels of the expected cap position". Brown cardboard dividers that once caused false "orange" detections are excluded by S ≥ 120; the reflections on glossy caps are filled by the closing step.
+
+## What you should remember from 10.7
+
+<Takeaways>
+<Takeaway n={1} title="Pipeline">Blur → HSV → inRange → open/close → components → area filter.</Takeaway>
+<Takeaway n={2} title="Limits">Hue band plus S and V minimums; red needs two ranges.</Takeaway>
+<Takeaway n={3} title="Measure">Set ranges from percentiles of sample ROIs, check against neighbouring colours.</Takeaway>
+<Takeaway n={4} title="Clean">Morphology and a minimum area turn a noisy mask into objects.</Takeaway>
+<Takeaway n={5} title="Foundation">Stable lighting and white balance come first.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Write the `inRange` calls for red with hue 0–8 and 170–179, S ≥ 100, V ≥ 50.
+
+<Solution>
+
+`m = cv2.bitwise_or(cv2.inRange(hsv, (0, 100, 50), (8, 255, 255)), cv2.inRange(hsv, (170, 100, 50), (179, 255, 255)))`
+
+</Solution>
+
+**Q2.** The mask of an orange part has a hole where a highlight is. Which morphological operation fills it?
+
+<Solution>
+
+**Closing** (dilate then erode) with a structuring element larger than the hole, or fill the outer contour.
+
+</Solution>
+
+### Next: Module 11, Intensity transforms
+
+From colour to single-channel values: point operations and lookup tables, negatives, logs, gamma and contrast stretching.
+
+## Code
+
+Three examples: inRange from scratch, a complete detection pipeline, and setting limits from a sample region.
+
+### 1. From scratch: what inRange does
+
+```python
+import numpy as np
+import cv2
+
+hsv = cv2.cvtColor(cv2.imread("sample-color.png"), cv2.COLOR_BGR2HSV)
+lo, hi = np.array([10, 120, 60]), np.array([22, 255, 255])
+
+ours = np.all((hsv >= lo) & (hsv <= hi), axis=2).astype(np.uint8) * 255    # from scratch: all three channels in range
+theirs = cv2.inRange(hsv, lo, hi)
+print("identical:", np.array_equal(ours, theirs), "| dtype", theirs.dtype, "| values", np.unique(theirs).tolist(), "| pixels", cv2.countNonZero(theirs))
+```
+
+Output:
+
+```text
+identical: True | dtype uint8 | values [0, 255] | pixels 5901
+```
+
+- Both limits are **inclusive**. The result is a single-channel uint8 mask with values 0 and 255.
+
+### 2. OpenCV: a complete red detector
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(1)
+img = cv2.imread("sample-color.png")
+cv2.rectangle(img, (250, 15), (299, 54), (60, 20, 200), -1)       # crimson square (hue near 173)
+shade = np.linspace(1.0, 0.45, img.shape[1])[None, :, None]
+img = np.clip(img * shade + rng.normal(0, 6, img.shape), 0, 255).astype(np.uint8)   # uneven light + noise
+
+hsv = cv2.cvtColor(cv2.GaussianBlur(img, (5, 5), 0), cv2.COLOR_BGR2HSV)   # 1. smooth noise, convert
+red = cv2.bitwise_or(cv2.inRange(hsv, (0, 120, 50), (8, 255, 255)),     # 2. red: two hue ranges
+                     cv2.inRange(hsv, (170, 120, 50), (179, 255, 255)))
+k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+red = cv2.morphologyEx(cv2.morphologyEx(red, cv2.MORPH_OPEN, k), cv2.MORPH_CLOSE, k)   # 3. clean the mask
+n, labels, stats, cents = cv2.connectedComponentsWithStats(red)          # 4. objects
+for i in range(1, n):
+    x, y, w, h, area = stats[i]
+    if area < 200:                                                        # 5. ignore small specks
+        continue
+    print(f"red object: area {area} px, box ({x}, {y}, {w}, {h}), centre ({cents[i][0]:.1f}, {cents[i][1]:.1f})")
+```
+
+Output:
+
+```text
+red object: area 1982 px, box (250, 15, 50, 40), centre (274.6, 34.4)
+red object: area 5782 px, box (28, 53, 85, 86), centre (69.9, 95.0)
+```
+
+- Both the pure red circle (H ≈ 0) and the crimson square (H ≈ 173) are found, despite shading to 45 % and noise.
+- The circle's area (5782) is a little larger than its true 5525 pixels: the blur spreads its edge by a pixel or two. For accurate sizes, measure on the unblurred image inside the detected region.
+
+### 3. OpenCV: limits from a sample region
+
+```python
+import numpy as np
+import cv2
+
+roi = hsv[168:183, 30:290]                                         # a sample region on the orange bar
+h, s, v = (roi[..., i].ravel() for i in range(3))
+lo = (int(np.percentile(h, 1)) - 3, int(np.percentile(s, 1)) - 30, int(np.percentile(v, 1)) - 30)
+hi = (int(np.percentile(h, 99)) + 3, 255, 255)
+print("H, S, V 1st-99th percentile:", [int(np.percentile(c, 1)) for c in (h, s, v)], "to", [int(np.percentile(c, 99)) for c in (h, s, v)])
+print("chosen range:", lo, "to", hi)
+orange = cv2.inRange(hsv, lo, hi)
+print("orange pixels:", cv2.countNonZero(orange), "| inside the red objects:", cv2.countNonZero(cv2.bitwise_and(orange, red)))
+```
+
+Output:
+
+```text
+H, S, V 1st-99th percentile: [14, 210, 128] to [16, 221, 240]
+chosen range: (11, 180, 98) to (19, 255, 255)
+orange pixels: 5821 | inside the red objects: 0
+```
+
+- The measured hue band is narrow (14–16); a margin of ±3 keeps it robust without touching red.
+- S and V lower limits get a larger margin (30) because they vary more with lighting; the upper limits stay at 255. The 5821 detected pixels are the bar minus some of its darkest, noisiest right-hand end, where V falls below 98: lower the V limit if the whole bar must be found.
+
+## OpenCV API notes
+
+**Range test**: `cv2.inRange(src, lowerb, upperb)`: works on any number of channels; bounds as tuples, arrays or scalars; inclusive; output uint8 0/255.
+
+**Combine masks**: `cv2.bitwise_or`, `cv2.bitwise_and`, `cv2.bitwise_not`.
+
+**Clean**: `cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))`, `cv2.morphologyEx(mask, cv2.MORPH_OPEN / MORPH_CLOSE, kernel)` (23.2).
+
+**Objects**: `cv2.connectedComponentsWithStats(mask)` → number of labels, label image, stats (x, y, w, h, area), centroids; `cv2.findContours` for shapes (24.1).
+
+**Mean colour of a detection**: `cv2.mean(img, mask=component_mask)`.
+
+## Where it fails
+
+- **Changing light colour** without white balance shifts all hues.
+- **Neutral and dark colours** (black, grey, white, brown) have poor hue; use V and S, or Lab.
+- **Similar hues** (orange vs brown, red vs crimson vs magenta) need careful S limits or a better colour space.
+- **Mixed pixels** at edges have intermediate colours: object sizes shrink or grow with the limits.
+- **Glossy surfaces**: highlights are white, reflections take the colour of surroundings.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **inRange on BGR** values for "red" (works only under fixed light and fails with shading).
+- **Forgetting the second red range**.
+- **Tuning ranges on one image** and deploying.
+- **Min/max instead of percentiles** when measuring samples (one outlier ruins the range).
+- **No minimum area**: noise specks counted as objects.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### From ranges to classifiers
+
+An inRange box is the simplest colour classifier: an axis-aligned box in HSV. Real colour clusters are tilted ellipsoids (correlated H, S, V), so a box either misses parts of the cluster or includes neighbours. Better boundaries come from a Mahalanobis distance to the class mean (using the measured covariance), Gaussian mixture models, or a small classifier on (a\*, b\*) or (H, S) features (Part F). Back-projection of a colour histogram (12.5) is another classic alternative.
+
+### Speed
+
+`cv2.cvtColor` to HSV and `cv2.inRange` are both vectorised and multi-threaded; on a 5 MP image they take a few milliseconds each on a modern CPU. For a fixed colour range on 8-bit BGR input, the HSV conversion plus range test can also be precomputed as a 256³-entry lookup table (16 MB) mapping BGR directly to "in range" (TODO: verify speed benefit on the target CPU before using it).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "cv2.inRange sets a pixel to 255 when…",
+      options: ["any channel is in range", "all channels are within [lower, upper]", "the hue is in range", "the pixel is bright"],
+      answer: 1,
+      explanation: "Every channel must be inside its inclusive interval.",
+    },
+    {
+      question: "Why set a minimum saturation in a colour detector?",
+      options: ["To speed it up", "To exclude greys, whites and highlights with unreliable hue", "To include shadows", "It has no effect"],
+      answer: 1,
+      explanation: "Low-saturation pixels have random hues.",
+    },
+    {
+      question: "Which step removes small false specks from the mask?",
+      options: ["Closing", "Opening", "Dilation only", "Thresholding again"],
+      answer: 1,
+      explanation: "Opening removes small foreground regions; closing fills small holes.",
+    },
+    {
+      question: "How should hue limits be chosen?",
+      options: ["From a colour wheel picture", "From percentiles of H in sample regions under production conditions, plus a margin", "Always ±10 around 0", "By guessing"],
+      answer: 1,
+      explanation: "Measure on real images, then check against neighbouring colours.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Samples of a green cap give H between 52 and 61, S between 140 and 230, V between 70 and 240. Propose an inRange range.
+
+<Solution>
+
+For example lower (48, 110, 50), upper (65, 255, 255): a few units of hue margin, larger margins below S and V, upper S and V at 255. Then check that blue-green and yellow-green objects in the scene stay out.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Count the green objects in `img` from example 2 using the range (45, 120, 50)–(80, 255, 255), the same cleaning, and a minimum area of 200. Print their areas.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+green = cv2.inRange(hsv, (45, 120, 50), (80, 255, 255))
+green = cv2.morphologyEx(cv2.morphologyEx(green, cv2.MORPH_OPEN, k), cv2.MORPH_CLOSE, k)
+n, _, stats, _ = cv2.connectedComponentsWithStats(green)
+print("green objects:", [int(a) for a in stats[1:, cv2.CC_STAT_AREA] if a >= 200])
+```
+
+Output:
+
+```text
+green objects: [6470]
+```
+
+One green object (the square of `sample-color.png`, true area 6161 pixels, slightly enlarged by the blur).
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colour detector works perfectly during the day shift and produces false detections at night. What do you investigate?
+
+<Solution>
+
+Ambient light: daylight through windows changes the light colour and intensity (the station is not shielded), so white balance and V/S levels differ between shifts. Also check auto exposure / auto white balance in the camera, lamp temperature (LED output depends on temperature), and whether night-shift parts come from a different batch. The fix is usually optical: shield the station, use its own constant light, fix camera settings, and log a reference patch to detect drift.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 6.7 (colour segmentation).
+2. OpenCV 4.13.0 documentation: "Changing Colorspaces" tutorial (object tracking with inRange), `inRange`, `connectedComponentsWithStats`. https://docs.opencv.org/4.13.0/
+3. C. Steger, M. Ulrich, C. Wiedemann, *Machine Vision Algorithms and Applications*, 2nd ed., Wiley-VCH, 2018: colour image processing and segmentation.

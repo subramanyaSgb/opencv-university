@@ -1,0 +1,445 @@
+export const meta = {
+  number: "3.3",
+  title: "Channels",
+  minutes: 35,
+  objectives: [
+    "Explain what a channel is and how channels are stored in NumPy arrays",
+    "Split, merge and inspect the B, G and R channels with OpenCV",
+    "Use an alpha channel for transparency and blending",
+    "Stack other kinds of data (depth, thermal, masks) as channels",
+    "Know which OpenCV functions accept how many channels",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 3.3 (Module 3 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 3.3 Channels
+
+<Definition term="Channel">one layer of numbers in an image: one value per pixel for one kind of measurement.</Definition>
+
+A grayscale image has **one** number per pixel. A colour image has **three**: blue, green and red. Each of those layers is a **channel**. Channels are not only for colour: transparency, depth, temperature and masks can all be channels.
+
+<ChannelStack />
+
+## 1. One pixel, several numbers
+
+In 1.3 we met the BGR pixel `[0, 0, 220]`: bright red. That is three numbers at one position, one from each channel. A channel is the **same position across the whole image, for one of those numbers**: all the blue values form the blue channel, and so on.
+
+<Flow direction="right" steps={["Image H × W × 3", "Channel 0: B (H × W)", "Channel 1: G (H × W)", { label: "Channel 2: R (H × W)", tone: "result" }]} />
+
+## 2. How NumPy stores channels
+
+OpenCV images are NumPy arrays. The channel is the **last** axis:
+
+| Image | `img.shape` | Bytes (320 × 200) |
+| --- | --- | --- |
+| Grayscale | (200, 320) | 64 000 |
+| BGR colour | (200, 320, 3) | 192 000 |
+| BGRA (with alpha) | (200, 320, 4) | 256 000 |
+
+*(From Code example 1.)* A grayscale image has **no** third axis at all: `img.ndim` is 2, not 3. Code that assumes `img.shape[2]` crashes on gray images.
+
+## 3. Interleaved storage
+
+In memory, the numbers of one pixel sit **next to each other**: B, G, R, B, G, R, … This is called **interleaved** (or "packed", HWC: height, width, channels). Some libraries, especially deep learning frameworks, prefer **planar** storage (CHW): all blue values, then all green, then all red. Converting between them is a transpose (Chapter 15.5).
+
+## 4. Looking at one channel
+
+A single channel is just a grayscale image: **bright where that colour is strong**. The red circle is bright in the R channel and black in B and G.
+
+**Try it.** Switch channels off, or show one channel as gray. Click to read a pixel.
+
+<ChannelLab caption="The colour sample scene. In 'one channel as gray', each channel is displayed as a black-and-white image." />
+
+## 5. Channel values tell the colour
+
+Measured over each shape in the sample image (Code example 2):
+
+| Region | B | G | R |
+| --- | --- | --- | --- |
+| Red circle | 0 | 0 | 220 |
+| Green box | 0 | 180 | 0 |
+| Blue triangle | 220 | 70 | 20 |
+
+Simple colour detection is often just a comparison of channels: "R much larger than G and B" means red (more robust versions in Chapter 10).
+
+## 6. Split and merge
+
+OpenCV can separate an image into single-channel images and put them back together:
+
+<Flow direction="right" steps={["BGR image", "cv2.split → B, G, R", "change one of them", { label: "cv2.merge → BGR image", tone: "result" }]} />
+
+NumPy slicing (`img[:, :, 2]`) gives the same channel **without copying**; `cv2.split` makes copies.
+
+## 7. Channel order traps
+
+The order is a convention, not a law. OpenCV uses **BGR**; most other libraries (matplotlib, PIL, deep learning models) use **RGB** (1.3). An image with swapped channels still "works" but red and blue are exchanged: faces turn blue, flames turn blue. Always know the order of the data you receive.
+
+## 8. Alpha: transparency
+
+A fourth channel, **alpha**, says how **opaque** each pixel is: 0 = fully transparent, 255 = fully opaque. It is used for overlays, logos, and cut-out objects. Blending a foreground onto a background:
+
+```text
+out = alpha × foreground + (1 − alpha) × background        (alpha scaled to 0 … 1)
+```
+
+<PixelMatrix values={[[0, 51, 102, 153, 204, 255]]} caption="An alpha row from transparent (0) to opaque (255): a red foreground fades in over white (Code example 3)." />
+
+PNG files can store alpha; JPEG cannot. `cv2.imread` drops alpha unless you use `cv2.IMREAD_UNCHANGED`.
+
+## 9. Channels that are not colour
+
+Any per-pixel measurement can be a channel. In industrial systems you may combine:
+
+<Glossary
+  items={[
+    { term: "Depth", desc: "Distance to the camera per pixel (stereo, laser profiler, ToF camera).", example: "2000 mm" },
+    { term: "Thermal", desc: "Temperature per pixel from a thermal camera, registered to the visible image.", example: "35.5 °C" },
+    { term: "Mask", desc: "0/255 marking a region of interest or a detected object.", example: "255" },
+    { term: "Multispectral", desc: "Many narrow wavelength bands, e.g. near-infrared for materials.", example: "8 bands" },
+  ]}
+/>
+
+Stacking them with `np.dstack` gives one array with several channels of **different meanings and units**; keep a note of which is which.
+
+## 10. How many channels does OpenCV accept?
+
+OpenCV arrays can have many channels (up to 512), but many functions are written for 1, 3 or 4. Filtering and resizing work channel by channel on 5 channels; colour conversion does not (Code example 4). When in doubt, process channels separately.
+
+## 11. Per-channel vs joint processing
+
+Some operations treat channels **independently** (blur, resize, thresholds per channel). Others **mix** them (colour conversion, colour distance). Blurring R, G and B separately is fine; thresholding them separately and combining the results is different from thresholding a colour distance (Chapter 10).
+
+## 12. Gray from colour
+
+Turning three channels into one with `cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)` uses the weighted sum from 1.3 (0.114 B + 0.587 G + 0.299 R). Sometimes **one channel** is better than gray: for example, the R channel shows rust on gray steel more strongly than the gray image does.
+
+## 13. Industrial example
+
+A system reading **green paint codes** on gray billets under white light: using only the **G channel** (or a G − R difference) makes the paint stand out against the steel far better than the gray image, with no extra hardware. Chapter 10 builds on this.
+
+## What you should remember from 3.3
+
+<Takeaways>
+<Takeaway n={1} title="Channel">One layer of values, one per pixel: B, G, R, alpha, depth, temperature…</Takeaway>
+<Takeaway n={2} title="Shape">Gray (H, W); colour (H, W, 3); with alpha (H, W, 4). Channels are the last axis.</Takeaway>
+<Takeaway n={3} title="Split / merge">cv2.split and cv2.merge, or NumPy slicing img[:, :, k].</Takeaway>
+<Takeaway n={4} title="Order">OpenCV is BGR; most other tools are RGB.</Takeaway>
+<Takeaway n={5} title="Alpha">0 = transparent, 255 = opaque; read PNG alpha with IMREAD_UNCHANGED.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** What is `img.shape` for a 1920 × 1080 colour image in OpenCV?
+
+<Solution>
+
+**(1080, 1920, 3)**: rows (height), columns (width), channels.
+
+</Solution>
+
+**Q2.** Which channel is `img[:, :, 0]` in an OpenCV colour image?
+
+<Solution>
+
+**Blue** (BGR order).
+
+</Solution>
+
+**Q3.** A pixel is (B, G, R) = (30, 200, 40). Which channel image shows it brightest?
+
+<Solution>
+
+**G**: its value 200 is the largest.
+
+</Solution>
+
+**Q4.** Alpha = 64 (of 255), foreground 200, background 0. Result?
+
+<Solution>
+
+64/255 ≈ 0.25 → 0.25 × 200 + 0.75 × 0 ≈ **50**.
+
+</Solution>
+
+### Next: 3.4 Coordinates and indexing
+
+How exactly do we address a pixel: (x, y) or (row, column)? Where is the origin, what about sub-pixel positions, and why do OpenCV functions sometimes want (x, y) and NumPy wants [y, x]?
+
+## Code
+
+Four experiments: shapes and sizes, split and merge, alpha blending and PNG alpha, and multi-channel stacks.
+
+### 1. Shapes of gray, colour and colour + alpha images
+
+```python
+import numpy as np
+import cv2
+
+bgr = cv2.imread("sample-color.png")                       # colour: 3 channels
+gray = cv2.imread("sample-color.png", cv2.IMREAD_GRAYSCALE)
+bgra = cv2.cvtColor(bgr, cv2.COLOR_BGR2BGRA)               # + alpha
+for name, img in [("gray", gray), ("BGR", bgr), ("BGRA", bgra)]:
+    ch = 1 if img.ndim == 2 else img.shape[2]
+    print(f"{name:4s}: shape {img.shape}, channels {ch}, bytes {img.nbytes}")
+print("pixel (100, 80) BGR:", bgr[100, 80], " gray:", gray[100, 80])
+```
+
+Output:
+
+```text
+gray: shape (200, 320), channels 1, bytes 64000
+BGR : shape (200, 320, 3), channels 3, bytes 192000
+BGRA: shape (200, 320, 4), channels 4, bytes 256000
+pixel (100, 80) BGR: [  0   0 220]  gray: 65
+```
+
+- `img.ndim` is 2 for gray and 3 for colour: test it before using `img.shape[2]`.
+- The gray value 65 = 0.299 × 220 (rounded): red contributes only about 30 % to brightness.
+
+### 2. OpenCV: split, measure, merge
+
+```python
+import numpy as np
+import cv2
+
+bgr = cv2.imread("sample-color.png")
+b, g, r = cv2.split(bgr)                                   # three single-channel images
+regions = {"red circle": (slice(80, 100), slice(60, 80)),
+           "green box": (slice(70, 120), slice(150, 180)),
+           "blue triangle": (slice(120, 140), slice(250, 265))}
+for name, (ys, xs) in regions.items():
+    print(f"{name:13s}: B {b[ys, xs].mean():5.1f}  G {g[ys, xs].mean():5.1f}  R {r[ys, xs].mean():5.1f}")
+
+only_red = cv2.merge([np.zeros_like(b), np.zeros_like(g), r])   # keep R, zero B and G
+print("merged shape:", only_red.shape, " red-only pixel:", only_red[90, 70])
+```
+
+Output:
+
+```text
+red circle   : B   0.0  G   0.0  R 220.0
+green box    : B   0.0  G 180.0  R   0.0
+blue triangle: B 220.0  G  70.0  R  20.0
+merged shape: (200, 320, 3)  red-only pixel: [  0   0 220]
+```
+
+- `cv2.split(img)` returns a tuple of single-channel arrays; `cv2.merge(list)` stacks them back.
+- `np.zeros_like(b)` makes an all-zero array with the same shape and type as `b`.
+
+### 3. Alpha blending, and PNG alpha
+
+```python
+import numpy as np
+import cv2
+
+h, w = 4, 6
+fg = np.full((h, w, 3), (0, 0, 255), np.uint8)             # red foreground (BGR)
+bg = np.full((h, w, 3), (255, 255, 255), np.uint8)         # white background
+alpha = np.tile(np.linspace(0, 255, w).astype(np.uint8), (h, 1))   # transparent -> opaque, left to right
+
+a = alpha.astype(np.float32)[..., None] / 255.0
+out = (a * fg + (1 - a) * bg).round().astype(np.uint8)
+print("alpha row:", alpha[0])
+print("result row (B, G, R):", out[0].tolist())
+
+rgba = np.dstack([fg, alpha])                              # 4-channel BGRA
+cv2.imwrite("logo.png", rgba)
+print("PNG read back:", cv2.imread("logo.png", cv2.IMREAD_UNCHANGED).shape, "default flag:", cv2.imread("logo.png").shape)
+```
+
+Output:
+
+```text
+alpha row: [  0  51 102 153 204 255]
+result row (B, G, R): [[255, 255, 255], [204, 204, 255], [153, 153, 255], [102, 102, 255], [51, 51, 255], [0, 0, 255]]
+PNG read back: (4, 6, 4) default flag: (4, 6, 3)
+```
+
+- `[..., None]` adds a channel axis to alpha so it broadcasts over B, G and R.
+- The default `cv2.imread` flag drops the alpha channel; `IMREAD_UNCHANGED` keeps it.
+
+### 4. Stacking other data as channels
+
+```python
+import numpy as np
+import cv2
+
+h, w = 100, 100
+gray = np.full((h, w), 120, np.uint8)
+depth = np.full((h, w), 2000, np.uint16).astype(np.float32)     # mm
+thermal = np.full((h, w), 35.5, np.float32)                     # degrees C
+stack = np.dstack([gray.astype(np.float32), depth, thermal])    # 3 different kinds of data, one array
+print("stack:", stack.shape, stack.dtype, "pixel:", stack[50, 50])
+five = np.dstack([stack, stack[..., :2]])                       # 5 channels
+for name, fn in [("GaussianBlur", lambda x: cv2.GaussianBlur(x, (5, 5), 0)),
+                 ("resize", lambda x: cv2.resize(x, (50, 50))),
+                 ("cvtColor BGR2GRAY", lambda x: cv2.cvtColor(x, cv2.COLOR_BGR2GRAY))]:
+    try:
+        out = fn(five)
+        print(f"{name:17s} on 5 channels: OK, shape {out.shape}")
+    except cv2.error as e:
+        print(f"{name:17s} on 5 channels: error")
+```
+
+Output:
+
+```text
+stack: (100, 100, 3) float32 pixel: [ 120.  2000.    35.5]
+GaussianBlur      on 5 channels: OK, shape (100, 100, 5)
+resize            on 5 channels: OK, shape (50, 50, 5)
+cvtColor BGR2GRAY on 5 channels: error
+```
+
+- `np.dstack` stacks 2D arrays along a new third axis. All must have the same height, width and (for one array) the same dtype; here everything is converted to float32.
+- Per-channel operations (blur, resize) accept 5 channels; colour conversions expect 3 or 4.
+
+## OpenCV API notes
+
+**`cv2.split(m) → tuple of arrays`** and **`cv2.merge(list) → array`**; **`cv2.extractChannel(src, k)`** / **`cv2.insertChannel(ch, dst, k)`** for one channel.
+
+**`cv2.mixChannels(src, dst, fromTo)`** copies channels between arrays in any arrangement (for example BGRA → ARGB).
+
+**`cv2.cvtColor(src, code)`** converts between channel layouts: `COLOR_BGR2RGB`, `COLOR_BGR2BGRA`, `COLOR_BGRA2BGR`, `COLOR_GRAY2BGR`, `COLOR_BGR2GRAY`.
+
+**`cv2.imread(path, flags)`**: `IMREAD_COLOR` (default, 3 channels), `IMREAD_GRAYSCALE`, `IMREAD_UNCHANGED` (keeps alpha and 16-bit).
+
+**NumPy**: `img[:, :, k]` is a **view** (no copy); `img[..., ::-1]` reverses channel order (BGR ↔ RGB) as a view; call `np.ascontiguousarray` before passing such views to some OpenCV functions.
+
+## Where it fails
+
+- **Mixing units** in one stacked array (mm, °C, gray levels) is easy to get wrong; document each channel.
+- **Alignment**: stacking depth or thermal with a visible image only makes sense if the pixels correspond (registration, Module 41+).
+- **Alpha in OpenCV**: most OpenCV drawing and processing functions ignore alpha; blending must be done explicitly.
+- **Single-channel colour tricks** depend on the lighting colour; a change of lamps can break them.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming every image has `shape[2]`.** Gray images are 2D.
+- **Showing an OpenCV image with matplotlib** without converting BGR → RGB.
+- **Losing alpha** by reading PNGs with the default flag.
+- **Blending in uint8** without converting to float: intermediate products overflow.
+- **Treating the channels of a stacked array as colours** and running colour conversions on depth or temperature.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Premultiplied alpha
+
+Some systems store colour already multiplied by alpha ("premultiplied"). Blending is then out = fg + (1 − α)·bg, and filtering behaves better at transparent edges. Mixing premultiplied and straight alpha gives dark or bright fringes [1].
+
+### Memory layout and strides
+
+A NumPy array has *strides*: how many bytes to step for each axis. For an interleaved 8-bit BGR image, stepping one column moves 3 bytes and one channel 1 byte. Views such as `img[..., ::-1]` change strides without copying, which is why some functions need a contiguous copy [2].
+
+### Hyperspectral cubes
+
+Hyperspectral cameras record tens to hundreds of narrow bands per pixel, forming a data cube (H × W × bands). Materials are identified from each pixel's spectrum rather than from three colour values.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is the shape of a 640 × 480 grayscale image in OpenCV?",
+      options: ["(640, 480)", "(480, 640)", "(480, 640, 1)", "(640, 480, 3)"],
+      answer: 1,
+      explanation: "(rows, columns) = (480, 640), and no channel axis for gray images.",
+    },
+    {
+      question: "In OpenCV, img[:, :, 2] is…",
+      options: ["Blue", "Green", "Red", "Alpha"],
+      answer: 2,
+      explanation: "BGR order: index 2 is red.",
+    },
+    {
+      question: "Which flag keeps a PNG's alpha channel?",
+      options: ["IMREAD_COLOR", "IMREAD_GRAYSCALE", "IMREAD_UNCHANGED", "IMREAD_ALPHA"],
+      answer: 2,
+      explanation: "IMREAD_UNCHANGED keeps all channels and the bit depth.",
+    },
+    {
+      question: "Alpha 255 means…",
+      options: ["Fully transparent", "Fully opaque", "Half transparent", "No colour"],
+      answer: 1,
+      explanation: "255 (or 1.0) is fully opaque.",
+    },
+    {
+      question: "Which operation failed on a 5-channel array in Code example 4?",
+      options: ["GaussianBlur", "resize", "cvtColor BGR2GRAY", "None"],
+      answer: 2,
+      explanation: "Colour conversions expect 3 or 4 channels.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A BGR pixel is (40, 120, 200). (a) Which channel is strongest? (b) What is its gray value with the weights 0.114, 0.587, 0.299? (c) What does it look like after swapping B and R?
+
+<Solution>
+
+(a) **R** (200). (b) 0.114 × 40 + 0.587 × 120 + 0.299 × 200 = 4.56 + 70.44 + 59.8 ≈ **135**. (c) (200, 120, 40) in BGR: now blue is strongest, so an orange pixel turns **blue-ish**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Load `sample-color.png`, compute `diff = R − G` as a signed image, and count how many pixels have `diff > 150`. Which shape do they belong to? What changes with `diff > 100`?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+bgr = cv2.imread("sample-color.png")
+diff = bgr[:, :, 2].astype(np.int16) - bgr[:, :, 1].astype(np.int16)
+for t in [150, 100]:
+    mask = diff > t
+    ys, xs = np.nonzero(mask)
+    print(f"diff > {t}: pixels {int(mask.sum())}, centre x {int(xs.mean())}, y {int(ys.mean())}")
+```
+
+Output:
+
+```text
+diff > 150: pixels 5525, centre x 70, y 95
+diff > 100: pixels 11426, centre x 116, y 136
+```
+
+With `> 150` the pixels are centred at (x 70, y 95): the **red circle**. With `> 100` the **orange bar** joins in (its pixels are B 40, G 150, R 255, so R − G = 105) and the centre moves between the two shapes. A threshold is a decision about colours, not just a number. Converting to `int16` first avoids uint8 wrap-around in the subtraction (1.5).
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+You stack a gray image (uint8), a depth map (uint16, mm) and a mask (uint8) into one array for a neural network. Name two things you must decide or check first.
+
+<Solution>
+
+1. A **common dtype and scale** (for example float32, each channel normalized to a known range), because the units differ.
+2. That the three images are **aligned pixel for pixel** (same size, registered).
+
+(Also: a fixed channel order that training and deployment both use.)
+
+</Solution>
+
+## References
+
+1. T. Porter and T. Duff, "Compositing digital images," *ACM SIGGRAPH Computer Graphics*, vol. 18, no. 3, pp. 253–259, 1984.
+2. NumPy documentation, *The N-dimensional array (ndarray)*: [numpy.org/doc/stable/reference/arrays.ndarray.html](https://numpy.org/doc/stable/reference/arrays.ndarray.html).
+3. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed. Pearson, 2018. Ch. 6 (colour image processing).
+4. OpenCV 4.13.0 documentation, *Operations on arrays* (`split`, `merge`, `mixChannels`): [docs.opencv.org/4.13.0/d2/de8/group__core__array.html](https://docs.opencv.org/4.13.0/d2/de8/group__core__array.html).

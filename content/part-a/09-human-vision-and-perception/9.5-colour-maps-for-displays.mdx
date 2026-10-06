@@ -1,0 +1,342 @@
+export const meta = {
+  number: "9.5",
+  title: "Colour maps for displays",
+  minutes: 25,
+  objectives: [
+    "Explain what a colour map does and why lightness must change steadily",
+    "Choose sequential, diverging or cyclic maps for heights, differences and angles",
+    "Recognise the problems of jet and other rainbow maps (false edges, ambiguity, colour blindness)",
+    "Apply built-in and custom colour maps with cv2.applyColorMap",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 9.5 (Module 9, last chapter of Part A).
+  ColormapLab uses lookup tables recorded from cv2.applyColorMap (OpenCV 4.13.0).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 9.5 Colour maps for displays
+
+<Definition term="Colour map">a lookup table that turns a single number per pixel (height, temperature, difference, score) into a colour for display. It adds no information; a good map makes the existing information easy to read, a bad one invents features that are not there.</Definition>
+
+3D sensors give height maps, thermal cameras give temperatures, inspection algorithms give difference and probability images. All are single-channel data shown in false colour. Choosing the colour map is a design decision with consequences: operators may see edges that do not exist or miss the defect that does. This chapter, the last of Part A, applies 9.2–9.4 to that choice.
+
+## 1. An analogy
+
+A map of a mountain range. A good map uses colours that get steadily darker (or lighter) with height: you can read "higher" at a glance, even in a black-and-white copy. A bad map paints heights in random-looking bands: 300 m yellow, 500 m cyan, 800 m yellow again. You see stripes, but you cannot tell which hill is higher.
+
+## 2. What a colour map does
+
+<Flow
+  steps={[
+    { label: "Single-channel data (height, temperature, score)", tone: "world" },
+    { label: "Scale to 0…255 (fixed limits!)", tone: "data" },
+    { label: "Lookup table: 256 colours", tone: "process" },
+    { label: "Colour image for the screen", tone: "result" },
+  ]}
+/>
+
+Two decisions matter:
+
+- **The scaling.** Fixed limits (for example 0–2 mm) make colours comparable between parts; automatic min/max scaling (6.5) makes every part look equally "dramatic".
+- **The map.** Its **lightness** (L\*, 9.2) is what the eye reads most precisely and what survives colour blindness and grey printouts. Hue helps to label ranges, but lightness carries the order.
+
+## 3. Good maps and bad maps
+
+<ColormapLab caption="A smooth height map with one small dent, shown with different colour maps. The curve shows lightness along the map: it should rise steadily. Try 'lightness only' and the colour-blind views." />
+
+Things to try:
+
+- **jet**: bright bands appear in the smooth bump (yellow and cyan are much lighter than blue and red): **false edges**. In "lightness only", low and high heights look alike.
+- **turbo**: smoother than jet, but lightness still rises and falls.
+- **viridis** and **cividis**: lightness rises steadily; the dent is visible as a darker spot, also in grey and with deuteranopia.
+
+| Family | Use | OpenCV maps |
+| --- | --- | --- |
+| **Sequential** (one direction) | heights, temperatures, scores, magnitudes | `COLORMAP_VIRIDIS`, `CIVIDIS`, `INFERNO`, `MAGMA`, `PLASMA` |
+| **Diverging** (two directions from a centre) | signed differences: above/below nominal, test − reference | build your own (example 3) |
+| **Cyclic** (wraps around) | angles, orientations, phase | `COLORMAP_TWILIGHT`, `TWILIGHT_SHIFTED` |
+| **Rainbow** | quick looks only; never for judging values | `COLORMAP_JET`, `TURBO`, `RAINBOW`, `HSV` |
+
+- **viridis** was designed to be perceptually uniform and readable with colour vision deficiency and in grey; it became matplotlib's default in 2.0 [1].
+- **cividis** was optimised further so that people with red-green deficiency see nearly the same map [2].
+- **turbo** is an improved rainbow (smoother than jet), useful when many distinct levels must be told apart, but it is not monotonic in lightness [3].
+- The problems of rainbow maps are well documented: false boundaries, hidden detail, and ambiguity for colour-blind viewers [4], [5].
+
+## 4. Rules for inspection displays
+
+- **Use a sequential, monotonic map** (viridis, cividis) for magnitudes; a **diverging** map centred on zero for signed deviations.
+- **Fix the scale** to physical units and show a **colour bar** with numbers.
+- **Mark tolerances explicitly** (contour lines, a hatched overlay) instead of hoping a colour step will show them.
+- **Keep grey for the context** (the camera image) and colour for the data, or blend the colour map over the grey image (`cv2.addWeighted`).
+- **Test in grey and with a CVD simulation** (9.4).
+
+## 5. Industrial example
+
+A 3D sensor measures the flatness of machined plates; the HMI showed height maps in jet with automatic scaling. Operators reported "bands" on good plates (jet's bright yellow and cyan) and argued about whether a plate was "red enough" to reject, while a slightly concave plate with a 30 µm dip looked unremarkable in a cyan band. The team switched to a diverging blue-white-red map centred on the nominal height, fixed at ±50 µm, with the tolerance ±30 µm drawn as contour lines, and a colour bar in micrometres. Good plates now look uniformly pale, deviations stand out in proportion to their size, and the rejection rule matches what the operator sees.
+
+## What you should remember from 9.5
+
+<Takeaways>
+<Takeaway n={1} title="Lightness carries order">Choose maps whose L* changes steadily (viridis, cividis, inferno).</Takeaway>
+<Takeaway n={2} title="Family">Sequential for magnitudes, diverging for signed differences, cyclic for angles.</Takeaway>
+<Takeaway n={3} title="Avoid jet">Rainbow maps invent edges, hide detail and fail for colour-blind viewers.</Takeaway>
+<Takeaway n={4} title="Fixed scale">Physical limits and a colour bar; mark tolerances explicitly.</Takeaway>
+<Takeaway n={5} title="Test">Look at it in grey and with a CVD simulation.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Which colour map family for a "test minus reference" difference image with positive and negative values?
+
+<Solution>
+
+**Diverging**, centred on zero (neutral colour at 0, two hues for the two signs).
+
+</Solution>
+
+**Q2.** A heat map in jet shows a bright yellow ring around a hot spot. Is there a temperature step?
+
+<Solution>
+
+Not necessarily: jet's yellow is much lighter than its neighbours, so a smooth temperature gradient passing through the yellow range looks like a bright ring (a false edge). Check with a monotonic map or a profile plot.
+
+</Solution>
+
+### Next: Part B, Module 10 Colour spaces
+
+Part A is complete. Part B starts the processing itself: colour spaces (RGB, HSV, Lab, YCrCb), grey conversion, white balance and colour detection.
+
+## Code
+
+Three examples: `applyColorMap` as a table lookup from scratch, the lightness profiles of OpenCV's maps, and a custom diverging map for signed differences.
+
+### 1. From scratch: a colour map is a lookup table
+
+```python
+import numpy as np
+import cv2
+
+h, w = 60, 256
+ramp = np.tile(np.arange(256, dtype=np.uint8), (h, 1))            # a perfectly smooth ramp 0..255
+
+lut = cv2.applyColorMap(np.arange(256, dtype=np.uint8).reshape(256, 1), cv2.COLORMAP_VIRIDIS)[:, 0]   # 256 x 3 (BGR)
+ours = lut[ramp]                                                   # from scratch: fancy indexing = table lookup
+theirs = cv2.applyColorMap(ramp, cv2.COLORMAP_VIRIDIS)
+print("lookup table shape:", lut.shape, "| identical to applyColorMap:", np.array_equal(ours, theirs))
+print("value 0 ->", lut[0].tolist(), "| value 128 ->", lut[128].tolist(), "| value 255 ->", lut[255].tolist(), "(BGR)")
+```
+
+Output:
+
+```text
+lookup table shape: (256, 3) | identical to applyColorMap: True
+value 0 -> [84, 1, 68] | value 128 -> [140, 145, 33] | value 255 -> [37, 231, 253] (BGR)
+```
+
+- `lut[ramp]` uses each pixel value as an index into the 256-row table (NumPy fancy indexing, 6.3): that is all a colour map does.
+- Viridis runs from dark purple through blue-green to bright yellow (BGR order printed).
+
+### 2. OpenCV: lightness along each map
+
+```python
+import numpy as np
+import cv2
+
+def lightness_profile(cmap):
+    bgr = cv2.applyColorMap(np.arange(256, dtype=np.uint8).reshape(256, 1), cmap)
+    return cv2.cvtColor(bgr.astype(np.float32) / 255, cv2.COLOR_BGR2Lab)[:, 0, 0]   # L* in 0..100
+
+for name in ["VIRIDIS", "CIVIDIS", "INFERNO", "TURBO", "JET"]:
+    L = lightness_profile(getattr(cv2, f"COLORMAP_{name}"))
+    d = np.diff(L)
+    turns = int(np.sum(np.diff(np.sign(d[np.abs(d) > 0.05])) != 0))
+    print(f"{name:8s} L* {L[0]:5.1f} -> {L[-1]:5.1f} | min {L.min():5.1f} max {L.max():5.1f} | direction changes: {turns}")
+
+values = np.arange(256, dtype=np.uint8).reshape(256, 1)
+for name in ["VIRIDIS", "JET"]:
+    L = cv2.cvtColor(cv2.applyColorMap(values, getattr(cv2, f"COLORMAP_{name}")).astype(np.float32) / 255, cv2.COLOR_BGR2Lab)[:, 0, 0]
+    far = np.abs(np.subtract.outer(np.arange(256), np.arange(256))) > 100
+    same = np.abs(np.subtract.outer(L, L)) < 1.0                   # less than 1 L* unit apart
+    print(f"{name:7s}: value pairs >100 apart with the same lightness: {int(np.sum(far & same)) // 2} | "
+          f"L* at values 40, 128, 220: {[round(float(L[v]), 1) for v in (40, 128, 220)]}")
+```
+
+Output:
+
+```text
+VIRIDIS  L*  14.8 ->  90.7 | min  14.8 max  90.7 | direction changes: 0
+CIVIDIS  L*  13.7 ->  91.2 | min  13.7 max  91.2 | direction changes: 0
+INFERNO  L*   0.1 ->  98.0 | min   0.1 max  98.0 | direction changes: 0
+TURBO    L*  11.8 ->  24.3 | min  11.8 max  90.9 | direction changes: 9
+JET      L*  13.0 ->  25.5 | min  13.0 max  97.1 | direction changes: 3
+VIRIDIS: value pairs >100 apart with the same lightness: 0 | L* at values 40, 128, 220: [28.3, 54.5, 80.7]
+JET    : value pairs >100 apart with the same lightness: 165 | L* at values 40, 128, 220: [34.5, 90.7, 53.5]
+```
+
+- Viridis, cividis and inferno only go up. Jet and turbo end almost as dark as they start, with a bright middle: in lightness, low and high values look alike.
+- In jet, value 128 is the **lightest** colour (L\* 90.7), so mid-range values draw the eye, not the extremes. 165 pairs of values more than 100 apart share the same lightness.
+
+### 3. OpenCV: a diverging map for signed differences
+
+OpenCV has no built-in diverging map, but `applyColorMap` accepts your own 256-entry table.
+
+```python
+import numpy as np
+import cv2
+
+def diverging_lut(neg=(180, 90, 30), mid=(245, 245, 245), pos=(30, 50, 200)):
+    """Blue -> white -> red (BGR) table: index 128 = zero deviation."""
+    t = np.linspace(-1, 1, 256)[:, None]
+    neg, mid, pos = (np.array(c, np.float64) for c in (neg, mid, pos))
+    lut = np.where(t < 0, mid + (neg - mid) * (-t), mid + (pos - mid) * t)
+    return np.round(lut).astype(np.uint8).reshape(256, 1, 3)
+
+dev_um = np.array([[-50, -30, -10, 0, 10, 30, 50]], np.float32)  # height deviations in micrometres
+idx = np.clip(np.round(128 + dev_um / 50 * 127), 0, 255).astype(np.uint8)   # fixed scale: +-50 um
+shown = cv2.applyColorMap(idx, diverging_lut())
+print("index :", idx.ravel().tolist())
+print("colour:", [tuple(int(v) for v in c) for c in shown[0]], "(BGR)")
+```
+
+Output:
+
+```text
+index : [1, 52, 103, 128, 153, 204, 255]
+colour: [(181, 91, 32), (207, 153, 118), (233, 215, 204), (244, 244, 245), (202, 206, 236), (116, 128, 218), (30, 50, 200)] (BGR)
+```
+
+- Zero deviation is near-white (index 128 is the first step above the exact centre, hence 244/245), −50 µm almost full blue, +50 µm full red; the scale is fixed in micrometres, so colours mean the same on every part.
+- Lightness falls symmetrically on both sides of zero, so the size of a deviation reads correctly in both directions, and blue vs red stays distinguishable for red-green colour-blind viewers through the lightness difference and the blue component.
+
+## OpenCV API notes
+
+**Colour maps**: `cv2.applyColorMap(src, colormap)` with `src` 8-bit (1 or 3 channels) and `colormap` one of `cv2.COLORMAP_*` (`AUTUMN, BONE, JET, WINTER, RAINBOW, OCEAN, SUMMER, SPRING, COOL, HSV, PINK, HOT, PARULA, MAGMA, INFERNO, PLASMA, VIRIDIS, CIVIDIS, TWILIGHT, TWILIGHT_SHIFTED, TURBO, DEEPGREEN`), or `cv2.applyColorMap(src, userColor)` with a 256 × 1 × 3 uint8 table.
+
+**Scaling first**: data must be 8-bit; scale with fixed limits, for example `np.clip((x - lo) / (hi - lo) * 255, 0, 255).astype(np.uint8)`, or `cv2.normalize` for automatic scaling.
+
+**Overlay**: `cv2.addWeighted(gray_bgr, 0.5, colour, 0.5, 0)` to keep the scene visible under the data.
+
+**matplotlib** (6.5): `plt.imshow(data, cmap="viridis", vmin=lo, vmax=hi)` plus `plt.colorbar()` for reports.
+
+## Where it fails
+
+- **Any map can mislead with automatic scaling**: the same colour then means different values on different images.
+- **256 levels**: an 8-bit map shows at most 256 steps; fine detail in high-dynamic-range data needs zooming into a range.
+- **Display differences**: uncalibrated screens shift colours; perceptual uniformity holds only approximately.
+- **Cultural meaning**: red often means "bad"; on a diverging map make sure the colour meaning matches the sign convention.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **jet as the default** for everything.
+- **No colour bar, or no units** on it.
+- **Automatic min/max scaling** for pass/fail judgement.
+- **A sequential map for signed data** (zero ends up as an arbitrary middle colour).
+- **Using colour alone to mark tolerance limits**.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Perceptual uniformity
+
+A map is perceptually uniform if equal steps in data give equal perceived colour differences. Designers measure this in a uniform colour space (CAM02-UCS for viridis, CIELAB as an approximation): the distance between neighbouring entries should be constant, and lightness monotonic. Example 2's L\* curve is a quick check of the most important part [1], [5].
+
+### Why rainbows look appealing
+
+Rainbow maps use many distinct hues, so people perceive many "categories" and the image looks detailed. But the category boundaries come from the map (where hues change quickly, for example around yellow), not from the data. For categorical data (labels, classes) a set of distinct hues is right; for continuous data it is not [4].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which property of a colour map matters most for reading the order of values?",
+      options: ["Number of hues", "Steadily changing lightness", "Saturation", "Brightness of red"],
+      answer: 1,
+      explanation: "Lightness is read most precisely and survives grey and CVD.",
+    },
+    {
+      question: "Which OpenCV map is perceptually uniform and colour-blind friendly?",
+      options: ["COLORMAP_JET", "COLORMAP_VIRIDIS", "COLORMAP_HSV", "COLORMAP_RAINBOW"],
+      answer: 1,
+      explanation: "Also CIVIDIS, INFERNO, MAGMA, PLASMA.",
+    },
+    {
+      question: "For angles (0–360°) you should use…",
+      options: ["A sequential map", "A cyclic map such as TWILIGHT", "jet", "grey"],
+      answer: 1,
+      explanation: "0° and 360° must get the same colour.",
+    },
+    {
+      question: "How do you use your own colour table in OpenCV?",
+      options: ["cv2.cvtColor with a matrix", "cv2.applyColorMap(src, lut) with a 256×1×3 uint8 table", "cv2.LUT only on grey images", "It is not possible"],
+      answer: 1,
+      explanation: "applyColorMap accepts a user table.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A height map spans 0–2 mm and is shown with a fixed 0–255 scale. Which colour-map index corresponds to 1.5 mm? To 2.4 mm?
+
+<Solution>
+
+1.5 / 2 · 255 ≈ **191**. 2.4 mm is outside the scale: it is clipped to **255** (the top colour); mark out-of-range values separately (for example in white or with hatching).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using `lightness_profile` from example 2, print the L\* at values 0, 64, 128, 192, 255 for `COLORMAP_INFERNO` and `COLORMAP_TWILIGHT`. Which one is suitable for angles, and why?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+for name in ["INFERNO", "TWILIGHT"]:
+    L = lightness_profile(getattr(cv2, f"COLORMAP_{name}"))
+    print(f"{name:8s}", [round(float(L[v]), 1) for v in (0, 64, 128, 192, 255)])
+```
+
+Output:
+
+```text
+INFERNO  [0.1, 21.9, 44.3, 69.1, 98.0]
+TWILIGHT [87.5, 50.4, 11.9, 48.4, 87.5]
+```
+
+TWILIGHT starts and ends at the same lightness (and colour): it is cyclic, so 0° and 360° look identical, as they should. INFERNO is sequential: ideal for magnitudes, wrong for angles (0° and 359° would look maximally different).
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A thermal camera's software shows images in a rainbow palette by default, and operators are used to it. How do you argue for changing it?
+
+<Solution>
+
+Show the evidence: the same smooth temperature field in rainbow and in a monotonic map (or inferno), the grey view, and a colour-blind simulation; point out false rings and that the rainbow's brightest colour is not the hottest. Propose a monotonic map with fixed temperature limits and a colour bar in °C, plus marked alarm thresholds, and run a short side-by-side trial where operators rank hot spots in both versions.
+
+</Solution>
+
+## References
+
+1. N. Smith, S. van der Walt, "A Better Default Colormap for Matplotlib", SciPy 2015 conference talk; matplotlib documentation "Choosing Colormaps". https://matplotlib.org/stable/users/explain/colors/colormaps.html
+2. J. R. Nuñez, C. R. Anderton, R. S. Renslow, "Optimizing colormaps with consideration for color vision deficiency to enable accurate interpretation of scientific data", *PLOS ONE* 13(7), 2018.
+3. A. Mikhailov, "Turbo, An Improved Rainbow Colormap for Visualization", Google Research blog, 2019.
+4. D. Borland, R. M. Taylor II, "Rainbow Color Map (Still) Considered Harmful", *IEEE Computer Graphics and Applications* 27(2), 2007.
+5. F. Crameri, G. E. Shephard, P. J. Heron, "The misuse of colour in science communication", *Nature Communications* 11, 2020.
+6. OpenCV 4.13.0 documentation, imgproc "ColorMaps in OpenCV" (`applyColorMap`). https://docs.opencv.org/4.13.0/

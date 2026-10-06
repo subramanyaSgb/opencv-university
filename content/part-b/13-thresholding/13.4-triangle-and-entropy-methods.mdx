@@ -1,0 +1,305 @@
+export const meta = {
+  number: "13.4",
+  title: "Triangle and entropy methods",
+  minutes: 20,
+  objectives: [
+    "Explain the triangle method and why it suits one dominant peak with a long tail",
+    "Explain the maximum-entropy (Kapur) threshold",
+    "Compute both and compare them with Otsu on the same images",
+    "Choose an automatic method from the shape of the histogram",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 13.4 (Module 13 plan).
+  Reuses ThreshLab; triangle() equals cv2 THRESH_TRIANGLE, kapur() equals the NumPy version (unit tests).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 13.4 Triangle and entropy methods
+
+<Definition term="Triangle and entropy thresholds">two automatic thresholds that, like Otsu, need only the histogram but use different ideas. The **triangle method** puts T at the foot of the largest peak, where the histogram falls away into a tail. The **maximum-entropy method** chooses the T for which the two classes together carry the most information.</Definition>
+
+Otsu (13.3) assumes two hills of reasonable size. Many inspection images have one huge hill (background) and a small, spread-out group of object pixels. The triangle method was designed exactly for that. The entropy method takes a third view, from information theory. None is best everywhere; the shape of the histogram tells you which to try.
+
+## 1. An analogy
+
+**Triangle**: from the top of a hill, stretch a rope to the far end of the plain; the point on the slope that sags furthest below the rope is where the hill ends. **Entropy**: split a library into two rooms so that each room is as varied as possible inside; a split that leaves one room with nearly identical books wastes a room.
+
+## 2. The triangle method
+
+<Flow
+  steps={[
+    { label: "Find the highest peak of the histogram", tone: "data" },
+    { label: "Draw a line from the peak to the far end of the longer tail", tone: "process" },
+    { label: "Find the bin with the largest distance below the line", tone: "process" },
+    { label: "T = that bin (OpenCV: one bin towards the tail)", tone: "result" },
+  ]}
+/>
+
+- It finds the **foot of the dominant peak**: everything beyond it is "unusual", i.e. object.
+- It works with tiny objects because it hardly looks at the object pixels at all; it only needs the background peak's shape.
+- Zack, Rogers and Latt (1977) introduced it for counting chromosomes and cells, where a bright background dominates [2].
+
+## 3. The maximum-entropy method
+
+For a threshold T, the background class has the normalised histogram p(i)/P(T) for i ≤ T and the object class p(i)/(1 − P(T)) for i > T. Each has an entropy H = −Σ q log q. Kapur, Sahoo and Wong (1985) choose the T that maximises H_background + H_object [3].
+
+- It does not use class means or variances, only how spread the two class histograms are.
+- It tends to give good results when the object class is broad, such as text or texture on a varying background.
+- OpenCV has no function for it; it takes ten lines of NumPy (example 1).
+
+<ThreshLab methods={["otsu", "triangle", "kapur", "manual"]} initial="triangle" initialSource={1} caption="Compare the three automatic methods on each image. On the well-lit plate the triangle T sits at the foot of the plate's peak (a few plate pixels become 'crack'); on the label the entropy method does best of the three, but no global T is good there." />
+
+## 4. Comparison
+
+F1 against ground truth, with the threshold each method chose:
+
+| Image | Otsu | Triangle | Entropy |
+| --- | --- | --- | --- |
+| Well-lit plate (crack 2 %) | T = 64: **1.000** | T = 186: 0.984 | T = 188: 0.929 |
+| Badly lit plate | T = 129: 0.064 | T = 91: 0.052 | T = 129: 0.064 |
+| Uneven label | T = 137: 0.414 | T = 183: 0.260 | T = 100: **0.828** |
+| Simulated, objects 1 % | T = 167: 0.043 | T = 124: 0.640 | T = 120: **0.753** |
+| Simulated, objects 50 % | T = 120: 0.998 | T = 100: **0.999** | T = 148: 0.933 |
+
+- With two clear hills all three work; Otsu and triangle are best.
+- With tiny objects Otsu breaks; triangle and entropy keep finding the objects.
+- No method rescues the badly lit plate: the problem is in the image, not in the threshold choice.
+
+Rule of thumb: **two hills → Otsu; one big hill with a tail → triangle; broad, irregular histograms → try entropy**; and always check the result against a few labelled images (13.7).
+
+## 5. Industrial example
+
+A particle counter for filter membranes images a white membrane with a few dark particles, typically 0.1 to 2 % of the area. Otsu thresholds jumped around and split the membrane texture on clean filters. The triangle method locks onto the foot of the membrane's peak, independent of how many particles there are, and gives stable counts from clean to dirty filters. A clean filter with no particles gives a T just below the membrane's grey values and almost no detections, which is the right answer.
+
+## What you should remember from 13.4
+
+<Takeaways>
+<Takeaway n={1} title="Triangle">T at the foot of the dominant peak; good for small objects on a large background.</Takeaway>
+<Takeaway n={2} title="Entropy">Maximise the summed entropy of both classes; good for broad classes.</Takeaway>
+<Takeaway n={3} title="OpenCV">THRESH_TRIANGLE built in; Kapur in NumPy.</Takeaway>
+<Takeaway n={4} title="Choose by histogram shape">And verify against labelled images.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Which method is least affected if the number of defects doubles, and why?
+
+<Solution>
+
+The **triangle** method: it depends mainly on the shape of the background peak, which barely changes when a few more defect pixels are added.
+
+</Solution>
+
+**Q2.** A histogram has two hills of equal size, far apart. Which methods will work?
+
+<Solution>
+
+All three; Otsu is the natural choice, and its threshold will be near the middle of the gap.
+
+</Solution>
+
+### Next: 13.5 Adaptive thresholds
+
+One threshold per pixel, computed from its neighbourhood: the answer to uneven lighting.
+
+## Code
+
+Two examples: the three methods on the course images, then a triangle from scratch.
+
+### 1. Otsu, triangle and entropy compared
+
+```python
+import numpy as np
+import cv2
+
+def kapur(img):
+    p = np.bincount(img.ravel(), minlength=256) / img.size
+    P = np.cumsum(p)
+    best, t = -np.inf, 0
+    for k in range(255):
+        if P[k] <= 0 or P[k] >= 1:
+            continue
+        a, b = p[:k + 1] / P[k], p[k + 1:] / (1 - P[k])          # class histograms, each summing to 1
+        H = -(a[a > 0] * np.log(a[a > 0])).sum() - (b[b > 0] * np.log(b[b > 0])).sum()
+        if H > best:
+            best, t = H, k
+    return t
+
+crack = cv2.imread("sample-plate-crack-mask.png", cv2.IMREAD_GRAYSCALE) > 0
+text = cv2.imread("sample-print-uneven-gt.png", cv2.IMREAD_GRAYSCALE) > 0
+for name, gt in [("sample-plate-good.png", crack), ("sample-plate-poor.png", crack), ("sample-print-uneven.png", text)]:
+    img = cv2.imread(name, cv2.IMREAD_GRAYSCALE)
+    row = []
+    for method, t in [("Otsu", cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[0]),
+                      ("triangle", cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_TRIANGLE)[0]),
+                      ("entropy", kapur(img))]:
+        m = img <= t
+        row.append(f"{method} T={t:.0f} F1={2 * (m & gt).sum() / (m.sum() + gt.sum()):.3f}")
+    print(f"{name:24s}", " | ".join(row))
+```
+
+Output:
+
+```text
+sample-plate-good.png    Otsu T=64 F1=1.000 | triangle T=186 F1=0.984 | entropy T=188 F1=0.929
+sample-plate-poor.png    Otsu T=129 F1=0.064 | triangle T=91 F1=0.052 | entropy T=129 F1=0.064
+sample-print-uneven.png  Otsu T=137 F1=0.414 | triangle T=183 F1=0.260 | entropy T=100 F1=0.828
+```
+
+- Triangle's T = 186 on the well-lit plate is just above the plate's darkest pixels (182): the foot of the plate peak, as designed. A margin towards the background of a few levels is typical for this method; shift T a little towards the objects for robustness.
+
+### 2. The triangle from scratch
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-plate-good.png", cv2.IMREAD_GRAYSCALE)
+h = np.bincount(img.ravel(), minlength=256).astype(float)
+nz = np.flatnonzero(h)
+left, right, peak = max(nz[0] - 1, 0), min(nz[-1] + 1, 255), int(h.argmax())
+print(f"occupied {nz[0]}..{nz[-1]}, peak at {peak} ({int(h[peak])} pixels)")
+# the longer side is towards the dark values here: line from (left, 0) to (peak, h[peak])
+i = np.arange(left + 1, peak + 1)
+dist = h[peak] * i + (left - peak) * h[i]               # proportional to the distance below the line
+t = i[dist.argmax()] - 1                                # OpenCV steps one bin towards the tail
+print("mine:", t, "| OpenCV:", int(cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_TRIANGLE)[0]))
+```
+
+Output:
+
+```text
+occupied 39..217, peak at 199 (6262 pixels)
+mine: 186 | OpenCV: 186
+```
+
+- The line runs from the empty bin next to the darkest value up to the peak. The distance of each bin below the line is proportional to `h[peak]·i + (left − peak)·h[i]` (the constant terms do not change where the maximum is).
+- If the long tail is on the bright side, OpenCV mirrors the histogram, applies the same rule, and mirrors T back.
+
+## OpenCV API notes
+
+**Triangle**: `T, dst = cv2.threshold(src, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_TRIANGLE)`; 8-bit single-channel only; the threshold argument is ignored, `T` is returned.
+
+**Entropy**: no OpenCV function; NumPy as above. scikit-image has `threshold_li` (minimum cross-entropy), `threshold_yen`, `threshold_isodata`, `threshold_minimum`, `threshold_mean` and more, and `try_all_threshold` to compare them visually.
+
+## Where it fails
+
+- **Triangle**: needs one dominant peak; with two similar hills it picks the foot of the higher one, not the valley.
+- **Entropy**: sensitive to noise in sparse histograms (empty and nearly empty bins); smooth the histogram or the image first.
+- **All global methods**: uneven lighting and overlapping classes (13.5, lighting).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using triangle on bimodal images** with two similar hills.
+- **Forgetting polarity**: triangle finds the foot of the peak; whether objects are below or above T depends on your image (use `_INV` for dark objects).
+- **Comparing methods on one image** only; compare on a labelled set.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Many more histogram methods
+
+Sezgin and Sankur (2004) group thresholding methods into histogram-shape methods (triangle, peak–valley analysis), clustering methods (Otsu, intermeans, minimum error), entropy methods (Kapur, Yen, cross-entropy), object-attribute methods (edge matching, fuzzy similarity), spatial methods and local methods; they rank Kittler–Illingworth minimum error and Kapur entropy among the most reliable on their test images [4].
+
+### Why entropy?
+
+For a class with normalised histogram q, the entropy −Σ q log q is the average information (in nats) of a pixel's grey value given that it belongs to the class. Kapur's criterion prefers thresholds after which both classes still have "rich" histograms; a threshold that isolates a few nearly constant pixels gives one class very low entropy and is avoided.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The triangle method places T…",
+      options: ["In the valley between two peaks", "At the foot of the dominant peak, where it meets its tail", "At the image mean", "At the highest peak"],
+      answer: 1,
+      explanation: "The bin furthest below the line from the peak to the end of the tail.",
+    },
+    {
+      question: "Which method suits a few small dark particles on a large bright background best?",
+      options: ["Otsu", "Triangle", "THRESH_TRUNC", "Equalization"],
+      answer: 1,
+      explanation: "It relies on the background peak's shape, not on balanced classes.",
+    },
+    {
+      question: "The maximum-entropy (Kapur) method maximises…",
+      options: ["The between-class variance", "The sum of the two classes' entropies", "The number of object pixels", "The valley depth"],
+      answer: 1,
+      explanation: "H_background + H_object.",
+    },
+    {
+      question: "Which OpenCV flag gives the triangle threshold?",
+      options: ["THRESH_OTSU", "THRESH_TRIANGLE", "THRESH_TOZERO", "ADAPTIVE_THRESH_MEAN_C"],
+      answer: 1,
+      explanation: "Combine it with THRESH_BINARY or THRESH_BINARY_INV.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A histogram has h[0] = 0, h[1] = 2, h[2] = 4, h[3] = 10, h[4] = 30 (the peak), and the tail on the dark side. With left = 0 and peak = 4, compute h[peak]·i + (left − peak)·h[i] for i = 1 … 4 and give OpenCV's T.
+
+<Solution>
+
+i = 1: 30 − 8 = 22; i = 2: 60 − 16 = 44; i = 3: 90 − 40 = **50**; i = 4: 120 − 120 = 0. Maximum at i = 3, so T = 3 − 1 = **2**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Repeat the simulation of 13.3 (objects mean 70, std 10; background mean 170, std 20; seed 1) for object areas 50 %, 5 % and 1 %, and print the F1 of Otsu, triangle and entropy.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(1)
+for frac in (0.5, 0.2, 0.05, 0.01):
+    n, k = 20000, int(20000 * frac)
+    x = np.concatenate([rng.normal(70, 10, k), rng.normal(170, 20, n - k)])
+    x = np.clip(np.rint(x), 0, 255).astype(np.uint8).reshape(100, 200)
+    truth = (np.arange(n) < k).reshape(100, 200)
+    if frac == 0.2:
+        continue                                           # same random sequence as 13.3, but not reported
+    row = []
+    for method, t in [("Otsu", cv2.threshold(x, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[0]),
+                      ("triangle", cv2.threshold(x, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_TRIANGLE)[0]),
+                      ("entropy", kapur(x))]:
+        m = x <= t
+        row.append(f"{method} {2 * (m & truth).sum() / (m.sum() + truth.sum()):.3f}")
+    print(f"objects {frac:4.0%}:", " | ".join(row))
+```
+
+Output:
+
+```text
+objects  50%: Otsu 0.998 | triangle 0.999 | entropy 0.933
+objects   5%: Otsu 0.902 | triangle 0.910 | entropy 0.813
+objects   1%: Otsu 0.043 | triangle 0.640 | entropy 0.753
+```
+
+As objects become rare, Otsu collapses while triangle and entropy keep working; with balanced classes, entropy is the weakest of the three here.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 10.3.
+2. G. W. Zack, W. E. Rogers, S. A. Latt, "Automatic measurement of sister chromatid exchange frequency", *Journal of Histochemistry & Cytochemistry* 25(7), 741–753, 1977.
+3. J. N. Kapur, P. K. Sahoo, A. K. C. Wong, "A new method for gray-level picture thresholding using the entropy of the histogram", *Computer Vision, Graphics, and Image Processing* 29(3), 273–285, 1985.
+4. M. Sezgin, B. Sankur, "Survey over image thresholding techniques and quantitative performance evaluation", *Journal of Electronic Imaging* 13(1), 146–165, 2004.
+5. OpenCV 4.13.0 documentation: `threshold`, `THRESH_TRIANGLE`. https://docs.opencv.org/4.13.0/

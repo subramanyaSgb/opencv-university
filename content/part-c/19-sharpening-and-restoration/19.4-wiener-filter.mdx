@@ -1,0 +1,327 @@
+export const meta = {
+  number: "19.4",
+  title: "Wiener filter",
+  minutes: 25,
+  objectives: [
+    "Undo a known blur in the frequency domain with the inverse filter, and see why it fails with noise",
+    "Derive the Wiener filter H* / (|H|² + K) and the meaning of K",
+    "Restore motion-blurred and defocused images with NumPy or cv2.dft",
+    "Choose K and recognise ringing and the limits of restoration",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 19.4 (Module 19).
+  Lab: RestoreLab (mode restore, Wiener).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 19.4 Wiener filter
+
+<Definition term="Wiener filter">a restoration filter that undoes a known blur frequency by frequency, but only as far as the noise allows: where the blur kept a frequency strong, it boosts it back; where the blur made it so weak that noise dominates, it leaves it small instead of amplifying the noise.</Definition>
+
+19.3 described blur as g = h * f + n and showed that in the frequency domain it is a multiplication: G = H·F + N. Dividing by H looks like the obvious way back. This chapter shows why that fails, and how Norbert Wiener's 1949 idea of balancing signal and noise [1] makes it work.
+
+## 1. An analogy
+
+Turning up the volume of a recording where some instruments were muffled. Instruments that were damped a little can be turned up and sound right again. An instrument that was damped to a whisper, below the tape hiss, cannot: turning it up only turns up the hiss. A good sound engineer raises each instrument only as much as it stands above the hiss.
+
+## 2. From inverse filter to Wiener filter
+
+<Flow
+  steps={[
+    { label: "Blurred, noisy image g and the PSF h", tone: "data" },
+    { label: "Transform: G = DFT(g), H = DFT(h)", tone: "process" },
+    { label: "Divide carefully: F̂ = G · H* / (|H|² + K)", tone: "process" },
+    { label: "Inverse DFT: restored image f̂", tone: "result" },
+  ]}
+/>
+
+The **inverse filter** F̂ = G / H = F + N / H recovers F exactly only without noise. Where |H| is small, N / H is huge. The **Wiener filter** multiplies G by H* / (|H|² + K) instead (H* is the complex conjugate). Where |H|² is much larger than K this is 1 / H, the inverse filter; where |H|² is much smaller than K it goes to 0.
+
+A worked example at two frequencies, true signal F = 10, noise N = 0.2, K = 0.01:
+
+| | Strong frequency, H = 0.5 | Weak frequency, H = 0.01 |
+| --- | --- | --- |
+| Observed G = H·F + N | 5.2 | 0.3 |
+| Inverse: G / H | **10.4** (good) | **30** (noise × 100) |
+| Wiener factor H / (H² + K) | 0.5 / 0.26 = 1.92 | 0.01 / 0.0101 = 0.99 |
+| Wiener: factor × G | **10.0** (good) | **0.30** (signal lost, but no explosion) |
+
+At the strong frequency both filters work. At the weak one, the inverse filter turns 0.2 of noise into 20 of error; the Wiener filter gives up on that frequency instead. Since there are thousands of weak frequencies, this decides the result.
+
+K is the **noise-to-signal power ratio**. The full Wiener filter uses a ratio per frequency, Sₙ(u, v) / S_f(u, v); the constant K is the usual simplification when the spectra are unknown.
+
+## 3. Real results
+
+The test image blurred with a horizontal motion PSF of 15 pixels or a Gaussian of σ = 2, then Gaussian noise added; PSNR in dB (the blurred image is about 21 dB in every case):
+
+| Blur | Noise σ | Inverse | Wiener K = 10⁻⁴ | K = 10⁻³ | K = 10⁻² | Best K |
+| --- | --- | --- | --- | --- | --- | --- |
+| Motion 15 | 0 | 11.9 | 24.0 | **27.6** | 24.3 | 10⁻³ |
+| Motion 15 | 0.5 | 10.9 | 22.4 | **26.6** | 24.2 | 10⁻³ |
+| Motion 15 | 2 | 7.4 | 15.4 | 20.5 | **23.4** | 10⁻² |
+| Motion 15 | 5 | 6.1 | 9.8 | 13.9 | 20.4 | 3·10⁻² (21.7) |
+| Gaussian 2 | 0 | 16.3 | **22.6** | 21.9 | 21.6 | 10⁻⁴ |
+| Gaussian 2 | 2 | 5.4 | 17.9 | 21.1 | **21.5** | 10⁻² |
+
+Three lessons:
+
+- **The inverse filter fails even without added noise** (11.9 dB, worse than the blurred image): the motion PSF has zeros, and tiny errors (the image border, floating-point rounding) are divided by almost nothing.
+- **More noise needs larger K**: the best K grows from 10⁻³ to 3·10⁻² as noise rises from 0 to 5 grey levels, and the achievable gain shrinks from 6.6 dB to 0.9 dB.
+- **Motion blur restores much better than Gaussian blur**: the motion PSF keeps most frequencies at a useful level between its zeros and leaves vertical frequencies untouched; the Gaussian pushes all high frequencies towards zero, in every direction. Gaussian blur of σ = 2 is close to unrecoverable.
+
+<RestoreLab mode="restore" initial="wiener" initialPsf="motion" initialNoise={2} caption="Motion blur of 11 pixels plus noise. Switch between 'inverse' and 'Wiener' and move K: too small and the noise explodes into stripes along the motion; too large and the image stays blurred. Then lower the noise to 0 and find the new best K, and try the Gaussian and disk PSFs. The PSNR under the result tells you how close you are."/>
+
+## 4. Ringing and borders
+
+Restored images often show ripples next to strong edges (**ringing**): frequencies near the zeros of H are missing or wrong, and a sharp edge needs all of them. Larger K reduces ringing at the cost of sharpness. The DFT also treats the image as periodic: the left edge meets the right edge, which is a large artificial step. Without care, it produces strong ripples from the borders inwards. Remedies: mirror-pad the image before the DFT (as the examples do), or taper the borders with a window (`cv2.createHanningWindow`) or OpenCV's `edgetaper` approach in the deblurring tutorial [3].
+
+## 5. Industrial example
+
+The Wiener filter is used where the blur is known and the noise is low: motion blur on conveyors when exposure cannot be shortened (the PSF follows from speed and exposure, 19.3), slightly defocused fixed-focus cameras with a measured PSF, and microscopy with a characterised objective. It is fast (two DFTs and a multiplication), so it fits production cycle times. It does not replace good imaging: a shorter exposure with a strobe (2.6) gives a sharp image directly, and every restoration adds ringing and amplifies noise somewhat. For measurement, the edge positions in a restored image should be validated against a reference part.
+
+## What you should remember from 19.4
+
+<Takeaways>
+<Takeaway n={1} title="Inverse">G / H is exact without noise and useless with it: N / H explodes where H is small.</Takeaway>
+<Takeaway n={2} title="Wiener">G · H* / (|H|² + K): inverse where H is strong, zero where it is weak.</Takeaway>
+<Takeaway n={3} title="K">Noise-to-signal ratio: more noise, larger K, less gain.</Takeaway>
+<Takeaway n={4} title="Limits">Zeros of H stay lost; ringing near edges; pad or taper the borders.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** At a frequency with H = 0.1 and K = 0.01, what does the Wiener filter multiply G by? Compare with the inverse filter.
+
+<Solution>
+
+0.1 / (0.01 + 0.01) = **5**; the inverse filter would multiply by 10. The Wiener filter boosts this frequency half as much.
+
+</Solution>
+
+**Q2.** What does the Wiener filter become when K = 0? And when K is very large?
+
+<Solution>
+
+K = 0: the inverse filter H* / |H|² = 1 / H. K very large: H* / K, almost zero; the output is a weak, blurred copy of the input (a further blur by H*, scaled down).
+
+</Solution>
+
+### Next: 19.5 Deconvolution
+
+Iterative methods: Richardson–Lucy for photon noise, regularised deconvolution, and blind deconvolution when the PSF is unknown.
+
+## Code
+
+Two examples: inverse against Wiener filtering of a motion blur, then choosing K.
+
+### 1. Inverse and Wiener filters
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-clean.png", cv2.IMREAD_GRAYSCALE).astype(float)
+h, w = img.shape
+H_SHAPE = (256, 512)                                                # padded size for the DFT
+
+def otf(psf):                                                       # PSF centred on pixel (0, 0), then DFT
+    P = np.zeros(H_SHAPE)
+    s = psf.shape[0]
+    P[:s, :s] = psf
+    return np.fft.fft2(np.roll(P, (-(s // 2), -(s // 2)), (0, 1)))
+
+pad = lambda x: np.pad(x, ((0, H_SHAPE[0] - h), (0, H_SHAPE[1] - w)), mode="symmetric")   # mirror padding
+psnr = lambda a: 10 * np.log10(255 ** 2 / np.mean((np.clip(np.rint(a), 0, 255) - img) ** 2))
+
+psf = np.zeros((15, 15))
+psf[7, :] = 1 / 15                                                  # horizontal motion, 15 px
+H = otf(psf)
+blurred = np.real(np.fft.ifft2(np.fft.fft2(pad(img)) * H))[:h, :w]
+rng = np.random.default_rng(0)
+g = blurred + rng.normal(0, 2, blurred.shape)                       # noise sigma 2
+G = np.fft.fft2(pad(g))
+
+inverse = np.real(np.fft.ifft2(G / np.where(np.abs(H) < 1e-3, 1e-3, H)))[:h, :w]
+wiener = lambda K: np.real(np.fft.ifft2(G * np.conj(H) / (np.abs(H) ** 2 + K)))[:h, :w]
+print(f"blurred + noise: {psnr(g):.2f} dB | inverse: {psnr(inverse):.2f} dB")
+for K in (1e-4, 1e-3, 1e-2):
+    print(f"Wiener K={K:g}: {psnr(wiener(K)):.2f} dB")
+```
+
+Output:
+
+```text
+blurred + noise: 20.94 dB | inverse: 7.41 dB
+Wiener K=0.0001: 15.42 dB
+Wiener K=0.001: 20.51 dB
+Wiener K=0.01: 23.36 dB
+```
+
+- The noise generator is created after the blur, so these numbers match the motion 15, σ = 2 row of the table.
+- `np.where(|H| < 1e-3, 1e-3, H)` only avoids division by zero; the inverse filter fails anyway.
+
+### 2. Choosing K
+
+```python
+import numpy as np
+import cv2
+
+for K in (1e-3, 3e-3, 1e-2, 3e-2, 1e-1):
+    print(f"K={K:<6g} PSNR {psnr(wiener(K)):.2f} dB")
+signal_power = np.mean(np.abs(np.fft.fft2(pad(img) - img.mean())) ** 2) / np.prod(H_SHAPE)
+print(f"rough estimate: K = noise variance / mean signal power = {4 / signal_power:.4f}")
+```
+
+Output:
+
+```text
+K=0.001  PSNR 20.51 dB
+K=0.003  PSNR 22.79 dB
+K=0.01   PSNR 23.36 dB
+K=0.03   PSNR 22.47 dB
+K=0.1    PSNR 20.40 dB
+rough estimate: K = noise variance / mean signal power = 0.0014
+```
+
+- The rough estimate (σ² over the average signal power) gives the order of magnitude; the best K here (10⁻²) is about seven times larger, because natural images have little power at high frequencies, exactly where H is weak. Tune K visually or on a reference image.
+
+## OpenCV API notes
+
+OpenCV has no `wiener` function; build it from the DFT:
+
+- **`cv2.dft(src, flags=cv2.DFT_COMPLEX_OUTPUT)`** and **`cv2.idft(..., flags=cv2.DFT_SCALE | cv2.DFT_REAL_OUTPUT)`**: float32 transforms; `cv2.getOptimalDFTSize(n)` gives fast sizes.
+- **`cv2.mulSpectrums(A, B, 0, conjB=True)`**: multiplies spectra, with the conjugate of B: the H* · G part.
+- **`cv2.createHanningWindow(size, cv2.CV_32F)`**: a window to taper borders.
+- The OpenCV tutorials "Out-of-focus Deblur Filter" and "Motion Deblur Filter" implement exactly this Wiener filter for disk and motion PSFs, with an edge-taper step [3].
+
+NumPy's `np.fft.fft2` / `ifft2` (float64) are simpler for experiments, as in the examples.
+
+## Where it fails
+
+- **Zeros of H**: the information at those frequencies is gone; the Wiener filter sets them to about zero, which shows as ringing.
+- **Wrong PSF**: a motion length off by 10–20 % or a wrong angle gives worse results than no restoration, with strong ripples.
+- **High noise**: the best K becomes large and the gain disappears.
+- **Spatially varying blur and non-linear images** (19.3): the model does not hold.
+- **Clipped (saturated) pixels**: their true values are unknown; they ring strongly.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using the inverse filter on real images**.
+- **PSF not centred at (0, 0)** before the DFT: the restored image is shifted by half the PSF size.
+- **No padding or tapering**: strong ripples from the image borders.
+- **Restoring a gamma-encoded or JPEG image** as if it were linear and noise-free.
+- **One K for all images**: K depends on noise and content.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why "Wiener"
+
+Among all linear filters, H* / (|H|² + Sₙ/S_f) minimises the mean squared error between the restored and the true image, if signal and noise are stationary random processes with power spectra S_f and Sₙ [1]. Using a model of natural image spectra (power falling roughly as 1/f²) instead of a constant K improves results noticeably.
+
+### Constrained least squares
+
+Gonzalez and Woods [2] describe constrained least-squares filtering: F̂ = G · H* / (|H|² + γ|P|²), where P is the transfer function of the Laplacian. It penalises rough solutions instead of assuming a noise spectrum, and γ is tuned so the residual matches the noise level. It is the frequency-domain form of Tikhonov regularisation, the starting point of the methods in 19.5.
+
+### Two-dimensional zeros
+
+For a motion PSF the zeros lie on lines perpendicular to the motion; for a disk, on rings. Their positions also reveal the PSF from the blurred image itself: the spectrum of a motion-blurred image shows dark parallel stripes whose spacing gives the length and whose direction gives the angle, a classic way to estimate motion blur.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why does the inverse filter G / H amplify noise?",
+      options: ["It is non-linear", "N / H becomes huge where |H| is small", "It ignores the PSF", "It works in the spatial domain"],
+      answer: 1,
+      explanation: "Every frequency the blur weakened is boosted by 1/|H|, noise included.",
+    },
+    {
+      question: "The Wiener filter multiplies G by…",
+      options: ["1 / H", "H* / (|H|² + K)", "H", "|H|²"],
+      answer: 1,
+      explanation: "With K = 0 it is the inverse filter.",
+    },
+    {
+      question: "The noise level increases. The best K…",
+      options: ["Decreases", "Increases", "Stays the same", "Becomes negative"],
+      answer: 1,
+      explanation: "More noise: trust weak frequencies less.",
+    },
+    {
+      question: "Which blur restores better at the same PSNR before restoration?",
+      options: ["Gaussian σ = 2", "Horizontal motion of 15 px", "Both equally", "Neither can be restored"],
+      answer: 1,
+      explanation: "The motion PSF keeps more frequencies at a usable level.",
+    },
+    {
+      question: "What removes the ripples coming from the image borders?",
+      options: ["A larger K only", "Mirror padding or tapering before the DFT", "Converting to uint8", "A median filter"],
+      answer: 1,
+      explanation: "The DFT treats the image as periodic; hide the artificial step at the border.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+At a frequency with H = 0.2, the observed value is G = 2.1 (true F = 10, noise 0.1). Compute the inverse and the Wiener (K = 0.01) estimates.
+
+<Solution>
+
+Inverse: 2.1 / 0.2 = **10.5**. Wiener: 0.2 / (0.04 + 0.01) = 4; 4 · 2.1 = **8.4**. The Wiener filter is biased low here (it trades some signal for noise safety); with K = 0.001 it would give 0.2 / 0.041 · 2.1 = 10.2.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Repeat the restoration for a Gaussian blur with σ = 2 (PSF size 13 × 13) and noise σ = 2, for K = 10⁻⁴, 10⁻³ and 10⁻². Compare the best result with the motion case.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+y, x = np.mgrid[-6:7, -6:7]
+gpsf = np.exp(-(x ** 2 + y ** 2) / 8)
+gpsf /= gpsf.sum()
+Hg = otf(gpsf)
+bg = np.real(np.fft.ifft2(np.fft.fft2(pad(img)) * Hg))[:h, :w]
+gg = bg + np.random.default_rng(1).normal(0, 2, bg.shape)
+Gg = np.fft.fft2(pad(gg))
+print(f"blurred + noise: {psnr(gg):.2f} dB")
+for K in (1e-4, 1e-3, 1e-2):
+    print(f"Wiener K={K:g}: {psnr(np.real(np.fft.ifft2(Gg * np.conj(Hg) / (np.abs(Hg) ** 2 + K)))[:h, :w]):.2f} dB")
+```
+
+Output:
+
+```text
+blurred + noise: 20.99 dB
+Wiener K=0.0001: 17.85 dB
+Wiener K=0.001: 21.14 dB
+Wiener K=0.01: 21.48 dB
+```
+
+At best 0.5 dB of gain, against 2.4 dB for the motion blur at the same noise. The Gaussian PSF has pushed the fine detail below the noise in every direction; no linear filter can bring it back.
+
+</Solution>
+
+## References
+
+1. N. Wiener, *Extrapolation, Interpolation, and Smoothing of Stationary Time Series*, MIT Press, 1949.
+2. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 5 (inverse filtering, Wiener filtering, constrained least squares).
+3. OpenCV 4.13.0 tutorials: "Out-of-focus Deblur Filter", "Motion Deblur Filter"; documentation: `dft`, `mulSpectrums`, `createHanningWindow`. https://docs.opencv.org/4.13.0/

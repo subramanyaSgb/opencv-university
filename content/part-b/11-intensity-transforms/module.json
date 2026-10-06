@@ -1,0 +1,12 @@
+{
+  "number": 11,
+  "title": "Intensity transforms",
+  "summary": "Point operations that map each grey value to a new one: lookup tables, negatives and logs, gamma, contrast stretching, level and bit-plane slicing.",
+  "chapters": [
+    { "number": "11.1", "slug": "11.1-point-operations-and-luts", "title": "Point operations and LUTs" },
+    { "number": "11.2", "slug": "11.2-negative-and-log", "title": "Negative and log" },
+    { "number": "11.3", "slug": "11.3-gamma", "title": "Gamma" },
+    { "number": "11.4", "slug": "11.4-contrast-stretching", "title": "Contrast stretching" },
+    { "number": "11.5", "slug": "11.5-level-and-bit-plane-slicing", "title": "Level and bit-plane slicing" }
+  ]
+}

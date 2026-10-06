@@ -1,0 +1,350 @@
+export const meta = {
+  number: "28.1",
+  title: "Snakes",
+  minutes: 30,
+  objectives: [
+    "Describe a snake as a curve with internal (shape) and external (image) energy",
+    "Compute the internal force of one snake point by hand",
+    "Implement the semi-implicit snake update in NumPy and tune α, β, edge weight and balloon force",
+    "Know the snake's limits: capture range, concavities, fixed topology",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 28.1 (Module 28).
+  New lab: ActiveContourLab (lib/active-ops.ts; the same formulas as the NumPy code in this chapter).
+  New sample: sample-snake.png (slotted disc and two small discs).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 28.1 Snakes
+
+<Definition term="Snake (active contour)">a closed curve, stored as a list of points, that moves step by step to lower its energy: an internal energy that keeps it smooth and short, and an external energy that is low on image edges. It stops when it lies on an edge and is as smooth as the edge allows (Kass, Witkin and Terzopoulos 1988 [1]).</Definition>
+
+Edge detectors give scattered edge pixels; contours (Module 24) need a clean binary mask. A snake starts from a rough outline, given by a user, a template or the previous video frame, and pulls itself onto the object's border, bridging gaps and ignoring isolated noise because it must stay smooth. OpenCV has no snake function (the old C API version was removed), so this chapter builds one in NumPy.
+
+## 1. An analogy
+
+A rubber band around an object. Stretched around the object, the band contracts (elasticity) and resists sharp bends (stiffness). Where it touches the object's edge, the edge holds it. A band that is too stiff cannot follow a corner; one that is too loose wrinkles on every bump.
+
+## 2. The energy and the update
+
+<Flow
+  steps={[
+    { label: "Initial curve: n points around (or inside) the object", tone: "data" },
+    { label: "Internal force: α pulls points towards neighbours, β straightens bends", tone: "process" },
+    { label: "External force: towards strong edges, ∇|∇(G_σ ∗ I)|²", tone: "process" },
+    { label: "Balloon force (optional): along the normal, shrink or grow", tone: "process" },
+    { label: "Semi-implicit step; repeat until it stops", tone: "result" },
+  ]}
+/>
+
+- **α (elasticity)** penalises stretching: each point is pulled towards its two neighbours. Large α shrinks the curve.
+- **β (rigidity)** penalises bending (the second difference): large β gives smooth, round curves that cannot follow corners.
+- **Edge force**: the gradient of the edge energy E = |∇(G_σ ∗ I)|². It points towards edges, but only within a few σ of them: the **capture range**.
+- **Balloon force** (Cohen 1991 [2]): a constant push along the normal. It moves the snake through flat regions where the edge force is zero, until an edge stops it.
+
+With all points stacked in vectors x and y, the internal forces are a matrix A times x. The **semi-implicit** update treats the internal part implicitly, which allows large steps without oscillation:
+
+```text
+x ← (I + τA)⁻¹ (x + τ Fx(x, y))      (same for y)
+```
+
+A is a fixed pentadiagonal matrix (coefficients β, −α − 4β, 2α + 6β, −α − 4β, β around each point, wrapping around), so (I + τA)⁻¹ is computed once.
+
+## 3. A worked example by hand
+
+Three neighbouring snake points: (0, 0), (2, 4), (4, 0). The elastic force on the middle point is α times the second difference:
+
+```text
+v(i−1) − 2 v(i) + v(i+1) = (0, 0) − (4, 8) + (4, 0) = (0, −8)
+```
+
+With α = 0.1 the force is (0, −0.8): the middle point moves 0.8 pixels down, towards the straight line between its neighbours. Repeating this everywhere makes a free snake shrink and round off, which is why an edge or a balloon force must hold it.
+
+## 4. On the test image
+
+The image has a disc (radius 45) with a deep slot from the top, and two separate discs. A snake of 120 points starts as a circle of radius 62 around the slotted disc (edge weight 2, σ = 2, 400 steps, resampled every 10 steps):
+
+| Setting | Mean distance to the true border | IoU | Result |
+| --- | --- | --- | --- |
+| α 0.05, β 0.1, no balloon | 12.8 px | 0.48 | stops in mid-air: the start is outside the capture range |
+| α 0.05, β 0.1, balloon −0.4 | **0.07 px** | **0.98** | locks onto the border and follows it into the slot |
+| α 0.3, β 0.5, balloon −0.4 | 2.6 px | 0.16 | too stiff to bend into the slot; squeezed past the edge |
+| α 0.05, β 0.1, balloon −0.6 | 0.4 px | 0.10 | balloon stronger than the edge force: parts are pushed through and the curve folds |
+
+Starting **inside** the slotted disc (a radius-10 circle) with a growing balloon (+0.4) also works: IoU 0.95.
+
+A snake keeps the topology of its start: one closed curve stays one closed curve. A circle around **both** small discs cannot split into two; the shrinking snake slides between them and breaks down. That is the job of level sets (28.2).
+
+<ActiveContourLab mode="snake" caption="Press Play. From the outside start with balloon −0.4 the snake shrinks, catches the disc's border and creeps into the slot. Set the balloon to 0: it stops far from the object (no edge force reaches it). Raise β: it cannot enter the slot. Switch the background to the edge energy to see the capture range. Try the start around both small discs."/>
+
+## 5. Industrial use
+
+- **Interactive outlining** in medical and labelling tools: a rough click outline snaps to the organ or object border.
+- **Tracking deforming outlines** in video: the previous frame's snake is the next frame's start (cells, lips, hands, a weld pool).
+- **Sub-pixel boundaries** of smooth objects: the snake points interpolate between pixels.
+
+## What you should remember from 28.1
+
+<Takeaways>
+<Takeaway n={1} title="Two energies">Internal (α stretch, β bend) keeps it smooth; external pulls it to edges.</Takeaway>
+<Takeaway n={2} title="Capture range">Edge forces act only near edges; start close or use a balloon force.</Takeaway>
+<Takeaway n={3} title="Semi-implicit">x ← (I + τA)⁻¹(x + τF): stable with large steps.</Takeaway>
+<Takeaway n={4} title="Fixed topology">One curve stays one curve; for splitting use level sets.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Points (0, 0), (3, 1), (6, 0). Elastic force on the middle point with α = 0.2?
+
+<Solution>
+
+Second difference (0, 0) − (6, 2) + (6, 0) = (0, −2); force 0.2 · (0, −2) = **(0, −0.4)**.
+
+</Solution>
+
+**Q2.** Your snake stops 10 pixels outside the object. Two fixes?
+
+<Solution>
+
+Increase σ (wider capture range, less precise), add an inward balloon force, or start closer. A gradient vector flow field (Go deeper) also extends the capture range.
+
+</Solution>
+
+### Next: 28.2 Level sets
+
+Contours as the zero line of a function: they can split, merge and enter concavities.
+
+## Code
+
+Three examples: the internal force, a complete snake, and the experiments of Section 4.
+
+### 1. The internal force
+
+```python
+import numpy as np
+import cv2
+
+pts = np.array([[0, 0], [2, 4], [4, 0]], float)
+second = pts[0] - 2 * pts[1] + pts[2]
+print("second difference:", second.tolist(), "| force with alpha 0.1:", (0.1 * second).tolist())
+
+n, alpha, beta, tau = 6, 0.1, 0.2, 1.0
+A = np.zeros((n, n))
+for i in range(n):
+    for k, c in ((-2, beta), (-1, -alpha - 4 * beta), (0, 2 * alpha + 6 * beta), (1, -alpha - 4 * beta), (2, beta)):
+        A[i, (i + k) % n] += c                                      # wraps around: a closed curve
+print("row 0 of A:", np.round(A[0], 2).tolist())
+print("rows of (I + tau A)^-1 sum to:", np.round(np.linalg.inv(np.eye(n) + tau * A).sum(axis=1), 6).tolist())
+```
+
+Output:
+
+```text
+second difference: [0.0, -8.0] | force with alpha 0.1: [0.0, -0.8]
+row 0 of A: [1.4, -0.9, 0.2, 0.0, 0.2, -0.9]
+rows of (I + tau A)^-1 sum to: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+```
+
+- Rows summing to 1 mean a snake with no external force does not drift as a whole; it only changes shape.
+
+### 2. A snake in NumPy
+
+```python
+img = cv2.imread("sample-snake.png", cv2.IMREAD_GRAYSCALE).astype(np.float64)
+H, W = img.shape
+
+def central(f):                                                      # central differences, edge replicated
+    p = np.pad(f, 1, mode="edge")
+    return (p[1:-1, 2:] - p[1:-1, :-2]) / 2, (p[2:, 1:-1] - p[:-2, 1:-1]) / 2
+
+def edge_force(sigma):
+    gx, gy = central(cv2.GaussianBlur(img, (0, 0), sigma))
+    E = gx ** 2 + gy ** 2
+    Fx, Fy = central(E / E.max())                                    # points towards edges
+    m = np.hypot(Fx, Fy).max()
+    return Fx / m, Fy / m
+
+def bilinear(F, x, y):
+    x = np.clip(x, 0, W - 1.001); y = np.clip(y, 0, H - 1.001)
+    x0, y0 = x.astype(int), y.astype(int); fx, fy = x - x0, y - y0
+    return F[y0, x0] * (1 - fx) * (1 - fy) + F[y0, x0 + 1] * fx * (1 - fy) + F[y0 + 1, x0] * (1 - fx) * fy + F[y0 + 1, x0 + 1] * fx * fy
+
+def resample(x, y, n):                                               # equal spacing along the curve
+    p = np.c_[np.r_[x, x[0]], np.r_[y, y[0]]]
+    s = np.r_[0, np.cumsum(np.hypot(*np.diff(p, axis=0).T))]
+    t = np.linspace(0, s[-1], n + 1)[:-1]
+    return np.interp(t, s, p[:, 0]), np.interp(t, s, p[:, 1])
+
+def snake(cx, cy, r, alpha, beta, w_edge, balloon, sigma=2, n=120, iters=400, tau=1.0):
+    t = np.arange(n) * 2 * np.pi / n
+    x, y = cx + r * np.cos(t), cy + r * np.sin(t)
+    A = np.zeros((n, n))
+    for i in range(n):
+        for k, c in ((-2, beta), (-1, -alpha - 4 * beta), (0, 2 * alpha + 6 * beta), (1, -alpha - 4 * beta), (2, beta)):
+            A[i, (i + k) % n] += c
+    P = np.linalg.inv(np.eye(n) + tau * A)
+    Fx, Fy = edge_force(sigma)
+    for it in range(iters):
+        nx = np.roll(y, -1) - np.roll(y, 1); ny = -(np.roll(x, -1) - np.roll(x, 1))   # outward normal
+        L = np.hypot(nx, ny) + 1e-12
+        fx = w_edge * bilinear(Fx, x, y) + balloon * nx / L
+        fy = w_edge * bilinear(Fy, x, y) + balloon * ny / L
+        x, y = P @ (x + tau * fx), P @ (y + tau * fy)
+        if (it + 1) % 10 == 0:
+            x, y = resample(x, y, n)
+    return x, y
+
+x, y = snake(70, 75, 62, 0.05, 0.1, 2, -0.4)
+print("points:", len(x), "| x range", round(float(x.min()), 1), "to", round(float(x.max()), 1), "| y range", round(float(y.min()), 1), "to", round(float(y.max()), 1))
+```
+
+Output:
+
+```text
+points: 120 | x range 25.0 to 114.2 | y range 33.6 to 119.4
+```
+
+### 3. Scoring against the true shape
+
+```python
+big = np.zeros((H * 4, W * 4), np.uint8)
+cv2.circle(big, (280, 300), 180, 255, -1); cv2.rectangle(big, (240, 100), (320, 340), 0, -1)
+truth = cv2.resize(big, (W, H), interpolation=cv2.INTER_AREA) > 127   # the slotted disc
+border = cv2.morphologyEx(truth.astype(np.uint8), cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
+dist = cv2.distanceTransform(1 - border, cv2.DIST_L2, 5)             # distance to the true border
+
+def score(x, y):
+    mask = np.zeros((H, W), np.uint8)
+    cv2.fillPoly(mask, [np.rint(np.c_[x, y]).astype(np.int32)], 1)
+    iou = (mask.astype(bool) & truth).sum() / (mask.astype(bool) | truth).sum()
+    return round(float(bilinear(dist, x, y).mean()), 2), round(float(iou), 2)
+
+for name, args in [("no balloon", (70, 75, 62, 0.05, 0.1, 2, 0)), ("balloon -0.4", (70, 75, 62, 0.05, 0.1, 2, -0.4)),
+                   ("stiff", (70, 75, 62, 0.3, 0.5, 2, -0.4)), ("balloon -0.6", (70, 75, 62, 0.05, 0.1, 2, -0.6)),
+                   ("inside, +0.4", (70, 100, 10, 0.05, 0.1, 2, 0.4))]:
+    print(name, "-> mean distance, IoU:", score(*snake(*args)))
+```
+
+Output:
+
+```text
+no balloon -> mean distance, IoU: (12.82, 0.48)
+balloon -0.4 -> mean distance, IoU: (0.07, 0.98)
+stiff -> mean distance, IoU: (2.63, 0.16)
+balloon -0.6 -> mean distance, IoU: (0.4, 0.1)
+inside, +0.4 -> mean distance, IoU: (0.03, 0.95)
+```
+
+## OpenCV API notes
+
+- **No snake in OpenCV 4.x**: `cvSnakeImage` belonged to the removed C API. Implement it as above, or use `skimage.segmentation.active_contour` (scikit-image, outside this course's pinned environment).
+- **Building blocks from OpenCV**: `cv2.GaussianBlur` and `cv2.Sobel` (edge energy), `cv2.remap` (sampling forces at sub-pixel points), `cv2.fillPoly` (snake → mask), `cv2.polylines` (drawing).
+- **Speed**: n points cost an n × n matrix–vector product per step (n = 120: negligible); the edge force image is computed once.
+
+## Where it fails
+
+- **Far from the edge**: no edge force reaches the snake (capture range ≈ a few σ).
+- **Deep, narrow concavities**: internal forces resist entering them; a balloon force helps only if the edge stops it in time.
+- **Weak edges and noise**: the balloon pushes through weak edges; strong noise edges catch it.
+- **Topology**: it cannot split around two objects or merge two snakes.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Edge energy with the wrong sign**: the snake must climb towards high |∇I|², not away from it.
+- **No resampling**: points bunch together on one side and leave gaps elsewhere.
+- **Too large step or force weights**: points jump past edges or the curve explodes.
+- **Expecting a snake from OpenCV**: there is none in the current API.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Energy minimisation
+
+Kass et al. [1] minimise E = ∫ (α|v′|² + β|v″|²) ds + ∫ E_ext(v) ds; the Euler–Lagrange equations give the force balance solved by the semi-implicit iteration above. Amini et al. solved it by dynamic programming; Williams and Shah's greedy algorithm moves each point to the best pixel in its neighbourhood.
+
+### Gradient vector flow
+
+Xu and Prince [3] replace the edge force by a diffused vector field (gradient vector flow) that extends far from edges and points into concavities, so snakes converge from farther away and enter boundary concavities without a balloon force.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does β (rigidity) control?",
+      options: ["Stretching", "Bending: large β makes smooth curves that cannot follow corners", "The edge weight", "The step size"],
+      answer: 1,
+      explanation: "It penalises the second difference.",
+    },
+    {
+      question: "Why did the snake without balloon force stop 13 pixels from the border?",
+      options: ["Too many points", "The edge force does not reach that far (capture range)", "β too small", "Noise"],
+      answer: 1,
+      explanation: "The edge force is near zero in flat regions.",
+    },
+    {
+      question: "Why is the update semi-implicit?",
+      options: ["To find edges", "Stable large steps for the stiff internal forces", "To change topology", "To resample"],
+      answer: 1,
+      explanation: "(I + τA)⁻¹ is computed once.",
+    },
+    {
+      question: "A snake around two separate objects…",
+      options: ["Splits into two", "Cannot split: its topology is fixed", "Finds only edges", "Merges them into a mask"],
+      answer: 1,
+      explanation: "Level sets (28.2) can split.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A closed snake of 4 points (0, 0), (4, 0), (4, 4), (0, 4), α = 0.1, β = 0. Where does point (4, 0) move after one explicit step x ← x + α · (second difference)?
+
+<Solution>
+
+Neighbours (0, 0) and (4, 4): (0, 0) − (8, 0) + (4, 4) = (−4, 4); move 0.1 · (−4, 4) = (−0.4, 0.4): **(3.6, 0.4)**, towards the square's centre. A free snake shrinks.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Run the snake from the outside start with edge weight 0 and balloon −0.4 (pure shrinking) for 50, 100 and 150 steps. How does its mean radius change, and why?
+
+<Solution>
+
+```python
+for steps in (50, 100, 150):
+    x, y = snake(70, 75, 62, 0.05, 0.1, 0, -0.4, iters=steps)
+    print(steps, "steps: mean radius", round(float(np.hypot(x - x.mean(), y - y.mean()).mean()), 1))
+```
+
+Output:
+
+```text
+50 steps: mean radius 41.6
+100 steps: mean radius 21.4
+150 steps: mean radius 1.4
+```
+
+Without the edge force the snake ignores the object: it shrinks by about 0.4 pixels per step (the balloon force, plus a little elastic shrinking) and collapses to a point after about 150 steps. The balloon only works together with an edge force strong enough to stop it.
+
+</Solution>
+
+## References
+
+1. M. Kass, A. Witkin, D. Terzopoulos, "Snakes: active contour models", *International Journal of Computer Vision* 1(4), 321–331, 1988.
+2. L. D. Cohen, "On active contour models and balloons", *CVGIP: Image Understanding* 53(2), 211–218, 1991.
+3. C. Xu, J. L. Prince, "Snakes, shapes, and gradient vector flow", *IEEE Trans. Image Processing* 7(3), 359–369, 1998.
+4. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022, Section 7.3 (contour tracking and active contours).

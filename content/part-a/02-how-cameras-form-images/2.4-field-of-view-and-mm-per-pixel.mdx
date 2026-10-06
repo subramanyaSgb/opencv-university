@@ -1,0 +1,608 @@
+export const meta = {
+  number: "2.4",
+  title: "Field of view and mm per pixel",
+  minutes: 50,
+  objectives: [
+    "Compute the sensor size, field of view and angle of view from the camera and lens",
+    "Compute mm per pixel and decide whether it is fine enough for a task",
+    "Work backwards from a requirement to the pixels, lens and working distance",
+    "Calibrate a scale from a reference object in the image",
+    "Explain why objects above or below the calibration plane measure wrong",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 2.4 (Module 2 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+  Thin-lens numbers are ideal; real lenses are calibrated (Module 41).
+*/}
+
+# 2.4 Field of view and mm per pixel
+
+<Definition term="mm per pixel">how much real-world distance one pixel covers on the object.</Definition>
+
+This chapter connects the camera to **real-world measurement**. In 1.6 we said *"1200 pixels does not mean 1200 mm"*. Now we learn exactly **how to turn pixels into millimetres**, and how to design a camera so that the millimetres are small enough for the job.
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Camera + lens + distance", tone: "world" },
+    { label: "Field of view (mm)", tone: "process" },
+    { label: "÷ pixels", tone: "process" },
+    { label: "mm per pixel", tone: "result" },
+  ]}
+/>
+
+## 1. The big question
+
+Your software finds a billet edge at column 212 and the other edge at column 1411. That is **1199 pixels**. The customer asks: *"How long is the billet, in millimetres?"*
+
+To answer, you need one number: **how many millimetres one pixel covers**. That number is **mm per pixel** (mm/px). Everything in this chapter is about finding it, and making it small enough.
+
+## 2. What is the field of view?
+
+Look at a wall through a cardboard tube. You see only a **patch** of the wall. Move closer and the patch gets smaller; move back and it gets bigger.
+
+<Callout kind="key">
+
+**Field of view (FOV)** = the size of the real-world area the camera sees, usually given as **width × height in mm** at the working distance.
+
+</Callout>
+
+<FovPyramid caption="A 2448 × 2048-pixel camera with a 16 mm lens, 1 m above a surface, sees about 519 × 435 mm." />
+
+## 3. Two ways to describe FOV
+
+| Description | Unit | Example | Depends on distance? |
+| --- | --- | --- | --- |
+| Linear FOV | mm | 519 × 435 mm | Yes |
+| Angle of view | degrees | 29.6° horizontal | No |
+
+The **angle** belongs to the camera and lens. The **linear FOV** is what that angle covers at your working distance. For measurement we almost always need the linear FOV.
+
+## 4. What sets the field of view?
+
+From 2.2 you already know the three ingredients:
+
+<Equation terms={[{ value: "Sensor size" }, { op: "+", value: "Focal length" }, { op: "+", value: "Working distance" }, { op: "=", value: "FOV", result: true }]} />
+
+- **Bigger sensor** → wider FOV.
+- **Shorter focal length** → wider FOV.
+- **Longer working distance** → wider FOV.
+
+## 5. Sensor size from pixels
+
+Datasheets give the resolution (for example **2448 × 2048**) and the **pixel size** (for example **3.45 µm**). Multiply:
+
+<Equation
+  terms={[
+    { value: "2448", label: "pixels" },
+    { op: "×", value: "3.45 µm", label: "pixel size" },
+    { op: "=", value: "8.45 mm", label: "sensor width", result: true },
+  ]}
+/>
+
+And 2048 × 3.45 µm = **7.07 mm** high. This is the light-sensitive area the lens must cover.
+
+## 6. The FOV formula
+
+The lens makes two similar triangles: the sensor on one side, the field of view on the other.
+
+<FovTriangles />
+
+```text
+FOV / WD ≈ sensor width / f        →        FOV ≈ sensor width × WD / f
+```
+
+The exact thin-lens version, which the tools in this course use, is **FOV = sensor width × (WD − f) / f**. When WD is much bigger than f the two give almost the same answer.
+
+**Worked example.** Sensor 8.45 mm wide, 16 mm lens, WD 1000 mm:
+
+<Equation
+  terms={[
+    { value: "8.45", label: "sensor (mm)" },
+    { op: "×", value: "(1000 − 16)", label: "WD − f" },
+    { op: "÷", value: "16", label: "f (mm)" },
+    { op: "=", value: "519.4 mm", label: "FOV width", result: true },
+  ]}
+/>
+
+## 7. Angle of view
+
+The angle depends only on the sensor and the lens:
+
+```text
+angle = 2 × atan( sensor width / (2 × f) )
+```
+
+8.45 mm sensor, 16 mm lens → **29.6°** horizontally. A wider angle means a wider FOV at every distance.
+
+## 8. mm per pixel
+
+Now the key step. Spread the FOV over the pixels:
+
+<Equation
+  terms={[
+    { value: "519.4 mm", label: "FOV width" },
+    { op: "÷", value: "2448", label: "pixels" },
+    { op: "=", value: "0.212 mm/px", label: "scale", result: true },
+  ]}
+/>
+
+So each pixel covers about **0.21 mm** of the object. Our billet edge-to-edge distance of 1199 pixels would be 1199 × 0.212 ≈ **254 mm**: a short billet, or a camera that is very close.
+
+**Try it.** The calculator from Chapter 1.6, now with proper meaning: change the FOV and the image width.
+
+<ScaleCalc />
+
+## 9. Magnification
+
+Another way to say the same thing: **magnification** m = sensor size ÷ FOV. Here 8.45 / 519.4 ≈ **0.016**: the object is imaged at 1/61 of its size. Then
+
+```text
+mm per pixel = pixel size ÷ magnification = 0.00345 mm ÷ 0.0163 ≈ 0.212 mm
+```
+
+Machine-vision lens catalogues often use magnification, especially for close-up and telecentric lenses.
+
+## 10. Square pixels, two directions
+
+Most industrial sensors have **square pixels**, so mm/px is the same horizontally and vertically: 519.4 / 2448 = 434.5 / 2048 = 0.212.
+
+The FOV is **not** square, though: 2448 × 2048 is wider than tall. Put **long objects along the sensor's long side**.
+
+## 11. How small must a pixel be?
+
+This is the design question. A pixel must be small compared with:
+
+- the **smallest thing you must detect** (a scratch, a crack, a missing rod), and
+- the **measurement tolerance** you must guarantee.
+
+Two common rules of thumb (not standards; check them on your own images):
+
+<Columns>
+<Panel title="Detection" tone="a">
+The smallest feature should cover **at least 2–3 pixels**, more for reliable classification.
+</Panel>
+<Panel title="Measurement" tone="b">
+The scale should be **several times finer** than the tolerance. A frequent target is mm/px about **1/10 of the tolerance** band, before sub-pixel methods.
+</Panel>
+</Columns>
+
+## 12. Working backwards: from requirement to camera
+
+Real projects start from the requirement, not from the camera. For example: inspect a **500 mm belt**, find **1 mm scratches**, camera **1.5 m** above.
+
+<Flow
+  steps={[
+    { label: "Area: 500 mm + 10% margin = 550 mm", tone: "world" },
+    { label: "Scratch 1 mm, 3 pixels on it → ≤ 0.333 mm/px", tone: "process" },
+    { label: "550 ÷ 0.333 → at least 1650 pixels across", tone: "data" },
+    { label: "Camera: 2448 px wide is enough", tone: "data" },
+    { label: "Lens: which focal length gives ≥ 550 mm at 1.5 m?", tone: "result" },
+  ]}
+/>
+
+## 13. Choosing the lens
+
+Solve the FOV formula for f: **f = sensor × WD / (FOV + sensor)** = 8.45 × 1500 / 558.45 ≈ **22.7 mm**. Nobody sells a 22.7 mm lens, so check the standard ones:
+
+| Lens | FOV at 1.5 m | mm/px | Scratch covers | Result |
+| --- | --- | --- | --- | --- |
+| 12 mm | 1047 mm | 0.428 | 2.3 px | too coarse |
+| 16 mm | 783 mm | 0.320 | 3.1 px | ✓ |
+| 25 mm | 498 mm | 0.204 | 4.9 px | FOV too small |
+
+The 16 mm lens passes. The 25 mm lens is sharper, but does not cover the belt; raise the camera to about **1.65 m** and it would (549 mm).
+
+**Try it.** Enter your own requirement and see which lens works.
+
+<FovPlanner caption="Thin-lens estimates with standard focal lengths. Always leave margin: the real FOV differs a little from the formula, and parts are never perfectly centred." />
+
+## 14. Calibrating the scale from the image
+
+Formulas get you close. On site, you **measure the scale**: place an object of known size (a ruler, a calibrated block, a target) in the field of view, at the **same height as the real parts**, and count its pixels.
+
+<Equation
+  terms={[
+    { value: "100 mm", label: "known length" },
+    { op: "÷", value: "50 px", label: "measured in image" },
+    { op: "=", value: "2.0 mm/px", label: "scale", result: true },
+  ]}
+/>
+
+Then every measurement is **pixels × scale**. Code example 3 does this with OpenCV.
+
+## 15. The height trap
+
+The scale is only valid **on the plane where you measured it**. An object that is **closer** to the camera looks bigger (perspective, 2.1), so it reads too long.
+
+<HeightErrorSketch />
+
+At 3 m working distance, a 1200 mm billet whose top is **150 mm higher** than the calibration plane reads **1263 mm**: a 63 mm error. Even 50 mm higher gives +20 mm.
+
+<Callout kind="mistake">
+
+Calibrate at the height of the surface you measure, keep the parts at that height, or correct for height. Precision gauging often uses **telecentric lenses**, whose scale hardly changes with distance.
+
+</Callout>
+
+## 16. The edges of the image
+
+Real lenses, especially short focal lengths, have **distortion**: straight lines bend near the edges and mm/px is slightly different there. For accurate measurement you **calibrate the camera** (Module 41) and correct the distortion, or keep the measured features near the centre.
+
+## 17. Sub-pixel: better than one pixel
+
+An edge is not a hard step; it is a gradient over a few pixels. By fitting that gradient, software can find edge positions to **a fraction of a pixel** (often around 1/10 of a pixel in good conditions). That is how a 0.2 mm/px system can measure to better than 0.2 mm. It only works with **sharp focus, good lighting and low noise** (2.2, 2.3, 2.5).
+
+## 18. Accuracy, resolution and repeatability
+
+<Glossary
+  items={[
+    { term: "Resolution", desc: "The smallest step the system can show: roughly mm per pixel (finer with sub-pixel methods)." },
+    { term: "Repeatability", desc: "Measure the same part many times: how much do the readings scatter?" },
+    { term: "Accuracy", desc: "How close the average reading is to the true value. Needs calibration against a known reference." },
+  ]}
+/>
+
+A system can be very repeatable and still inaccurate, for example because of the height trap in section 15.
+
+## 19. Industrial example: slab width
+
+A **2000 mm slab** must be measured to **±2 mm**. With the 1/10 rule we want about **0.2 mm/px**, so 2000 / 0.2 = **10,000 pixels** across. That is more than a normal area-scan camera has.
+
+The usual solution: **don't look at the whole slab**. Use **two cameras**, each with a narrow FOV over **one edge**, at a calibrated distance apart. Each edge is measured finely; the width is the camera spacing plus the two edge offsets.
+
+<TwoCameraSlab />
+
+Another option for very long or wide objects is a **line-scan camera** (Chapter 2.10).
+
+## 20. Putting it together
+
+<Flow
+  steps={[
+    { label: "Requirement: area, smallest feature, tolerance", tone: "world" },
+    { label: "Required mm per pixel", tone: "process" },
+    { label: "Pixels needed = FOV ÷ mm per pixel", tone: "data" },
+    { label: "Camera (pixels, pixel size)", tone: "data" },
+    { label: "Lens and working distance (FOV formula)", tone: "process" },
+    { label: "Calibrate the scale on site", tone: "result" },
+  ]}
+/>
+
+## What you should remember from 2.4
+
+<Takeaways>
+<Takeaway n={1} title="FOV">The real-world area the camera sees, in mm, at the working distance.</Takeaway>
+<Takeaway n={2} title="FOV formula">FOV ≈ sensor size × WD / f (exactly: sensor × (WD − f) / f for a thin lens).</Takeaway>
+<Takeaway n={3} title="mm per pixel">FOV ÷ number of pixels. Smaller is finer.</Takeaway>
+<Takeaway n={4} title="Design backwards">Requirement → mm/px → pixels → camera → lens and distance.</Takeaway>
+<Takeaway n={5} title="Calibrate on the right plane">The scale is only valid at the height where it was measured.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A camera sees a 600 mm wide area with 1920 pixels across. What is the mm/px?
+
+<Solution>
+
+600 / 1920 = **0.3125 mm/px**.
+
+</Solution>
+
+**Q2.** The same camera is moved twice as far away (same lens). What happens to the FOV and to mm/px?
+
+<Solution>
+
+Both roughly **double**: about 1200 mm wide and 0.625 mm/px. The camera sees more, but each pixel covers more.
+
+</Solution>
+
+**Q3.** You must detect 0.5 mm cracks with at least 3 pixels on them, over a 300 mm wide area. How many pixels across do you need?
+
+<Solution>
+
+0.5 / 3 = 0.167 mm/px, and 300 / 0.167 ≈ **1800 pixels**.
+
+</Solution>
+
+**Q4.** Why does a billet lying on a higher roller table read longer than one on the calibration plane?
+
+<Solution>
+
+It is closer to the camera, so it covers more pixels (perspective). With the scale from the lower plane, its length in mm comes out too large.
+
+</Solution>
+
+**Q5.** Which change makes mm/px smaller (finer)? A. Shorter focal length · B. More pixels across the same FOV · C. Larger working distance
+
+<Solution>
+
+**B.** More pixels across the same FOV. (A and C both widen the FOV and make mm/px larger.)
+
+</Solution>
+
+### Next: 2.5 The sensor and noise
+
+We'll look inside the sensor: how photons become electrons and then numbers, where **noise** comes from, and why a dark image cannot simply be brightened without paying a price.
+
+## Code
+
+Four calculations: the FOV and scale of a real camera, choosing a lens from a requirement, calibrating the scale from a reference object with OpenCV, and the height trap.
+
+### 1. From scratch: sensor size, FOV, angle and mm per pixel
+
+```python
+import numpy as np
+
+px_w, px_h = 2448, 2048          # sensor resolution, pixels
+pitch = 0.00345                  # pixel size, mm (3.45 µm)
+f = 16.0                         # focal length, mm
+wd = 1000.0                      # working distance, mm (lens to object)
+
+sensor_w, sensor_h = px_w * pitch, px_h * pitch
+fov_w = sensor_w * (wd - f) / f  # thin lens
+fov_h = sensor_h * (wd - f) / f
+angle = 2 * np.degrees(np.arctan(sensor_w / (2 * f)))
+print(f"sensor: {sensor_w:.2f} x {sensor_h:.2f} mm")
+print(f"FOV at {wd:.0f} mm: {fov_w:.1f} x {fov_h:.1f} mm, horizontal angle {angle:.1f} deg")
+print(f"mm per pixel: {fov_w / px_w:.3f} (x), {fov_h / px_h:.3f} (y)")
+```
+
+Output:
+
+```text
+sensor: 8.45 x 7.07 mm
+FOV at 1000 mm: 519.4 x 434.5 mm, horizontal angle 29.6 deg
+mm per pixel: 0.212 (x), 0.212 (y)
+```
+
+- Square pixels give the same scale in x and y.
+- The angle does not depend on `wd`; the FOV in mm does.
+
+### 2. From scratch: from a requirement to a lens
+
+```python
+import numpy as np
+
+need_fov = 550.0        # mm: 500 mm belt + 10% margin
+feature = 1.0           # mm: smallest scratch to detect
+px_per_feature = 3      # pixels across the smallest feature
+wd = 1500.0             # mm
+px_w, pitch = 2448, 0.00345
+sensor_w = px_w * pitch
+
+need_mmpp = feature / px_per_feature
+print(f"need <= {need_mmpp:.3f} mm/px -> at least {need_fov / need_mmpp:.0f} px across")
+f_exact = sensor_w * wd / (need_fov + sensor_w)          # thin lens solved for f
+print(f"exact focal length for {need_fov:.0f} mm FOV: {f_exact:.1f} mm")
+for f in [8, 12, 16, 25, 35]:
+    fov = sensor_w * (wd - f) / f
+    mmpp = fov / px_w
+    ok = fov >= need_fov and mmpp <= need_mmpp
+    print(f"{f:2d} mm lens: FOV {fov:6.1f} mm, {mmpp:.3f} mm/px, scratch = {feature / mmpp:.1f} px  {'OK' if ok else '--'}")
+print(f"25 mm lens at 1650 mm: FOV {sensor_w * (1650 - 25) / 25:.1f} mm")
+```
+
+Output:
+
+```text
+need <= 0.333 mm/px -> at least 1650 px across
+exact focal length for 550 mm FOV: 22.7 mm
+ 8 mm lens: FOV 1575.1 mm, 0.643 mm/px, scratch = 1.6 px  --
+12 mm lens: FOV 1047.3 mm, 0.428 mm/px, scratch = 2.3 px  --
+16 mm lens: FOV  783.3 mm, 0.320 mm/px, scratch = 3.1 px  OK
+25 mm lens: FOV  498.3 mm, 0.204 mm/px, scratch = 4.9 px  --
+35 mm lens: FOV  353.5 mm, 0.144 mm/px, scratch = 6.9 px  --
+25 mm lens at 1650 mm: FOV 549.0 mm
+```
+
+- Only one standard lens meets both conditions at 1.5 m. Moving the camera is the other knob.
+- The 8 mm lens sees a lot but puts only 1.6 pixels on a scratch: too coarse to detect it reliably.
+
+### 3. OpenCV: calibrate the scale from a reference block, then measure
+
+```python
+import numpy as np
+import cv2
+
+# synthetic top view: a 100 mm reference block and a billet, on a dark belt
+img = np.full((300, 900), 30, np.uint8)
+cv2.rectangle(img, (40, 120), (89, 179), 230, -1)       # reference block, 100 mm long
+cv2.rectangle(img, (220, 110), (819, 189), 200, -1)     # billet
+
+_, bw = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+boxes = sorted(cv2.boundingRect(c) for c in contours)   # (x, y, w, h), left to right
+ref, billet = boxes
+mm_per_px = 100.0 / ref[2]
+print("reference:", ref, "-> mm per pixel:", mm_per_px)
+print("billet:", billet, "-> length", billet[2] * mm_per_px, "mm")
+```
+
+Output:
+
+```text
+reference: (40, 120, 50, 60) -> mm per pixel: 2.0
+billet: (220, 110, 600, 80) -> length 1200.0 mm
+```
+
+- `cv2.rectangle` with thickness `-1` fills the rectangle; both corner pixels are included, so (40 … 89) is **50** pixels wide.
+- `cv2.boundingRect` returns `(x, y, w, h)`: the top-left corner and the size in pixels.
+- The scale comes from the image itself: **100 mm ÷ 50 px = 2.0 mm/px**. The reference must lie at the same height as the billet.
+
+### 4. The height trap in numbers
+
+```python
+import numpy as np
+
+wd = 3000.0             # camera to the calibration plane, mm
+true_len = 1200.0       # billet length, mm
+for h in [0.0, 50.0, 150.0]:      # billet top this far above the calibration plane
+    measured = true_len * wd / (wd - h)
+    print(f"top {h:5.0f} mm higher -> reads {measured:7.1f} mm (error {measured - true_len:+.1f} mm)")
+```
+
+Output:
+
+```text
+top     0 mm higher -> reads  1200.0 mm (error +0.0 mm)
+top    50 mm higher -> reads  1220.3 mm (error +20.3 mm)
+top   150 mm higher -> reads  1263.2 mm (error +63.2 mm)
+```
+
+- Image size goes with 1 / distance (2.1), so a surface h closer reads longer by the factor WD / (WD − h).
+- Doubling the working distance halves the error from the same height difference: one reason measurement cameras are often mounted high.
+
+## OpenCV API notes
+
+**`cv2.boundingRect(points) → (x, y, w, h)`**: the upright rectangle around a contour, in whole pixels. For rotated parts use `cv2.minAreaRect(points) → ((cx, cy), (w, h), angle)`, which gives float sizes.
+
+**`cv2.findContours(binary, mode, method) → contours, hierarchy`** (OpenCV 4.x returns two values). `cv2.RETR_EXTERNAL` keeps outer contours only; `cv2.CHAIN_APPROX_SIMPLE` compresses straight runs.
+
+**Pixel counting conventions.** A filled rectangle from column 40 to 89 is 50 pixels wide (89 − 40 + 1). Edge-to-edge distance between two detected edge positions (for example 212 and 1411) is 1411 − 212 = 1199 pixels. Be consistent, or you build in a one-pixel error.
+
+**OpenCV has no "mm".** All OpenCV results are in pixels. Converting to millimetres is your scale (this chapter) or a full camera calibration (`cv2.calibrateCamera`, Module 41).
+
+## Where it fails
+
+- **Distortion.** One scale for the whole image ignores lens distortion. Calibrate the camera or keep measurements near the centre.
+- **Different heights.** Parts above or below the calibration plane read wrong (section 15). Use a fixed height, a height measurement, or a telecentric lens.
+- **Tilted camera.** If the camera is not square to the surface, the scale changes across the image (perspective). Correct it with a homography (Module 41) or mount the camera square.
+- **Thin-lens FOV.** The formula is an estimate. Real lenses and the lens's actual principal point differ; measure the FOV on site.
+- **Rules of thumb.** "3 pixels per feature" and "1/10 of the tolerance" are starting points; contrast, noise and edge quality decide what really works.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Choosing the camera before the requirement.** Start from feature size, tolerance and area.
+- **Forgetting margin.** Parts are not perfectly centred; leave 10–20 % extra FOV.
+- **Calibrating with a reference lying on the floor while parts ride on rollers.** Calibrate at the part's height.
+- **Mixing the off-by-one pixel conventions** (`x2 − x1` vs `x2 − x1 + 1`).
+- **Assuming more megapixels fix everything.** Optics, focus and lighting must also support the finer scale (2.2, 2.3).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Where the FOV formula comes from
+
+With the thin lens, magnification m = s′ / s = f / (s − f) for an object at distance s. The object-side size of the sensor is sensor / m = sensor × (s − f) / f. For s ≫ f this is sensor × s / f, the similar-triangles estimate [1][2].
+
+### Sensor formats
+
+Sensor "inch" formats (1/2″, 2/3″, 1.1″ …) are historical names from video camera tubes; they do not equal any physical dimension of the sensor. Always compute the size from pixels × pixel size, or read the active-area size in the datasheet [2].
+
+### Telecentric lenses
+
+An object-side telecentric lens accepts only rays parallel to its axis, so magnification hardly changes with distance inside its working range. The price: the FOV can be no larger than the front lens, so telecentric lenses are large and used for small, precise parts [2].
+
+### Sub-pixel edges
+
+Edge positions can be estimated to fractions of a pixel by fitting the intensity profile across the edge or interpolating the gradient peak. Steger et al. discuss sub-pixel edge extraction and its accuracy limits in detail [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A sensor has 2448 pixels of 3.45 µm across. How wide is it?",
+      options: ["2.45 mm", "8.45 mm", "24.5 mm", "0.845 mm"],
+      answer: 1,
+      explanation: "2448 × 0.00345 mm = 8.45 mm.",
+    },
+    {
+      question: "A camera sees 519 mm across with 2448 pixels. What is the scale?",
+      options: ["4.7 mm/px", "0.212 mm/px", "2.12 mm/px", "0.0212 mm/px"],
+      answer: 1,
+      explanation: "519 / 2448 ≈ 0.212 mm per pixel.",
+    },
+    {
+      question: "You need 0.25 mm/px over a 1000 mm wide area. How many pixels across?",
+      options: ["250", "1000", "4000", "2500"],
+      answer: 2,
+      explanation: "1000 / 0.25 = 4000 pixels.",
+    },
+    {
+      question: "A part is 100 mm closer to the camera than the calibration plane (WD 2000 mm). Its length reads…",
+      options: ["Correct", "About 5 % too long", "About 5 % too short", "It depends on the colour"],
+      answer: 1,
+      explanation: "Factor 2000 / 1900 ≈ 1.053: about 5 % too long.",
+    },
+    {
+      question: "Which lens gives a wider field of view at the same distance, on the same camera?",
+      options: ["50 mm", "25 mm", "12 mm", "They are all the same"],
+      answer: 2,
+      explanation: "Shorter focal length → wider angle → wider FOV.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 1920 × 1200 camera with 5.86 µm pixels uses a 12 mm lens at 800 mm. (a) Sensor width? (b) FOV width (thin lens)? (c) mm/px? (d) Can it put 3 pixels on a 1 mm defect?
+
+<Solution>
+
+(a) 1920 × 0.00586 = **11.25 mm**.
+
+(b) 11.25 × (800 − 12) / 12 ≈ **738.8 mm**.
+
+(c) 738.8 / 1920 ≈ **0.385 mm/px**.
+
+(d) A 1 mm defect covers 1 / 0.385 ≈ 2.6 pixels: **just short** of 3. Use a 16 mm lens (FOV ≈ 552 mm, 0.287 mm/px, 3.5 pixels) if 552 mm is wide enough.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Two calibration marks 500 mm apart are found at pixel positions (312.4, 518.0) and (1561.9, 521.5). (a) Compute mm/px from their distance. (b) A billet's edges are at x = 402.0 and x = 1478.5 on the same row. How long is it?
+
+<Solution>
+
+```python
+import numpy as np
+
+a = np.array([312.4, 518.0])
+b = np.array([1561.9, 521.5])
+mm_per_px = 500.0 / np.linalg.norm(b - a)
+print(f"scale: {mm_per_px:.4f} mm/px")
+print(f"billet: {(1478.5 - 402.0) * mm_per_px:.1f} mm")
+```
+
+Output:
+
+```text
+scale: 0.4002 mm/px
+billet: 430.8 mm
+```
+
+`np.linalg.norm` gives the straight-line distance between the marks in pixels (it also handles a slightly tilted pair). Sub-pixel positions like 312.4 come from edge or centroid fitting.
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+A camera 2.5 m above a roller table was calibrated on the rollers. A 600 mm wide plate is 40 mm thick. (a) What width does the camera read for its top surface? (b) What would you change?
+
+<Solution>
+
+(a) 600 × 2500 / (2500 − 40) ≈ **609.8 mm**: almost 10 mm too wide.
+
+(b) Calibrate on a target at the plate-top height, or correct using the known thickness (scale × (WD − h) / WD), or use a telecentric or stereo/laser height measurement for varying thickness.
+
+</Solution>
+
+## References
+
+1. E. Hecht, *Optics*, 5th ed. Pearson, 2017. Ch. 5 (thin lenses, magnification).
+2. C. Steger, M. Ulrich and C. Wiedemann, *Machine Vision Algorithms and Applications*, 2nd ed. Wiley-VCH, 2018. Ch. 2 (lenses, telecentric lenses, sensor formats) and Ch. 3 (sub-pixel edge extraction, camera calibration).
+3. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. Springer, 2022. Ch. 2 (image formation). Free online edition: [szeliski.org/Book](https://szeliski.org/Book/).
+4. OpenCV 4.13.0 documentation, *Structural Analysis and Shape Descriptors* (`findContours`, `boundingRect`, `minAreaRect`): [docs.opencv.org/4.13.0/d3/dc0/group__imgproc__shape.html](https://docs.opencv.org/4.13.0/d3/dc0/group__imgproc__shape.html).

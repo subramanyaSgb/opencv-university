@@ -1,0 +1,329 @@
+export const meta = {
+  number: "23.1",
+  title: "Erosion and dilation",
+  minutes: 20,
+  objectives: [
+    "Explain erosion and dilation as minimum and maximum over a structuring element",
+    "Compute both by hand on a small binary image and with cv2.erode / cv2.dilate",
+    "Choose the structuring element's shape and size, and use iterations",
+    "Use erosion to remove specks and break thin connections, dilation to fill gaps and join parts",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 23.1 (first chapter of Module 23).
+  New lab: MorphLab (lib/morph-ops.ts; elements, morphologyEx, distance transforms equal OpenCV; Zhang–Suen equals cv2.ximgproc.thinning).
+  New sample: sample-morph.png.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 23.1 Erosion and dilation
+
+<Definition term="Erosion and dilation">the two basic operations of mathematical morphology. A small shape, the structuring element, is placed on every pixel. Erosion keeps a pixel white only if the element fits completely inside the white region (minimum over the element): objects shrink. Dilation makes a pixel white if the element touches any white pixel (maximum): objects grow.</Definition>
+
+Thresholding (13) turns an image into a binary mask, and masks are rarely clean: there are white specks from noise, small black holes inside objects, thin bridges between parts that should be separate, and gaps in parts that should be whole. Morphology repairs masks by shape, not by brightness. Its theory comes from Matheron and Serra's work on mineral textures in the 1960s [1]; in practice, erosion and dilation and their combinations (23.2–23.6) are among the most used operations in machine vision.
+
+## 1. An analogy
+
+Erosion is like sanding a wooden shape with a round sanding block that must stay entirely on the wood: thin parts and small bumps disappear first, and the whole shape gets smaller. Dilation is like painting around the shape with a round brush whose centre follows the outline: everything gets thicker, small gaps and holes fill in.
+
+## 2. Minimum and maximum over the element
+
+<Flow
+  steps={[
+    { label: "Binary image (0 / 255) and a structuring element (e.g. 3 × 3 square)", tone: "data" },
+    { label: "Place the element's centre on each pixel", tone: "process" },
+    { label: "Erosion: output = minimum under the element (all white → white)", tone: "process" },
+    { label: "Dilation: output = maximum under the element (any white → white)", tone: "result" },
+  ]}
+/>
+
+A worked example: a 4 × 4 block with a one-pixel-wide spur to the right, 3 × 3 square element.
+
+<Columns>
+<Panel title="Input" tone="a">
+<PixelMatrix size="sm" values={[[0, 0, 0, 0, 0, 0, 0], [0, 255, 255, 255, 255, 0, 0], [0, 255, 255, 255, 255, 0, 0], [0, 255, 255, 255, 255, 255, 255], [0, 255, 255, 255, 255, 0, 0], [0, 0, 0, 0, 0, 0, 0]]} />
+</Panel>
+<Panel title="Eroded" tone="b">
+<PixelMatrix size="sm" values={[[0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 255, 255, 0, 0, 0], [0, 0, 255, 255, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0]]} />
+</Panel>
+<Panel title="Dilated" tone="c">
+<PixelMatrix size="sm" values={[[255, 255, 255, 255, 255, 255, 0], [255, 255, 255, 255, 255, 255, 0], [255, 255, 255, 255, 255, 255, 255], [255, 255, 255, 255, 255, 255, 255], [255, 255, 255, 255, 255, 255, 255], [255, 255, 255, 255, 255, 255, 0]]} />
+</Panel>
+</Columns>
+
+- **Erosion**: only the 2 × 2 centre survives. The spur is gone (it is narrower than the element), and the block lost one pixel on every side.
+- **Dilation**: the block grew by one pixel on every side, and the spur thickened to 3 pixels.
+
+A 3 × 3 element removes or adds one pixel per side; a k × k element (k odd) removes or adds (k − 1)/2. Erosion and dilation are *duals*: eroding the white is the same as dilating the black.
+
+## 3. On a real mask
+
+The test mask has 89 white connected components: 7 shapes plus 82 isolated specks and small fragments. Counting white pixels and components after one erosion or dilation:
+
+| Element | Erode: white pixels | Erode: components | Dilate: white pixels | Dilate: components |
+| --- | --- | --- | --- | --- |
+| (input) | 17 220 | 89 | 17 220 | 89 |
+| 3 × 3 square | 15 017 | 21 | 19 852 | 82 |
+| 5 × 5 square | 13 055 | 6 | 22 998 | 74 |
+| 5 × 5 ellipse | 13 665 | 8 | 21 822 | 74 |
+
+- A 3 × 3 erosion removes every one-pixel speck; what remains besides the five large shapes are fragments of the 2-pixel-wide diagonal line, which is too thin to survive intact.
+- The two discs are joined by a 3-pixel bridge. A 3 × 3 erosion leaves a 1-pixel thread; a 5 × 5 erosion cuts it, and the discs become separate objects.
+- Dilation fills the small holes and pepper inside the rectangle (230 black pixels inside it before, 107 after a 3 × 3 dilation, 64 after 5 × 5) and merges nearby specks into larger blobs.
+
+Each operation alone changes the size of everything. Combining them (23.2) removes the unwanted parts while keeping the size of the rest.
+
+<MorphLab mode="binary" initialOp="erode" caption="The test mask with erosion or dilation (and the combinations of 23.2). White pixels were kept, red ones removed, green ones added. Change the element's shape and size and the number of iterations: watch the specks vanish, the bridge between the discs break, the thin line fall apart, and the holes in the rectangle close."/>
+
+## 4. The structuring element
+
+`cv2.getStructuringElement(shape, (w, h))` makes the three standard shapes:
+
+| Shape | Effect | Use |
+| --- | --- | --- |
+| `MORPH_RECT` | grows and shrinks squarely; corners stay sharp | axis-aligned parts, fast (separable) |
+| `MORPH_ELLIPSE` | approximately round; rounds corners | most natural shapes, direction-independent |
+| `MORPH_CROSS` | 4-neighbour growth | thin structures, minimal change |
+
+Any binary NumPy array works as an element: a horizontal line (k × 1) erodes only horizontally and removes vertical structures thinner than k, which is how lines are separated from text (23.2 exercise). Two iterations of a 3 × 3 square equal one 5 × 5 square; iterations of a small element are often faster than one large element.
+
+## 5. Industrial example
+
+After thresholding a back-lit image of stamped parts, a 3 × 3 erosion removes single-pixel noise from dust, and a dilation with the same element restores the part's size (that pair is an opening, 23.2). Erosion alone is used to separate touching parts before counting (25.4): erode until the necks between parts break, count the pieces, and do not measure them, because they have shrunk. Dilation alone grows a mask to create a safety margin: a "do not inspect" zone around a hole edge, or a search region around an expected position.
+
+## What you should remember from 23.1
+
+<Takeaways>
+<Takeaway n={1} title="Erosion">Minimum under the element: shapes shrink, specks and thin parts vanish.</Takeaway>
+<Takeaway n={2} title="Dilation">Maximum under the element: shapes grow, holes and gaps fill.</Takeaway>
+<Takeaway n={3} title="Element">Shape and size decide what counts as "thin" or "small".</Takeaway>
+<Takeaway n={4} title="Size changes">Alone, both change object size; combine them to repair without resizing (23.2).</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A white line 4 pixels wide is eroded with a 5 × 5 square. What remains?
+
+<Solution>
+
+Nothing: the element never fits inside a 4-pixel-wide line. With a 3 × 3 square it would become 2 pixels wide.
+
+</Solution>
+
+**Q2.** A black hole of 2 × 2 pixels inside a white region is dilated with a 3 × 3 square. What happens?
+
+<Solution>
+
+It disappears: every hole pixel has a white pixel within one step, so the maximum is white everywhere.
+
+</Solution>
+
+### Next: 23.2 Opening and closing
+
+Erosion followed by dilation, and the reverse: clean masks without changing their size.
+
+## Code
+
+Two examples: the worked example, then erosion and dilation on the test mask.
+
+### 1. Erode and dilate by hand and with OpenCV
+
+```python
+import numpy as np
+import cv2
+
+a = np.zeros((6, 7), np.uint8)
+a[1:5, 1:5] = 1
+a[3, 5:7] = 1                                                        # the spur
+k = np.ones((3, 3), np.uint8)
+print("eroded:\n", cv2.erode(a, k))
+print("dilated:\n", cv2.dilate(a, k))
+
+def erode_numpy(img, r=1):                                          # minimum over the (2r+1) x (2r+1) square
+    p = np.pad(img, r, constant_values=img.max())                  # outside counts as white, as in OpenCV
+    h, w = img.shape
+    return np.min([p[dy:dy + h, dx:dx + w] for dy in range(2 * r + 1) for dx in range(2 * r + 1)], axis=0)
+
+print("NumPy erosion equals cv2.erode:", np.array_equal(erode_numpy(a), cv2.erode(a, k)))
+```
+
+Output:
+
+```text
+eroded:
+ [[0 0 0 0 0 0 0]
+ [0 0 0 0 0 0 0]
+ [0 0 1 1 0 0 0]
+ [0 0 1 1 0 0 0]
+ [0 0 0 0 0 0 0]
+ [0 0 0 0 0 0 0]]
+dilated:
+ [[1 1 1 1 1 1 0]
+ [1 1 1 1 1 1 0]
+ [1 1 1 1 1 1 1]
+ [1 1 1 1 1 1 1]
+ [1 1 1 1 1 1 1]
+ [1 1 1 1 1 1 0]]
+NumPy erosion equals cv2.erode: True
+```
+
+- Pixels outside the image do not count: OpenCV's default border value is "neutral" (the maximum for erosion, the minimum for dilation).
+
+### 2. On the test mask
+
+```python
+import numpy as np
+import cv2
+
+mask = cv2.imread("sample-morph.png", cv2.IMREAD_GRAYSCALE)
+components = lambda m: cv2.connectedComponents(m)[0] - 1             # minus the background
+print(f"input: {int((mask > 0).sum())} white, {components(mask)} components")
+for shape, name in [(cv2.MORPH_RECT, "square"), (cv2.MORPH_ELLIPSE, "ellipse")]:
+    for size in (3, 5):
+        k = cv2.getStructuringElement(shape, (size, size))
+        e, d = cv2.erode(mask, k), cv2.dilate(mask, k)
+        print(f"{name} {size}x{size}: erode {int((e > 0).sum())} white, {components(e)} comp | "
+              f"dilate {int((d > 0).sum())} white, {components(d)} comp")
+bridge = (slice(54, 57), slice(195, 225))                            # the 3-px bridge between the discs
+for size in (3, 5):
+    left = int((cv2.erode(mask, np.ones((size, size), np.uint8))[bridge] > 0).sum())
+    print(f"bridge pixels left after a {size}x{size} erosion: {left}")
+```
+
+Output:
+
+```text
+input: 17220 white, 89 components
+square 3x3: erode 15017 white, 21 comp | dilate 19852 white, 82 comp
+square 5x5: erode 13055 white, 6 comp | dilate 22998 white, 74 comp
+ellipse 3x3: erode 15570 white, 6 comp | dilate 19056 white, 84 comp
+ellipse 5x5: erode 13665 white, 8 comp | dilate 21822 white, 74 comp
+bridge pixels left after a 3x3 erosion: 30
+bridge pixels left after a 5x5 erosion: 0
+```
+
+- The 3 × 3 "ellipse" is a cross; it keeps the 2-pixel diagonal line connected, unlike the square.
+
+## OpenCV API notes
+
+**`cv2.erode(src, kernel, dst=None, anchor=(-1, -1), iterations=1, borderType=cv2.BORDER_CONSTANT, borderValue=morphologyDefaultBorderValue())`** and **`cv2.dilate(...)`** (same parameters):
+- `kernel`: uint8 array (non-zero = part of the element), usually from `cv2.getStructuringElement(cv2.MORPH_RECT | MORPH_ELLIPSE | MORPH_CROSS, (w, h))`. `None` means 3 × 3 square.
+- `iterations`: repeat the operation; `iterations=2` with 3 × 3 equals one 5 × 5 square.
+- Works on any number of channels and on grey images (23.6): minimum and maximum of grey values.
+- `cv2.morphologyEx(src, cv2.MORPH_ERODE | MORPH_DILATE, kernel)` is the same through the general entry point.
+
+**Speed**: rectangular elements are separable and fast for any size; elliptical ones cost more as they grow.
+
+## Where it fails
+
+- **Size changes**: erosion and dilation alone make measurements wrong; use opening and closing (23.2) or reverse the operation.
+- **Touching or close objects**: dilation merges them; erosion may delete small ones before it separates large ones.
+- **Shape-dependent results**: a square element turns circles into rounded squares when used repeatedly.
+- **Grey and noisy images**: binarise carefully first, or use grey morphology (23.6).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Black objects on white**: erosion acts on white; invert the mask (or use dilate) if your objects are black.
+- **Kernel of the wrong type** (float, or values other than 0/1 when you meant a shape): use uint8.
+- **Forgetting that `iterations` compounds** the size: 5 iterations of 3 × 3 is an 11 × 11 operation.
+- **Measuring areas after an erosion** used for separation.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Set definitions
+
+For a set X (white pixels) and element B: erosion X ⊖ B = \{x : B shifted to x is inside X\}; dilation X ⊕ B = \{x : (reflected B) shifted to x touches X\} (Serra [1], Gonzalez and Woods [2]). OpenCV applies the element without reflection in both operations; for symmetric elements this makes no difference.
+
+### Fast algorithms
+
+For rectangular elements, the van Herk / Gil–Werman algorithm computes running minima and maxima with about 3 comparisons per pixel regardless of size. Large discs can be approximated by sequences of small elements (octagons from alternating squares and crosses).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Erosion with a 3 × 3 square makes a pixel white when…",
+      options: ["Any of the 9 pixels is white", "All 9 pixels are white", "The centre is white", "More than half are white"],
+      answer: 1,
+      explanation: "Minimum over the element.",
+    },
+    {
+      question: "Which operation removes isolated white specks?",
+      options: ["Dilation", "Erosion", "Inversion", "Histogram equalisation"],
+      answer: 1,
+      explanation: "Specks smaller than the element disappear (but objects shrink).",
+    },
+    {
+      question: "Two iterations of a 3 × 3 square equal…",
+      options: ["One 3 × 3", "One 5 × 5 square", "One 6 × 6", "One 9 × 9"],
+      answer: 1,
+      explanation: "Each iteration adds one pixel per side.",
+    },
+    {
+      question: "Two objects are joined by a 3-px bridge. Which erosion separates them?",
+      options: ["None", "3 × 3 square", "5 × 5 square", "Only dilation"],
+      answer: 2,
+      explanation: "The 3 × 3 erosion leaves a 1-pixel thread.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Row 0, 1, 1, 0, 1, 1, 1, 1, 0 (1 = white). Erode and dilate with a 1 × 3 horizontal element (outside the row counts as neutral).
+
+<Solution>
+
+Erosion (white only if left, centre and right are white): 0, 0, 0, 0, 0, 1, 1, 0, 0. Dilation (white if any is white): 1, 1, 1, 1, 1, 1, 1, 1, 1. The 2-pixel run vanished in the erosion; the dilation closed the 1-pixel gap.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Separate the two discs with an erosion, label them, and then dilate each labelled piece back (with the same element) to recover their original sizes. Compare the areas with the original discs.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+k = np.ones((5, 5), np.uint8)
+n, labels = cv2.connectedComponents(cv2.erode(mask, k))
+for cx in (165, 255):
+    lab = labels[55, cx]                                              # the piece under each disc centre
+    piece = cv2.dilate((labels == lab).astype(np.uint8) * 255, k) & mask
+    print(f"disc at x={cx}: area after erosion {(labels == lab).sum()}, restored {(piece > 0).sum()}")
+print("true disc area (radius 30):", int(np.pi * 30 ** 2))
+```
+
+Output:
+
+```text
+disc at x=165: area after erosion 2361, restored 2817
+disc at x=255: area after erosion 2361, restored 2817
+true disc area (radius 30): 2827
+```
+
+Dilating each piece back and intersecting with the original mask restores the discs to their full area (2 817 pixels, close to π · 30² ≈ 2 827) while keeping them separate; the bridge stays cut. This "erode, label, dilate within the mask" pattern is the core of watershed-style separation (27.4).
+
+</Solution>
+
+## References
+
+1. J. Serra, *Image Analysis and Mathematical Morphology*, Academic Press, 1982.
+2. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 9 (morphological image processing).
+3. P. Soille, *Morphological Image Analysis: Principles and Applications*, 2nd ed., Springer, 2003.
+4. OpenCV 4.13.0 documentation: `erode`, `dilate`, `getStructuringElement`, `morphologyEx`. https://docs.opencv.org/4.13.0/

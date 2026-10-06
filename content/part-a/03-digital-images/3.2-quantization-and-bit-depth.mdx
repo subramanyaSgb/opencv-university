@@ -1,0 +1,431 @@
+export const meta = {
+  number: "3.2",
+  title: "Quantization and bit depth",
+  minutes: 40,
+  objectives: [
+    "Explain quantization: rounding each measurement to one of a fixed set of levels",
+    "Relate bit depth, number of levels, step size and rounding error",
+    "Explain why 10-, 12- and 16-bit data matter for dark and high-contrast scenes",
+    "Convert 16-bit images to 8-bit correctly in OpenCV",
+    "Recognize banding and use dithering to reduce it",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 3.2 (Module 3 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 3.2 Quantization and bit depth
+
+<Definition term="Quantization">rounding each pixel's measured value to one of a fixed number of levels.</Definition>
+
+Sampling (3.1) decided **where** we measure. **Quantization** decides **how precisely** we write each measurement down. The number of levels is set by the **bit depth**: 8 bits give 256 levels, 12 bits give 4096.
+
+<Flow
+  direction="right"
+  steps={[
+    { label: "Continuous brightness", tone: "world" },
+    { label: "ADC rounds to nearest level", tone: "process" },
+    { label: "Integer code (0 … 2ⁿ − 1)", tone: "data" },
+    { label: "Pixel value", tone: "result" },
+  ]}
+/>
+
+## 1. A ruler with fewer marks
+
+Measure a pencil with a ruler marked only in centimetres: you write "12 cm", even if it is 12.3 cm. With millimetre marks you write "123 mm". The pencil did not change; only the **precision of the marks** did.
+
+Quantization is the ruler's marks. The sensor's analog signal is continuous; the ADC (2.5) rounds it to the nearest mark.
+
+## 2. Bits and levels
+
+With **n bits** you can write **2ⁿ** different numbers:
+
+<Equation terms={[{ value: "1 bit", label: "2 levels" }, { op: "→", value: "4 bits", label: "16 levels" }, { op: "→", value: "8 bits", label: "256 levels" }, { op: "→", value: "12 bits", label: "4096 levels", result: true }]} />
+
+1.1 explained why 8 bits give 0…255. The same rule gives 0…1023 for 10 bits, 0…4095 for 12 bits and 0…65535 for 16 bits.
+
+## 3. Step size and rounding error
+
+Spread the levels over the full range and the **step** between neighbouring levels is range ÷ (levels − 1). The worst rounding error is **half a step**.
+
+| Bits | Levels | Max error (as fraction of full range) |
+| --- | --- | --- |
+| 1 | 2 | 0.5 |
+| 2 | 4 | 0.167 |
+| 3 | 8 | 0.071 |
+| 8 | 256 | 0.002 |
+
+*(From Code example 1.)*
+
+## 4. What too few levels look like
+
+**Try it.** Reduce the bits and watch smooth areas.
+
+<QuantLab caption="Top: a smooth gray ramp. Bottom: the gradient scene from Module 1. Both are quantized to the chosen number of bits." />
+
+With few levels, smooth gradients break into **bands**: this is **posterization** (or banding, contouring). Around 6 bits the bands become hard to see on a smooth ramp; at 8 bits they are invisible to the eye.
+
+## 5. Why 8 bits is enough to look at
+
+The eye can tell apart roughly a hundred or so brightness steps across a scene. 256 levels, spread with the gamma curve of 2.8, are enough for a smooth-looking picture. That is why 8 bits per channel became the standard for displays, JPEG and most images.
+
+## 6. Why machine vision often wants more
+
+Looking is not measuring. More bits help when:
+
+- the scene has a **huge range** (glowing steel next to a dark floor, 2.5): 8 bits cannot hold both ends finely;
+- the important detail is in a **small part of the range** (dark areas, or a faint defect on a bright surface);
+- you will **process** the image heavily (flat-field correction, contrast stretching), which magnifies small steps.
+
+In the darkest 2 % of the range, 8 bits give only **6** distinct values; 12 bits give **83** (Code example 2).
+
+## 7. Bits vs noise
+
+More bits are only useful if the sensor is **less noisy** than one step. If the noise is ±10 levels, the last few bits record noise, not detail. Camera datasheets therefore offer 8-, 10- or 12-bit output to match the sensor's dynamic range (2.5). A rule of thumb: the useful bit depth is about log₂(dynamic range).
+
+<Equation terms={[{ value: "1667 : 1", label: "dynamic range (2.5)" }, { op: "→", value: "log₂ 1667", label: "" }, { op: "≈", value: "10.7 bits", label: "useful", result: true }]} />
+
+## 8. How images store more than 8 bits
+
+A 10- or 12-bit value does not fit in one byte, so it is usually stored in **16 bits** (two bytes). In NumPy that is `uint16`. A 12-bit camera image therefore uses values 0…4095 inside a container that could hold 0…65535; displayed directly, it looks almost black.
+
+Some cameras send **packed** formats (for example `Mono12Packed`: two 12-bit pixels in 3 bytes) to save bandwidth; the SDK unpacks them.
+
+## 9. Converting 16-bit to 8-bit
+
+To display or use 8-bit tools, you must **scale**, not just cut:
+
+| Method | 1000 (in 12-bit) becomes |
+| --- | --- |
+| `astype(np.uint8)` | 232 ❌ (wraps around) |
+| `>> 4` (12 → 8 bits) | 62 ✅ |
+| `cv2.convertScaleAbs(img, alpha=255/4095)` | 62 ✅ |
+| `cv2.normalize(..., NORM_MINMAX)` | stretched to the image's own min…max |
+
+*(Code example 3.)* Know the **real** bit depth: a 12-bit image stored in 16 bits must be divided by 16, not 257.
+
+<Callout kind="mistake">
+
+`img16.astype(np.uint8)` keeps only the lowest 8 bits: values wrap around (1000 → 232, 30000 → 48). It is the most common 16-bit bug in Python vision code.
+
+</Callout>
+
+## 10. Float images
+
+During processing it is often easier to work in **floating point** (`float32`), with values 0.0…1.0 or in physical units. No rounding happens until you convert back. OpenCV functions accept `float32` for most operations; convert back with clipping and rounding at the end.
+
+## 11. Banding and dithering
+
+When a smooth gradient is quantized with too few levels, the rounding error forms **bands**. Adding a tiny amount of random noise (about ± half a step) **before** rounding scatters the error: neighbouring pixels round up or down at random, and on average they follow the true value. This is **dithering**.
+
+In Code example 4, a gentle gradient from 100 to 104 rounded directly has an average column error of **0.249**; with dithering, **0.047**. Dithering adds noise to single pixels but removes the structured error.
+
+## 12. Quantization noise
+
+The rounding error behaves like a small noise of standard deviation **step / √12 ≈ 0.29 step** (2.5). It matters only when the sensor's own noise is smaller than about one step, which is when a higher bit depth or more gain (2.5) helps.
+
+## 13. Bit depth of colour images
+
+Colour images have a bit depth **per channel**: "24-bit colour" means 3 × 8 bits; "48-bit" means 3 × 16 bits. "8-bit colour" can also mean an indexed palette of 256 colours (old GIF images), which is something else entirely.
+
+## 14. Industrial example
+
+A camera looks at a **glowing billet** on a dark roller table. At 8 bits, an exposure that keeps the billet below 255 leaves the table and any markings in the bottom few levels. At **12 bits**, the same exposure keeps the billet unsaturated **and** leaves dozens of levels in the dark areas, so both can be analysed in one image.
+
+## What you should remember from 3.2
+
+<Takeaways>
+<Takeaway n={1} title="Quantization">Each measurement is rounded to one of 2ⁿ levels.</Takeaway>
+<Takeaway n={2} title="Error">The worst rounding error is half a step; more bits, smaller steps.</Takeaway>
+<Takeaway n={3} title="When more bits help">High dynamic range, dark details, heavy processing, as long as the noise is smaller than a step.</Takeaway>
+<Takeaway n={4} title="16-bit containers">10/12-bit data lives in uint16; scale it correctly, never astype(uint8).</Takeaway>
+<Takeaway n={5} title="Banding">Too few levels cause bands; dithering trades them for fine noise.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** How many levels does a 10-bit image have, and what is its maximum value?
+
+<Solution>
+
+2¹⁰ = **1024** levels, values **0…1023**.
+
+</Solution>
+
+**Q2.** A 12-bit pixel reads 2048. What is it in 8 bits?
+
+<Solution>
+
+2048 / 16 = **128** (or 2048 >> 4).
+
+</Solution>
+
+**Q3.** Why might a 16-bit image from a camera look black when shown directly?
+
+<Solution>
+
+It is probably 10- or 12-bit data in a 16-bit container: values up to 1023 or 4095 out of 65535 are displayed as very dark.
+
+</Solution>
+
+**Q4.** What does `np.uint16(300).astype(np.uint8)` give, and why?
+
+<Solution>
+
+**44**: only the lowest 8 bits are kept (300 − 256).
+
+</Solution>
+
+### Next: 3.3 Channels
+
+So far mostly one number per pixel. Next: images with **several** numbers per pixel — colour, alpha, depth, multispectral — and how they are stored and split.
+
+## Code
+
+Four experiments: quantizing a ramp, how many levels survive in the dark, converting 16-bit images to 8-bit, and dithering.
+
+### 1. From scratch: quantize a ramp to n bits
+
+```python
+import numpy as np
+
+ramp = np.linspace(0, 1, 11)                 # true brightness 0.0 .. 1.0
+for bits in [1, 2, 3, 8]:
+    levels = 2 ** bits
+    q = np.round(ramp * (levels - 1))        # integer code 0 .. levels-1
+    back = q / (levels - 1)                  # value the code stands for
+    print(f"{bits} bit ({levels:3d} levels): codes {q.astype(int)}  max error {np.abs(back - ramp).max():.3f}")
+```
+
+Output:
+
+```text
+1 bit (  2 levels): codes [0 0 0 0 0 0 1 1 1 1 1]  max error 0.500
+2 bit (  4 levels): codes [0 0 1 1 1 2 2 2 2 3 3]  max error 0.167
+3 bit (  8 levels): codes [0 1 1 2 3 4 4 5 6 6 7]  max error 0.071
+8 bit (256 levels): codes [  0  26  51  77 102 128 153 179 204 230 255]  max error 0.002
+```
+
+- `np.round` rounds halves to the **nearest even** number: 0.5 → 0 in the 1-bit case. ADCs have their own rounding rules; the error bound is the same.
+- The 1-bit error of 0.5 is exactly half a step (the step is the whole range).
+
+### 2. From scratch: levels available in a dark area
+
+```python
+import numpy as np
+
+# a dark gradient: the darkest 2 % of the sensor's range across 1000 pixels
+true = np.linspace(0, 0.02, 1000)
+for bits in [8, 10, 12, 16]:
+    codes = np.round(true * (2 ** bits - 1))
+    print(f"{bits:2d}-bit: {len(np.unique(codes)):4d} different values in the dark gradient")
+```
+
+Output:
+
+```text
+ 8-bit:    6 different values in the dark gradient
+10-bit:   21 different values in the dark gradient
+12-bit:   83 different values in the dark gradient
+16-bit: 1000 different values in the dark gradient
+```
+
+- `np.unique` lists the distinct values. With 8 bits the whole dark gradient is drawn with 6 gray levels: strong banding after any contrast stretch.
+
+### 3. OpenCV: 16-bit to 8-bit, right and wrong
+
+```python
+import numpy as np
+import cv2
+
+img16 = np.array([[0, 1000, 4095, 30000, 65535]], np.uint16)   # e.g. a 12-bit camera image stored in 16 bits
+print("astype(uint8):     ", img16.astype(np.uint8))           # wraps around: wrong
+print("divide by 257:     ", (img16 // 257).astype(np.uint8))   # full 16-bit range -> 0..255
+print("12-bit >> 4:       ", (np.minimum(img16, 4095) >> 4).astype(np.uint8))
+norm = cv2.normalize(img16, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+print("cv2.normalize:     ", norm)
+print("convertScaleAbs:   ", cv2.convertScaleAbs(img16, alpha=255 / 4095))
+```
+
+Output:
+
+```text
+astype(uint8):      [[  0 232 255  48 255]]
+divide by 257:      [[  0   3  15 116 255]]
+12-bit >> 4:        [[  0  62 255 255 255]]
+cv2.normalize:      [[  0   4  16 117 255]]
+convertScaleAbs:    [[  0  62 255 255 255]]
+```
+
+- `astype(np.uint8)` keeps the low byte: 1000 → 232. Wrong.
+- Dividing by 257 maps the **full 16-bit** range to 0…255; for 12-bit data it makes everything dark (1000 → 3).
+- For 12-bit data, `>> 4` (divide by 16) or `convertScaleAbs(alpha = 255/4095)` give the right answer (1000 → 62). `convertScaleAbs` saturates values above the range at 255.
+- `cv2.normalize(…, NORM_MINMAX)` stretches each image's own min…max to 0…255: good for display, bad for comparing images (the scale changes per image).
+
+### 4. From scratch: banding and dithering
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(seed=32)
+true = np.tile(np.linspace(100, 104, 400), (50, 1))         # a very gentle gradient: 100 to 104
+plain = np.round(true)                                       # quantize directly
+dither = np.round(true + rng.uniform(-0.5, 0.5, true.shape)) # add tiny noise first
+for name, q in [("plain", plain), ("dithered", dither)]:
+    col_mean = q.mean(axis=0)                                # what the eye sees after averaging
+    print(f"{name:8s}: values {np.unique(q).astype(int)}, column-mean error {np.abs(col_mean - true[0]).mean():.3f}")
+```
+
+Output:
+
+```text
+plain   : values [100 101 102 103 104], column-mean error 0.249
+dithered: values [100 101 102 103 104], column-mean error 0.047
+```
+
+- Both use the same five levels. Without dithering, each column is a flat step: the average error is about a quarter of a level.
+- With dithering, pixels in a column scatter between two levels in the right proportion, so their average is close to the true value.
+
+## OpenCV API notes
+
+**Depths**: `CV_8U` (uint8), `CV_16U` (uint16), `CV_16S`, `CV_32S`, `CV_32F` (float32), `CV_64F`. Most functions support 8U, 16U and 32F; check the documentation for each.
+
+**`cv2.convertScaleAbs(src, alpha=1, beta=0)`**: computes |src·alpha + beta| and saturates to 8-bit.
+
+**`cv2.normalize(src, dst, alpha, beta, norm_type, dtype)`**: with `NORM_MINMAX`, maps the image's min to `alpha` and max to `beta`.
+
+**Reading 16-bit files**: `cv2.imread(path, cv2.IMREAD_UNCHANGED)` (or `IMREAD_ANYDEPTH`) keeps 16-bit PNG/TIFF data; the default flag converts to 8-bit.
+
+**`img.astype(np.float32) / 4095`** is a safe way to bring 12-bit data to 0.0…1.0 for processing.
+
+## Where it fails
+
+- **More bits than the noise allows** add data, not information.
+- **Per-image normalization** makes the same object look different in different images; use a fixed scale for measurement.
+- **Dithering** helps the eye and averages, but adds noise to single pixels; do not dither data that will be thresholded pixel by pixel.
+- **Banding in compressed video** comes from compression too (Module 4), not only from bit depth.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **`astype(np.uint8)` on 16-bit data.**
+- **Assuming 16-bit means 16 bits of data.** It is often 10 or 12 bits in a 16-bit container.
+- **Loading 16-bit images with the default `cv2.imread` flag**, which converts them to 8-bit.
+- **Saving processed float images as 8-bit too early**, losing precision between steps.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Uniform quantization noise
+
+For a uniform quantizer with step Δ and a signal that varies over many steps, the error is approximately uniform on [−Δ/2, Δ/2], with variance Δ²/12. The resulting signal-to-quantization-noise ratio grows by about 6.02 dB per bit [1].
+
+### Non-uniform quantization
+
+Gamma encoding (2.8) is a form of non-uniform quantization: more levels where the eye is sensitive. Logarithmic and companding curves do the same in some high-dynamic-range sensors [2].
+
+### Error diffusion
+
+Instead of random dither, error diffusion (Floyd–Steinberg) passes each pixel's rounding error to its unprocessed neighbours. It gives sharper results than random dither and is common for printing [3].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "How many levels does a 12-bit image have?",
+      options: ["12", "1024", "4096", "65536"],
+      answer: 2,
+      explanation: "2¹² = 4096 levels: 0 … 4095.",
+    },
+    {
+      question: "What is the largest rounding error of a quantizer with step 4?",
+      options: ["1", "2", "4", "8"],
+      answer: 1,
+      explanation: "Half a step.",
+    },
+    {
+      question: "A 12-bit value 3000 is stored in a uint16 array. How do you convert it to 8 bits?",
+      options: ["astype(np.uint8)", "Divide by 257", "Divide by 16 (>> 4)", "Divide by 4095"],
+      answer: 2,
+      explanation: "4096 levels → 256 levels is a factor of 16: 3000 >> 4 = 187.",
+    },
+    {
+      question: "What is banding (posterization)?",
+      options: ["Noise from the sensor", "Visible steps in smooth gradients caused by too few levels", "Colour fringes", "Motion blur"],
+      answer: 1,
+      explanation: "Each band is one quantization level over a smooth area.",
+    },
+    {
+      question: "Dithering works by…",
+      options: ["Blurring the image", "Adding a little noise before rounding", "Using more bits", "Compressing the image"],
+      answer: 1,
+      explanation: "The noise randomizes the rounding so that averages follow the true value.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A sensor has a full well of 20 000 e⁻ and an ADC with 10 bits. (a) How many electrons is one step? (b) If the read noise is 5 e⁻, is the ADC fine enough?
+
+<Solution>
+
+(a) 20 000 / 1023 ≈ **19.6 e⁻ per step**. (b) **No**: the noise (5 e⁻) is smaller than a step, so small differences are lost to rounding. A 12-bit ADC (≈ 4.9 e⁻ per step) would match the noise.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Create a 12-bit test image `np.array([[0, 512, 1024, 2048, 4095]], np.uint16)` and convert it to 8 bits with `cv2.convertScaleAbs`, with `>> 4`, and to float 0…1. Print all three.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+img = np.array([[0, 512, 1024, 2048, 4095]], np.uint16)
+print(cv2.convertScaleAbs(img, alpha=255 / 4095))
+print((img >> 4).astype(np.uint8))
+print(np.round(img.astype(np.float32) / 4095, 3))
+```
+
+Output:
+
+```text
+[[  0  32  64 128 255]]
+[[  0  32  64 128 255]]
+[[0.    0.125 0.25  0.5   1.   ]]
+```
+
+Both 8-bit conversions agree; the float version keeps the full precision for further processing.
+
+</Solution>
+
+### Exercise 3 (by hand)
+
+An image of a smooth white wall shows visible bands after a strong contrast stretch. Give two possible fixes.
+
+<Solution>
+
+Capture with a **higher bit depth** (10/12-bit) so there are more levels to stretch; or **avoid the strong stretch** by setting exposure and lighting so the wall uses more of the range. (Dithering before quantizing for display also hides bands.)
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez and R. E. Woods, *Digital Image Processing*, 4th ed. Pearson, 2018. Sec. 2.4 (image sampling and quantization).
+2. C. Poynton, *Digital Video and HD: Algorithms and Interfaces*, 2nd ed. Morgan Kaufmann, 2012.
+3. R. W. Floyd and L. Steinberg, "An adaptive algorithm for spatial greyscale," *Proceedings of the Society for Information Display*, vol. 17, no. 2, pp. 75–77, 1976.
+4. OpenCV 4.13.0 documentation, *Operations on arrays* (`convertScaleAbs`, `normalize`): [docs.opencv.org/4.13.0/d2/de8/group__core__array.html](https://docs.opencv.org/4.13.0/d2/de8/group__core__array.html).

@@ -1,0 +1,290 @@
+export const meta = {
+  number: "12.1",
+  title: "What a histogram shows",
+  minutes: 25,
+  objectives: [
+    "Compute and read a grey-value histogram and its cumulative histogram",
+    "Diagnose exposure, contrast, clipping and bimodality from the histogram",
+    "Compute statistics (mean, median, percentiles) directly from a histogram",
+    "Use cv2.calcHist with masks, bins and ranges, and compare histograms",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 12.1 (first chapter of Module 12).
+  HistLab (lib/hist-ops.ts) is shared by Module 12; equalization and CLAHE are tested against OpenCV.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 12.1 What a histogram shows
+
+<Definition term="Histogram">a table (or bar chart) of how many pixels have each grey value. It forgets where the pixels are and keeps only how often each value occurs, which makes it the quickest summary of an image's brightness and contrast.</Definition>
+
+The histogram is the most used diagnostic in image processing. One glance tells you whether an image is dark or bright, has low or high contrast, is clipped, or contains two populations (object and background) that a threshold could separate. Many operations in this module and the next (equalization, thresholds) are computed from it.
+
+## 1. An analogy
+
+Sorting a class by height into bins of 5 cm and counting each bin. The chart tells you the average height, the spread, whether there are two groups (children and teachers), without saying who stands where. A histogram does the same with pixels and grey values.
+
+## 2. Building a histogram
+
+<Flow
+  steps={[
+    { label: "Image: one grey value per pixel", tone: "data" },
+    { label: "For each value 0…255, count the pixels with that value", tone: "process" },
+    { label: "Histogram h[v]; cumulative c[v] = h[0] + … + h[v]", tone: "result" },
+  ]}
+/>
+
+- **h[v]**: number of pixels with value v; Σ h = number of pixels.
+- **Normalised histogram** p[v] = h[v] / N: the probability of value v.
+- **Cumulative histogram** c[v]: how many pixels are at or below v. Its normalised form rises from 0 to 1; where it crosses 0.5 is the **median**, 0.01 and 0.99 give the 1st and 99th percentiles (11.4).
+- **Bins**: several values per bar (for example 32 bins of 8 values) give a smoother, less noisy histogram.
+
+<HistLab ops={["none"]} initial="none" sources={[{ label: "scene", src: "/images/sample-scene.png" }, { label: "plate, poor light", src: "/images/sample-plate-poor.png" }, { label: "plate, good light", src: "/images/sample-plate-good.png" }, { label: "dark, high gain", src: "/images/sample-noise-dark-gain.png" }]} caption="Histograms (bars) and cumulative histograms (line) of four images. Compare where the mass of the histogram lies and how wide it is." />
+
+## 3. Reading histograms
+
+| Histogram shape | Meaning | Action |
+| --- | --- | --- |
+| Mass on the left | dark, underexposed | longer exposure, more light, gain |
+| Mass on the right | bright, overexposed | shorter exposure, less light |
+| Narrow peak | low contrast | better lighting; stretch (11.4) |
+| Spike at 0 or 255 | clipping: information lost | change exposure; never accept for measurement |
+| Two separated peaks | two populations (part and background) | a global threshold will work (13.2) |
+| Gaps (comb shape) | values were stretched digitally; levels missing | stretch less, or capture with more bits |
+| Very wide, noisy | noise or high gain | more light, lower gain |
+
+The histogram says nothing about **where** values are: a dark object on a bright background and a checkerboard can have identical histograms. Use it together with the image.
+
+## 4. Histograms in inspection
+
+- **Exposure monitoring**: log the percentage of pixels at 0 and 255 and the 1st/99th percentiles on every frame; alarm when they drift (lamp ageing, dirty lens, wrong camera setting).
+- **Region statistics**: histograms of a mask (a part's ROI) for its mean, spread, and contamination by background.
+- **Quick classification**: comparing histograms (`cv2.compareHist`) of a region with a reference, e.g. to check the right material or a missing coating.
+- **Threshold selection**: Otsu (13.3) and others pick a threshold from the histogram alone.
+
+## 5. Industrial example
+
+A battery-cell weld inspection logs, for every image, the 1st and 99th percentile of the weld ROI and the fraction of clipped pixels. Over three weeks the 99th percentile crept from 210 to 245 and clipped pixels appeared: a reflector in the lighting had loosened and was focusing more light on the weld. The defect detection had not yet failed, but its margin was shrinking. The histogram trend found the problem before it caused false rejects; a five-minute maintenance fix restored the original values.
+
+## What you should remember from 12.1
+
+<Takeaways>
+<Takeaway n={1} title="Counts">h[v] = number of pixels with value v; the cumulative histogram gives median and percentiles.</Takeaway>
+<Takeaway n={2} title="Diagnosis">Position = brightness, width = contrast, spikes at the ends = clipping, two peaks = threshold possible.</Takeaway>
+<Takeaway n={3} title="No positions">Very different images can share a histogram.</Takeaway>
+<Takeaway n={4} title="OpenCV">cv2.calcHist([img], [ch], mask, [bins], [0, 256]).</Takeaway>
+<Takeaway n={5} title="Monitoring">Percentiles and clipping fractions are cheap, powerful health checks.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** An image has 10 000 pixels; 300 have value 255. What does that tell you?
+
+<Solution>
+
+3 % of the pixels are clipped at white: some bright areas lost their detail; reduce exposure or light if those areas matter.
+
+</Solution>
+
+**Q2.** The cumulative fraction reaches 0.5 at value 90 and 0.99 at value 140. Median and 99th percentile?
+
+<Solution>
+
+Median **90**, 99th percentile **140**.
+
+</Solution>
+
+### Next: 12.2 Equalization
+
+Using the cumulative histogram as a transfer curve to spread the grey values evenly.
+
+## Code
+
+Two examples: a histogram and its statistics from scratch, and `cv2.calcHist` for exposure checks, masks and comparisons.
+
+### 1. From scratch: counting and statistics
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+h_np = np.bincount(img.ravel(), minlength=256)                    # from scratch: count each value 0..255
+h_cv = cv2.calcHist([img], [0], None, [256], [0, 256]).ravel()     # OpenCV: float32 counts
+print("same counts:", np.array_equal(h_np, h_cv.astype(int)), "| total", int(h_np.sum()), "=", img.size)
+
+c = np.cumsum(h_np) / img.size                                     # cumulative fraction
+median = int(np.searchsorted(c, 0.5))
+p1, p99 = int(np.searchsorted(c, 0.01)), int(np.searchsorted(c, 0.99))
+mean = float((np.arange(256) * h_np).sum() / img.size)
+print(f"from the histogram: mean {mean:.1f} | median {median} | 1 % {p1} | 99 % {p99}")
+print(f"from the image:     mean {img.mean():.1f} | median {np.median(img):.0f} | 1 % {np.percentile(img, 1):.0f} | 99 % {np.percentile(img, 99):.0f}")
+```
+
+Output:
+
+```text
+same counts: True | total 64000 = 64000
+from the histogram: mean 120.3 | median 117 | 1 % 6 | 99 % 252
+from the image:     mean 120.3 | median 117 | 1 % 6 | 99 % 252
+```
+
+- 256 counts are enough to get the mean, median and percentiles: no need to sort millions of pixels. On large images this is much faster than `np.percentile`.
+- `np.bincount` is the NumPy histogram for small non-negative integers.
+
+### 2. OpenCV: exposure checks, masks and comparisons
+
+```python
+import numpy as np
+import cv2
+
+def report(name, im):
+    h = cv2.calcHist([im], [0], None, [256], [0, 256]).ravel()
+    n = im.size
+    print(f"{name:20s}: range {im.min():3d}..{im.max():3d} | at 0: {h[0] / n:5.1%} | at 255: {h[255] / n:5.1%} | levels used {int(np.count_nonzero(h)):3d}")
+
+good = cv2.imread("sample-plate-good.png", cv2.IMREAD_GRAYSCALE)
+poor = cv2.imread("sample-plate-poor.png", cv2.IMREAD_GRAYSCALE)
+gain = cv2.imread("sample-noise-dark-gain.png", cv2.IMREAD_GRAYSCALE)
+for name, im in [("plate, good light", good), ("plate, poor light", poor), ("dark scene, high gain", gain)]:
+    report(name, im)
+
+h_good = cv2.calcHist([good], [0], None, [32], [0, 256])          # 32 bins of 8 values each
+h_poor = cv2.calcHist([poor], [0], None, [32], [0, 256])
+print("histogram correlation good vs poor:", round(float(cv2.compareHist(h_good, h_poor, cv2.HISTCMP_CORREL)), 3))
+mask = np.zeros_like(good); mask[50:150, 100:220] = 255            # histogram of a region only
+print("ROI histogram pixels:", int(cv2.calcHist([good], [0], mask, [256], [0, 256]).sum()))
+```
+
+Output:
+
+```text
+plate, good light   : range  39..217 | at 0:  0.0% | at 255:  0.0% | levels used  61
+plate, poor light   : range  69..183 | at 0:  0.0% | at 255:  0.0% | levels used 111
+dark scene, high gain: range  10..255 | at 0:  0.0% | at 255:  0.0% | levels used 244
+histogram correlation good vs poor: -0.157
+ROI histogram pixels: 12000
+```
+
+- The "good" plate uses few levels (61) but they are spread far apart: two well-separated populations. The "poor" plate uses more levels in a narrow band: low contrast.
+- The high-gain image uses almost all 256 levels: noise fills the histogram.
+- `cv2.compareHist` with `HISTCMP_CORREL` gives 1 for identical shapes; here the two lighting conditions produce clearly different histograms (−0.16).
+
+## OpenCV API notes
+
+**`cv2.calcHist(images, channels, mask, histSize, ranges)`**: lists for each argument; `ranges=[0, 256]` (upper bound exclusive); returns float32 of shape (bins, 1). Several channels → multi-dimensional histograms (12.6).
+
+**Comparison**: `cv2.compareHist(h1, h2, method)` with `HISTCMP_CORREL`, `HISTCMP_CHISQR`, `HISTCMP_INTERSECT`, `HISTCMP_BHATTACHARYYA`; normalise first (`cv2.normalize`) when images differ in size.
+
+**NumPy**: `np.bincount(img.ravel(), minlength=256)`, `np.histogram(img, bins, range)`; **matplotlib**: `plt.hist(img.ravel(), 256, (0, 256))` or `plt.plot(h)` (6.5).
+
+## Where it fails
+
+- **No spatial information**: identical histograms for very different images; a small defect barely changes the histogram of a large image.
+- **Bin choice**: too many bins on few pixels → noisy; too few → peaks merge.
+- **Mixed regions**: the histogram of an ROI that includes background mixes populations.
+- **Colour**: three separate channel histograms lose the joint colour information (12.6).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **`ranges=[0, 255]`** instead of `[0, 256]` (value 255 is then excluded).
+- **Passing the image instead of a list** (`cv2.calcHist(img, …)` instead of `[img]`).
+- **Comparing histograms of different-size images** without normalising.
+- **Judging exposure from the mean only** (clipping can hide behind a normal mean).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The histogram as a probability density
+
+The normalised histogram estimates the probability density of grey values. Image statistics computed from it (mean, variance, entropy H = −Σ p log₂ p) are the basis of thresholding methods (Otsu uses class means and variances, 13.3; entropy methods use H, 13.4) and of contrast measures. With few pixels, smoothing the histogram (kernel density estimation) gives a more stable density [1].
+
+### Fast histograms
+
+Histograms of sliding windows (for local thresholds or median filters) can be updated incrementally: moving the window one pixel removes one column and adds another, costing O(window height) instead of O(window area). Huang's and Perreault–Hébert's median filters are built on this idea (18.3) [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A histogram tells you…",
+      options: ["where the bright pixels are", "how many pixels have each value", "the image's edges", "the camera model"],
+      answer: 1,
+      explanation: "Only frequencies, no positions.",
+    },
+    {
+      question: "A tall spike at 255 means…",
+      options: ["high contrast", "clipped (saturated) pixels", "a dark image", "noise"],
+      answer: 1,
+      explanation: "Many pixels hit the maximum: detail lost.",
+    },
+    {
+      question: "Which ranges argument covers all 8-bit values in cv2.calcHist?",
+      options: ["[0, 255]", "[0, 256]", "[1, 256]", "[-1, 255]"],
+      answer: 1,
+      explanation: "The upper bound is exclusive.",
+    },
+    {
+      question: "Two well-separated peaks suggest…",
+      options: ["the image is blurred", "a global threshold can separate two populations", "clipping", "nothing"],
+      answer: 1,
+      explanation: "Object and background have different grey levels.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 4 × 4 image has the values 10, 10, 10, 10, 10, 10, 20, 20, 20, 20, 200, 200, 200, 200, 200, 255. Write the non-zero histogram entries, the median and the fraction of clipped pixels.
+
+<Solution>
+
+h[10] = 6, h[20] = 4, h[200] = 5, h[255] = 1. Sorted, the 8th and 9th values are 20 and 20 → median **20**. Clipped: 1/16 ≈ **6 %**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Compute the entropy H = −Σ p log₂ p (in bits) of the three plate/scene images used above. Which has the most "information" in its grey levels?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+for name, im in [("good", good), ("poor", poor), ("high gain", gain)]:
+    p = np.bincount(im.ravel(), minlength=256) / im.size
+    p = p[p > 0]
+    print(f"{name:9s}: entropy {-(p * np.log2(p)).sum():.2f} bits")
+```
+
+Output:
+
+```text
+good     : entropy 4.19 bits
+poor     : entropy 6.12 bits
+high gain: entropy 5.11 bits
+```
+
+Entropy measures how evenly the levels are used, not how useful they are: the low-contrast plate scores highest because noise spreads its values over many levels, while the well-lit plate (two clean populations) scores lowest. A high entropy is not the same as a good image.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 3.3 (histogram processing).
+2. S. Perreault, P. Hébert, "Median Filtering in Constant Time", *IEEE Transactions on Image Processing* 16(9), 2007.
+3. OpenCV 4.13.0 documentation: `calcHist`, `compareHist`; "Histograms" tutorials. https://docs.opencv.org/4.13.0/

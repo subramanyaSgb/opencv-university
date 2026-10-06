@@ -1,0 +1,383 @@
+export const meta = {
+  number: "6.3",
+  title: "Overflow and type conversion",
+  minutes: 30,
+  objectives: [
+    "Predict the result of +, −, averaging and differences on uint8 arrays in NumPy and in OpenCV",
+    "Know NumPy 2's type-promotion rules for arrays, Python numbers and mixed dtypes",
+    "Convert between uint8, int16 and float32 safely: widen, compute, round, clip, convert back",
+    "Use cv2.absdiff, cv2.addWeighted, cv2.convertScaleAbs and cv2.normalize for safe 8-bit results",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 6.3 (Module 6 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 6.3 Overflow and type conversion
+
+<Definition term="Overflow">what happens when a result does not fit in its dtype: uint8 can hold 0 … 255, so 200 + 100 must become something else. NumPy wraps around; OpenCV clips.</Definition>
+
+Chapter 3.2 showed the 16-bit-to-8-bit conversion trap. This chapter covers the everyday version: plain arithmetic on images. It is the single most common source of "the result looks strange" bugs in Python vision code, because nothing raises an error.
+
+## 1. An analogy
+
+A car's odometer with three digits: after 999 km it shows 000 (wrap-around). A speedometer needle stops at the end of the dial: at 300 km/h it still shows its maximum (saturation). NumPy `uint8` is the odometer; OpenCV is the speedometer. Neither shows the true value.
+
+## 2. Same operation, three answers
+
+a = 200, b = 100, both uint8 *(Code example 1)*:
+
+| Operation | NumPy uint8 | OpenCV | int16 (exact) |
+| --- | --- | --- | --- |
+| a + b | **44** | 255 | 300 |
+| b − a | **156** | 0 | −100 |
+| (a + b) / 2 | **22** | 150 | 150 |
+| \|b − a\| | **156** | 100 | 100 |
+
+- NumPy computes modulo 256: 300 − 256 = 44; −100 + 256 = 156.
+- OpenCV's arithmetic functions **saturate**: results are rounded and clipped to 0 … 255.
+- Widening to int16 (or float32) **before** the operation keeps the exact value.
+
+The averaging row is the classic bug: `(a + b) / 2` on two bright images gives dark noise, because a + b already wrapped. `cv2.addWeighted(a, 0.5, b, 0.5, 0)` or widening first gives 150.
+
+## 3. Try it
+
+<OverflowLab caption="Pick an operation and two 8-bit values. Cards show the result under NumPy uint8, OpenCV and exact arithmetic; the curve shows all values of a at once." />
+
+Things to try: a + b with b = 100 (the red NumPy curve jumps back to 0 at a = 156); a − b (NumPy wraps below 0, OpenCV flattens at 0); |a − b| (NumPy's `np.abs(a − b)` is wrong whenever a &lt; b).
+
+## 4. NumPy 2 type rules
+
+When dtypes mix, NumPy picks the result type *(Code example 2)*:
+
+| Expression (img is uint8) | Result dtype | Note |
+| --- | --- | --- |
+| `img + 100` | uint8 | the Python int adopts the array's type: wraps |
+| `img + 300` | error | `OverflowError`: 300 does not fit in uint8 |
+| `img * 1.5` | float64 | any float makes it float |
+| `img / 2` | float64 | true division is always float |
+| `img // 2` | uint8 | floor division keeps the integer type |
+| `img + int16_array` | int16 | the wider type wins |
+| `img.sum()`, `img.mean()` | uint64, float64 | reductions are widened automatically |
+
+Since NumPy 2.0 (NEP 50) a Python number no longer changes the array's dtype, so `img + 100` stays uint8 even though 100 + 200 overflows [1].
+
+## 5. Converting safely
+
+<Flow
+  steps={[
+    { label: "uint8 image", tone: "world" },
+    { label: "widen: astype(np.float32) (or int16)", tone: "process" },
+    { label: "compute freely (negatives, fractions, > 255)", tone: "process" },
+    { label: "np.round → np.clip(0, 255) → astype(np.uint8)", tone: "process" },
+    { label: "uint8 result", tone: "result" },
+  ]}
+/>
+
+Each step matters *(Code example 3)*:
+
+| Float values | 2.7 | −0.6 | 127.5 | 255.5 |
+| --- | --- | --- | --- | --- |
+| `astype(np.uint8)` | 2 | 0 | 127 | 255 |
+| round, clip, astype | **3** | **0** | **128** | **255** |
+| `cv2.convertScaleAbs` | 3 | 1 | 128 | 255 |
+
+- `astype` **truncates** (2.7 → 2) and does not clip: converting values outside 0 … 255 to uint8 is undefined in NumPy (it typically wraps, and may warn).
+- `np.round` rounds halves to even (127.5 → 128, 126.5 → 126), like OpenCV.
+- `cv2.convertScaleAbs(src, alpha, beta)` computes |src·alpha + beta|, rounds and saturates: handy for derivatives (5.5), but note the absolute value (−0.6 → 1).
+
+For calculations, **float32 in 0 … 1** (`img.astype(np.float32) / 255`) is a clean working space; multiply by 255, round and clip on the way back. `cv2.normalize(…, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)` stretches any range to 0 … 255 for display.
+
+## 6. Industrial example
+
+Detecting a missing part by comparing each frame with a reference image:
+
+<Flow
+  steps={[
+    { label: "frame, reference: uint8", tone: "world" },
+    { label: "diff = cv2.absdiff(frame, reference)  (not np.abs(frame − reference))", tone: "process" },
+    { label: "mask = diff > 40", tone: "process" },
+    { label: "missing part = large connected area in mask", tone: "result" },
+  ]}
+/>
+
+With `np.abs(frame − reference)` every pixel that got **darker** wraps to a large value (10 − 30 → 236): half of all changes look huge and the other half normal, so the detector behaves differently for dark and bright parts. One function call avoids the bug.
+
+## What you should remember from 6.3
+
+<Takeaways>
+<Takeaway n={1} title="NumPy">uint8 arithmetic wraps modulo 256, silently.</Takeaway>
+<Takeaway n={2} title="OpenCV">cv2.add / subtract / addWeighted / absdiff round and saturate.</Takeaway>
+<Takeaway n={3} title="Promotion">Python ints keep the array dtype (NumPy 2); floats and / give float64.</Takeaway>
+<Takeaway n={4} title="Safe pattern">Widen → compute → round → clip → astype(uint8).</Takeaway>
+<Takeaway n={5} title="Differences">cv2.absdiff, never np.abs(a − b) on uint8.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** uint8: 250 + 10 in NumPy and with cv2.add?
+
+<Solution>
+
+NumPy: 260 − 256 = **4**. OpenCV: **255**.
+
+</Solution>
+
+**Q2.** What does `(np.uint8 array of 30) - 50` give in NumPy?
+
+<Solution>
+
+−20 + 256 = **236**: a dark pixel becomes nearly white.
+
+</Solution>
+
+**Q3.** Why is `img.mean()` correct even though `img + img` overflows?
+
+<Solution>
+
+Reductions like `sum` and `mean` use a wider accumulator automatically (uint64 / float64); element-wise operators keep the array dtype.
+
+</Solution>
+
+### Next: 6.4 Vectorization vs loops
+
+Why one NumPy expression runs a hundred times faster than a Python loop over pixels.
+
+## Code
+
+Three examples: one operation under three rules, NumPy's promotion rules, and safe conversions. Copy the sample images next to the script.
+
+### 1. NumPy and OpenCV: the same arithmetic, three results
+
+```python
+import numpy as np
+import cv2
+
+a = np.full((2, 2), 200, np.uint8)
+b = np.full((2, 2), 100, np.uint8)
+rows = [
+    ("a + b",       (a + b)[0, 0],      cv2.add(a, b)[0, 0],                   (a.astype(np.int16) + b)[0, 0]),
+    ("b - a",       (b - a)[0, 0],      cv2.subtract(b, a)[0, 0],              (b.astype(np.int16) - a)[0, 0]),
+    ("(a + b) / 2", ((a + b) // 2)[0, 0], cv2.addWeighted(a, 0.5, b, 0.5, 0)[0, 0], ((a.astype(np.int16) + b) // 2)[0, 0]),
+    ("|b - a|",     np.abs(b - a)[0, 0], cv2.absdiff(b, a)[0, 0],              np.abs(b.astype(np.int16) - a)[0, 0]),
+]
+print(f"{'':12s} {'NumPy uint8':>12s} {'OpenCV':>8s} {'int16':>7s}")
+for name, np8, cv, i16 in rows:
+    print(f"{name:12s} {np8:12d} {cv:8d} {i16:7d}")
+```
+
+Output:
+
+```text
+             NumPy uint8   OpenCV   int16
+a + b                  44      255     300
+b - a                 156        0    -100
+(a + b) / 2            22      150     150
+|b - a|               156      100     100
+```
+
+- Arrays are 2 × 2 on purpose: OpenCV treats a 1-D NumPy array with up to 4 elements as a **scalar** (a colour value), not an image (Where it fails).
+- `a.astype(np.int16) + b`: one int16 operand is enough; NumPy promotes the other.
+
+### 2. NumPy: type promotion rules
+
+```python
+import numpy as np
+
+img = np.array([[10, 200]], np.uint8)
+print("img + 100      :", img + 100, img.dtype, "-> stays uint8 and wraps")
+try:
+    img + 300
+except OverflowError as e:
+    print("img + 300      : OverflowError:", e)
+print("img * 1.5      :", img * 1.5, (img * 1.5).dtype)
+print("img / 2        :", img / 2, (img / 2).dtype, "| img // 2:", img // 2, (img // 2).dtype)
+print("img + int16 arr:", (img + np.array([[1, 1]], np.int16)).dtype)
+print("sum, mean      :", img.sum(), img.sum().dtype, img.mean(), "(NumPy widens for reductions)")
+```
+
+Output:
+
+```text
+img + 100      : [[110  44]] uint8 -> stays uint8 and wraps
+img + 300      : OverflowError: Python integer 300 out of bounds for uint8
+img * 1.5      : [[ 15. 300.]] float64
+img / 2        : [[  5. 100.]] float64 | img // 2: [[  5 100]] uint8
+img + int16 arr: int16
+sum, mean      : 210 uint64 105.0 (NumPy widens for reductions)
+```
+
+- In NumPy 1.x, `img + 300` silently produced int16; NumPy 2 raises instead. Code written for NumPy 1 can break here.
+- Float results are float64 by default; use `astype(np.float32)` before passing them to OpenCV functions that reject float64 (6.1).
+
+### 3. NumPy and OpenCV: converting back to uint8
+
+```python
+import numpy as np
+import cv2
+
+f = np.array([2.7, -0.6, 127.5, 255.5], np.float32)
+print("astype(uint8)               :", f.astype(np.uint8), "<- truncates towards zero")
+print("round, clip, astype         :", np.clip(np.round(f), 0, 255).astype(np.uint8))
+print("cv2.convertScaleAbs         :", cv2.convertScaleAbs(f.reshape(1, -1)).ravel(), "<- rounds and saturates (|x|)")
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+x = img.astype(np.float32) / 255.0                                  # 0..1 floats for calculations
+print("to float 0..1               :", x.dtype, round(float(x.min()), 3), "..", round(float(x.max()), 3))
+back = np.clip(np.round(x * 255), 0, 255).astype(np.uint8)
+print("back to uint8, identical    :", np.array_equal(back, img))
+dark = (img // 4).astype(np.float32)                               # values 0..63
+stretched = cv2.normalize(dark, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+print("cv2.normalize 0..63 -> uint8:", int(stretched.min()), "..", int(stretched.max()))
+```
+
+Output:
+
+```text
+astype(uint8)               : [  2   0 127 255] <- truncates towards zero
+round, clip, astype         : [  3   0 128 255]
+cv2.convertScaleAbs         : [  3   1 128 255] <- rounds and saturates (|x|)
+to float 0..1               : float32 0.0 .. 1.0
+back to uint8, identical    : True
+cv2.normalize 0..63 -> uint8: 0 .. 255
+```
+
+- The round trip uint8 → float32 / 255 → × 255 → round → uint8 is exact.
+- `cv2.normalize(src, None, alpha, beta, NORM_MINMAX, dtype=…)` maps the minimum to alpha and the maximum to beta.
+
+## OpenCV API notes
+
+**Saturating arithmetic**: `cv2.add`, `cv2.subtract`, `cv2.multiply(a, b, scale=…)`, `cv2.divide`, `cv2.addWeighted(a, α, b, β, γ, dtype=…)`, `cv2.absdiff`, `cv2.scaleAdd`. Each accepts `dtype=` to compute into a wider output (for example `cv2.subtract(a, b, dtype=cv2.CV_16S)` keeps negatives).
+
+**Conversions**: `cv2.convertScaleAbs(src, alpha, beta)` → uint8; `cv2.normalize`; in C++ `Mat::convertTo(dst, type, alpha, beta)` (saturating).
+
+**Scalars**: `cv2.add(img, 100)` adds 100 to every channel (checked on 4.13.0); a tuple such as `(100, 0, 0, 0)` adds per channel. Some older OpenCV versions treated a plain number as (100, 0, 0, 0), i.e. blue only: pass a full tuple when code must run on several versions.
+
+## Where it fails
+
+- **OpenCV's scalar interpretation**: a 1-D NumPy array with ≤ 4 elements is read as a scalar, so `cv2.add(np.array([200], np.uint8), …)` returns a 4 × 1 float array, not an image. Keep image arrays 2-D.
+- **Saturation hides information**: OpenCV's clipped result is "safe" but wrong for measurement (a − b clipped at 0 loses all negative differences). Use signed or float outputs when the sign matters.
+- **float16 and float64** are not accepted by all OpenCV functions (6.1).
+- **Accumulating** many frames in uint8 (`acc += frame`) wraps; use `cv2.accumulate` into float32.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **`(img1 + img2) / 2`** on uint8 images.
+- **`np.abs(a - b)`** for image differences.
+- **`img.astype(np.uint8)`** on float results without rounding and clipping.
+- **`img + 50` to brighten** (wraps the bright pixels to dark); use `cv2.add` or widen and clip.
+- **Assuming NumPy 1 behaviour** (`img + 300` → int16) in NumPy 2 code.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### NEP 50: promotion in NumPy 2
+
+NumPy 2 adopted "weak" Python scalars: a Python int or float has no dtype of its own and takes the array's dtype (if it fits), so results no longer depend on the **value** of a scalar. This made behaviour predictable but turned some silent upcasts into errors or wrap-arounds [1].
+
+### Saturate cast in OpenCV
+
+OpenCV's C++ `saturate_cast<uchar>(x)` rounds to the nearest integer (halves to even with the default rounding mode) and clips to 0 … 255; all its arithmetic functions use it [2]. It is why OpenCV results never wrap, but also why they can silently clip.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "uint8 arrays a = 100, b = 200. NumPy a − b?",
+      options: ["−100", "0", "156", "100"],
+      answer: 2,
+      explanation: "−100 + 256 = 156 (wrap-around).",
+    },
+    {
+      question: "Same values with cv2.subtract(a, b)?",
+      options: ["−100", "0", "156", "100"],
+      answer: 1,
+      explanation: "OpenCV saturates negative results to 0.",
+    },
+    {
+      question: "In NumPy 2, what is the dtype of uint8_img * 2.0?",
+      options: ["uint8", "float32", "float64", "int16"],
+      answer: 2,
+      explanation: "A float scalar makes the result float64.",
+    },
+    {
+      question: "Correct way to get |a − b| for uint8 images?",
+      options: ["np.abs(a - b)", "cv2.absdiff(a, b)", "abs(a) - abs(b)", "(a - b).astype(np.uint8)"],
+      answer: 1,
+      explanation: "absdiff computes in a wider type and returns the exact absolute difference.",
+    },
+    {
+      question: "np.array([2.9]).astype(np.uint8) gives…",
+      options: ["3", "2", "Error", "255"],
+      answer: 1,
+      explanation: "astype truncates; round first.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+uint8 pixels 30 and 240. Compute in NumPy and with OpenCV: sum, difference (30 − 240), and average via (a + b) // 2.
+
+<Solution>
+
+Sum: NumPy 270 − 256 = **14**, OpenCV **255**. Difference: NumPy −210 + 256 = **46**, OpenCV **0**. Average: NumPy (14) // 2 = **7**; correct (and `cv2.addWeighted`) **135**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Brighten `sample-scene.png` by 80 levels in three ways: `img + 80` (NumPy), `cv2.add(img, 80)`, and widening with clipping. Count how many pixels end up darker than they started in each result.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+a = img + 80                                                  # NumPy uint8: wraps
+b = cv2.add(img, 80)                                          # OpenCV: saturates
+c = np.clip(img.astype(np.int16) + 80, 0, 255).astype(np.uint8)
+for name, r in [("img + 80", a), ("cv2.add", b), ("widen + clip", c)]:
+    print(f"{name:13s}: {int(np.sum(r < img)):6d} pixels darker than before, max {r.max()}")
+```
+
+Output:
+
+```text
+img + 80     :  14997 pixels darker than before, max 255
+cv2.add      :      0 pixels darker than before, max 255
+widen + clip :      0 pixels darker than before, max 255
+```
+
+Every pixel above 175 wraps around in the NumPy version: about 23 % of this image turns dark. `cv2.add` saturates instead (with OpenCV 4.13's Python bindings a plain number is added to every channel, also for colour images).
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A background-subtraction script computes `diff = frame - background` on uint8 images and flags `diff > 30`. It raises alarms for every faint shadow passing over the scene, but ignores equally faint brightening. Explain and fix.
+
+<Solution>
+
+Where the scene gets **darker**, `frame − background` is negative and wraps around: a darkening of just 5 levels gives 251, far above 30, so every shadow triggers. Where the scene gets **brighter**, the difference is positive and correct, so only changes above 30 count. The detector's sensitivity depends on the sign of the change. Fix: `diff = cv2.absdiff(frame, background)`, then threshold; both directions are now treated the same.
+
+</Solution>
+
+## References
+
+1. NumPy Enhancement Proposal 50, *Promotion rules for Python scalars*, and the NumPy 2.0 migration guide: [numpy.org/neps/nep-0050-scalar-promotion.html](https://numpy.org/neps/nep-0050-scalar-promotion.html).
+2. OpenCV 4.13.0 documentation, *Operations on arrays* (`add`, `subtract`, `absdiff`, `addWeighted`, `convertScaleAbs`, `normalize`) and *saturate_cast*: [docs.opencv.org/4.13.0/d2/de8/group__core__array.html](https://docs.opencv.org/4.13.0/d2/de8/group__core__array.html).
+3. NumPy documentation, *Data type promotion*: [numpy.org/doc/stable/reference/arrays.promotion.html](https://numpy.org/doc/stable/reference/arrays.promotion.html).

@@ -1,0 +1,279 @@
+export const meta = {
+  number: "17.2",
+  title: "Convolution step by step",
+  minutes: 20,
+  objectives: [
+    "Write the sliding-window computation as a double loop and match cv2.filter2D",
+    "Tell convolution from correlation (the kernel flip) and know which one OpenCV computes",
+    "Understand output size (same vs valid) and the anchor",
+    "Estimate the cost of a filter from the kernel size",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 17.2 (Module 17 plan).
+  Reuses ConvLab (17.1) starting with the asymmetric "shift" kernel.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 17.2 Convolution step by step
+
+<Definition term="Convolution">the operation that slides a kernel over an image and, at every position, computes the sum of products between the kernel and the image patch under it, with the kernel flipped. Without the flip it is called correlation. OpenCV's filter2D computes correlation; for symmetric kernels the two are identical.</Definition>
+
+17.1 computed one output pixel. A filter repeats that at every pixel: a sliding window. This chapter writes the full loop, checks it against OpenCV, and clears up a detail that confuses many: the textbook definition of convolution flips the kernel, OpenCV's `filter2D` does not.
+
+## 1. An analogy
+
+A stamp rolled across a sheet: at every position, the stamp's pattern meets a different part of the sheet. Convolution is the same stamp turned upside down before rolling; for a symmetric stamp you cannot tell the difference.
+
+## 2. The loop
+
+<Flow
+  steps={[
+    { label: "Pad the image by r = (k − 1)/2 on each side (17.3)", tone: "data" },
+    { label: "For every output pixel (x, y): take the k × k patch around it", tone: "process" },
+    { label: "Multiply element-wise with the kernel, sum", tone: "process" },
+    { label: "Write the sum to output(x, y)", tone: "result" },
+  ]}
+/>
+
+```text
+for y in rows:
+    for x in columns:
+        out[y, x] = sum over (i, j) of  K[j, i] · I[y + j − r, x + i − r]     correlation (filter2D)
+        out[y, x] = sum over (i, j) of  K[j, i] · I[y − j + r, x − i + r]     convolution (kernel flipped)
+```
+
+- Output size: with padding the output has the input's size ("same"). Without padding only positions where the kernel fits entirely are computed: for a 5 × 5 image and a 3 × 3 kernel, a 3 × 3 "valid" output.
+- Cost: k² multiplications per pixel. A 3 × 3 filter on a 5-megapixel image is 45 million multiply-adds; 31 × 31 would be 4.8 billion (17.4 and 17.5 show the shortcuts).
+
+## 3. Correlation vs convolution: the flip
+
+The difference shows only with asymmetric kernels. The kernel [0 0 1] on the row 0, 0, 10, 20, 30, 0, 0:
+
+| Operation | Result | Interpretation |
+| --- | --- | --- |
+| Correlation (`filter2D`) | 0, 10, 20, 30, 0, 0, 0 | each pixel copies its **right** neighbour: the signal moves left |
+| Convolution (flipped kernel, as `np.convolve`) | 0, 0, 0, 10, 20, 30, 0 | the signal moves right |
+
+For blur kernels, Gaussians, Laplacians (all symmetric) the results are the same. For derivative kernels the sign flips (a flipped Sobel kernel is −Sobel). To compute a true convolution with OpenCV, flip the kernel first: `cv2.filter2D(img, -1, cv2.flip(k, -1))`.
+
+<ConvLab initialKernel="shift" caption="The 'shift' kernel has a single 1 to the right of the centre. Click pixels: each output copies the value to its right, so the dark spot appears one column to the left. Flip the kernel in 'your own' (put the 1 on the left) to get the convolution result."/>
+
+## 4. Industrial example
+
+A team ported an edge-direction check from MATLAB (`conv2`, true convolution) to OpenCV (`filter2D`, correlation) with an asymmetric kernel. All edge directions came out reversed by 180°, and the polarity check (dark-to-bright vs bright-to-dark) failed on every part. Flipping the kernel (`cv2.flip(k, -1)`) restored identical results. Since then the team writes down, with every ported filter, whether the source library convolves or correlates.
+
+## What you should remember from 17.2
+
+<Takeaways>
+<Takeaway n={1} title="Loop">Pad, take the patch, multiply with the kernel, sum: at every pixel.</Takeaway>
+<Takeaway n={2} title="filter2D = correlation">No flip; true convolution needs cv2.flip(kernel, -1).</Takeaway>
+<Takeaway n={3} title="Symmetric kernels">Correlation = convolution (blur, Gaussian, Laplacian).</Takeaway>
+<Takeaway n={4} title="Cost">k² operations per pixel; large kernels need shortcuts.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Correlate the row 1, 2, 3, 4, 5 with the kernel [1, 0, −1] at the middle pixel (3). Then convolve.
+
+<Solution>
+
+Correlation: 1·2 + 0·3 + (−1)·4 = **−2**. Convolution (kernel flipped to [−1, 0, 1]): −1·2 + 0 + 1·4 = **+2**. Same magnitude, opposite sign.
+
+</Solution>
+
+**Q2.** A 640 × 480 image, 7 × 7 kernel, valid mode. Output size?
+
+<Solution>
+
+Each side loses 3 pixels: **634 × 474**.
+
+</Solution>
+
+### Next: 17.3 Borders and padding
+
+What the kernel sees when it reaches past the edge of the image.
+
+## Code
+
+Two examples: the loop vs filter2D, then flipping and the anchor.
+
+### 1. A filter as a double loop
+
+```python
+import numpy as np
+import cv2
+
+def correlate(img, k):
+    r = k.shape[0] // 2
+    p = np.pad(img, r, mode="reflect")                     # NumPy "reflect" = OpenCV BORDER_REFLECT_101 (default)
+    out = np.zeros_like(img)
+    for y in range(img.shape[0]):
+        for x in range(img.shape[1]):
+            out[y, x] = (p[y:y + k.shape[0], x:x + k.shape[1]] * k).sum()
+    return out
+
+a = np.arange(25, dtype=np.float32).reshape(5, 5)
+k = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]], np.float32)
+print("loop == filter2D on 5 x 5:", np.array_equal(correlate(a, k), cv2.filter2D(a, -1, k)))
+print("valid part (no padding needed):", a[1:-1, 1:-1].shape)
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+print("largest difference on the 320 x 200 scene:", float(np.abs(correlate(img, k / 45) - cv2.filter2D(img, -1, k / 45)).max()) < 1e-3)
+```
+
+Output:
+
+```text
+loop == filter2D on 5 x 5: True
+valid part (no padding needed): (3, 3)
+largest difference on the 320 x 200 scene: True
+```
+
+- The Python loop is exact but thousands of times slower than OpenCV's optimised code; it is for understanding, not for use.
+
+### 2. Flip and anchor
+
+```python
+import numpy as np
+import cv2
+
+row = np.array([[0, 0, 10, 20, 30, 0, 0]], np.float32)
+shift = np.array([[0, 0, 1]], np.float32)
+print("correlation (filter2D):", cv2.filter2D(row, -1, shift, borderType=cv2.BORDER_CONSTANT).tolist())
+print("convolution (flipped):", cv2.filter2D(row, -1, cv2.flip(shift, -1), borderType=cv2.BORDER_CONSTANT).tolist())
+print("np.convolve 'same':   ", np.convolve(row[0], [0, 0, 1], mode="same").tolist())
+
+ident = np.array([[1, 0, 0]], np.float32)
+print("anchor at the first cell turns [1, 0, 0] into identity:",
+      cv2.filter2D(row, -1, ident, anchor=(0, 0), borderType=cv2.BORDER_CONSTANT).tolist())
+```
+
+Output:
+
+```text
+correlation (filter2D): [[0.0, 10.0, 20.0, 30.0, 0.0, 0.0, 0.0]]
+convolution (flipped): [[0.0, 0.0, 0.0, 10.0, 20.0, 30.0, 0.0]]
+np.convolve 'same':    [0.0, 0.0, 0.0, 10.0, 20.0, 30.0, 0.0]
+anchor at the first cell turns [1, 0, 0] into identity: [[0.0, 0.0, 10.0, 20.0, 30.0, 0.0, 0.0]]
+```
+
+- `anchor` sets which kernel cell sits on the output pixel (default: the centre). Moving it shifts the result.
+
+## OpenCV API notes
+
+**`cv2.filter2D(src, ddepth, kernel, anchor=(-1, -1), delta=0, borderType)`**: correlation; `delta` is added to every output value. For kernels larger than about 11 × 11 OpenCV switches to a DFT-based implementation automatically.
+
+**Convolution**: `cv2.filter2D(src, -1, cv2.flip(kernel, -1))`.
+
+**Other libraries**: `scipy.ndimage.convolve` / `correlate`, `scipy.signal.convolve2d` (true convolution), PyTorch `conv2d` (correlation, despite the name).
+
+## Where it fails
+
+- **Python loops** are far too slow for real images; always use vectorised or library calls.
+- **Mixing libraries** with different conventions (flip, border, anchor) gives silently different results.
+- **Even-sized kernels** have no centre: the anchor defaults to (k/2, k/2) and shifts the result by half a pixel compared with odd kernels.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming filter2D convolves** with asymmetric kernels.
+- **Porting from MATLAB `conv2` or SciPy `convolve2d`** without flipping.
+- **Ignoring the anchor** when using even-sized kernels.
+- **Writing per-pixel Python loops** in production code.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why convolution flips
+
+Convolution is defined as (f ∗ g)(x) = Σ f(t) g(x − t). The flip makes the operation commutative and associative (f ∗ g = g ∗ f; (f ∗ g) ∗ h = f ∗ (g ∗ h)) and gives the convolution theorem: convolution in space is multiplication in frequency (Part E, 30.5). Correlation lacks these properties but is the natural "template comparison" (Part E, 32) [1].
+
+### Convolution as matrix multiplication
+
+Flattening the image into a vector, a convolution is multiplication by a large sparse matrix (a doubly block Toeplitz matrix). Deep-learning libraries use the related "im2col" trick: unroll all patches into columns and multiply by the kernel matrix with fast matrix routines.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "cv2.filter2D computes…",
+      options: ["Convolution", "Correlation (no kernel flip)", "Median filtering", "A DFT"],
+      answer: 1,
+      explanation: "Flip the kernel yourself for a true convolution.",
+    },
+    {
+      question: "For which kernel do correlation and convolution differ?",
+      options: ["Box 3 × 3", "Gaussian", "Sobel x", "Laplacian"],
+      answer: 2,
+      explanation: "Sobel x is antisymmetric: the flip changes its sign.",
+    },
+    {
+      question: "How many multiplications does a 9 × 9 filter need per pixel?",
+      options: ["9", "18", "81", "729"],
+      answer: 2,
+      explanation: "k² for a direct 2-D filter.",
+    },
+    {
+      question: "Valid-mode output of a 100 × 100 image with a 5 × 5 kernel?",
+      options: ["100 × 100", "98 × 98", "96 × 96", "104 × 104"],
+      answer: 2,
+      explanation: "Two pixels lost on every side.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Correlate the 3 × 3 patch (1 2 3; 4 5 6; 7 8 9) with the kernel (0 0 0; 0 0 0; 0 0 1). Then convolve.
+
+<Solution>
+
+Correlation picks the bottom-right value: **9**. Convolution flips the kernel to (1 0 0; 0 0 0; 0 0 0) and picks the top-left value: **1**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Time the Python loop and `cv2.filter2D` for a 3 × 3 kernel on the scene image and print the speed ratio.
+
+<Solution>
+
+```python
+# Timings depend on the computer; the output is not fixed.
+import time
+import numpy as np
+import cv2
+
+t0 = time.perf_counter(); correlate(img, k / 45); t1 = time.perf_counter()
+for _ in range(100):
+    cv2.filter2D(img, -1, k / 45)
+t2 = time.perf_counter()
+print(f"loop {1000 * (t1 - t0):.0f} ms | filter2D {1000 * (t2 - t1) / 100:.3f} ms | ratio {(t1 - t0) / ((t2 - t1) / 100):.0f}x")
+```
+
+Typical output:
+
+```text
+loop 180 ms | filter2D 0.060 ms | ratio 3000x
+```
+
+OpenCV uses vectorised (SIMD), multi-threaded code; the Python loop interprets nine multiplications per pixel one by one.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 3.4 (spatial correlation and convolution).
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022: Section 3.2.
+3. OpenCV 4.13.0 documentation: `filter2D` (notes on correlation and the DFT-based implementation), `flip`. https://docs.opencv.org/4.13.0/

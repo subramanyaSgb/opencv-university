@@ -1,0 +1,311 @@
+export const meta = {
+  number: "27.4",
+  title: "Watershed",
+  minutes: 30,
+  objectives: [
+    "Explain watershed segmentation as flooding a relief from markers",
+    "Flood a small 1D relief by hand and find the watershed line",
+    "Use cv2.watershed with markers: seeds, sure background and the unknown zone",
+    "Avoid over-segmentation and separate touching objects with distance-transform markers",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 27.4 (Module 27).
+  Lab: SegmentLab mode "watershed" (exact cv2.watershed).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 27.4 Watershed
+
+<Definition term="Watershed segmentation">segmentation that treats the image (usually its gradient) as a landscape and floods it with water rising from marker points; where water from two different markers would meet, a dam is built. The dams are the region borders.</Definition>
+
+Region growing (27.1) grows one region from one seed. The watershed grows **all** regions at once from their seeds, always extending the lowest available pixel first, so regions meet exactly on the "ridges" of the image: the edges. It is the standard way to split touching objects (25.4) and to turn a few clicks into a full segmentation.
+
+## 1. An analogy
+
+A mountain landscape with lakes. Drill a hole at the bottom of every valley that should become a region and let water rise slowly from below. Each lake grows uphill. Where two lakes are about to merge, build a dam. When the water reaches the top of the highest mountain, the dams draw the borders of every region: they lie on the crests between valleys.
+
+## 2. The idea and OpenCV's version
+
+<Flow
+  steps={[
+    { label: "Image → relief (dark = low): usually the gradient", tone: "data" },
+    { label: "Markers: one label per region (+ background)", tone: "process" },
+    { label: "Flood: always grow into the lowest neighbouring pixel", tone: "process" },
+    { label: "Two labels meet → watershed line (−1)", tone: "process" },
+    { label: "Every pixel labelled", tone: "result" },
+  ]}
+/>
+
+On the **gradient** magnitude, object interiors are low (flat colour) and edges are high, so regions fill objects first and meet on the edges. Without markers, every local minimum of the relief starts its own region; on a real image that means thousands of tiny regions (**over-segmentation**). That is why OpenCV's `cv2.watershed` (Meyer 1992 [2]) always starts from **markers** you provide.
+
+OpenCV does not need you to compute the gradient: it orders pixels by the largest B, G or R difference between a pixel and its already-labelled neighbour, which is a gradient measured on the fly.
+
+## 3. A worked example by hand
+
+A 1D relief (heights, e.g. gradient values) with two markers, A at position 2 and B at position 6:
+
+| Position | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Height | 5 | 3 | **1** | 3 | 6 | 2 | **1** | 4 |
+| Label | A | A | A | A | dam | B | B | B |
+
+Flooding level by level:
+
+1. Level 1: the markers themselves.
+2. Level 2: B reaches position 5.
+3. Level 3: A reaches positions 1 and 3.
+4. Level 4: B reaches position 7.
+5. Level 5: A reaches position 0.
+6. Level 6: position 4 is reached by A (from 3) and B (from 5) at once: it becomes the **watershed line**.
+
+The border sits on the highest point between the two markers, the edge, not halfway between them.
+
+## 4. On the scene
+
+One marker (a disc of radius 3) per object and one on the cloth:
+
+- All six regions are found; IoU 0.95 to 0.97 (the remainder is the 1 687 watershed-line pixels, which belong to no region).
+- **Remove the crimson marker**: the red disc's region floods the crimson disc too (1 452 of its 1 516 pixels). Every region needs a marker; the watershed never invents one.
+- **Markers from every gradient minimum** instead of seeds: 4 663 regions; even after smoothing the gradient (σ = 2) still 459. This is the classic over-segmentation.
+
+<SegmentLab mode="watershed" caption="cv2.watershed (exact) from one seed per object. White: watershed lines (−1). Untick the crimson disc's seed: the red region floods both discs. Switch to 'every gradient minimum' to see why markers are needed."/>
+
+## 5. Separating touching objects
+
+The OpenCV tutorial recipe for touching objects builds markers from the binary mask:
+
+1. **Sure background**: dilate the mask; everything outside it is background.
+2. **Sure foreground**: threshold the distance transform (23.5) at a fraction of its maximum; what remains are the cores of the objects.
+3. **Unknown**: sure background minus sure foreground (marker 0): the watershed decides.
+4. Label the cores (`connectedComponents`), add 1 so the background becomes 1, set the unknown zone to 0, run `cv2.watershed`.
+
+On the 40 particles (25.4), with a global threshold at 0.3 or 0.5 of the maximum distance (12 pixels): **38** markers and 38 regions; at 0.7: 21. A fraction of the **global** maximum suits objects of one size; here small particles never reach it, and touching pairs keep one shared core. Local maxima of the distance transform (25.4) gave all **40**. Choose markers to match the objects' size range.
+
+## 6. Industrial use
+
+- **Touching objects**: grains, pellets, cells, coins, bubbles: count and measure each one.
+- **Interactive segmentation**: a few clicks or strokes as markers (as in many labelling tools).
+- **Boundaries of known parts**: markers from a template or the previous frame; the watershed snaps the borders to the edges.
+- **Microscopy**: nuclei as markers, cell borders by watershed on the membrane image.
+
+## What you should remember from 27.4
+
+<Takeaways>
+<Takeaway n={1} title="Flood from markers">Regions grow lowest-first and meet on ridges (edges).</Takeaway>
+<Takeaway n={2} title="Markers decide">One marker per region; a missing marker merges regions.</Takeaway>
+<Takeaway n={3} title="No markers = chaos">Every minimum becomes a region: over-segmentation.</Takeaway>
+<Takeaway n={4} title="Touching objects">Distance-transform cores as markers; borders become −1.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Relief 2, 1, 4, 3, 7, 3, 1 with markers at positions 1 (A) and 6 (B). Where is the watershed line?
+
+<Solution>
+
+Flooding order: A takes position 0 (height 2); B takes 5 (height 3); A takes 2 (height 4) and then 3 (height 3, reachable only through 2). Position 4 (height 7) now touches A and B: the watershed line is at **position 4**, the highest point between the markers.
+
+</Solution>
+
+**Q2.** Your watershed gives one region for two touching coins. What is wrong?
+
+<Solution>
+
+The two coins share one marker (or one has none). Make sure each coin has its own marker, e.g. local maxima of the distance transform.
+
+</Solution>
+
+### Next: 27.5 GrabCut and graph cut
+
+Segmentation as an energy minimisation: colour models plus a smooth border, solved by a minimum cut.
+
+## Code
+
+Three examples: markers on the scene, a missing marker, and touching particles.
+
+### 1. One marker per object
+
+```python
+import numpy as np
+import cv2
+
+scene = cv2.imread("sample-seg.png")
+ids = cv2.imread("sample-seg-ids.png", cv2.IMREAD_GRAYSCALE)
+seeds = [(225, 15), (55, 55), (120, 50), (165, 65), (60, 125), (205, 112)]   # cloth, orange, red, crimson, box, label
+
+markers = np.zeros(ids.shape, np.int32)                                      # int32, 0 = unknown
+for k, (x, y) in enumerate(seeds):
+    cv2.circle(markers, (x, y), 3, k + 1, -1)                                # labels 1 … 6
+result = cv2.watershed(scene, markers.copy())                                # 8-bit 3-channel image
+print("labels:", np.unique(result).tolist(), "| line pixels:", int((result == -1).sum()))
+print("IoU:", [round(float(((result == k + 1) & (ids == k)).sum() / ((result == k + 1) | (ids == k)).sum()), 3) for k in range(6)])
+```
+
+Output:
+
+```text
+labels: [-1, 1, 2, 3, 4, 5, 6] | line pixels: 1687
+IoU: [0.953, 0.971, 0.963, 0.971, 0.945, 0.965]
+```
+
+- `cv2.watershed` modifies the markers array in place and also returns it; pass a copy to keep your markers.
+- The image border is always set to −1.
+
+### 2. A missing marker
+
+```python
+m2 = markers.copy()
+m2[m2 == 4] = 0                                                              # remove the crimson seed
+r2 = cv2.watershed(scene, m2)
+print("red region:", int((r2 == 3).sum()), "px | crimson pixels in it:", int(((r2 == 3) & (ids == 3)).sum()), "of", int((ids == 3).sum()))
+```
+
+Output:
+
+```text
+red region: 3281 px | crimson pixels in it: 1452 of 1516
+```
+
+### 3. Touching particles: the tutorial recipe
+
+```python
+img = cv2.imread("sample-particles.png", cv2.IMREAD_GRAYSCALE)
+_, mask = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+sure_bg = cv2.dilate(mask, np.ones((3, 3), np.uint8), iterations=3)
+dist = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
+for frac in (0.3, 0.5, 0.7):
+    _, sure_fg = cv2.threshold(dist, frac * dist.max(), 255, cv2.THRESH_BINARY)
+    sure_fg = sure_fg.astype(np.uint8)
+    unknown = cv2.subtract(sure_bg, sure_fg)
+    n, mk = cv2.connectedComponents(sure_fg)
+    mk = mk + 1                                                              # background = 1, cores = 2 …
+    mk[unknown == 255] = 0
+    ws = cv2.watershed(cv2.cvtColor(img, cv2.COLOR_GRAY2BGR), mk)
+    print(f"fraction {frac}: {n - 1} markers -> {len(np.unique(ws[ws > 1]))} regions (true 40)")
+```
+
+Output:
+
+```text
+fraction 0.3: 38 markers -> 38 regions (true 40)
+fraction 0.5: 38 markers -> 38 regions (true 40)
+fraction 0.7: 21 markers -> 21 regions (true 40)
+```
+
+## OpenCV API notes
+
+- **`cv2.watershed(image, markers)`** → markers (in place). `image`: 8-bit, 3 channels. `markers`: int32, same size; > 0 = seed labels, 0 = to be decided. Output: labels, −1 on watershed lines and the image border.
+- **Markers from**: clicks/strokes (`cv2.circle`, `cv2.line` into the marker image), `cv2.connectedComponents` of sure-foreground cores, local maxima of the distance transform (25.4).
+- **Grey images**: convert to 3 channels with `cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)`.
+- **Speed**: linear in the number of pixels (one priority queue with 256 levels).
+
+## Where it fails
+
+- **Missing or extra markers**: merged or split objects; the watershed trusts the markers completely.
+- **Weak edges**: a region leaks through the gap at the lowest crossing point.
+- **Noisy gradients**: thin, wiggly borders; smooth first.
+- **Watershed lines**: the −1 pixels belong to no region; assign them to a neighbour if you need areas.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Markers as uint8**: they must be int32.
+- **Background labelled 0**: 0 means "unknown"; give the sure background its own label (usually 1).
+- **Grey input**: `cv2.watershed` needs a 3-channel 8-bit image.
+- **Counting −1 as a region**: exclude it (and the background label) when counting.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Definitions of the watershed
+
+Beucher and Lantuéjoul [1] introduced the watershed for contour detection; Vincent and Soille [3] gave a fast immersion algorithm; Meyer [2] the marker-controlled flooding with a priority queue that OpenCV follows. Different definitions (by flooding, by topographic distance, as a minimum spanning forest) give slightly different lines on plateaus. The **h-minima** transform (suppressing minima shallower than h) is a classical way to reduce over-segmentation without explicit markers.
+
+### Compact watershed
+
+Plain watershed regions can be very irregular in flat areas. The compact watershed adds a spatial term to the flooding priority (Neubert and Protzel 2014), giving more regular regions and a simple superpixel method (27.6).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Where does the watershed put the border between two markers?",
+      options: ["Halfway", "On the highest point of the relief between them", "At the first edge pixel", "Randomly"],
+      answer: 1,
+      explanation: "Regions meet on the ridge.",
+    },
+    {
+      question: "Why does cv2.watershed need markers?",
+      options: ["Speed", "Without them every local minimum becomes a region (over-segmentation)", "It needs colours", "For the border"],
+      answer: 1,
+      explanation: "Thousands of tiny regions on a real image.",
+    },
+    {
+      question: "What does −1 in the result mean?",
+      options: ["Background", "Unknown", "Watershed line (or image border)", "An error"],
+      answer: 2,
+      explanation: "Line pixels belong to no region.",
+    },
+    {
+      question: "The tutorial recipe found 38 of 40 particles. Why?",
+      options: ["Wrong Otsu", "A global distance threshold misses small particles and keeps shared cores of touching pairs", "Too many iterations", "Grey image"],
+      answer: 1,
+      explanation: "Local maxima (25.4) adapt to each particle's size.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Relief 4, 2, 5, 8, 5, 1, 3 with markers at 1 (A) and 5 (B). Label every position.
+
+<Solution>
+
+A: positions 0, 1, 2; B: 4, 5, 6; position 3 (height 8) is reached from both sides last: **watershed line**. Labels: A A A — B B B.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Replace the tutorial's sure-foreground cores by local maxima of the distance transform (window 9 × 9, distance > 4, as in 25.4) and run the same watershed. How many regions?
+
+<Solution>
+
+```python
+peaks = ((dist == cv2.dilate(dist, np.ones((9, 9), np.uint8))) & (dist > 4)).astype(np.uint8)
+n, mk = cv2.connectedComponents(peaks)
+mk = mk + 1
+mk[(sure_bg == 255) & (peaks == 0)] = 0                                      # everything else is unknown
+ws = cv2.watershed(cv2.cvtColor(img, cv2.COLOR_GRAY2BGR), mk)
+print(n - 1, "markers ->", len(np.unique(ws[ws > 1])), "regions")
+```
+
+Output:
+
+```text
+40 markers -> 40 regions
+```
+
+One marker per particle, so every particle gets its own region, with watershed lines along the waists of touching pairs.
+
+</Solution>
+
+## References
+
+1. S. Beucher, C. Lantuéjoul, "Use of watersheds in contour detection", *International Workshop on Image Processing: Real-time Edge and Motion Detection/Estimation*, Rennes, 1979.
+2. F. Meyer, "Color image segmentation", *Proc. International Conference on Image Processing and its Applications*, 303–306, 1992.
+3. L. Vincent, P. Soille, "Watersheds in digital spaces: an efficient algorithm based on immersion simulations", *IEEE Trans. Pattern Analysis and Machine Intelligence* 13(6), 583–598, 1991.
+4. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Section 10.7 (morphological watersheds).
+5. OpenCV 4.13.0 documentation: `watershed`; tutorial "Image Segmentation with Watershed Algorithm". https://docs.opencv.org/4.13.0/

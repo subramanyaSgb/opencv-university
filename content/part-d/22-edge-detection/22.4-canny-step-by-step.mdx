@@ -1,0 +1,304 @@
+export const meta = {
+  number: "22.4",
+  title: "Canny step by step",
+  minutes: 30,
+  objectives: [
+    "Follow the four steps of the Canny detector: smoothing, gradient, non-maximum suppression, hysteresis",
+    "Implement Canny in NumPy and match cv2.Canny",
+    "Choose the low and high thresholds, the pre-blur and the gradient norm",
+    "Recognise Canny's typical failures: broken edges, noise edges, rounded corners",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 22.4 (Module 22).
+  Lab: EdgeLab (mode canny; equals cv2.Canny within 2 pixels on the test crop).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 22.4 Canny step by step
+
+<Definition term="Canny edge detector">the standard edge detector (John Canny, 1986): compute the gradient, keep only the pixels where the gradient magnitude is a local maximum across the edge (thin edges), and keep those above a high threshold plus those above a low threshold that are connected to them (hysteresis). The result is a binary map of thin, connected edge lines.</Definition>
+
+Thresholding the gradient magnitude (22.2) gives thick edges and either misses weak parts of real edges or picks up noise. Canny [1] stated three goals for an edge detector: detect every real edge (few misses), locate it precisely, and respond only once per edge. His detector meets them with two ideas beyond the gradient: non-maximum suppression and hysteresis thresholds. It is the edge detector of first choice in OpenCV pipelines.
+
+## 1. An analogy
+
+Tracing the outline of a mountain range on a map from height data. First you smooth away small bumps. Then you find the steepest slopes. Then you keep only the crest line of each slope, not the whole hillside. Finally you follow the clearly visible ridges, and where a ridge fades for a while you keep following it as long as it still rises a little and connects to a strong part.
+
+## 2. The four steps
+
+<Flow
+  steps={[
+    { label: "1 Smooth: Gaussian (optional in cv2.Canny, do it yourself)", tone: "process" },
+    { label: "2 Gradient: Sobel gx, gy → magnitude and direction", tone: "process" },
+    { label: "3 Non-maximum suppression: keep a pixel only if it beats its two neighbours across the edge", tone: "process" },
+    { label: "4 Hysteresis: strong > high are edges; weak > low are edges only if connected to strong ones", tone: "result" },
+  ]}
+/>
+
+**Step 3, non-maximum suppression (NMS)**: the gradient direction is rounded to one of four directions (0°, 45°, 90°, 135°). The pixel's magnitude is compared with the two neighbours along that direction, i.e. across the edge. If either neighbour is larger, the pixel is set to 0. A blurred edge 4 pixels wide becomes a ridge 1 pixel wide at its steepest point.
+
+Example: magnitudes across a vertical edge (gradient pointing right) 40, 120, **310**, 260, 90. Only 310 is larger than both its left and right neighbours, so only it survives.
+
+**Step 4, hysteresis**: one threshold cannot separate weak parts of real edges from strong noise. Canny uses two. Pixels above `high` are certain edges. Pixels between `low` and `high` are kept only if they connect (8-neighbour) to a certain edge, possibly through other weak pixels. Edges therefore stay continuous where their contrast dips, while isolated noise ridges, which are rarely connected to strong edges, disappear.
+
+The counts on the scene (`low` = 50, `high` = 150, L1 magnitude, no pre-blur):
+
+| Stage | Pixels |
+| --- | --- |
+| Magnitude > low (thick bands and noise) | 13 004 |
+| After NMS, > low (thin ridges, including noise ridges) | 9 510 |
+| After NMS, > high (strong) | 1 382 |
+| **After hysteresis (final edges)** | **1 491** (cv2.Canny: 1 490) |
+
+Hysteresis keeps 109 weak pixels that continue strong edges and drops more than 8 000 weak ones that are noise.
+
+<EdgeLab mode="canny" caption="Step through Canny on the scene, the test chart or the noisy metal plate: smoothing, gradient magnitude, the thin ridges after NMS, the double threshold (white strong, orange weak), and the final edges. Lower the low threshold until noise appears; raise the high threshold until edges break. Add a pre-blur on the plate: the noise edges vanish while the plate outline stays."/>
+
+## 3. Choosing the parameters
+
+| Parameter | Effect | Typical start |
+| --- | --- | --- |
+| Pre-blur σ | suppresses noise and texture, rounds corners, merges close edges | 1–2 px (`cv2.Canny` itself does not blur) |
+| `high` | which edges are certain; too high breaks edges | from the gradient histogram of real edges |
+| `low` | how far edges are followed; too low lets noise attach | high / 2 to high / 3 (Canny suggested 2–3 : 1) |
+| `L2gradient` | √(gx² + gy²) instead of |gx| + |gy| | True for accuracy; False (default) is faster |
+| `apertureSize` | Sobel size 3, 5 or 7; larger kernels give much larger gradients | 3; rescale thresholds if you change it |
+
+Thresholds are in Sobel units (22.2): a clean 100-grey-level step gives an L1 magnitude of about 400. On the scene, (25, 75) without blur gives 14 987 edge pixels (noise everywhere); after a Gaussian blur of σ = 1.5 the same thresholds give 1 416, almost only real outlines. A popular automatic rule sets the thresholds at 0.67 and 1.33 times the image median (for the scene: 78 and 155, giving 1 387 pixels); it is a starting point, not a guarantee, because the median brightness says nothing about edge contrast.
+
+## 4. Industrial example
+
+Canny edges are the input of many measurement and localisation steps: contours of parts for size and shape checks (24), lines and circles for Hough-based alignment (26), and edge-based template matching. In production, the pre-blur and thresholds are tuned once on representative images (good parts, worst-case contrast, typical noise) and then fixed, often together with controlled lighting that makes the wanted edges much stronger than everything else (back-lighting for silhouettes). Because Canny's output depends strongly on contrast, systems monitor the edge count or edge strength as a health signal: a sudden drop indicates dirt on the lens or a failing lamp.
+
+## What you should remember from 22.4
+
+<Takeaways>
+<Takeaway n={1} title="Steps">Smooth, gradient, non-maximum suppression, hysteresis.</Takeaway>
+<Takeaway n={2} title="NMS">Keeps the ridge: one-pixel-wide edges at the steepest point.</Takeaway>
+<Takeaway n={3} title="Hysteresis">Strong edges plus weak pixels connected to them: continuous edges, little noise.</Takeaway>
+<Takeaway n={4} title="Tuning">Blur first; low ≈ high / 2–3; thresholds are in Sobel units.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** After NMS, a row of weak pixels (between low and high) touches a strong pixel at one end. Which of them are kept?
+
+<Solution>
+
+All of them that are connected (8-neighbour) through other kept pixels to the strong pixel: the whole chain is kept.
+
+</Solution>
+
+**Q2.** Why does `cv2.Canny` on a noisy image with low thresholds produce thousands of short edges, and what fixes it best?
+
+<Solution>
+
+Noise creates many local gradient maxima above the low threshold, some above the high one. A Gaussian pre-blur (σ 1–2) lowers the noise gradients far more than the real edges; raising the thresholds helps too, but also breaks weak real edges.
+
+</Solution>
+
+### Next: 22.5 Sub-pixel edges
+
+Canny gives edges on the pixel grid; measurement needs their position to a fraction of a pixel.
+
+## Code
+
+Two examples: Canny from scratch against cv2.Canny, then the effect of thresholds and pre-blur.
+
+### 1. Canny in NumPy
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+gx = cv2.Sobel(img, cv2.CV_32F, 1, 0, borderType=cv2.BORDER_REPLICATE)   # cv2.Canny uses replicated borders
+gy = cv2.Sobel(img, cv2.CV_32F, 0, 1, borderType=cv2.BORDER_REPLICATE)
+mag = np.abs(gx) + np.abs(gy)                                            # L1, the default
+angle = np.degrees(np.arctan2(gy, gx)) % 180
+sector = ((angle + 22.5) // 45 % 4 * 45).astype(int)                    # 0, 45, 90, 135
+
+M = np.pad(mag, 1)                                                       # zeros around, as OpenCV
+H, W = mag.shape
+neighbours = {0: ((0, -1), (0, 1)), 45: ((-1, -1), (1, 1)), 90: ((-1, 0), (1, 0)), 135: ((-1, 1), (1, -1))}
+thin = np.zeros_like(mag)
+for d, ((ay, ax), (by, bx)) in neighbours.items():
+    a = M[1 + ay:1 + ay + H, 1 + ax:1 + ax + W]
+    b = M[1 + by:1 + by + H, 1 + bx:1 + bx + W]
+    keep = (sector == d) & (mag > a) & (mag >= b)
+    thin[keep] = mag[keep]
+
+low, high = 50, 150
+strong, weak = thin > high, thin > low
+n, labels = cv2.connectedComponents(weak.astype(np.uint8), connectivity=8)
+keep_labels = np.unique(labels[strong])
+edges = np.isin(labels, keep_labels[keep_labels > 0])                   # weak chains touching a strong pixel
+ref = cv2.Canny(img, low, high) > 0
+print(f"magnitude > low: {int((mag > low).sum())} | NMS > low: {int(weak.sum())} | strong: {int(strong.sum())}")
+print(f"final: {int(edges.sum())} | cv2.Canny: {int(ref.sum())} | different pixels: {int((edges != ref).sum())}")
+```
+
+Output:
+
+```text
+magnitude > low: 13004 | NMS > low: 9510 | strong: 1382
+final: 1491 | cv2.Canny: 1490 | different pixels: 1
+```
+
+- Hysteresis as connected components: label all weak pixels and keep the components that contain at least one strong pixel. (OpenCV follows edges with a stack instead; the result is the same.)
+- The single different pixel comes from a tie in the diagonal comparison (OpenCV uses > on both sides for diagonals).
+
+### 2. Thresholds and pre-blur
+
+```python
+import numpy as np
+import cv2
+
+plate = cv2.imread("sample-plate-good.png", cv2.IMREAD_GRAYSCALE)
+for name, x in [("scene", img), ("plate", plate)]:
+    for sigma in (0, 1.5):
+        y = x if sigma == 0 else cv2.GaussianBlur(x, (0, 0), sigma)
+        counts = [int((cv2.Canny(y, lo, hi) > 0).sum()) for lo, hi in [(25, 75), (50, 150), (100, 200)]]
+        print(f"{name} blur {sigma}: (25,75) {counts[0]:6d} | (50,150) {counts[1]:5d} | (100,200) {counts[2]:5d}")
+med = float(np.median(img))
+lo, hi = int(max(0, 0.67 * med)), int(min(255, 1.33 * med))
+print(f"median rule: median {med:.0f} -> ({lo}, {hi}) -> {int((cv2.Canny(img, lo, hi) > 0).sum())} pixels")
+```
+
+Output:
+
+```text
+scene blur 0: (25,75)  14987 | (50,150)  1490 | (100,200)  1384
+scene blur 1.5: (25,75)   1416 | (50,150)  1413 | (100,200)  1139
+plate blur 0: (25,75)    855 | (50,150)   505 | (100,200)   505
+plate blur 1.5: (25,75)    540 | (50,150)   540 | (100,200)   540
+median rule: median 117 -> (78, 155) -> 1387 pixels
+```
+
+- With a blur, the result barely depends on the thresholds over a wide range: the sign of a well-conditioned setup.
+
+## OpenCV API notes
+
+**`cv2.Canny(image, threshold1, threshold2, edges=None, apertureSize=3, L2gradient=False)`**:
+- `image`: 8-bit, 1 or 3 channels (for colour, the gradient of the channel with the largest magnitude is used per pixel).
+- `threshold1`, `threshold2`: low and high (order does not matter; OpenCV swaps them if needed).
+- `apertureSize`: 3, 5 or 7 (Sobel size); thresholds must grow with it.
+- `L2gradient`: True for the Euclidean magnitude.
+- Output: uint8, 255 on edges, 0 elsewhere. No smoothing is done: call `cv2.GaussianBlur` first.
+
+**`cv2.Canny(dx, dy, threshold1, threshold2, L2gradient=False)`**: overload taking your own int16 gradients (for example from Scharr or after custom smoothing).
+
+## Where it fails
+
+- **Junctions and corners**: NMS and smoothing break edges near T-junctions and round off corners.
+- **Weak edges next to strong ones**: the strong edge's blur can suppress them.
+- **Texture**: produces dense edge clutter; increase σ or use a region-based method (27).
+- **Contrast changes across the image**: one global threshold pair fits only part of it; normalise illumination first (15.3).
+- **Precision**: edge positions are integers; use sub-pixel refinement for measurement (22.5).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming cv2.Canny smooths**: it does not.
+- **Thresholds in grey levels**: they are in Sobel units (about 4 × the step for L1 with aperture 3, more with larger apertures).
+- **low ≈ high**: hysteresis loses its effect; edges break.
+- **Canny on a colour image expecting grey behaviour**: it uses the strongest channel gradient.
+- **Measuring widths from Canny pixels directly**: ±1 pixel errors; refine (22.5).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Canny's criteria
+
+Canny [1] formalised detection (signal-to-noise ratio of the filter output at the edge), localisation (the variance of the detected position) and single response (distance between noise maxima), and showed that for step edges in white Gaussian noise the optimal filter is well approximated by the first derivative of a Gaussian. There is a trade-off: wider filters detect better but localise worse, which is the scale trade-off of 22.1.
+
+### Beyond Canny
+
+Deriche (1987) derived a recursive (IIR) version with constant cost per pixel. Structured edge detection (Dollár and Zitnick, 2013; `cv2.ximgproc.createStructuredEdgeDetection` in contrib) and CNN-based detectors (HED, 2015) learn which edges are object boundaries rather than texture, at much higher cost.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does non-maximum suppression do?",
+      options: ["Removes noise pixels", "Keeps only pixels whose magnitude is a maximum across the edge, giving thin edges", "Thresholds the image", "Connects edges"],
+      answer: 1,
+      explanation: "Compares with the two neighbours along the gradient direction.",
+    },
+    {
+      question: "A pixel with magnitude between low and high is kept if…",
+      options: ["Always", "It is connected to a pixel above high", "It is isolated", "Its direction is 0°"],
+      answer: 1,
+      explanation: "Hysteresis.",
+    },
+    {
+      question: "Does cv2.Canny blur the image?",
+      options: ["Yes, with σ = 1.4", "No, blur it yourself first", "Only colour images", "Only with L2gradient"],
+      answer: 1,
+      explanation: "It starts directly with Sobel.",
+    },
+    {
+      question: "A good ratio of high to low threshold is about…",
+      options: ["1 : 1", "2 : 1 to 3 : 1", "10 : 1", "1 : 2"],
+      answer: 1,
+      explanation: "Canny's recommendation.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Gradient magnitudes after NMS along a chain of neighbouring edge pixels: 180, 120, 60, 40, 90, 160, 30. With low = 50 and high = 150, which pixels are edges?
+
+<Solution>
+
+Strong: 180, 160. Weak: 120, 60, 90. 120 and 60 connect to 180 → kept. 40 is below low → removed, which breaks the chain. 90 connects to 160 → kept. 30 removed. Edges: **180, 120, 60** and **90, 160** (two pieces).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Use Canny's gradient overload with Scharr gradients on the blurred scene and compare the edge count with the default call.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+b = cv2.GaussianBlur(img, (0, 0), 1.0)
+dx = cv2.Scharr(b, cv2.CV_16S, 1, 0)
+dy = cv2.Scharr(b, cv2.CV_16S, 0, 1)
+e_scharr = cv2.Canny(dx, dy, 50 * 4, 150 * 4)                         # Scharr is about 4x Sobel in scale
+e_sobel = cv2.Canny(b, 50, 150)
+print("Sobel:", int((e_sobel > 0).sum()), "| Scharr:", int((e_scharr > 0).sum()),
+      "| common:", int(((e_sobel > 0) & (e_scharr > 0)).sum()))
+```
+
+Output:
+
+```text
+Sobel: 1426 | Scharr: 1424 | common: 1415
+```
+
+Almost all edges agree (1 415 in common); the few differences are at corners and curved edges where the more accurate Scharr directions change which neighbour wins in NMS. The thresholds were multiplied by 4 because Scharr's weights (3, 10, 3) sum to 16 instead of 4.
+
+</Solution>
+
+## References
+
+1. J. Canny, "A computational approach to edge detection", *IEEE Trans. PAMI* 8(6), 679–698, 1986.
+2. R. Deriche, "Using Canny's criteria to derive a recursively implemented optimal edge detector", *Int. J. Computer Vision* 1(2), 167–187, 1987.
+3. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 10 (the Canny edge detector).
+4. OpenCV 4.13.0 documentation: `Canny`, `Sobel`, `Scharr`. https://docs.opencv.org/4.13.0/

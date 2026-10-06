@@ -1,0 +1,275 @@
+export const meta = {
+  number: "17.6",
+  title: "filter2D",
+  minutes: 20,
+  objectives: [
+    "Use cv2.filter2D with the right ddepth, delta, anchor and border",
+    "Build custom kernels: motion blur, emboss, directional derivatives",
+    "Apply kernels to colour images and display signed results",
+    "Know when filter2D is slow and which specialised function to use instead",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 17.6 (last chapter of Module 17).
+  Reuses ConvLab (custom kernel editor).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 17.6 filter2D
+
+<Definition term="cv2.filter2D">OpenCV's general-purpose linear filter: it correlates an image with any kernel you supply, on every channel, with a chosen output depth, border rule and anchor. All the linear filters of this module can be written with it.</Definition>
+
+Specialised functions (`blur`, `GaussianBlur`, `Sobel`) are faster for their one job. `filter2D` is the tool for everything else: a motion-blur kernel matched to a conveyor's speed, an emboss for display, a directional derivative at 45°, a defect-shaped detector. This chapter collects its parameters and the practical rules for using it correctly.
+
+## 1. An analogy
+
+A universal kitchen machine with interchangeable blades: slower than a dedicated vegetable slicer for slicing, but it can do any cut you can describe with a blade.
+
+## 2. The parameters
+
+<Flow
+  steps={[
+    { label: "src: 1–4 channels, uint8 / uint16 / int16 / float32 / float64", tone: "data" },
+    { label: "kernel: float array (any size), applied to every channel", tone: "process" },
+    { label: "ddepth (output type), delta (added), anchor, borderType", tone: "process" },
+    { label: "dst: same size and channels, type ddepth", tone: "result" },
+  ]}
+/>
+
+| Parameter | Meaning | Rule of thumb |
+| --- | --- | --- |
+| `ddepth` | output depth; −1 = same as input | `cv2.CV_32F` or `cv2.CV_16S` for kernels with negative weights |
+| `kernel` | float32/float64 weights | normalise blur kernels to sum 1 |
+| `anchor` | kernel cell placed on the output pixel; (−1, −1) = centre | leave at centre for odd kernels |
+| `delta` | constant added to every output value | 128 to show signed results in uint8 |
+| `borderType` | 17.3 | default `BORDER_REFLECT_101` |
+
+Real numbers: Sobel x on `sample-scene.png` gives −745 to 803 in `CV_16S` or `CV_32F`; with `ddepth=-1` (uint8) the same call returns 0 to 255, with every negative response clipped to 0 and every response above 255 clipped too.
+
+<ConvLab initialKernel="custom" caption="Make your own 3 × 3 kernels: an emboss (−2 −1 0; −1 1 1; 0 1 2), a diagonal derivative (0 1 2; −1 0 1; −2 −1 0), or a horizontal line detector (−1 −1 −1; 2 2 2; −1 −1 −1). Switch on the signed view for kernels that sum to 0."/>
+
+## 3. Custom kernels that are worth knowing
+
+| Kernel | Weights | Use |
+| --- | --- | --- |
+| Horizontal motion blur, length L | one row of L values 1/L | simulate or match motion blur (2.6, 19.3) |
+| Emboss | (−2 −1 0; −1 1 1; 0 1 2) | relief display of surface texture |
+| Diagonal derivative | (0 1 2; −1 0 1; −2 −1 0) | edges at 45° |
+| Line detector | (−1 −1 −1; 2 2 2; −1 −1 −1) | thin horizontal lines (scratches, wires) |
+| Matched filter | a small image of the defect, mean subtracted | find a known shape (Part E, template matching) |
+
+For colour images the same kernel runs on B, G and R independently: the motion-blurred colour image equals blurring each channel separately.
+
+## 4. Industrial example
+
+A label printer smears ink slightly in the direction of travel. To make a reference image that looks like the real prints, the team convolves the clean digital artwork with a 1 × 7 motion kernel (the measured smear length) and a small Gaussian (the optics), using `filter2D` and `GaussianBlur`. The inspection then compares each print with this realistic reference instead of the perfect artwork, and the false-alarm rate on good labels drops, because sharp-edge differences that every good print has are no longer reported.
+
+## What you should remember from 17.6
+
+<Takeaways>
+<Takeaway n={1} title="General">Any kernel, any size, every channel; correlation (17.2).</Takeaway>
+<Takeaway n={2} title="ddepth">Signed kernels need CV_16S or CV_32F output.</Takeaway>
+<Takeaway n={3} title="Display">delta = 128, or convertScaleAbs / normalise, to show signed results.</Takeaway>
+<Takeaway n={4} title="Speed">Prefer blur, GaussianBlur, Sobel, sepFilter2D when they fit; filter2D switches to the DFT for large kernels.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Write a 1 × 5 horizontal motion-blur kernel.
+
+<Solution>
+
+**[0.2, 0.2, 0.2, 0.2, 0.2]** (five equal weights summing to 1).
+
+</Solution>
+
+**Q2.** You filter a uint8 image with Sobel x and `ddepth=-1`. What happens to a dark-to-bright edge going right-to-left?
+
+<Solution>
+
+Its response is negative and is **clipped to 0**: the edge disappears. Use `CV_16S` or `CV_32F`.
+
+</Solution>
+
+### Next: Module 18, Noise and smoothing
+
+Where noise comes from, and how box, Gaussian, median, bilateral and non-local means filters remove it.
+
+## Code
+
+Two examples: output depth and delta, then a motion-blur kernel on a colour image.
+
+### 1. ddepth and delta
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+sobel_x = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], np.float32)
+for name, depth in [("-1 (uint8)", -1), ("CV_16S", cv2.CV_16S), ("CV_32F", cv2.CV_32F)]:
+    r = cv2.filter2D(img, depth, sobel_x)
+    print(f"ddepth {name:11s} -> {r.dtype}, range {int(r.min())} to {int(r.max())}")
+
+shown = cv2.filter2D(img, -1, sobel_x, delta=128)                   # adds 128, then saturates
+print("with delta=128 (uint8):", shown.min(), "to", shown.max())
+scaled = cv2.convertScaleAbs(cv2.filter2D(img, cv2.CV_16S, sobel_x), alpha=0.25)   # |value| / 4 for display
+print("convertScaleAbs(|Sobel| / 4):", scaled.min(), "to", scaled.max())
+```
+
+Output:
+
+```text
+ddepth -1 (uint8)  -> uint8, range 0 to 255
+ddepth CV_16S      -> int16, range -745 to 803
+ddepth CV_32F      -> float32, range -745 to 803
+with delta=128 (uint8): 0 to 255
+convertScaleAbs(|Sobel| / 4): 0 to 201
+```
+
+- `delta=128` centres the response for display but still clips large values; scale first (`alpha`) when responses exceed ±127.
+
+### 2. Motion blur on a colour image
+
+```python
+import numpy as np
+import cv2
+
+color = cv2.imread("sample-color.png")
+motion = np.zeros((9, 9), np.float32)
+motion[4, :] = 1 / 9                                         # horizontal line of 9 weights
+blurred = cv2.filter2D(color, -1, motion)
+print("shape", color.shape, "->", blurred.shape, "| pixel (25, 95):", color[95, 25].tolist(), "->", blurred[95, 25].tolist())
+print("same as filtering the G channel alone:", np.array_equal(blurred[..., 1], cv2.filter2D(color[..., 1], -1, motion)))
+```
+
+Output:
+
+```text
+shape (200, 320, 3) -> (200, 320, 3) | pixel (25, 95): [40, 32, 28] -> [31, 25, 71]
+same as filtering the G channel alone: True
+```
+
+- The pixel at the red disc's left edge picks up red from its right neighbours: the disc is smeared horizontally.
+- A 9 × 9 kernel with a single non-zero row is wasteful; `cv2.filter2D(color, -1, motion[4:5])` (a 1 × 9 kernel) gives the same result with a ninth of the work.
+
+## OpenCV API notes
+
+**`cv2.filter2D(src, ddepth, kernel, dst=None, anchor=(-1, -1), delta=0, borderType=BORDER_REFLECT_101)`**.
+
+**Depth combinations**: uint8 input → −1/CV_16S/CV_32F/CV_64F; uint16/int16 → CV_32F/CV_64F; float32 → CV_32F/CV_64F.
+
+**Large kernels**: from about 11 × 11, `filter2D` uses a DFT-based algorithm internally; results are the same, the speed is better than direct correlation.
+
+**Display**: `cv2.convertScaleAbs`, `cv2.normalize(r, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)`.
+
+## Where it fails
+
+- **Speed for standard filters**: `blur`, `boxFilter`, `GaussianBlur`, `Sobel` are faster than the same kernel in `filter2D`.
+- **Linear only**: median, bilateral, morphology are not kernels in this sense.
+- **Different kernel per channel**: `filter2D` applies one kernel to all; split the channels for different kernels.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **`ddepth=-1` with derivative kernels** on 8-bit images.
+- **Integer kernels** like `np.array([[1, 2, 1]]) / 4` built with integer division (all zeros) or left unnormalised.
+- **Large square kernels with mostly zeros** (use the smallest shape that holds the non-zero weights).
+- **Displaying signed results** without scaling or offset.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Choosing direct vs DFT filtering
+
+Direct correlation costs about k² operations per pixel; DFT filtering costs about O(log N) per pixel for an N-pixel image plus transforms, independent of k. The crossover depends on hardware and image size; OpenCV's threshold of roughly 11 × 11 is a practical choice for typical images (Part E, 30.5) [1].
+
+### Kernels for derivatives at any angle
+
+The derivative in direction θ is cos θ · ∂/∂x + sin θ · ∂/∂y: a weighted sum of the Sobel x and Sobel y responses. You never need a new kernel per angle; two filters and a weighted sum give all directions (the "steerable" property) [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which ddepth keeps negative Sobel responses for a uint8 image?",
+      options: ["-1", "cv2.CV_8U", "cv2.CV_16S", "cv2.CV_8S"],
+      answer: 2,
+      explanation: "int16 (or float32) holds the signed range.",
+    },
+    {
+      question: "What does delta do in filter2D?",
+      options: ["Shifts the kernel", "Adds a constant to every output value", "Changes the border", "Scales the kernel"],
+      answer: 1,
+      explanation: "Useful to centre signed results for display.",
+    },
+    {
+      question: "On a colour image, filter2D applies the kernel…",
+      options: ["To the grey version only", "To each channel independently", "To the first channel only", "Not at all"],
+      answer: 1,
+      explanation: "Same kernel on B, G and R.",
+    },
+    {
+      question: "Why prefer GaussianBlur over filter2D with a Gaussian kernel?",
+      options: ["Different result", "It is faster (separable, optimised)", "filter2D cannot use floats", "It handles borders"],
+      answer: 1,
+      explanation: "Same result, less work.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Apply the emboss kernel (−2 −1 0; −1 1 1; 0 1 2) to a flat area of value 100, and with delta = 0.
+
+<Solution>
+
+Sum of weights = −2 − 1 + 0 − 1 + 1 + 1 + 0 + 1 + 2 = 1 → **100**: flat areas keep their value; only edges get relief.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Build the derivative at 45° from Sobel x and Sobel y responses (cos 45° · gx + sin 45° · gy), and compare it with filtering once with the combined kernel.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+f = img.astype(np.float32)
+sobel_y = sobel_x.T
+c = np.cos(np.pi / 4)
+two = c * cv2.filter2D(f, -1, sobel_x) + c * cv2.filter2D(f, -1, sobel_y)
+one = cv2.filter2D(f, -1, c * sobel_x + c * sobel_y)
+print("combined kernel:", np.round(c * sobel_x + c * sobel_y, 3).tolist())
+print("same result:", float(np.abs(two - one).max()) < 1e-3)
+```
+
+Output:
+
+```text
+combined kernel: [[-1.414, -1.414, 0.0], [-1.414, 0.0, 1.414], [0.0, 1.414, 1.414]]
+same result: True
+```
+
+Linearity at work: a weighted sum of filter outputs equals one filter with the weighted sum of the kernels.
+
+</Solution>
+
+## References
+
+1. OpenCV 4.13.0 documentation: `filter2D` (depth combinations, DFT for large kernels), `convertScaleAbs`, `normalize`. https://docs.opencv.org/4.13.0/
+2. W. T. Freeman, E. H. Adelson, "The design and use of steerable filters", *IEEE Transactions on Pattern Analysis and Machine Intelligence* 13(9), 891–906, 1991.
+3. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 3.4.

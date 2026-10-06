@@ -1,0 +1,416 @@
+export const meta = {
+  number: "5.2",
+  title: "Vectors and transforms",
+  minutes: 40,
+  objectives: [
+    "Use vectors for positions, directions, lengths and angles in images",
+    "Use the dot product to measure along a direction and the 2-D cross product to measure across it",
+    "Build 2 × 2 matrices for rotation, scaling, shear and reflection, and combine them in the right order",
+    "Read the determinant and use the inverse to undo a transform",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 5.2 (Module 5 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 5.2 Vectors and transforms
+
+<Definition term="Vector and linear transform">a vector is an arrow: a direction and a length, written as numbers (x, y). A linear transform is a 2 × 2 matrix that moves every point the same way: rotating, stretching, slanting or mirroring.</Definition>
+
+Measuring a part's angle, the distance between two holes, or how far a point lies from an edge; rotating an image so a label reads straight: all of this is vectors and small matrices. Chapter 5.1 treated the **image** as a matrix; this chapter treats **points** as vectors.
+
+## 1. An analogy
+
+Giving directions in a factory hall: "from the door, 18 m along the wall, then 7.5 m to the right". That pair of numbers is a **vector**. A **transform** is like redrawing the hall plan turned by 30° or at a different scale: every point moves by the same rule.
+
+## 2. Points and vectors in image coordinates
+
+A point is (x, y): x to the right, **y down** (3.4). A **vector** is the difference of two points:
+
+<Equation terms={[{ value: "d" }, { op: "=", value: "q − p" }, { op: "=", value: "(300 − 120, 115 − 40)" }, { op: "=", value: "(180, 75)", result: true }]} />
+
+From d you get *(Code example 1)*:
+
+| Quantity | Formula | Rod from p = (120, 40) to q = (300, 115) |
+| --- | --- | --- |
+| Length | ‖d‖ = √(dx² + dy²) | 195.0 px |
+| Angle from the x axis | atan2(dy, dx) | 22.62° |
+| Unit vector (length 1) | u = d / ‖d‖ | (0.923, 0.385) |
+
+Because y points down, a **positive angle points below** the x axis: clockwise on screen. Always use `atan2(dy, dx)`, not `atan(dy/dx)`: it handles all four quadrants and dx = 0.
+
+## 3. The dot product: measuring along a direction
+
+The **dot product** a · b = ax·bx + ay·by. With a unit vector u, **r · u** is how far r reaches **along** u. The **2-D cross product** rx·uy − ry·ux is how far r lies **across** it (perpendicular distance):
+
+<Columns>
+<Panel title="Along the rod: r · u" tone="a">
+
+A point at (200, 120), relative to p: r = (80, 80).
+
+r · u = 80·0.923 + 80·0.385 = **104.6 px** along the rod.
+
+</Panel>
+<Panel title="Across the rod: r × u" tone="b">
+
+|80·0.385 − 80·0.923| = **43.1 px** from the rod's centre line.
+
+Point-to-line distance: used for straightness and position checks.
+
+</Panel>
+</Columns>
+
+The dot product also gives the angle between two directions: cos θ = (a · b) / (‖a‖ ‖b‖). Two edges are perpendicular when their dot product is 0.
+
+## 4. Transforms as 2 × 2 matrices
+
+Multiplying a point by a 2 × 2 matrix M moves it: p′ = M p. The four basic ones:
+
+| Transform | Matrix | Effect on (1, 0) and (0, 1) |
+| --- | --- | --- |
+| Scale | [[sx, 0], [0, sy]] | stretched along x and y |
+| Rotate by θ | [[cos θ, −sin θ], [sin θ, cos θ]] | turned by θ (clockwise on screen, y down) |
+| Shear | [[1, k], [0, 1]] | (0, 1) slides sideways to (k, 1) |
+| Mirror in y axis | [[−1, 0], [0, 1]] | x flips sign |
+
+The key to reading any matrix: **its columns are where (1, 0) and (0, 1) go**. Rotate by 90°: (1, 0) → (0, 1), so the first column is (0, 1).
+
+## 5. Combining: the order matters
+
+Applying first S and then R is the product **R S** (the last step is written on the **left**). Matrix products are not commutative: with S = scale x by 2 and R = rotate 90° *(Code example 2)*:
+
+| Point | Scale, then rotate (R S) | Rotate, then scale (S R) |
+| --- | --- | --- |
+| (1, 0) | (0, 2) | (0, 1) |
+| (0, 1) | (−1, 0) | (−2, 0) |
+| (1, 1) | (−1, 2) | (−2, 1) |
+
+With equal scaling in x and y the order does not matter; with anything else, it does. In code, write the steps out and multiply in reverse order.
+
+## 6. The determinant and the inverse
+
+The **determinant** det M = ad − bc of M = [[a, b], [c, d]] is the factor by which **areas** change:
+
+<Chips items={["det = 1: area kept (rotation)", "det = 2: area doubled", "det < 0: mirrored", "det = 0: flattened to a line, cannot be undone"]} />
+
+If det ≠ 0, the **inverse** M⁻¹ undoes M: M⁻¹ M p = p. Used to map points **back**, for example from a straightened image to the original camera image.
+
+## 7. Try it
+
+<TransformLab caption="Build a matrix from rotation, scale and shear, see where the part and the unit vectors go. Red and green arrows are the matrix's two columns." />
+
+Things to try: a negative scale (mirror: the shape turns amber, det &lt; 0); scale x = 0 (det 0: flattened); scale 1.5 × 1 with rotate 30°, then swap the order.
+
+## 8. Rotating an image with OpenCV
+
+Rotating a whole image uses the same maths for every pixel position, plus a translation so it turns about the **centre**. `cv2.getRotationMatrix2D(center, angle, scale)` returns a **2 × 3** matrix (the extra column is the translation; 5.3 explains why it fits in a matrix) and `cv2.warpAffine` applies it:
+
+```text
+getRotationMatrix2D(center=(0, 0), angle=30) = [[ 0.866  0.5    0.   ]
+                                                [-0.5    0.866  0.   ]]
+```
+
+Its 2 × 2 part is R(−30°): OpenCV's **positive angle turns counter-clockwise on screen**, the opposite of the plain R(θ) in image coordinates. Check the sign with one test point before trusting a rotation *(Code example 3)*.
+
+## 9. Industrial example
+
+Checking that a bracket's hole is in the right place, whatever the bracket's angle on the conveyor:
+
+<Flow
+  steps={[
+    { label: "Find two reference points on the bracket edge: p, q", tone: "process" },
+    { label: "u = (q − p) / ‖q − p‖: the bracket's x direction", tone: "data" },
+    { label: "Hole centre h: along = (h − p) · u, across = (h − p) × u", tone: "process" },
+    { label: "Compare with the drawing (mm via mm/px, 2.4)", tone: "result" },
+  ]}
+/>
+
+The measurement is now in the **part's own coordinates**: rotation on the belt no longer matters.
+
+## What you should remember from 5.2
+
+<Takeaways>
+<Takeaway n={1} title="Vectors">d = q − p; length √(dx² + dy²); angle atan2(dy, dx) (y down: positive = clockwise).</Takeaway>
+<Takeaway n={2} title="Dot and cross">r · u = distance along u; r × u = distance across (to a line).</Takeaway>
+<Takeaway n={3} title="Matrices">Columns = images of (1, 0) and (0, 1). Rotate, scale, shear, mirror.</Takeaway>
+<Takeaway n={4} title="Order">First A then B = B A. Not commutative.</Takeaway>
+<Takeaway n={5} title="det and inverse">det = area factor (negative: mirror, 0: no inverse); M⁻¹ maps back.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Two hole centres at (50, 80) and (110, 160) px. Distance between them?
+
+<Solution>
+
+d = (60, 80); √(3600 + 6400) = √10000 = **100 px**.
+
+</Solution>
+
+**Q2.** Are the directions (3, 4) and (4, −3) perpendicular?
+
+<Solution>
+
+3·4 + 4·(−3) = 0: **yes**.
+
+</Solution>
+
+**Q3.** det of [[2, 1], [4, 2]]? Can it be undone?
+
+<Solution>
+
+2·2 − 1·4 = **0**: it flattens the plane onto a line; **no inverse**.
+
+</Solution>
+
+### Next: 5.3 Homogeneous coordinates
+
+How to put translation into a matrix too, and why perspective needs a third coordinate.
+
+## Code
+
+Three examples: lengths, angles and point-to-line distances; 2 × 2 matrices and their order; and OpenCV's rotation matrix. Copy the sample images next to the script.
+
+### 1. From scratch: lengths, angles, along and across
+
+```python
+import numpy as np
+
+p = np.array([120.0, 40.0])                     # one end of a rod (x, y) in pixels
+q = np.array([300.0, 115.0])                    # the other end
+d = q - p                                       # direction vector
+length = np.linalg.norm(d)                      # sqrt(dx^2 + dy^2)
+angle = np.degrees(np.arctan2(d[1], d[0]))      # angle from the x axis (y points down in images)
+print(f"d = {d}, length = {length:.1f} px, angle = {angle:.2f} deg")
+
+u = d / length                                  # unit vector along the rod
+r = np.array([200.0, 120.0]) - p                # a point near the rod, relative to p
+along = r @ u                                   # dot product: distance along the rod
+off = abs(r[0] * u[1] - r[1] * u[0])            # distance from the rod's line (2-D cross product)
+print(f"point is {along:.1f} px along the rod and {off:.1f} px from its centre line")
+```
+
+Output:
+
+```text
+d = [180.  75.], length = 195.0 px, angle = 22.62 deg
+point is 104.6 px along the rod and 43.1 px from its centre line
+```
+
+- `np.linalg.norm(d)` is the Euclidean length. `np.hypot(dx, dy)` does the same for two numbers.
+- `r @ u` on two 1-D arrays is the dot product.
+- `np.arctan2(y, x)` returns radians in (−π, π]; note the argument order **y first**.
+
+### 2. From scratch: 2 × 2 matrices, order, determinant, inverse
+
+```python
+import numpy as np
+
+def R(deg):
+    t = np.radians(deg)
+    return np.array([[np.cos(t), -np.sin(t)], [np.sin(t), np.cos(t)]])
+
+S = np.diag([2.0, 1.0])                          # stretch x by 2
+pts = np.array([[1, 0], [0, 1], [1, 1]], float)  # three points, one per row
+print("R(90) @ (1, 0):", np.round(R(90) @ [1, 0], 3))
+print("scale then rotate:", np.round(pts @ (R(90) @ S).T, 3).tolist())
+print("rotate then scale:", np.round(pts @ (S @ R(90)).T, 3).tolist())
+M = R(30) @ S
+print(f"det(S) = {np.linalg.det(S):.1f}, det(R) = {np.linalg.det(R(30)):.1f}, det(R @ S) = {np.linalg.det(M):.1f}")
+print("undo with the inverse:", np.allclose(np.linalg.inv(M) @ (M @ [3, 4]), [3, 4]))
+```
+
+Output:
+
+```text
+R(90) @ (1, 0): [0. 1.]
+scale then rotate: [[0.0, 2.0], [-1.0, 0.0], [-1.0, 2.0]]
+rotate then scale: [[0.0, 1.0], [-2.0, 0.0], [-2.0, 1.0]]
+det(S) = 2.0, det(R) = 1.0, det(R @ S) = 2.0
+undo with the inverse: True
+```
+
+- Points stored **one per row** (N × 2) are transformed with `pts @ M.T`, which equals `(M @ pts.T).T`.
+- `np.diag([2, 1])` builds a diagonal (scale) matrix.
+- det(R S) = det(R) · det(S).
+- `np.allclose` compares floats with a tolerance; never test floats with `==`.
+
+### 3. OpenCV: the rotation matrix for images
+
+```python
+import numpy as np
+import cv2
+
+M = cv2.getRotationMatrix2D(center=(0, 0), angle=30, scale=1.0)
+print("getRotationMatrix2D(angle=30):\n", np.round(M, 3))
+img = cv2.imread("sample-color.png")
+h, w = img.shape[:2]
+M = cv2.getRotationMatrix2D((w / 2, h / 2), 30, 1.0)     # rotate 30 deg about the centre
+rot = cv2.warpAffine(img, M, (w, h))
+corner = M @ [0, 0, 1]                                   # where the top-left corner goes
+print("top-left corner (0, 0) moves to", np.round(corner, 1))
+print("output shape:", rot.shape)
+```
+
+Output:
+
+```text
+getRotationMatrix2D(angle=30):
+ [[ 0.866  0.5    0.   ]
+ [-0.5    0.866  0.   ]]
+top-left corner (0, 0) moves to [-28.6  93.4]
+output shape: (200, 320, 3)
+```
+
+- The 2 × 3 matrix is [2 × 2 rotation-and-scale | translation]. A point (x, y) is multiplied as (x, y, 1): Chapter 5.3.
+- The corner lands at x = −28.6, outside the output: rotating inside the same frame size **cuts off corners**. Enlarge the output size and adjust the translation to keep everything (Exercise 2).
+- `warpAffine(src, M, (width, height))` takes the size as (width, height); pixels that come from outside the source are filled with 0 (black) by default.
+
+## OpenCV API notes
+
+**`cv2.getRotationMatrix2D(center, angle, scale) → 2×3`**: angle in degrees, positive = counter-clockwise on screen; center as (x, y).
+
+**`cv2.warpAffine(src, M, dsize[, flags, borderMode, borderValue])`**: applies a 2 × 3 matrix to an image. `flags` sets the interpolation (`INTER_LINEAR` default, `INTER_NEAREST`, `INTER_CUBIC`) and `WARP_INVERSE_MAP` when M maps output to input. Interpolation is covered in Part D.
+
+**`cv2.transform(points, M)`**: applies a matrix to an array of points (shape N × 1 × 2, `float32`).
+
+**NumPy**: `np.linalg.norm`, `np.arctan2`, `np.degrees`/`np.radians`, `np.linalg.det`, `np.linalg.inv`, `@`.
+
+## Where it fails
+
+- **Reference points must be precise**: an angle from two points 20 px apart with ±0.5 px error is uncertain by about ±2°; use points far apart or fit a line to many points (5.6).
+- **Linear transforms keep the origin fixed**: they cannot move (translate) anything. Translation needs 5.3.
+- **Perspective** (a tilted camera) is not linear in (x, y): parallel lines meet. Also 5.3.
+- **Lens distortion** bends straight lines; correct it first (Part E).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **`atan(dy/dx)` instead of `atan2(dy, dx)`**: wrong quadrant, division by zero for vertical lines.
+- **Forgetting that y points down**: angles and rotation directions flip compared with school maths.
+- **Multiplying in the wrong order**: "first A, then B" is `B @ A`.
+- **Mixing degrees and radians**: NumPy's trig functions take radians; OpenCV's `getRotationMatrix2D` takes degrees.
+- **(row, col) vs (x, y)** when building point arrays from `np.nonzero` (which returns rows first).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Rotation matrices
+
+A rotation matrix R satisfies Rᵀ R = I and det R = 1: its columns are perpendicular unit vectors. So its inverse is simply its transpose, R⁻¹ = Rᵀ, which is cheap and numerically exact. Matrices with Rᵀ R = I and det = −1 are reflections.
+
+### Any 2 × 2 matrix is rotate–scale–rotate
+
+The singular value decomposition (5.7) writes any matrix as M = U Σ Vᵀ: a rotation (or reflection), a scaling along the axes, and another rotation. So rotations, scalings and reflections are all you ever need; shear is a combination of them [1].
+
+### Eigenvectors of a transform
+
+Directions that a matrix only stretches (does not turn) are its eigenvectors (5.7). For a shear, the x direction is one; for a pure rotation (other than 0° or 180°) there are none in the real plane.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which gives the correct angle for the direction (−1, 0)?",
+      options: ["atan(0 / −1) = 0°", "atan2(0, −1) = 180°", "atan2(−1, 0) = −90°", "acos(−1) = 180° always"],
+      answer: 1,
+      explanation: "atan2(dy, dx) knows the quadrant; atan(dy/dx) loses the sign of dx.",
+    },
+    {
+      question: "The first column of a 2 × 2 matrix tells you…",
+      options: ["Its determinant", "Where (1, 0) goes", "Where (0, 1) goes", "The translation"],
+      answer: 1,
+      explanation: "M (1, 0) = first column; M (0, 1) = second column.",
+    },
+    {
+      question: "You want to scale first, then rotate. Which product?",
+      options: ["S @ R", "R @ S", "Either", "S + R"],
+      answer: 1,
+      explanation: "The step applied last is on the left: R @ S applied to p = R (S p).",
+    },
+    {
+      question: "det M = −1 means…",
+      options: ["The shape shrinks to nothing", "The shape is mirrored, area kept", "The matrix is a rotation", "Error"],
+      answer: 1,
+      explanation: "Negative determinant = reflection; |det| = 1 keeps area.",
+    },
+    {
+      question: "OpenCV's getRotationMatrix2D with angle = +30 turns the image…",
+      options: ["Clockwise on screen", "Counter-clockwise on screen", "Depends on the image size", "Not at all"],
+      answer: 1,
+      explanation: "Positive angles are counter-clockwise on screen in OpenCV's convention.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Rotate the point (4, 0) by 90° with R(θ) in image coordinates. Where does it go, and is that clockwise or counter-clockwise on screen?
+
+<Solution>
+
+R(90°) = [[0, −1], [1, 0]]; (4, 0) → (0, 4). (0, 4) is **below** the origin on screen (y down): from pointing right to pointing down = **clockwise**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Rotate `sample-color.png` by 30° about its centre **without cutting off corners**: compute the new width and height from the rotated corner points and shift the matrix so all corners land inside.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+h, w = img.shape[:2]
+M = cv2.getRotationMatrix2D((w / 2, h / 2), 30, 1.0)
+corners = np.array([[0, 0, 1], [w, 0, 1], [0, h, 1], [w, h, 1]], float)
+moved = corners @ M.T                                   # 4 corners after rotation, (x, y)
+x0, y0 = moved.min(axis=0)
+x1, y1 = moved.max(axis=0)
+M[:, 2] -= [x0, y0]                                     # shift so the smallest x and y become 0
+new_w, new_h = int(np.ceil(x1 - x0)), int(np.ceil(y1 - y0))
+rot = cv2.warpAffine(img, M, (new_w, new_h))
+print("new size:", new_w, "x", new_h, "| corners now from", np.round((corners @ M.T).min(axis=0), 1),
+      "to", np.round((corners @ M.T).max(axis=0), 1))
+```
+
+Output:
+
+```text
+new size: 378 x 334 | corners now from [0. 0.] to [377.1 333.2]
+```
+
+The rotated 320 × 200 frame needs a 378 × 334 canvas. Changing only the translation column `M[:, 2]` moves the result without changing the rotation.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A gauge measures the angle of a steel bar from two edge points 40 px apart; each point is accurate to ±0.5 px. Roughly how uncertain is the angle, and how would you improve it?
+
+<Solution>
+
+A sideways error of up to 2 × 0.5 = 1 px over 40 px is an angle error of about atan(1/40) ≈ **1.4°**. Improve by using points much further apart (error shrinks in proportion), by fitting a line through many edge points (least squares, 5.6), or by sub-pixel edge detection.
+
+</Solution>
+
+## References
+
+1. G. Strang, *Introduction to Linear Algebra*, 5th ed., Wellesley-Cambridge Press, 2016, Chapters 1 (vectors), 2 (matrices), 5 (determinants) and 7 (SVD).
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022, Section 2.1 (Geometric primitives and transformations).
+3. R. Hartley and A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004, Chapter 2 (Projective geometry and transformations of 2D).
+4. OpenCV 4.13.0 documentation, *Geometric image transformations* (`getRotationMatrix2D`, `warpAffine`): [docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html](https://docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html).

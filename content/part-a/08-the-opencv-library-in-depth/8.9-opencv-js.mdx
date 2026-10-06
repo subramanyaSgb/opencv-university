@@ -1,0 +1,353 @@
+export const meta = {
+  number: "8.9",
+  title: "OpenCV.js",
+  minutes: 25,
+  objectives: [
+    "Explain what OpenCV.js is (OpenCV compiled to WebAssembly) and what it can and cannot do",
+    "Load OpenCV.js, read pixels from a canvas, process them and draw the result",
+    "Handle the two browser traps: RGBA channel order and manual memory management with delete()",
+    "Decide when browser-side processing makes sense",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 8.9 (Module 8 plan).
+  Reference tail: the Python examples are compared automatically. The JavaScript example was run in Node.js with the
+  npm package @techstark/opencv-js 4.12.0-release.1 (the newest OpenCV.js build on npm at the time of writing; no 4.13
+  build was available there) and printed the same line as the Python example; its output is shown as text.
+  TODO: verify against the official 4.13.0 opencv.js once the site integrates it (see CLAUDE.md).
+*/}
+
+# 8.9 OpenCV.js
+
+<Definition term="OpenCV.js">OpenCV's C++ code compiled to WebAssembly, so that a web page can run OpenCV functions in the browser, on the user's device, without a server or an installation.</Definition>
+
+The interactive figures in this course run in your browser. OpenCV.js makes the same possible with real OpenCV code: a web page that thresholds, finds contours or runs a small network on camera frames, locally. This chapter shows how it works and where it bites.
+
+## 1. An analogy
+
+A travel kit version of a workshop. The main tools come along, packed small; everything works the same way, but you must pack and unpack them yourself. Plugs are different abroad (the browser gives you pixels as R, G, B, A, not B, G, R), and nobody cleans up after you: what you take out, you must put away (delete).
+
+## 2. How it fits together
+
+<Flow
+  steps={[
+    { label: "OpenCV C++ source", tone: "world" },
+    { label: "Emscripten compiler → WebAssembly + JavaScript bindings (opencv.js)", tone: "data" },
+    { label: "Web page loads opencv.js; cv object becomes ready", tone: "process" },
+    { label: "canvas/video → cv.Mat → cv.* functions → canvas", tone: "result" },
+  ]}
+/>
+
+- The official build is one file, `opencv.js` (about 11 MB for the npm build we tested, with the WebAssembly code embedded), with a JavaScript object `cv` whose functions mirror the C++ API: `cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY)`.
+- Modules included in that build: core, imgproc, features2d, calib3d, objdetect, photo, video, dnn, flann. There is **no** imgcodecs, videoio or highgui: the browser provides those (images, `<video>`, `<canvas>`), and OpenCV.js adds small helpers `cv.imread(canvas)`, `cv.imshow(canvas, mat)` and `cv.VideoCapture(videoElement)`.
+- Code runs on the user's CPU, single-threaded in the default build (the build information says `Parallel framework: none`); SIMD and threaded builds exist but need special browser settings.
+
+## 3. The browser pipeline
+
+```text
+<canvas id="in"></canvas> <canvas id="out"></canvas>
+<script async src="opencv.js" onload="onCvLoaded()"></script>
+```
+
+```text
+function onCvLoaded() {
+  cv['onRuntimeInitialized'] = () => {
+    const src = cv.imread('in');                    // canvas -> Mat, CV_8UC4, RGBA
+    const gray = new cv.Mat();
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);     // RGBA, not BGR
+    cv.Canny(gray, gray, 50, 150);
+    cv.imshow('out', gray);                         // Mat -> canvas
+    src.delete(); gray.delete();                    // free WebAssembly memory
+  };
+}
+```
+
+Two differences from Python run through every OpenCV.js program:
+
+| Python (cv2) | OpenCV.js |
+| --- | --- |
+| `cv2.imread` → BGR, `uint8 (h, w, 3)` | `cv.imread(canvas)` → **RGBA**, `CV_8UC4` |
+| `dst = cv2.f(src, …)` returns a new array | `cv.f(src, dst, …)`: create `dst = new cv.Mat()` first |
+| NumPy indexing `img[y, x]` | `mat.ucharPtr(y, x)`, `mat.ucharAt(y, x)`, or `mat.data` (typed array) |
+| memory freed automatically | **`mat.delete()`** for every Mat, MatVector, and many other objects |
+
+## 4. Memory: the delete() rule
+
+A `cv.Mat` is a small JavaScript object pointing into the WebAssembly heap, where the pixels live. JavaScript's garbage collector frees the small object but cannot free the pixels. In a video loop that creates Mats every frame, forgotten `delete()` calls add up fast.
+
+<JsMemLab caption="Mats per frame, frame size and running time. Without delete(), the WebAssembly heap grows until the tab runs out of memory." />
+
+With three VGA RGBA Mats per frame at 30 fps, a missing `delete()` costs about 3.5 MB per frame and fills 2 GB in under 20 seconds. The usual pattern for video: **allocate the Mats once** outside the loop, reuse them every frame, and delete them when the page stops processing.
+
+## 5. When to process in the browser
+
+| Good fit | Poor fit |
+| --- | --- |
+| Interactive teaching and demos (no installation) | Heavy processing on large images at high frame rates |
+| Privacy: images never leave the user's device | Long-running production inspection |
+| Instant feedback in a web HMI (preview of a threshold setting) | Anything needing camera control beyond what the browser exposes |
+| Offloading a server: each client does its own preprocessing | Algorithms missing from the JS build (contrib, CUDA) |
+
+## 6. Industrial example
+
+A quality engineer configures a new inspection from a web page served by the line PC. The page shows the live camera image (a JPEG stream from the server) and, while the engineer moves a threshold slider, OpenCV.js thresholds the frame and draws the found contours directly in the browser: instant feedback, no load on the line PC, which keeps running production. When the engineer saves, only the numbers (threshold, ROI, minimum area) go to the server, where the Python program applies them with `cv2`. Because both use the same OpenCV algorithms, the preview matches production; the team still checks one reference image on both sides after every OpenCV upgrade, like example 2 below does.
+
+## What you should remember from 8.9
+
+<Takeaways>
+<Takeaway n={1} title="What">OpenCV compiled to WebAssembly; the cv object mirrors the C++ API.</Takeaway>
+<Takeaway n={2} title="I/O">Canvas and video elements in, canvas out; pixels are RGBA (CV_8UC4).</Takeaway>
+<Takeaway n={3} title="Outputs">Create dst Mats first; functions write into them.</Takeaway>
+<Takeaway n={4} title="Memory">Every Mat needs delete(); in loops, allocate once and reuse.</Takeaway>
+<Takeaway n={5} title="Use">Demos, previews, privacy; not heavy production processing.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** `cv.imread(canvas)` gives a Mat of type `CV_8UC4`. Which colour conversion makes a gray image?
+
+<Solution>
+
+`cv.COLOR_RGBA2GRAY`. Canvas pixels are R, G, B, A.
+
+</Solution>
+
+**Q2.** A page processes webcam frames and becomes slower and slower, then the tab crashes after a minute. First suspect?
+
+<Solution>
+
+Mats created in the frame loop and never deleted: the WebAssembly heap fills up. Allocate them once and reuse, or `delete()` each one.
+
+</Solution>
+
+### Next: 8.10 Versions 4.x and 5.x
+
+How OpenCV versions work, what changed in 4.x, what OpenCV 5 brings, and how to upgrade safely.
+
+## Code
+
+Two Python examples that produce reference values, and the same pipeline in JavaScript. Running both languages on the same synthetic image and comparing the numbers is the easiest way to trust a browser port.
+
+### 1. From scratch: canvas pixels to gray
+
+```python
+import numpy as np
+import cv2
+
+# The same 2 x 3 RGBA pixels a browser canvas would give (red, green, blue, dark, grey, white)
+rgba = np.array([[[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255]],
+                 [[10, 20, 30, 255], [128, 128, 128, 255], [255, 255, 255, 255]]], np.uint8)
+
+# From scratch: Y = 0.299 R + 0.587 G + 0.114 B, alpha ignored
+y = 0.299 * rgba[..., 0] + 0.587 * rgba[..., 1] + 0.114 * rgba[..., 2]
+print("numpy     :", np.round(y).astype(np.uint8).ravel().tolist())
+print("RGBA2GRAY :", cv2.cvtColor(rgba, cv2.COLOR_RGBA2GRAY).ravel().tolist())
+print("BGRA2GRAY :", cv2.cvtColor(rgba, cv2.COLOR_BGRA2GRAY).ravel().tolist(), "<- wrong order for canvas data")
+```
+
+Output:
+
+```text
+numpy     : [76, 150, 29, 18, 128, 255]
+RGBA2GRAY : [76, 150, 29, 18, 128, 255]
+BGRA2GRAY : [29, 150, 76, 22, 128, 255] <- wrong order for canvas data
+```
+
+- With the wrong order, pure red (76) and pure blue (29) swap their gray levels: a threshold tuned in Python would select different parts in the browser.
+- OpenCV.js 4.12 printed exactly the same two lists for `COLOR_RGBA2GRAY` and `COLOR_BGRA2GRAY` on these pixels.
+
+### 2. OpenCV: the reference pipeline in Python
+
+```python
+import numpy as np
+import cv2
+
+h, w = 60, 80
+rgba = np.zeros((h, w, 4), np.uint8)
+rgba[..., 3] = 255                                           # opaque, like canvas pixels
+cv2.rectangle(rgba, (20, 15), (59, 44), (200, 180, 40, 255), -1)   # a yellowish part (R, G, B, A)
+gray = cv2.cvtColor(rgba, cv2.COLOR_RGBA2GRAY)
+_, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+x, y, cw, ch = cv2.boundingRect(contours[0])
+print(f"gray of the part: {gray[30, 40]} | contours: {len(contours)} | box: {x},{y},{cw},{ch} | area: {cv2.contourArea(contours[0])}")
+```
+
+Output:
+
+```text
+gray of the part: 170 | contours: 1 | box: 20,15,40,30 | area: 1131.0
+```
+
+- 0.299 · 200 + 0.587 · 180 + 0.114 · 40 = 170.0: the part's gray level.
+- The contour area 1131 = 39 × 29: `contourArea` measures the polygon through the outer pixel centres, one pixel less than the box in each direction.
+
+### 3. The same pipeline in OpenCV.js
+
+Run in Node.js with `npm install @techstark/opencv-js` (in a web page, use `cv.imread(canvas)` instead of building the image and `cv.imshow` to display).
+
+```text
+const cv = require("@techstark/opencv-js");
+
+async function ready() {
+  while (typeof cv.Mat !== "function") await new Promise((r) => setTimeout(r, 50));
+}
+
+ready().then(() => {
+  const h = 60, w = 80;
+  const rgba = new cv.Mat(h, w, cv.CV_8UC4, new cv.Scalar(0, 0, 0, 255));
+  cv.rectangle(rgba, new cv.Point(20, 15), new cv.Point(59, 44), new cv.Scalar(200, 180, 40, 255), -1);
+  const gray = new cv.Mat(), bw = new cv.Mat(), hierarchy = new cv.Mat();
+  const contours = new cv.MatVector();
+  cv.cvtColor(rgba, gray, cv.COLOR_RGBA2GRAY);
+  cv.threshold(gray, bw, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU);
+  cv.findContours(bw, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+  const c = contours.get(0);
+  const r = cv.boundingRect(c);
+  console.log(`gray of the part: ${gray.ucharAt(30, 40)} | contours: ${contours.size()} | box: ${r.x},${r.y},${r.width},${r.height} | area: ${cv.contourArea(c)}`);
+  [rgba, gray, bw, hierarchy, contours, c].forEach((m) => m.delete());   // free WebAssembly memory
+});
+```
+
+Output printed by Node.js (OpenCV.js 4.12.0):
+
+```text
+gray of the part: 170 | contours: 1 | box: 20,15,40,30 | area: 1131
+```
+
+- The same numbers as Python (JavaScript prints `1131` without `.0`).
+- The npm module is a "thenable" that resolves to itself; awaiting it directly can hang, so the code waits until `cv.Mat` exists.
+- `contours.get(0)` returns a new Mat object that must also be deleted.
+
+## OpenCV API notes
+
+**Loading**: `<script async src="opencv.js">`; wait for `cv.onRuntimeInitialized` (or, with module builds, the promise).
+
+**Canvas and video**: `cv.imread(canvasOrImgOrId)` → `CV_8UC4`; `cv.imshow(canvasOrId, mat)` (1, 3 or 4 channels); `new cv.VideoCapture(videoElement)` with `cap.read(mat)` into a preallocated `CV_8UC4` Mat of the video's size.
+
+**Objects**: `new cv.Mat()`, `new cv.Mat(rows, cols, type, scalar)`, `cv.matFromArray(rows, cols, type, array)`, `cv.matFromImageData(imageData)`, `new cv.MatVector()`, `new cv.Point(x, y)`, `new cv.Size(w, h)`, `new cv.Scalar(...)`, `new cv.Rect(...)`.
+
+**Pixel access**: `mat.data` (Uint8Array view), `mat.ucharAt(y, x)`, `mat.ucharPtr(y, x)`, `mat.data32F`; `mat.roi(rect)` (shares data).
+
+**Memory**: `.delete()` on Mat, MatVector and most other cv objects; `mat.isDeleted()`.
+
+**Build information**: `cv.getBuildInformation()`; docs and tutorials: "OpenCV.js Tutorials" in the documentation of your version.
+
+## Where it fails
+
+- **Speed**: WebAssembly is fast, but single-threaded default builds are several times slower than native multi-threaded OpenCV on the same machine.
+- **Download size**: ~11 MB is heavy for mobile users; custom builds with only the needed modules are smaller.
+- **Missing modules**: no contrib, no CUDA, no file or camera I/O of its own.
+- **Memory**: manual `delete()`; the heap is limited (WebAssembly memory is at most 4 GB, often less in practice).
+- **Version lag**: browser builds are published separately; check the version you load (`cv.getBuildInformation()`).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using `COLOR_BGR2GRAY` on canvas data** (RGBA).
+- **Not waiting for `onRuntimeInitialized`** before calling `cv` functions.
+- **Forgetting `delete()`**, especially in video loops and for objects returned by `get()`.
+- **Calling `cv.imread` on an image that has not loaded yet** (empty Mat).
+- **Expecting Python-style return values**: outputs are parameters.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Emscripten and embind
+
+OpenCV.js is built with Emscripten, which compiles C++ to WebAssembly, and embind, which generates the JavaScript classes (`cv.Mat`, `cv.MatVector`) and functions from a white-list of OpenCV functions. Only white-listed functions exist in `cv`; a custom build can add others. The build script (`platforms/js/build_js.py`) has options for SIMD (`--simd`) and threads (`--threads`); threaded builds need `SharedArrayBuffer`, which browsers enable only on cross-origin-isolated pages [1], [2].
+
+### Why delete() and not garbage collection
+
+The pixel buffer is allocated by C++ code inside the WebAssembly linear memory, a single large ArrayBuffer. JavaScript's garbage collector sees only the small wrapper object; it cannot know that the wrapper owns C++ memory. Some newer JavaScript features (FinalizationRegistry) could free memory automatically but run at unpredictable times, so explicit `delete()` remains the reliable rule [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What type does cv.imread(canvas) return?",
+      options: ["CV_8UC3 BGR", "CV_8UC4 RGBA", "CV_8UC1 gray", "CV_32FC3"],
+      answer: 1,
+      explanation: "Canvas pixels are RGBA, one byte each.",
+    },
+    {
+      question: "Why must you call mat.delete() in OpenCV.js?",
+      options: ["To save the image", "Its pixels live in the WebAssembly heap, which the JavaScript garbage collector does not free", "To update the canvas", "It is optional"],
+      answer: 1,
+      explanation: "Forgetting it leaks memory every time.",
+    },
+    {
+      question: "How do OpenCV.js functions return their result image?",
+      options: ["As a return value", "By writing into a dst Mat you pass in", "Through the canvas only", "As a NumPy array"],
+      answer: 1,
+      explanation: "Like the C++ API: create dst first.",
+    },
+    {
+      question: "Which is a good use of OpenCV.js?",
+      options: ["A 24/7 production inspection at 100 fps", "An instant preview of threshold settings in a web HMI", "Training a network", "CUDA acceleration"],
+      answer: 1,
+      explanation: "Interactive, local, light processing.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A web page processes 1280 × 720 webcam frames at 30 fps and creates 4 new RGBA Mats per frame without deleting them. How many megabytes leak per second? After how long is a 2 GB heap full?
+
+<Solution>
+
+Per frame 4 × 1280 × 720 × 4 B = 14 745 600 B ≈ 14.1 MiB; per second × 30 ≈ **422 MiB/s**. 2048 / 422 ≈ **4.9 s**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+In Python, compute the Otsu threshold and the number of white pixels of the reference image of example 2, so the browser team has two more numbers to compare against.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+t, bw2 = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+print("Otsu threshold:", t, "| white pixels:", cv2.countNonZero(bw2))
+```
+
+Output:
+
+```text
+Otsu threshold: 0.0 | white pixels: 1200
+```
+
+With only two gray levels (0 and 170) Otsu's method places the threshold at the lower level, 0; pixels must be greater than the threshold to become white, so exactly the 40 × 30 = 1200 part pixels are white.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Your web HMI preview (OpenCV.js) and the production program (Python) give different contour counts on the same image. List three things to check.
+
+<Solution>
+
+(1) Channel order: RGBA in the browser vs BGR in Python (the conversion code). (2) The pixels themselves: the browser image may be a resized or JPEG-recompressed copy, or the canvas may apply colour management; compare a few pixel values. (3) OpenCV versions on both sides (`cv.getBuildInformation()` vs `cv2.__version__`) and parameters (threshold type, contour mode). Run a synthetic reference image like example 2 on both sides to separate algorithm differences from input differences.
+
+</Solution>
+
+## References
+
+1. OpenCV 4.13.0 documentation, "OpenCV.js Tutorials" (introduction, build, using OpenCV.js, image and video). https://docs.opencv.org/4.13.0/
+2. Emscripten documentation: embind, memory, pthreads and SharedArrayBuffer. https://emscripten.org/docs/
+3. WebAssembly specification (linear memory, 4 GiB limit for wasm32). https://webassembly.github.io/spec/
+4. @techstark/opencv-js npm package (OpenCV.js builds for Node.js and bundlers). https://www.npmjs.com/package/@techstark/opencv-js

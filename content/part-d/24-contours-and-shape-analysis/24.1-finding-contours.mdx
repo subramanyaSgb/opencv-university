@@ -1,0 +1,288 @@
+export const meta = {
+  number: "24.1",
+  title: "Finding contours",
+  minutes: 20,
+  objectives: [
+    "Explain a contour as the ordered list of boundary pixels of a white region",
+    "Use cv2.findContours with the right input, retrieval mode and approximation",
+    "Draw contours and read their point lists",
+    "Avoid the classic mistakes: black objects, edge images as input, pixel-centre areas",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 24.1 (first chapter of Module 24).
+  New lab: ContourLab (contours precomputed with OpenCV 4.13 by scripts/gen_contour_data.py; lib/contour-ops.ts for area, perimeter, approxPolyDP).
+  New sample: sample-parts.png.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 24.1 Finding contours
+
+<Definition term="Contour">the outline of a connected white region in a binary image, stored as an ordered list of boundary pixel coordinates that goes once around the region. Contours turn a mask (millions of pixels) into a few shapes (lists of points) that can be measured, compared and drawn.</Definition>
+
+Edges (22) and masks (13, 23) are still images. Most inspection questions are about objects: how many, how big, which shape, where. `cv2.findContours` is the bridge: it follows the border of every white region and returns it as a polygon. Everything in this module (hierarchy, area, perimeter, bounding shapes, hulls, moments) starts from its output.
+
+## 1. An analogy
+
+Walking around a pond while keeping your left hand on the fence: you pass every post in order and return to where you started. Writing down the position of each post gives the pond's contour. A pond with an island has a second fence, around the island, which you walk separately.
+
+## 2. Border following
+
+<Flow
+  steps={[
+    { label: "Binary image: objects white (non-zero), background black", tone: "data" },
+    { label: "Scan rows until a border pixel is found", tone: "process" },
+    { label: "Follow the border pixel by pixel (8-neighbours) back to the start", tone: "process" },
+    { label: "Contours: lists of (x, y) points + hierarchy (which contour is inside which)", tone: "result" },
+  ]}
+/>
+
+OpenCV implements Suzuki and Abe's border-following algorithm (1985) [1]. It finds outer borders (around white regions) and hole borders (around black regions inside white ones), and records which border encloses which (24.2).
+
+A worked example: a 4 × 4 white square at x = 2…5, y = 2…5. With `CHAIN_APPROX_NONE`, the contour lists all 12 boundary pixels in order: (2, 2), (2, 3), (2, 4), (2, 5), (3, 5), (4, 5), (5, 5), (5, 4), (5, 3), (5, 2), (4, 2), (3, 2). With `CHAIN_APPROX_SIMPLE`, straight horizontal, vertical and diagonal runs are compressed to their end points: (2, 2), (2, 5), (5, 5), (5, 2).
+
+The contour runs through the **centres** of the boundary pixels. Its polygon area is 3 × 3 = **9**, although the square contains 16 pixels: area and perimeter computed from contours describe the outline through pixel centres, about half a pixel inside the true edge (24.3).
+
+On the six parts of the test image (outer contours only):
+
+| Part | Points (NONE) | Points (SIMPLE) |
+| --- | --- | --- |
+| Plate (rectangle) | 360 | **4** |
+| L-bracket | 269 | **7** |
+| Washer (disc) | 212 | 116 |
+| Rotated bar | 224 | 212 |
+| Star | 220 | 112 |
+| Oval | 176 | 84 |
+
+`SIMPLE` saves a lot on axis-aligned shapes (4 corners for the plate) and less on curved or rotated ones, where few runs are perfectly straight. Use `NONE` when you need every boundary pixel (curvature, sub-pixel fitting), `SIMPLE` otherwise.
+
+<ContourLab initialMode="external" caption="The contours of the six parts, as cv2.findContours finds them. Click a part (or a line in the list) to select it; its point counts with CHAIN_APPROX_NONE and SIMPLE, area and perimeter appear below. Switch the retrieval mode from EXTERNAL to LIST or TREE: the holes of the washer and the plate, and the pin inside the square hole, appear as extra contours (24.2)."/>
+
+## 3. The input must be a clean binary image
+
+- **Objects white, background black**: findContours traces non-zero regions. Dark parts on a light background must be inverted first; otherwise the whole background becomes one big object (inverting the parts image and asking for external contours gives exactly one contour: the frame).
+- **Masks, not edge maps**: running findContours on a Canny image traces both sides of every one-pixel edge line and every small edge fragment. On the parts image, Canny + `RETR_LIST` returns 21 contours instead of 10. Threshold or segment into filled regions first (13, 27); use edges only when you really want curves.
+- **Clean first**: specks and holes become contours too (23.2).
+- **Type**: 8-bit single channel (or 32-bit integer labels with `RETR_CCOMP`/`RETR_FLOODFILL`); float images raise an error.
+
+## 4. Industrial example
+
+A sorting station thresholds a back-lit image of parts on a conveyor and calls findContours on the mask. Each outer contour is one part: its area rejects fragments and touching pairs, its bounding box gives the pick position, and its shape decides the part type (24.3–24.6, 29). The whole step takes well under a millisecond per frame for a few dozen parts, because the contour lists are small compared with the image.
+
+## What you should remember from 24.1
+
+<Takeaways>
+<Takeaway n={1} title="Contour">Ordered boundary pixels of a white region, through pixel centres.</Takeaway>
+<Takeaway n={2} title="Call">contours, hierarchy = cv2.findContours(mask, mode, method).</Takeaway>
+<Takeaway n={3} title="Approximation">NONE keeps every point; SIMPLE compresses straight runs.</Takeaway>
+<Takeaway n={4} title="Input">Clean 8-bit mask, objects white; not an edge image.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A white 10 × 10 square. How many points does its contour have with CHAIN_APPROX_NONE, and with SIMPLE?
+
+<Solution>
+
+NONE: the boundary pixels of a 10 × 10 square: 4 × 10 − 4 = **36**. SIMPLE: **4** (the corners).
+
+</Solution>
+
+**Q2.** Your parts are dark on a light conveyor. What happens if you call findContours on the thresholded image directly (parts = 0, conveyor = 255)?
+
+<Solution>
+
+The conveyor becomes the object: one large outer contour around the frame, with the parts as holes in it. Invert the mask first (or threshold with THRESH_BINARY_INV).
+
+</Solution>
+
+### Next: 24.2 Hierarchy
+
+Holes, parts inside holes, and how OpenCV describes who is inside whom.
+
+## Code
+
+Two examples: the small square, then the parts image with both approximations.
+
+### 1. A contour by hand
+
+```python
+import numpy as np
+import cv2
+
+square = np.zeros((8, 8), np.uint8)
+square[2:6, 2:6] = 255                                               # 4 x 4 white pixels
+none, _ = cv2.findContours(square, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+simple, _ = cv2.findContours(square, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+print("NONE:  ", none[0].reshape(-1, 2).tolist())
+print("SIMPLE:", simple[0].reshape(-1, 2).tolist())
+print("contour area:", cv2.contourArea(none[0]), "| white pixels:", int((square > 0).sum()))
+```
+
+Output:
+
+```text
+NONE:   [[2, 2], [2, 3], [2, 4], [2, 5], [3, 5], [4, 5], [5, 5], [5, 4], [5, 3], [5, 2], [4, 2], [3, 2]]
+SIMPLE: [[2, 2], [2, 5], [5, 5], [5, 2]]
+contour area: 9.0 | white pixels: 16
+```
+
+- Each contour is an array of shape (N, 1, 2), int32, with (x, y) points; `reshape(-1, 2)` makes it an N × 2 list.
+
+### 2. The parts image
+
+```python
+import numpy as np
+import cv2
+
+parts = cv2.imread("sample-parts.png", cv2.IMREAD_GRAYSCALE)
+none, hierarchy = cv2.findContours(parts, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+simple, _ = cv2.findContours(parts, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+for c_none, c_simple in zip(none, simple):
+    x, y, w, h = cv2.boundingRect(c_none)
+    print(f"part at ({x:3d}, {y:3d}), {w:3d} x {h:3d}: NONE {len(c_none):3d} points | SIMPLE {len(c_simple):3d}")
+
+edges = cv2.Canny(parts, 50, 150)
+on_edges, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+on_mask, _ = cv2.findContours(parts, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+inverted, _ = cv2.findContours(255 - parts, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+print("contours on the mask:", len(on_mask), "| on Canny edges:", len(on_edges), "| external on the inverted mask:", len(inverted))
+
+canvas = cv2.cvtColor(parts, cv2.COLOR_GRAY2BGR)
+cv2.drawContours(canvas, none, -1, (0, 0, 255), 2)                    # -1 = all contours
+```
+
+Output:
+
+```text
+part at (228, 127),  75 x  47: NONE 176 points | SIMPLE  84
+part at (147, 118),  56 x  65: NONE 220 points | SIMPLE 112
+part at ( 22, 115),  96 x  70: NONE 224 points | SIMPLE 212
+part at (115,  20),  61 x  76: NONE 269 points | SIMPLE   7
+part at ( 17,  17),  77 x  77: NONE 212 points | SIMPLE 116
+part at (200,  15), 101 x  81: NONE 360 points | SIMPLE   4
+contours on the mask: 10 | on Canny edges: 21 | external on the inverted mask: 1
+```
+
+- The order of the contours is the order in which the scan meets them (bottom to top here); do not rely on it, sort by position if needed.
+
+## OpenCV API notes
+
+**`contours, hierarchy = cv2.findContours(image, mode, method, offset=(0, 0))`** (OpenCV 4: two return values; OpenCV 3 returned three):
+- `image`: 8-bit single channel, non-zero = object. Not modified since OpenCV 3.2.
+- `mode`: `cv2.RETR_EXTERNAL` (outer contours only), `RETR_LIST` (all, no hierarchy), `RETR_CCOMP` (two levels), `RETR_TREE` (full nesting) (24.2).
+- `method`: `cv2.CHAIN_APPROX_NONE`, `CHAIN_APPROX_SIMPLE`, `CHAIN_APPROX_TC89_L1`, `CHAIN_APPROX_TC89_KCOS` (Teh–Chin dominant points).
+- Returns a tuple of (N, 1, 2) int32 arrays and a (1, K, 4) hierarchy array.
+
+**`cv2.drawContours(image, contours, contourIdx, color, thickness)`**: `contourIdx=-1` draws all; `thickness=-1` (`cv2.FILLED`) fills, which turns contours back into masks.
+
+**Related**: `cv2.connectedComponentsWithStats` (25.1) when you only need areas and boxes, not outlines.
+
+## Where it fails
+
+- **Touching objects**: one contour for the pair; separate them first (23.2, 23.5, 27.4).
+- **Noisy masks**: many tiny contours; filter by area or clean the mask.
+- **Objects cut by the image border**: their contour follows the border; flag contours touching it.
+- **Precision**: pixel-centre polygons are biased by about half a pixel; use sub-pixel edges for measurement (22.5).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Black objects on white background** without inverting.
+- **Contours on Canny output** when filled regions were meant.
+- **Unpacking three return values** (OpenCV 3 code) in OpenCV 4: `ValueError`.
+- **Assuming a fixed contour order**.
+- **Comparing contour area with pixel counts**: they differ by about half the perimeter.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Border following
+
+Suzuki and Abe [1] scan the image in raster order; each time they meet an unvisited border pixel they follow the border with an 8-neighbour (for the object) search and label it with a new border number. The numbers of the borders crossed before reaching a pixel define the parent–child relation, which gives the hierarchy in one pass.
+
+### Chain codes
+
+The NONE output is equivalent to a Freeman chain code (29.1): a start point plus one of 8 directions per step. Chain codes compress contours, and their statistics (number of diagonal steps) give better perimeter estimates than the polygon length.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "findContours traces regions that are…",
+      options: ["Black (zero)", "White (non-zero)", "Edges only", "Above 128"],
+      answer: 1,
+      explanation: "Objects must be non-zero.",
+    },
+    {
+      question: "CHAIN_APPROX_SIMPLE stores…",
+      options: ["Every boundary pixel", "Only the end points of straight runs", "A smoothed curve", "The convex hull"],
+      answer: 1,
+      explanation: "A rectangle becomes 4 points.",
+    },
+    {
+      question: "Why should you not run findContours on a Canny edge image to measure objects?",
+      options: ["It is too slow", "Each thin edge line is traced on both sides and fragments become contours", "Canny output is float", "It returns no contours"],
+      answer: 1,
+      explanation: "Use filled masks.",
+    },
+    {
+      question: "A 4 × 4 square of white pixels has a contour area of…",
+      options: ["16", "9", "12", "4"],
+      answer: 1,
+      explanation: "The polygon runs through pixel centres: 3 × 3.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A white shape: a 3 × 3 square at x = 0…2, y = 0…2, plus one extra pixel at (0, 3) below its bottom-left corner. List the corner points that CHAIN_APPROX_SIMPLE would keep.
+
+<Solution>
+
+Boundary walk: (0, 0) down to (0, 3), then up-right diagonal to (1, 2), right to (2, 2), up to (2, 0), left back to (0, 0). Corners kept: **(0, 0), (0, 3), (1, 2), (2, 2), (2, 0)**: five points (the diagonal step from (0, 3) to (1, 2) is a run of its own).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Fill the contours of the parts image back into a mask with `drawContours(..., thickness=-1)` using `RETR_EXTERNAL`. How many pixels differ from the original mask, and why?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+filled = np.zeros_like(parts)
+cv2.drawContours(filled, none, -1, 255, thickness=cv2.FILLED)
+diff = (filled > 0) != (parts > 0)
+print("pixels that differ:", int(diff.sum()), "| original white:", int((parts > 0).sum()), "| refilled white:", int((filled > 0).sum()))
+```
+
+Output:
+
+```text
+pixels that differ: 2118 | original white: 20352 | refilled white: 22470
+```
+
+Filling only the external contours fills the holes too: the washer's hole, the plate's two holes (and the pin inside one of them) become white. Those 2 118 pixels are the hole areas (minus the pin, which was already white). To reproduce the mask with holes, draw with `RETR_CCOMP` or `RETR_TREE` and fill holes in black (24.2).
+
+</Solution>
+
+## References
+
+1. S. Suzuki, K. Abe, "Topological structural analysis of digitized binary images by border following", *Computer Vision, Graphics, and Image Processing* 30(1), 32–46, 1985.
+2. C.-H. Teh, R. T. Chin, "On the detection of dominant points on digital curves", *IEEE Trans. PAMI* 11(8), 859–872, 1989.
+3. OpenCV 4.13.0 documentation: `findContours`, `drawContours`, `contourArea`, "Contours in OpenCV" tutorials. https://docs.opencv.org/4.13.0/

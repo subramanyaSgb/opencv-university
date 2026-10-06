@@ -176,6 +176,354 @@ point = np.zeros((41, 41), np.uint8)
 point[20, 20] = 255
 images["sample-airy-point.png"] = cv2.resize(point, None, fx=6, fy=6, interpolation=cv2.INTER_NEAREST)
 
+# Chapter 2.5: sensor noise. Same chart, (a) bright exposure, (b) 1/16 of the light with 16x gain.
+# Model: QE 0.6, read noise 6 e-, full well 10000 e- = 255 DN at gain 1; Poisson shot noise.
+noise_rng = np.random.default_rng(seed=25)
+
+
+def capture(photons_at_white, gain):
+    e = noise_rng.poisson(chart.astype(np.float64) / 255.0 * photons_at_white * 0.6).astype(np.float64)
+    e += noise_rng.normal(0, 6.0, chart.shape)
+    return np.clip(np.rint(e * gain / (10000 / 255)), 0, 255).astype(np.uint8)
+
+
+images["sample-noise-bright.png"] = capture(16000, 1)
+images["sample-noise-dark-gain.png"] = capture(1000, 16)
+
+# Chapter 2.6: motion blur. The chart moving 15 px to the right during the exposure (horizontal box kernel).
+mk = np.full((1, 15), 1.0 / 15, np.float32)
+images["sample-motion-blur.png"] = cv2.filter2D(chart, -1, mk)
+
+# Chapter 2.7: Bayer mosaic (RGGB) and bilinear demosaicing, shown as 6x enlarged crops.
+def rggb_mosaic(img_bgr):
+    m = np.zeros(img_bgr.shape[:2], np.uint8)
+    m[0::2, 0::2] = img_bgr[0::2, 0::2, 2]
+    m[0::2, 1::2] = img_bgr[0::2, 1::2, 1]
+    m[1::2, 0::2] = img_bgr[1::2, 0::2, 1]
+    m[1::2, 1::2] = img_bgr[1::2, 1::2, 0]
+    return m
+
+
+def show_mosaic(m):
+    v = np.zeros(m.shape + (3,), np.uint8)
+    v[0::2, 0::2, 2] = m[0::2, 0::2]
+    v[0::2, 1::2, 1] = m[0::2, 1::2]
+    v[1::2, 0::2, 1] = m[1::2, 0::2]
+    v[1::2, 1::2, 0] = m[1::2, 1::2]
+    return v
+
+
+def big(img):
+    return cv2.resize(img, None, fx=6, fy=6, interpolation=cv2.INTER_NEAREST)
+
+
+colour_scene = images["sample-color.png"]
+cy, cx = 44, 222
+crop = colour_scene[cy:cy + 40, cx:cx + 40]
+crop_mosaic = rggb_mosaic(colour_scene)[cy:cy + 40, cx:cx + 40]
+crop_demosaic = cv2.cvtColor(rggb_mosaic(colour_scene), cv2.COLOR_BayerRGGB2BGR)[cy:cy + 40, cx:cx + 40]
+images["sample-bayer-true.png"] = big(crop)
+images["sample-bayer-mosaic.png"] = big(show_mosaic(crop_mosaic))
+images["sample-bayer-demosaic.png"] = big(crop_demosaic)
+stripes_gray = np.zeros((40, 40), np.uint8)
+stripes_gray[:, 0::2] = 255
+stripes_bgr = cv2.cvtColor(stripes_gray, cv2.COLOR_GRAY2BGR)
+images["sample-bayer-stripes.png"] = big(stripes_bgr)
+images["sample-bayer-stripes-demosaic.png"] = big(cv2.cvtColor(rggb_mosaic(stripes_bgr), cv2.COLOR_BayerRGGB2BGR))
+
+# Chapter 2.8: what the sensor delivers before the ISP (linear, black level, colour cast, lens shading)
+# and the corrected result. Simulation from sample-color.
+def srgb_decode(v):
+    return np.where(v <= 0.04045, v / 12.92, ((v + 0.055) / 1.055) ** 2.4)
+
+
+def srgb_encode(x):
+    return np.where(x <= 0.0031308, 12.92 * x, 1.055 * np.power(np.clip(x, 0, None), 1 / 2.4) - 0.055)
+
+
+lin = srgb_decode(images["sample-color.png"][:, :, ::-1].astype(np.float64) / 255.0)   # RGB, linear
+iy, ix = np.mgrid[0:H, 0:W]
+ir2 = ((ix - W / 2) ** 2 + (iy - H / 2) ** 2) / ((W / 2) ** 2 + (H / 2) ** 2)
+sens = np.array([0.55, 1.0, 0.7])                                   # raw R, G, B sensitivity (colour cast)
+raw_lin = lin * sens * (1 - 0.45 * ir2)[..., None] + 16 / 255.0     # shading + black level
+images["sample-isp-raw.png"] = np.clip(np.rint(raw_lin * 255), 0, 255).astype(np.uint8)[:, :, ::-1]
+fixed = (raw_lin - 16 / 255.0) / (1 - 0.45 * ir2)[..., None] / sens
+images["sample-isp-final.png"] = np.clip(np.rint(srgb_encode(fixed) * 255), 0, 255).astype(np.uint8)[:, :, ::-1]
+
+# Chapter 2.9: rolling shutter skew and flicker banding (simulated).
+bars = np.full((H, W), 30, np.uint8)
+for bx in (60, 140, 220):
+    cv2.rectangle(bars, (bx, 20), (bx + 24, H - 20), 220, -1)
+images["sample-shutter-global.png"] = bars
+rolled = np.zeros_like(bars)
+for yy_ in range(H):
+    rolled[yy_] = np.roll(bars[yy_], int(round(yy_ * 0.25)))
+images["sample-shutter-rolling.png"] = rolled
+wt_ = 2 * np.pi * 100.0
+t0_ = np.arange(H) * 30e-6 * 2.5
+gain_ = 1 + 0.3 * (np.sin(wt_ * (t0_ + 2.5e-3)) - np.sin(wt_ * t0_)) / (wt_ * 2.5e-3)
+images["sample-flicker-bands.png"] = np.clip(np.rint(chart.astype(np.float64) * 0.6 * gain_[:, None] + 40 * gain_[:, None]), 0, 255).astype(np.uint8)
+
+# Chapter 3.5: aliasing. A zone plate (rings whose spacing shrinks outwards), and the same
+# image shrunk 4x by point sampling (nearest) vs area averaging, shown back at full size.
+zy, zx = np.mgrid[0:H, 0:W]
+zr2 = (zx - W / 2) ** 2 + (zy - H / 2) ** 2
+zone = (127.5 + 127.5 * np.cos(np.pi * zr2 / 400.0)).astype(np.uint8)
+images["sample-zoneplate.png"] = zone
+for name_, interp_ in (("nearest", cv2.INTER_NEAREST), ("area", cv2.INTER_AREA)):
+    small_ = cv2.resize(zone, (W // 4, H // 4), interpolation=interp_)
+    images[f"sample-zoneplate-{name_}.png"] = cv2.resize(small_, (W, H), interpolation=cv2.INTER_NEAREST)
+
+# Chapter 4.3: JPEG artefacts, shown as enlarged crops (nearest; 4x text, 8x colour). Text on the test chart at
+# quality 10 (blocking, ringing), and colour edges at quality 95 with 4:2:0 vs 4:4:4 chroma.
+def jpeg_roundtrip(img_, quality_, sampling_=None):
+    params_ = [cv2.IMWRITE_JPEG_QUALITY, quality_]
+    if sampling_ is not None:
+        params_ += [cv2.IMWRITE_JPEG_SAMPLING_FACTOR, sampling_]
+    return cv2.imdecode(cv2.imencode(".jpg", img_, params_)[1], cv2.IMREAD_UNCHANGED)
+
+def zoom(img_, y_, x_, f_=4):
+    return cv2.resize(img_[y_:y_ + 192 // f_, x_:x_ + 320 // f_], None, fx=f_, fy=f_, interpolation=cv2.INTER_NEAREST)
+
+images["sample-jpeg-text.png"] = zoom(chart, 126, 32)
+images["sample-jpeg-text-q10.png"] = zoom(jpeg_roundtrip(chart, 10), 126, 32)
+images["sample-jpeg-color.png"] = zoom(color, 70, 24, 8)
+images["sample-jpeg-color-420.png"] = zoom(jpeg_roundtrip(color, 95, cv2.IMWRITE_JPEG_SAMPLING_FACTOR_420), 70, 24, 8)
+images["sample-jpeg-color-444.png"] = zoom(jpeg_roundtrip(color, 95, cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444), 70, 24, 8)
+
+# Chapter 5.3: a flat label seen by a tilted camera (perspective), and the same rectified with a homography
+# from its four corners. The rectified label is placed at (40, 40)-(280, 160) in a 320 x 200 frame.
+label_ = np.full((120, 240), 235, np.uint8)
+cv2.rectangle(label_, (4, 4), (235, 115), 40, 3)
+for x_ in range(40, 240, 40):
+    cv2.line(label_, (x_, 4), (x_, 115), 170, 1)
+cv2.putText(label_, "LOT 4711", (22, 75), cv2.FONT_HERSHEY_SIMPLEX, 1.3, 20, 3)
+label_corners_ = np.float32([[70, 40], [270, 62], [255, 170], [52, 140]])
+tilted_ = cv2.warpPerspective(label_, cv2.getPerspectiveTransform(
+    np.float32([[0, 0], [240, 0], [240, 120], [0, 120]]), label_corners_), (W, H), borderValue=90)
+images["sample-label-tilted.png"] = tilted_
+images["sample-label-rectified.png"] = cv2.warpPerspective(tilted_, cv2.getPerspectiveTransform(
+    label_corners_, np.float32([[40, 40], [280, 40], [280, 160], [40, 160]])), (W, H), borderValue=90)
+
+# Chapter 5.7: the gradient scene rebuilt from its k strongest SVD components (low-rank approximation).
+U_, S_, Vt_ = np.linalg.svd(scene.astype(np.float64), full_matrices=False)
+for k_ in (1, 5, 20):
+    images[f"sample-svd-rank{k_}.png"] = np.clip(np.rint((U_[:, :k_] * S_[:k_]) @ Vt_[:k_]), 0, 255).astype(np.uint8)
+
+# Chapter 7.5: sample-color annotated with OpenCV drawing functions (filled highlight, outlines, labels).
+gray_ = cv2.cvtColor(color, cv2.COLOR_BGR2GRAY)
+_, mask_ = cv2.threshold(gray_, 60, 255, cv2.THRESH_BINARY)
+cnts_, _ = cv2.findContours(mask_, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+cnts_ = sorted(cnts_, key=lambda c: (cv2.boundingRect(c)[1] // 100, cv2.boundingRect(c)[0]))
+over_ = color.copy()
+cv2.drawContours(over_, cnts_, -1, (255, 255, 255), -1)
+ann_ = cv2.addWeighted(over_, 0.3, color, 0.7, 0)
+cv2.drawContours(ann_, cnts_, -1, (0, 255, 255), 1, cv2.LINE_AA)
+for i_, c_ in enumerate(cnts_):
+    x_, y_, w_, h_ = cv2.boundingRect(c_)
+    lab_ = f"#{i_ + 1}: {int(cv2.contourArea(c_))} px"
+    (tw_, th_), b_ = cv2.getTextSize(lab_, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)
+    cv2.rectangle(ann_, (x_, y_ - th_ - b_ - 4), (x_ + tw_ + 4, y_), (0, 0, 0), -1)
+    cv2.putText(ann_, lab_, (x_ + 2, y_ - b_ - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+images["sample-annotated.png"] = ann_
+
+# Chapter 9.1: sample-scene as the eye sees it when looking at the centre (blur grows with distance from the fixation point).
+f_img = scene.astype(np.float32)
+f_h, f_w = f_img.shape
+f_yy, f_xx = np.mgrid[0:f_h, 0:f_w]
+f_ecc = np.hypot(f_xx - f_w // 2, f_yy - f_h // 2) / np.hypot(f_w / 2, f_h / 2)
+f_levels = np.stack([f_img] + [cv2.GaussianBlur(f_img, (0, 0), s) for s in (1.5, 3.0, 6.0)])
+f_idx = np.clip(f_ecc * 3, 0, 2.999)
+f_lo = f_idx.astype(int)
+f_t = f_idx - f_lo
+images["sample-scene-foveated.png"] = np.clip(np.rint((1 - f_t) * f_levels[f_lo, f_yy, f_xx] + f_t * f_levels[f_lo + 1, f_yy, f_xx]), 0, 255).astype(np.uint8)
+
+# Chapter 11.2: Fourier magnitude of sample-scene, scaled linearly to 8 bits (almost all dark: a case for the log transform).
+s_mag = np.abs(np.fft.fftshift(np.fft.fft2(scene.astype(np.float64))))
+images["sample-spectrum-linear.png"] = np.clip(np.round(255 * s_mag / s_mag.max() * 40), 0, 255).astype(np.uint8)
+
+# Chapter 12.4: the same scene seen by a "second camera" with lower gain, a gamma of 1.5, an offset and a little noise.
+cb_rng = np.random.default_rng(12)
+images["sample-scene-camb.png"] = np.clip(np.rint(25 + 180 * (scene / 255.0) ** 1.5 + cb_rng.normal(0, 1.5, scene.shape)), 0, 255).astype(np.uint8)
+
+# Chapters 12.5, 12.6: the shaded cap scene of InRangeLab/BackProjLab (10.7, 12.5) with its object-id map (0 belt, 1 orange, 2 red, 3 crimson, 4 green, 5 cardboard).
+cap_rng = np.random.default_rng(7)
+cap_yy, cap_xx = np.mgrid[0:100, 0:160]
+cap_bgr = np.empty((100, 160, 3)); cap_bgr[:] = (118, 120, 122)
+cap_id = np.zeros((100, 160), np.uint8)
+cap_cols = {1: (30, 140, 250), 2: (30, 30, 210), 3: (70, 25, 200), 4: (60, 170, 40), 5: (70, 110, 150)}
+for o, cx, cy, r in [(1, 30, 35, 16), (2, 75, 30, 15), (3, 120, 32, 15), (4, 40, 75, 14)]:
+    m = (cap_xx - cx) ** 2 + (cap_yy - cy) ** 2 <= r * r
+    cap_bgr[m] = cap_cols[o]; cap_id[m] = o
+m = (np.abs(cap_xx - 105) <= 20) & (np.abs(cap_yy - 75) <= 11)
+cap_bgr[m] = cap_cols[5]; cap_id[m] = 5
+cap_shade = (1 - 0.55 * cap_xx / 160)[..., None] * np.ones(3)
+hl = (cap_id == 1) & ((cap_xx - 25) ** 2 + (cap_yy - 30) ** 2 <= 9)
+cap_bgr[hl] = 250; cap_shade[hl] = 1
+images["sample-caps.png"] = np.clip(cap_bgr * cap_shade + cap_rng.uniform(-6, 6, cap_bgr.shape), 0, 255).astype(np.uint8)
+images["sample-caps-ids.png"] = cap_id
+
+# Module 13: printed label text under uneven light (bright top right, dark bottom left) and its ground-truth text mask.
+pr_ink = np.zeros((200, 320), np.uint8)
+for pr_i, pr_t in enumerate(["Lot 4471-B  QTY 120", "EXP 2027-03  PASS", "Line 3  Shift B  OK", "Batch 0912 / 77"]):
+    cv2.putText(pr_ink, pr_t, (14, 40 + pr_i * 44), cv2.FONT_HERSHEY_SIMPLEX, 0.85, 255, 2, cv2.LINE_AA)
+pr_yy, pr_xx = np.mgrid[0:200, 0:320]
+pr_light = 0.35 + 0.65 * np.exp(-(((pr_xx - 260) / 220) ** 2 + ((pr_yy - 40) / 170) ** 2))
+pr_a = pr_ink / 255.0
+pr_img = 210 * pr_light * (1 - pr_a) + 60 * pr_light * pr_a + np.random.default_rng(5).normal(0, 4, pr_ink.shape)
+images["sample-print-uneven.png"] = np.clip(np.rint(pr_img), 0, 255).astype(np.uint8)
+images["sample-print-uneven-gt.png"] = ((pr_ink > 127) * 255).astype(np.uint8)
+# Chapter 15.3: the same light on a blank white target (flat-field reference), its own noise.
+images["sample-print-white.png"] = np.clip(np.rint(210 * pr_light + np.random.default_rng(6).normal(0, 4, pr_ink.shape)), 0, 255).astype(np.uint8)
+
+# Chapter 13.6: a faint crack (150) on a plate (180) with strong noise (σ 12): single thresholds fail, hysteresis works.
+fc_mask = images["sample-plate-crack-mask.png"] > 0
+images["sample-crack-faint.png"] = np.clip(np.where(fc_mask, 150.0, 180.0) + np.random.default_rng(4).normal(0, 12, fc_mask.shape), 0, 255).astype(np.uint8)
+
+# Chapter 16.5: text printed around a ring (like a cap or a bearing), to be unwrapped with warpPolar.
+rt_img = np.full((240, 240), 200, np.uint8)
+cv2.circle(rt_img, (120, 120), 105, 120, -1)
+cv2.circle(rt_img, (120, 120), 60, 200, -1)
+rt_text = "LOT 4711 * EXP 2027-03 * PASS * "
+for rt_i, rt_ch in enumerate(rt_text):
+    rt_glyph = np.zeros((40, 40), np.uint8)
+    cv2.putText(rt_glyph, rt_ch, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, 255, 2, cv2.LINE_AA)
+    rt_angle = 360.0 * rt_i / len(rt_text)                     # clockwise from the top, letters upright towards the centre
+    rt_t = np.deg2rad(rt_angle - 90)
+    rt_cx, rt_cy = 120 + 82 * np.cos(rt_t), 120 + 82 * np.sin(rt_t)
+    rt_M = cv2.getRotationMatrix2D((20, 20), -rt_angle, 1.0)
+    rt_M[0, 2] += rt_cx - 20
+    rt_M[1, 2] += rt_cy - 20
+    rt_mask = cv2.warpAffine(rt_glyph, rt_M, (240, 240))
+    rt_img = np.where(rt_mask > 0, np.minimum(rt_img, 255 - rt_mask.astype(np.int32) * 235 // 255), rt_img).astype(np.uint8)
+images["sample-ring-text.png"] = rt_img
+
+# Module 18: a clean, noise-free test image (flat areas, a gradient, sharp and thin edges, small text, fine stripes) for denoising experiments.
+cl = np.zeros((200, 320), np.float64)
+cl[:] = np.linspace(60, 190, 320)[None, :]                            # smooth gradient background
+cv2.rectangle(cl, (20, 20), (110, 110), 230, -1)                      # bright square with sharp edges
+cv2.circle(cl, (170, 65), 45, 40, -1)                                 # dark disc
+# fine vertical stripes, 2 px period
+cl[130:180, 20:110] = np.where((np.arange(90) // 2) % 2 == 0, 210, 80)[None, :]
+for cl_k in range(5):                                                 # thin lines of width 1
+    cv2.line(cl, (230, 20 + 8 * cl_k), (300, 20 + 8 * cl_k), 20, 1)
+cv2.putText(cl, "A7", (150, 175), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 245, 2, cv2.LINE_AA)
+cv2.putText(cl, "lot 42", (225, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 20, 1, cv2.LINE_AA)
+images["sample-clean.png"] = np.clip(np.rint(cl), 0, 255).astype(np.uint8)
+
+# 20.3: two colour textures for pyramid blending (256 x 256)
+bl_rng = np.random.default_rng(20)
+bl_y, bl_x = np.mgrid[0:256, 0:256].astype(np.float64)
+streak = cv2.GaussianBlur(bl_rng.normal(0, 1, (256, 256)), (0, 0), sigmaX=25, sigmaY=0.6)
+streak = streak / streak.std()
+steel = 140 + 0.15 * bl_x - 0.1 * bl_y + 14 * streak
+bl_a = np.dstack([steel + 18, steel + 6, steel - 6])                      # cool grey-blue (BGR)
+for cy, cx in [(48, 48), (48, 208), (208, 48), (208, 208)]:              # four bolts
+    r = np.hypot(bl_y - cy, bl_x - cx)
+    bl_a[r < 12] = (np.array([70, 70, 75]) + 60 * np.clip((cx - bl_x[r < 12] + cy - bl_y[r < 12]) / 24 + 0.5, 0, 1)[:, None])
+mortar = ((bl_y % 32) < 3) | ((((bl_x + 32 * ((bl_y // 32) % 2)) % 64) < 3))
+brick = 1 + 0.08 * bl_rng.normal(0, 1, (256, 256))
+bl_b = np.dstack([45 * brick, 80 * brick, 170 * brick])                  # red-orange brick (BGR)
+bl_b[mortar] = [175, 180, 185]
+bl_b = cv2.GaussianBlur(bl_b, (0, 0), 0.7) + bl_rng.normal(0, 4, (256, 256, 3))
+images["sample-blend-a.png"] = np.clip(np.rint(bl_a), 0, 255).astype(np.uint8)
+images["sample-blend-b.png"] = np.clip(np.rint(bl_b), 0, 255).astype(np.uint8)
+
+# 23.x: binary test image for morphology: shapes with holes, a thin bridge, specks, a notch, text
+mo = np.zeros((200, 320), np.uint8)
+cv2.rectangle(mo, (20, 20), (110, 90), 255, -1)
+for hx, hy in [(40, 40), (60, 70), (90, 45)]:
+    cv2.circle(mo, (hx, hy), 3, 0, -1)                                   # small holes
+cv2.rectangle(mo, (100, 50), (110, 60), 0, -1)                             # a notch in the edge
+cv2.circle(mo, (165, 55), 30, 255, -1)
+cv2.circle(mo, (255, 55), 30, 255, -1)
+cv2.rectangle(mo, (190, 54), (230, 56), 255, -1)                           # 3-px bridge between the discs
+cv2.ellipse(mo, (70, 150), (45, 25), 20, 0, 360, 255, -1)
+cv2.putText(mo, "A7", (150, 175), cv2.FONT_HERSHEY_SIMPLEX, 2.0, 255, 6, cv2.LINE_8)
+cv2.line(mo, (250, 120), (300, 185), 255, 2)                              # a thin line
+mo_rng = np.random.default_rng(23)
+ys, xs = mo_rng.integers(0, 200, 120), mo_rng.integers(0, 320, 120)
+mo[ys, xs] = 255                                                           # isolated white specks
+ys, xs = mo_rng.integers(20, 90, 25), mo_rng.integers(20, 110, 25)
+mo[ys, xs] = 0                                                             # pepper inside the rectangle
+images["sample-morph.png"] = mo
+
+# 24.x: binary image of machined parts for contour analysis
+pa = np.zeros((200, 320), np.uint8)
+cv2.circle(pa, (55, 55), 38, 255, -1); cv2.circle(pa, (55, 55), 16, 0, -1)               # washer (hole)
+cv2.fillPoly(pa, [np.array([[115, 20], [175, 20], [175, 40], [135, 40], [135, 95], [115, 95]])], 255)   # L-bracket
+cv2.rectangle(pa, (200, 15), (300, 95), 255, -1)                                         # plate with two holes
+cv2.circle(pa, (225, 55), 12, 0, -1); cv2.rectangle(pa, (255, 40), (285, 70), 0, -1)
+cv2.circle(pa, (270, 55), 5, 255, -1)                                                    # a pin inside the square hole
+box = cv2.boxPoints(((70, 150), (90, 34), 25)).astype(np.int32); cv2.fillPoly(pa, [box], 255)   # rotated bar
+t = np.linspace(0, 2 * np.pi, 13)[:-1]                                                    # 6-point star
+star = np.array([[175 + (32 if i % 2 == 0 else 14) * np.cos(a - np.pi / 2), 150 + (32 if i % 2 == 0 else 14) * np.sin(a - np.pi / 2)] for i, a in enumerate(t)], np.int32)
+cv2.fillPoly(pa, [star], 255)
+cv2.ellipse(pa, (265, 150), (38, 22), -15, 0, 360, 255, -1)                              # oval
+images["sample-parts.png"] = pa
+
+# 25.x: grey image of round particles (some touching) with a known count
+pt_rng = np.random.default_rng(25)
+pt_img = np.full((200, 320), 60.0)
+pt_centres = []
+while len(pt_centres) < 40:
+    x, y, r = pt_rng.uniform(15, 305), pt_rng.uniform(15, 185), pt_rng.uniform(6, 13)
+    if all(np.hypot(x - a, y - b) > 0.8 * (r + c) for a, b, c in pt_centres):   # may touch, never overlap much
+        pt_centres.append((x, y, r))
+yy, xx = np.mgrid[0:200, 0:320]
+for x, y, r in pt_centres:
+    d = np.hypot(xx - x, yy - y)
+    pt_img = np.maximum(pt_img, np.where(d <= r, 200 - 40 * (d / r) ** 2, 0))  # domed particles
+pt_img = cv2.GaussianBlur(pt_img, (0, 0), 0.8) + pt_rng.normal(0, 6, pt_img.shape)
+images["sample-particles.png"] = np.clip(np.rint(pt_img), 0, 255).astype(np.uint8)
+
+# 26.x: grey scene for Hough lines and circles: rotated plate with four holes, a washer and a disc
+hg = np.full((200, 320), 45.0)
+hg_big = np.zeros((1600, 2560), np.uint8)
+cv2.fillPoly(hg_big, [np.rint(cv2.boxPoints(((120, 100), (170, 110), 12)) * 8).astype(np.int32)], 255)   # 8x supersampled plate
+hg_plate = cv2.resize(hg_big, (320, 200), interpolation=cv2.INTER_AREA) / 255.0
+hg = hg * (1 - hg_plate) + 175 * hg_plate
+hy, hx = np.mgrid[0:200, 0:320]
+hdisc = lambda cx, cy, r: np.clip(r + 0.5 - np.hypot(hx - cx, hy - cy), 0, 1)          # anti-aliased disc
+for cx, cy, r in [(85, 75, 14), (150, 85, 9), (105, 125, 18), (160, 128, 6)]:          # holes in the plate
+    a = hdisc(cx, cy, r); hg = hg * (1 - a) + 60 * a
+a = hdisc(265, 60, 30) - hdisc(265, 60, 13); hg = hg * (1 - a) + 160 * a                 # washer
+a = hdisc(262, 150, 22); hg = hg * (1 - a) + 150 * a                                     # disc
+hg = cv2.GaussianBlur(hg, (0, 0), 0.7) + np.random.default_rng(26).normal(0, 5, hg.shape)
+images["sample-hough.png"] = np.clip(np.rint(hg), 0, 255).astype(np.uint8)
+
+# 27.x: colour scene for segmentation with an object-id map: cloth background (light falls off to the right),
+# shaded orange (1), red disc (2) touching a crimson disc (3), striped green box (4), yellow label with dark text (5)
+sg_rng = np.random.default_rng(27)
+sy, sx = np.mgrid[0:160, 0:240]
+sg = np.zeros((160, 240, 3)); sg[:] = (150, 120, 95)                     # B, G, R
+sg += (8 * np.sin(sx * 1.3) * np.sin(sy * 1.3))[..., None]                # weave texture
+sg_ids = np.zeros((160, 240), np.uint8)
+def sg_ell(cx, cy, a, b, ang):
+    m = np.zeros((160, 240), np.uint8); cv2.ellipse(m, (cx, cy), (a, b), ang, 0, 360, 255, -1); return m > 0
+m1 = sg_ell(55, 55, 34, 28, 15); sg[m1] = (30, 130, 235); sg_ids[m1] = 1
+sg_d = np.hypot((sx - 45) / 34, (sy - 45) / 28); sg[m1] *= (1.15 - 0.45 * sg_d[m1])[:, None]   # shading
+m2 = sg_ell(120, 50, 24, 24, 0); m3 = sg_ell(160, 62, 22, 22, 0) & ~m2
+sg[m2] = (40, 40, 200); sg_ids[m2] = 2; sg[m3] = (70, 30, 170); sg_ids[m3] = 3
+m4 = np.zeros((160, 240), np.uint8); cv2.rectangle(m4, (25, 100), (95, 145), 255, -1); m4 = m4 > 0
+sg[m4] = (60, 150, 50); sg_ids[m4] = 4; sg[m4 & ((sx // 6) % 2 == 0)] -= (20, 35, 15)       # stripes
+m5 = np.zeros((160, 240), np.uint8); cv2.rectangle(m5, (130, 105), (215, 140), 255, -1); m5 = m5 > 0
+sg[m5] = (90, 190, 210); sg_ids[m5] = 5
+sg_txt = np.zeros((160, 240), np.uint8); cv2.putText(sg_txt, "OK 27", (140, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.6, 255, 2)
+sg[(sg_txt > 0) & m5] = (40, 40, 40)
+sg *= (1.15 - 0.45 * sx / 240)[..., None]                                 # light falls off to the right
+sg = cv2.GaussianBlur(sg + sg_rng.normal(0, 4, sg.shape), (0, 0), 0.6)
+images["sample-seg.png"] = np.clip(np.rint(sg), 0, 255).astype(np.uint8)
+images["sample-seg-ids.png"] = sg_ids
+
+# 28.x: grey image for active contours: a disc with a deep slot from the top, and two separate discs (seed 28)
+ac_big = np.zeros((600, 800), np.uint8)
+cv2.circle(ac_big, (280, 300), 180, 255, -1); cv2.rectangle(ac_big, (240, 100), (320, 340), 0, -1)   # slotted disc
+cv2.circle(ac_big, (640, 180), 64, 255, -1); cv2.circle(ac_big, (660, 440), 80, 255, -1)             # two discs
+ac = 60 + 110 * (cv2.resize(ac_big, (200, 150), interpolation=cv2.INTER_AREA) / 255.0)               # 4x supersampled
+ac = cv2.GaussianBlur(ac, (0, 0), 1.0) + np.random.default_rng(28).normal(0, 10, ac.shape)
+images["sample-snake.png"] = np.clip(np.rint(ac), 0, 255).astype(np.uint8)
+
 for name, img in images.items():
     ok = cv2.imwrite(str(OUT / name), img)
     assert ok, f"could not write {name}"

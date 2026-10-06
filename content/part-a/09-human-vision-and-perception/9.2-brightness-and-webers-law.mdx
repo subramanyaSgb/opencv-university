@@ -1,0 +1,349 @@
+export const meta = {
+  number: "9.2",
+  title: "Brightness and Weber's law",
+  minutes: 25,
+  objectives: [
+    "State Weber's law and the just-noticeable difference of about 2 %",
+    "Explain why perceived brightness is roughly logarithmic or cube-root, not linear",
+    "Convert sRGB code values to luminance and back, and explain why images are gamma-encoded",
+    "Predict when a low-contrast defect is visible on a screen, including room light",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 9.2 (Module 9 plan).
+  sRGB formulas from IEC 61966-2-1; Weber fraction ~0.02 and the brightness-adaptation discussion follow
+  Gonzalez & Woods, 4th ed., Section 2.1. Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 9.2 Brightness and Weber's law
+
+<Definition term="Weber's law">the smallest change in light intensity a person can notice is a fixed fraction of the intensity itself: ΔI / I ≈ constant, about 2 % for most everyday brightness levels. We perceive ratios, not differences.</Definition>
+
+A camera measures light linearly: twice the photons, twice the signal. The eye does not. That difference explains why 8-bit images store values the way they do (gamma), why dark defects disappear on a screen in a bright room, and why "add 20 to every pixel" looks like a big change in the shadows and a small one in the highlights.
+
+## 1. An analogy
+
+Adding one candle to a room lit by one candle doubles the light: you notice at once. Adding one candle to a room lit by a hundred candles changes almost nothing visible. What matters is the change **relative** to what is already there. Money works the same way: 10 € extra matters on 20 €, not on 20 000 €.
+
+## 2. Weber's law and the just-noticeable difference
+
+<Equation terms={[{ value: "ΔI / I" }, { op: "≈", value: "0.02 (just noticeable)", result: true }]} />
+
+- **I**: intensity of the background; **ΔI**: the smallest increase that is just noticed (the "just-noticeable difference", JND).
+- The **Weber fraction** is about 0.02 over a wide middle range of brightness. In very dim light (where rods take over) it becomes much larger: we discriminate poorly in the dark [1].
+- Consequence: on a background of luminance 100, a spot must differ by about 2 to be seen; on a background of 10, by about 0.2. Equal **ratios** look like equal steps.
+
+## 3. Perceived brightness is compressed
+
+If equal ratios are equal steps, perceived brightness grows roughly with the **logarithm** of intensity (Fechner). Measurements of lightness are better described by a **cube root** (Stevens), and the CIE lightness scale L\* uses exactly that:
+
+<Equation terms={[{ value: "L*" }, { op: "=", value: "116 · (Y / Yₙ)^(1/3) − 16", result: true }]} />
+
+A surface reflecting 18–20 % of the light looks "middle grey" (L\* ≈ 50), not one reflecting 50 %. Our perception spends its resolution on the darks.
+
+## 4. Why images are gamma-encoded
+
+An 8-bit image has 256 code values. If they were spread **linearly in light**, the step from code 10 to 11 would be a 10 % jump (clearly visible banding in shadows), while codes 200 to 255 would waste 55 steps on differences below 1 %. So images and screens use a **non-linear encoding**: sRGB maps light to codes roughly like a power of 1/2.2, close to how we perceive.
+
+| sRGB code | Luminance (% of white) | Next code is brighter by |
+| --- | --- | --- |
+| 10 | 0.30 % | 10.3 % |
+| 50 | 3.19 % | 3.8 % |
+| 128 | 21.6 % | about 1.7 % |
+| 200 | 57.8 % | 1.1 % |
+| 254 | 99.1 % | 0.9 % |
+
+- Code 128 is not half the light: it is 21.6 % of white, which looks like a middle grey. Half the light is code **188**.
+- In the darkest codes the steps are still above 2 %, so very dark gradients can show banding even in sRGB.
+- **Machine vision cameras usually output linear values** (gamma off, 2.6): good for measurement, but images look dark and contrasty on a screen. For display, apply a gamma; for measurement, do not.
+
+## 5. Try it on your screen
+
+<WeberLab caption="A spot slightly darker than its background, drawn on your screen. Change the background, the difference and the room light; compare the Weber contrast with the ~2 % threshold. Below: equal code steps vs equal light steps." />
+
+Things to try:
+
+- Background 20, spot 2 codes darker, dark room: about 14 % Weber contrast, clearly visible. Add 2 % reflected room light: about 3.5 %, near the threshold. 5 %: about 1.7 %, below it.
+- Background 200, 2 codes darker: about 2 % whatever the room light (2.2 % → 2.1 %).
+- Look at the two ramps: equal code steps look even; equal light steps look crowded at the bright end.
+
+The room-light effect is real on the factory floor: light reflected by the screen adds to every pixel equally, which hardly matters for bright areas but wipes out contrast in the darks. Shadow defects need dark control rooms, matte screens, or display contrast enhancement.
+
+## 6. Industrial example
+
+On a casting line, operators must spot dark porosity in dark grey aluminium on an HMI next to the line, under bright hall lighting. The camera image is linear (gamma off) for measurement. Shown unchanged, the castings appear almost black and the pores are invisible: the pores differ by a few codes in the darkest part of the scale, and reflected hall light adds several percent of white to the screen. The team keeps the linear image for the algorithm and adds, for display only, a gamma of 0.5 plus a contrast stretch over the castings' grey range (`cv2.LUT`, example 2). On the display the pores now differ by about 9 codes instead of 6, in a brighter range where reflections matter less; operator confirmation of flagged pores improves without changing the measurement.
+
+## What you should remember from 9.2
+
+<Takeaways>
+<Takeaway n={1} title="Ratios">We notice relative changes: ΔI / I ≈ 2 % (Weber).</Takeaway>
+<Takeaway n={2} title="Compression">Perceived lightness ≈ cube root of luminance (L*); middle grey ≈ 18–20 % reflectance.</Takeaway>
+<Takeaway n={3} title="Gamma">sRGB codes are spaced roughly perceptually; code 128 ≈ 22 % of white light.</Takeaway>
+<Takeaway n={4} title="Linear cameras">Measure in linear values; add gamma only for display.</Takeaway>
+<Takeaway n={5} title="Room light">Reflections destroy dark contrast; design screens and rooms for dark defects.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A background has luminance 50 cd/m². Using a Weber fraction of 2 %, what is the smallest visible increase? And on 500 cd/m²?
+
+<Solution>
+
+**1 cd/m²** and **10 cd/m²**.
+
+</Solution>
+
+**Q2.** Is sRGB code 128 half as bright as white in emitted light?
+
+<Solution>
+
+No: about **21.6 %** of white. Half the light is code 188.
+
+</Solution>
+
+**Q3.** Why do linear camera images look too dark on a monitor?
+
+<Solution>
+
+The monitor applies the sRGB decoding (≈ power 2.2) to the codes: a linear value of 50 % (code 128) is shown at about 22 % light. Displaying a linear image correctly needs the inverse (gamma) encoding first.
+
+</Solution>
+
+### Next: 9.3 Illusions and contrast
+
+The eye judges brightness relative to the surroundings, and sometimes gets it badly wrong.
+
+## Code
+
+Three examples: sRGB decoding and step sizes from scratch, Weber contrast of two defects with room light, and the display gamma with `cv2.LUT`.
+
+### 1. From scratch: how big is one code step?
+
+```python
+import numpy as np
+import cv2
+
+def srgb_to_linear(c):                       # c: code value 0..255 -> relative luminance 0..1 (IEC 61966-2-1)
+    c = np.asarray(c, np.float64) / 255
+    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+def linear_to_srgb(y):
+    y = np.asarray(y, np.float64)
+    c = np.where(y <= 0.0031308, 12.92 * y, 1.055 * y ** (1 / 2.4) - 0.055)
+    return np.round(255 * c).astype(int)
+
+codes = np.arange(256)
+L = srgb_to_linear(codes)
+print("luminance of codes 0, 50, 128, 200, 255:", np.round(L[[0, 50, 128, 200, 255]], 4).tolist())
+print("code for 50 % luminance:", int(linear_to_srgb(0.5)), "| code 128 is", f"{L[128]:.1%}", "of white")
+weber = np.diff(L)[1:] / L[1:-1]             # luminance step to the next code, relative
+for c in [10, 50, 100, 200, 254]:
+    print(f"code {c:3d}: next code is {weber[c - 1]:.1%} brighter (linear 8-bit coding: {1 / c:.1%})")
+```
+
+Output:
+
+```text
+luminance of codes 0, 50, 128, 200, 255: [0.0, 0.0319, 0.2159, 0.5776, 1.0]
+code for 50 % luminance: 188 | code 128 is 21.6% of white
+code  10: next code is 10.3% brighter (linear 8-bit coding: 10.0%)
+code  50: next code is 3.8% brighter (linear 8-bit coding: 2.0%)
+code 100: next code is 2.1% brighter (linear 8-bit coding: 1.0%)
+code 200: next code is 1.1% brighter (linear 8-bit coding: 0.5%)
+code 254: next code is 0.9% brighter (linear 8-bit coding: 0.4%)
+```
+
+- In sRGB the relative step stays near the 1–4 % range over most codes; with linear coding the bright codes have tiny, invisible steps (wasted codes) while the same light range in the darks has far fewer codes.
+- Compare at equal **light**, not equal code: 3.2 % luminance is code 50 in sRGB but only code 8 in linear coding, where a step is 12.5 %.
+
+### 2. OpenCV: the same defect, dark vs bright background
+
+```python
+import numpy as np
+import cv2
+
+# Two identical "defects": 6 code values darker than their background, one on a dark, one on a bright area
+img = np.zeros((100, 200), np.uint8)
+img[:, :100], img[:, 100:] = 30, 200
+img[45:55, 45:55] -= 6
+img[45:55, 145:155] -= 6
+
+lut_lin = np.array([((c / 255 + 0.055) / 1.055) ** 2.4 if c / 255 > 0.04045 else c / 255 / 12.92 for c in range(256)], np.float32)
+lin = cv2.LUT(img, lut_lin)                                  # code values -> relative luminance (float32)
+for name, bg, spot in [("dark area  ", lin[10, 10], lin[50, 50]), ("bright area", lin[10, 110], lin[50, 150])]:
+    amb = 0.02                                                # room light reflected by the screen: 2 % of white
+    print(f"{name}: background {bg:.4f}, spot {spot:.4f}, Weber contrast {(bg - spot) / bg:.1%}"
+          f" | with 2 % ambient reflection {(bg - spot) / (bg + amb):.1%}")
+
+gamma_lut = np.array([255 * (c / 255) ** 0.5 for c in range(256)]).round().astype(np.uint8)   # brighten shadows
+g = cv2.LUT(img, gamma_lut)
+print("after gamma 0.5 on the codes: dark area", int(g[10, 10]), "vs spot", int(g[50, 50]), "| bright area", int(g[10, 110]), "vs spot", int(g[50, 150]))
+```
+
+Output:
+
+```text
+dark area  : background 0.0130, spot 0.0091, Weber contrast 29.6% | with 2 % ambient reflection 11.7%
+bright area: background 0.5776, spot 0.5395, Weber contrast 6.6% | with 2 % ambient reflection 6.4%
+after gamma 0.5 on the codes: dark area 87 vs spot 78 | bright area 226 vs spot 222
+```
+
+- In a perfectly dark room the dark defect has the larger contrast. With only 2 % reflected room light, its contrast drops by more than half, while the bright one barely changes.
+- `cv2.LUT` maps every pixel through a 256-entry table: the fast way to apply any per-value curve to 8-bit images. A float32 table gives a float32 result.
+- The display gamma spreads the dark codes (6 → 9 codes apart) and squeezes the bright ones (6 → 4): use it for display, not for measurement.
+
+### 3. OpenCV: gamma for a linear camera image
+
+```python
+import numpy as np
+import cv2
+
+def display_lut(gamma=2.2):
+    """Encode linear camera values for a screen: out = 255 * (in / 255) ** (1 / gamma)."""
+    return np.clip(np.round(255 * (np.arange(256) / 255) ** (1 / gamma)), 0, 255).astype(np.uint8)
+
+linear = np.array([[0, 5, 20, 64, 128, 255]], np.uint8)       # values from a linear (gamma-off) camera
+print("linear camera values:", linear.ravel().tolist())
+print("encoded for display :", cv2.LUT(linear, display_lut()).ravel().tolist())
+```
+
+Output:
+
+```text
+linear camera values: [0, 5, 20, 64, 128, 255]
+encoded for display : [0, 43, 80, 136, 186, 255]
+```
+
+- 50 % of the light (128) becomes code 186, close to sRGB's 188: the monitor then shows it at about 50 % again.
+- Never feed the encoded image back into measurements (areas, edge positions, flat-field correction) that assume linear values.
+
+## OpenCV API notes
+
+**Lookup tables**: `cv2.LUT(src, lut)`: `src` 8-bit, `lut` 256 entries (any depth; 1 or as many channels as `src`).
+
+**Arithmetic for contrast**: `cv2.convertScaleAbs(src, alpha, beta)` (linear stretch with saturation), `cv2.normalize(src, None, 0, 255, cv2.NORM_MINMAX)`.
+
+**Colour science**: `cv2.cvtColor(img, cv2.COLOR_BGR2Lab)` gives L\* (scaled to 0–255 for 8-bit images) using the sRGB transfer function (10.3).
+
+**Camera side**: `cv2.CAP_PROP_GAMMA` exists for some backends; industrial cameras set gamma through their SDK (GenICam `Gamma`, `GammaEnable`).
+
+## Where it fails
+
+- **Weber's law is an approximation**: it breaks down in very dim light and at extreme brightness, and depends on spot size, viewing time and surround.
+- **Screens differ**: not every monitor follows sRGB exactly; HDR displays and wide-gamut modes use other curves.
+- **Adaptation**: after looking at a bright area, the eye needs time to see dark detail again.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Treating code 128 as 50 % light**.
+- **Measuring on gamma-encoded images** (intensity ratios, flat-field correction, photometric stereo).
+- **Judging dark defects on a screen in a bright hall** without considering reflections.
+- **Applying a display gamma twice** (camera gamma on, then again in software).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Where Weber's law comes from
+
+At high light levels the noise in the visual system's signal grows in proportion to the signal (multiplicative noise and gain control), so the threshold grows in proportion to the background: ΔI ∝ I. At low light levels photon noise dominates; its standard deviation grows with √I, so the threshold follows the de Vries–Rose law ΔI ∝ √I, and Weber's fraction rises in the dark [1], [2].
+
+### Fechner, Stevens and L\*
+
+Integrating Weber's law (each JND is one perceptual unit) gives Fechner's logarithmic law. Stevens' magnitude-estimation experiments instead found power laws (brightness ∝ I^0.33 to I^0.5 depending on conditions). CIE L\* (1976) adopted the cube root with a linear segment near black; sRGB's encoding is close to L\* in shape, which is why 8-bit sRGB is "perceptually efficient" [3].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Weber's law says that the just-noticeable difference is…",
+      options: ["A fixed number of code values", "A fixed fraction of the background intensity", "Independent of the background", "Always 1 cd/m²"],
+      answer: 1,
+      explanation: "ΔI / I ≈ constant, about 2 %.",
+    },
+    {
+      question: "What fraction of white light does sRGB code 128 emit?",
+      options: ["50 %", "About 22 %", "About 73 %", "12.8 %"],
+      answer: 1,
+      explanation: "Decoding with the sRGB curve gives 0.216.",
+    },
+    {
+      question: "Why are 8-bit images gamma-encoded?",
+      options: ["To make files smaller", "To spend the 256 codes evenly in perceived brightness", "Because cameras require it", "To remove noise"],
+      answer: 1,
+      explanation: "Linear coding wastes codes in the brights and bands in the darks.",
+    },
+    {
+      question: "Reflected room light on a screen hurts most…",
+      options: ["Bright areas", "Dark areas", "Colour only", "Nothing"],
+      answer: 1,
+      explanation: "It adds the same light everywhere: a big fraction of a dark background.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A screen shows a defect at 1.0 % luminance on a background of 1.2 % (dark room). Weber contrast? With 3 % reflected room light?
+
+<Solution>
+
+Dark room: 0.2 / 1.2 ≈ **16.7 %**. With reflections: 0.2 / (1.2 + 3) ≈ **4.8 %**: still above 2 %, but much weaker.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Use `srgb_to_linear` from example 1 to find, for backgrounds of code 20, 60, 120 and 220, how many codes darker a spot must be to reach 2 % Weber contrast in a dark room.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+for bg in [20, 60, 120, 220]:
+    Lb = srgb_to_linear(bg)
+    d = next(d for d in range(1, bg + 1) if (Lb - srgb_to_linear(bg - d)) / Lb >= 0.02)
+    print(f"background {bg:3d}: {d} code(s) darker")
+```
+
+Output:
+
+```text
+background  20: 1 code(s) darker
+background  60: 1 code(s) darker
+background 120: 2 code(s) darker
+background 220: 2 code(s) darker
+```
+
+In sRGB, one or two codes reach the threshold at every level shown: the encoding is close to perceptually uniform. (With reflections or a linear encoding the dark values would need many more codes.)
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Your camera has a "gamma" setting. The measurement team wants it off; the HMI team wants it on. Who is right?
+
+<Solution>
+
+Both, for different purposes. Measurement (intensities, thresholds tied to physics, flat-field correction, comparisons between cameras) needs linear values: gamma off. Display needs perceptual encoding: apply gamma in software for the HMI only, so one linear image serves both.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 2.1 (brightness adaptation and discrimination, Weber ratio).
+2. B. A. Wandell, *Foundations of Vision*, Sinauer, 1995 (contrast sensitivity, Weber and de Vries–Rose regimes).
+3. IEC 61966-2-1:1999, *Multimedia systems and equipment – Colour measurement and management – Part 2-1: Default RGB colour space – sRGB*; CIE 15:2004 *Colorimetry* (L\*).
+4. S. S. Stevens, "To honor Fechner and repeal his law", *Science* 133, 1961.

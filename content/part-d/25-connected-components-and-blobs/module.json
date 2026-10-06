@@ -1,0 +1,11 @@
+{
+  "number": 25,
+  "title": "Connected components and blobs",
+  "summary": "Labelling every connected region in one pass, measuring regions, detecting blobs with LoG, MSER and SimpleBlobDetector, and counting objects that touch.",
+  "chapters": [
+    { "number": "25.1", "slug": "25.1-labelling", "title": "Labelling" },
+    { "number": "25.2", "slug": "25.2-region-statistics", "title": "Region statistics" },
+    { "number": "25.3", "slug": "25.3-blob-detectors", "title": "Blob detectors (LoG, MSER)" },
+    { "number": "25.4", "slug": "25.4-counting-objects", "title": "Counting objects" }
+  ]
+}

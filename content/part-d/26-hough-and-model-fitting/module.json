@@ -1,0 +1,11 @@
+{
+  "number": 26,
+  "title": "Hough and model fitting",
+  "summary": "Finding lines and circles by voting, fitting models robustly with RANSAC, and fitting lines, circles and ellipses to edge points.",
+  "chapters": [
+    { "number": "26.1", "slug": "26.1-hough-lines", "title": "Hough lines" },
+    { "number": "26.2", "slug": "26.2-hough-circles", "title": "Hough circles" },
+    { "number": "26.3", "slug": "26.3-ransac", "title": "RANSAC" },
+    { "number": "26.4", "slug": "26.4-line-circle-ellipse-fitting", "title": "Line, circle, ellipse fitting" }
+  ]
+}

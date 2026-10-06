@@ -1,0 +1,449 @@
+export const meta = {
+  number: "5.3",
+  title: "Homogeneous coordinates",
+  minutes: 40,
+  objectives: [
+    "Write translation, rotation about a point and affine maps as 3 × 3 matrices",
+    "Explain the divide by w and why it produces perspective",
+    "Compute affine maps from 3 and homographies from 4 point pairs, with and without OpenCV",
+    "Rectify a tilted planar object and avoid measurement errors caused by perspective",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 5.3 (Module 5 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 5.3 Homogeneous coordinates
+
+<Definition term="Homogeneous coordinates">writing a point (x, y) as (x, y, 1), so that translation, rotation, scaling and even perspective all become one 3 × 3 matrix multiplication.</Definition>
+
+Chapter 5.2 ended with two problems: a 2 × 2 matrix cannot **move** (translate) points, and it cannot produce **perspective**, where parallel lines meet. Both are solved by one small trick: add a third coordinate.
+
+## 1. An analogy
+
+A shadow puppet. The shape of your hand is fixed, but by moving it and tilting it between the lamp and the wall, its shadow shifts, grows and gets distorted. The extra "depth" direction is what lets one simple rule (a straight line from the lamp) produce all those changes. The third coordinate w plays the role of that depth.
+
+## 2. Adding a 1
+
+Write (x, y) as **(x, y, 1)**. Now translation is a matrix product:
+
+<Equation terms={[{ value: "[[1, 0, tx], [0, 1, ty], [0, 0, 1]] · (x, y, 1)" }, { op: "=", value: "(x + tx, y + ty, 1)", result: true }]} />
+
+(10, 20) translated by (5, −3) gives (15, 17) *(Code example 1)*. Rotation, scale and shear are the 2 × 2 matrices from 5.2, placed in the top-left corner of a 3 × 3 identity.
+
+## 3. Rotation about a point
+
+To rotate about the image centre c instead of the origin: **move c to the origin, rotate, move back**:
+
+<Flow
+  steps={[
+    { label: "T(−c): centre to origin", tone: "process" },
+    { label: "R: rotate", tone: "process" },
+    { label: "T(c): back", tone: "process" },
+    { label: "M = T(c) · R · T(−c)", tone: "result" },
+  ]}
+/>
+
+For c = (160, 100) and 30°, the top two rows of M are exactly what `cv2.getRotationMatrix2D` returns, [[0.866, 0.5, −28.564], [−0.5, 0.866, 93.397]], and the centre maps to itself. OpenCV's 2 × 3 matrices are these 3 × 3 matrices without the last row [0, 0, 1].
+
+## 4. Affine transforms: 6 numbers, 3 points
+
+A 3 × 3 matrix whose last row is [0, 0, 1] is **affine**: any combination of translation, rotation, scale and shear. It has 6 free numbers; each point pair gives 2 equations, so **3 point pairs** determine it. `cv2.getAffineTransform(src, dst)` solves exactly this 6 × 6 system *(Code example 2)*.
+
+Affine maps keep **parallel lines parallel** and keep **ratios along a line** (the midpoint stays the midpoint). A rectangle becomes a parallelogram.
+
+## 5. The divide by w: perspective
+
+Now let the last row be anything: H = [[a, b, c], [d, e, f], [g, h, 1]]. The result (X, Y, w) generally has **w ≠ 1**, and the image point is
+
+<Equation terms={[{ value: "(x′, y′)" }, { op: "=", value: "(X / w, Y / w)", result: true }]} />
+
+Because w depends on x and y, points further "away" are divided by a larger w and shrink: that is **perspective**. Such an H is a **homography** (projective transform): 8 free numbers, so **4 point pairs** determine it (no three on a line).
+
+For the tilted label below, the bottom-right corner (255, 170) gives H·(255, 170, 1) = (272.619, 136.309, **1.136**); dividing by w gives exactly (240, 120), the corner of the straightened label *(Code example 3)*.
+
+## 6. Try it
+
+<HomographyLab caption="A 240 × 120 label grid mapped into the image by the corners you drag. Compare the affine model (parallelogram only) with the projective one." />
+
+## 7. Rectifying a tilted label
+
+A flat object (label, plate, PCB, sheet) seen by a tilted camera is related to its front view by a homography. Find its 4 corners, map them to a rectangle with `cv2.getPerspectiveTransform`, and `cv2.warpPerspective` straightens the whole image:
+
+<ImageCompare
+  before={{ src: "/images/sample-label-tilted.png", label: "Camera view (tilted)" }}
+  after={{ src: "/images/sample-label-rectified.png", label: "Rectified with a homography" }}
+  width={320}
+  height={200}
+  alt="A label with the text LOT 4711 seen at an angle in perspective, and the same label straightened into a rectangle"
+  caption="Four corners are enough to undo the perspective of a flat object. Text and grid lines become straight and evenly spaced, ready for OCR or measurement."
+/>
+
+This only holds for **flat** objects (or a scene far away compared with its depth); a box or a cylinder needs 3-D methods (Part E).
+
+## 8. Perspective and measurement
+
+In a perspective image, equal distances on the object are **not** equal in pixels, and the average of the corners is **not** the centre. For our label *(Code example 4)*:
+
+| Method | Centre found at (x, y) |
+| --- | --- |
+| True centre mapped through H | (158.2, 102.0) |
+| Average of the 4 image corners | (161.8, 103.0): 3.7 px off |
+| Intersection of the image diagonals | (158.2, 102.0): exact |
+
+Straight lines stay straight and lines that meet still meet (the diagonals' crossing is preserved), but distances, ratios and angles do not. Measure **after** rectifying, or in the rectified coordinates.
+
+## 9. The family of transforms
+
+| Transform | Free numbers | Point pairs needed | Keeps | OpenCV |
+| --- | --- | --- | --- | --- |
+| Translation | 2 | 1 | everything except position | `warpAffine` |
+| Euclidean (rigid) | 3 | 2 | lengths, angles | `estimateAffinePartial2D` (+ fixed scale) |
+| Similarity | 4 | 2 | angles, length ratios | `estimateAffinePartial2D` |
+| Affine | 6 | 3 | parallel lines, ratios along lines | `getAffineTransform`, `estimateAffine2D` |
+| Projective (homography) | 8 | 4 | straight lines, incidence | `getPerspectiveTransform`, `findHomography` |
+
+With more points than needed (and some wrong ones), the `estimate…` / `findHomography` functions fit the best transform by least squares (5.6) with outlier rejection (RANSAC, Part F).
+
+## 10. Industrial example
+
+Reading lot numbers printed on steel plates from a camera mounted at an angle above the roller table:
+
+<Flow
+  steps={[
+    { label: "Calibrate once: 4 marks on the table → H", tone: "data" },
+    { label: "Each frame: warpPerspective with H", tone: "process" },
+    { label: "Straight, evenly scaled view of the table", tone: "process" },
+    { label: "OCR and mm measurements in the rectified image", tone: "result" },
+  ]}
+/>
+
+The camera can stay where it fits mechanically; the homography makes the image look as if it were mounted straight above.
+
+## What you should remember from 5.3
+
+<Takeaways>
+<Takeaway n={1} title="The trick">(x, y) → (x, y, 1): translation becomes a matrix; transforms chain by multiplying 3 × 3 matrices.</Takeaway>
+<Takeaway n={2} title="Rotate about c">T(c) · R · T(−c); OpenCV's 2 × 3 matrices are the top two rows.</Takeaway>
+<Takeaway n={3} title="Affine">Last row [0 0 1]; 6 numbers, 3 points; parallel stays parallel.</Takeaway>
+<Takeaway n={4} title="Homography">Any last row; divide by w; 8 numbers, 4 points; perspective.</Takeaway>
+<Takeaway n={5} title="Measure">Perspective changes distances and centres; rectify first.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Write the 3 × 3 matrix that translates by (−50, 20). Where does (100, 100) go?
+
+<Solution>
+
+[[1, 0, −50], [0, 1, 20], [0, 0, 1]]; (100, 100) → **(50, 120)**.
+
+</Solution>
+
+**Q2.** A homography gives (X, Y, w) = (300, 150, 1.5). What is the image point?
+
+<Solution>
+
+(300 / 1.5, 150 / 1.5) = **(200, 100)**.
+
+</Solution>
+
+**Q3.** How many point pairs do you need for an affine map, and for a homography?
+
+<Solution>
+
+**3** for affine (6 unknowns), **4** for a homography (8 unknowns), with no three points on a line.
+
+</Solution>
+
+### Next: 5.4 Statistics (mean, variance, Gaussian)
+
+Describing pixel values and noise with a few numbers, and the bell curve behind most of image processing.
+
+## Code
+
+Four examples: translation and rotation about a point, an affine map from 3 points, rectifying with a homography, and why perspective breaks naive measurements. Copy the sample images next to the script.
+
+### 1. From scratch: 3 × 3 matrices, rotation about the centre
+
+```python
+import numpy as np
+import cv2
+
+def T(tx, ty):
+    return np.array([[1, 0, tx], [0, 1, ty], [0, 0, 1]], float)
+
+def R(deg):                                      # OpenCV's sense: positive = counter-clockwise on screen
+    t = np.radians(deg)
+    return np.array([[np.cos(t), np.sin(t), 0], [-np.sin(t), np.cos(t), 0], [0, 0, 1]])
+
+p = np.array([10, 20, 1.0])                      # the point (10, 20) in homogeneous coordinates
+print("translate by (5, -3):", T(5, -3) @ p)
+cx, cy = 160, 100
+M = T(cx, cy) @ R(30) @ T(-cx, -cy)              # move centre to origin, rotate, move back
+print("T R T^-1, top two rows:\n", np.round(M[:2], 3))
+print("getRotationMatrix2D   :\n", np.round(cv2.getRotationMatrix2D((cx, cy), 30, 1.0), 3))
+print("centre stays put:", M @ [cx, cy, 1])
+```
+
+Output:
+
+```text
+translate by (5, -3): [15. 17.  1.]
+T R T^-1, top two rows:
+ [[  0.866   0.5   -28.564]
+ [ -0.5     0.866  93.397]]
+getRotationMatrix2D   :
+ [[  0.866   0.5   -28.564]
+ [ -0.5     0.866  93.397]]
+centre stays put: [160. 100.   1.]
+```
+
+- The chain is read **right to left**: T(−c) acts first.
+- `R` here uses OpenCV's sign convention (5.2) so the result can be compared directly.
+
+### 2. OpenCV and by hand: an affine map from 3 points
+
+```python
+import numpy as np
+import cv2
+
+src = np.float32([[0, 0], [100, 0], [0, 50]])            # three points on a part (x, y)
+dst = np.float32([[20, 30], [106.6, 80], [-5, 73.3]])    # where the camera sees them
+A = cv2.getAffineTransform(src, dst)
+print("cv2.getAffineTransform:\n", np.round(A, 3))
+# the same by hand: each point gives two equations a*x + b*y + c = x', d*x + e*y + f = y'
+rows, rhs = [], []
+for (x, y), (u, v) in zip(src, dst):
+    rows += [[x, y, 1, 0, 0, 0], [0, 0, 0, x, y, 1]]
+    rhs += [u, v]
+sol = np.linalg.solve(np.array(rows, float), np.array(rhs, float))
+print("solved by hand:\n", np.round(sol.reshape(2, 3), 3))
+print("4th corner (100, 50) maps to", np.round(A @ [100, 50, 1], 1))
+```
+
+Output:
+
+```text
+cv2.getAffineTransform:
+ [[ 0.866 -0.5   20.   ]
+ [ 0.5    0.866 30.   ]]
+solved by hand:
+ [[ 0.866 -0.5   20.   ]
+ [ 0.5    0.866 30.   ]]
+4th corner (100, 50) maps to [ 81.6 123.3]
+```
+
+- The points must be `float32` arrays of shape (3, 2) for OpenCV.
+- `np.linalg.solve(A, b)` solves the 6 × 6 linear system exactly; it fails if the three points are on one line.
+- The fourth corner follows automatically: an affine map turns the rectangle into a parallelogram.
+
+### 3. OpenCV: rectifying with a homography
+
+```python
+import numpy as np
+import cv2
+
+np.set_printoptions(suppress=True, precision=5)
+scene = cv2.imread("sample-label-tilted.png", cv2.IMREAD_GRAYSCALE)
+corners = np.float32([[70, 40], [270, 62], [255, 170], [52, 140]])   # label corners in the image (x, y)
+target = np.float32([[0, 0], [240, 0], [240, 120], [0, 120]])        # where they should go: a 240 x 120 rectangle
+H = cv2.getPerspectiveTransform(corners, target)
+print("H =\n", H)
+flat = cv2.warpPerspective(scene, H, (240, 120))                      # the label, straightened
+print("rectified label:", flat.shape)
+
+x = np.array([255, 170, 1.0])                                         # bottom-right corner, homogeneous
+q = H @ x
+print("H @ (255, 170, 1) =", np.round(q, 3), "-> divide by w:", np.round(q[:2] / q[2], 2))
+print("cv2.perspectiveTransform:", cv2.perspectiveTransform(np.float32([[[255, 170]]]), H).ravel().round(2))
+```
+
+Output:
+
+```text
+H =
+ [[   1.30815    0.23547 -100.98932]
+ [  -0.13674    1.24313  -40.15316]
+ [   0.00035    0.00027    1.     ]]
+rectified label: (120, 240)
+H @ (255, 170, 1) = [272.619 136.309   1.136] -> divide by w: [240. 120.]
+cv2.perspectiveTransform: [240. 120.]
+```
+
+- The corner order must match between `corners` and `target` (here: top-left, top-right, bottom-right, bottom-left).
+- The small numbers in the last row (0.00035, 0.00027) are the perspective: they make w grow towards the bottom-right, the side nearer to the camera.
+- `cv2.perspectiveTransform` takes points as shape (N, 1, 2) `float32` and does the divide by w for you.
+- `warpPerspective` computes, for every **output** pixel, where it comes from in the input (using H⁻¹) and interpolates (Part D).
+
+### 4. From scratch: perspective breaks the "average of corners"
+
+```python
+import numpy as np
+import cv2
+
+corners = np.float32([[70, 40], [270, 62], [255, 170], [52, 140]])
+target = np.float32([[0, 0], [240, 0], [240, 120], [0, 120]])
+H_inv = cv2.getPerspectiveTransform(target, corners)                   # label (mm-like units) -> image
+true_centre = cv2.perspectiveTransform(np.float32([[[120, 60]]]), H_inv).ravel()
+naive_centre = corners.mean(axis=0)                                   # average of the 4 image corners
+print("true centre of the label in the image :", true_centre.round(1))
+print("average of the four image corners     :", naive_centre.round(1))
+print("error of the naive centre             :", round(float(np.linalg.norm(true_centre - naive_centre)), 1), "px")
+diag = lambda a, b: np.cross(np.append(a, 1), np.append(b, 1))       # line through two points (homogeneous)
+c = np.cross(diag(corners[0], corners[2]), diag(corners[1], corners[3]))
+print("intersection of the diagonals         :", (c[:2] / c[2]).round(1))
+```
+
+Output:
+
+```text
+true centre of the label in the image : [158.2 102. ]
+average of the four image corners     : [161.8 103. ]
+error of the naive centre             : 3.7 px
+intersection of the diagonals         : [158.2 102. ]
+```
+
+- In homogeneous coordinates, the **line** through two points is their cross product, and the **intersection** of two lines is again a cross product: a neat bonus of the "add a 1" trick.
+- The diagonals of a rectangle cross at its centre, and homographies keep intersections: so the diagonal crossing is the true centre even in perspective.
+
+## OpenCV API notes
+
+**Affine**: `cv2.getAffineTransform(src3, dst3)` (exact, 3 pairs), `cv2.estimateAffine2D(src, dst)` (≥ 3 pairs, robust), `cv2.estimateAffinePartial2D` (rotation + uniform scale + translation), `cv2.warpAffine(img, M2x3, (w, h))`, `cv2.invertAffineTransform(M)`.
+
+**Projective**: `cv2.getPerspectiveTransform(src4, dst4)` (exact, 4 pairs), `cv2.findHomography(src, dst, cv2.RANSAC, threshold)` (≥ 4 pairs, robust), `cv2.warpPerspective(img, H, (w, h))`, `cv2.perspectiveTransform(points, H)`.
+
+**Types**: point arrays as `float32`, shape (N, 2) or (N, 1, 2); matrices returned as `float64`. Output size is always (width, height).
+
+## Where it fails
+
+- **Non-flat objects**: a homography maps one plane only; anything sticking out of that plane is distorted.
+- **Corner accuracy**: a 1 px error in one corner tilts the whole rectified image; use many points and `findHomography`, or sub-pixel corner refinement (`cv2.cornerSubPix`).
+- **Lens distortion** curves straight lines; undistort first (Part E), then apply the homography.
+- **Extreme tilts** stretch the far side over few pixels: rectified images get blurry there. Keep the camera tilt moderate.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Corner order mismatch** between source and destination: the result is mirrored or twisted.
+- **Forgetting the divide by w** when applying H by hand.
+- **Using `warpAffine` with a homography** (it ignores the last row).
+- **Passing (height, width)** as the output size.
+- **Measuring distances directly in a perspective image** and converting with a single mm/px factor.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Projective geometry
+
+In homogeneous coordinates, (x, y, w) and (kx, ky, kw) are the same point for any k ≠ 0. Points with w = 0 are **points at infinity**: the directions where parallel lines meet. Lines are also 3-vectors, a point lies on a line when their dot product is 0, and both "line through two points" and "intersection of two lines" are cross products [1].
+
+### Estimating a homography: the DLT
+
+With more than 4 pairs, each pair gives 2 linear equations in the 9 entries of H; the **direct linear transform** stacks them into A h = 0 and takes the singular vector of A with the smallest singular value (5.7). Normalising the points first (centre at 0, average distance √2) makes it numerically stable [1].
+
+### Where homographies appear
+
+Rectifying planes, image stitching for rotating cameras (panoramas, Part G), augmented reality on flat markers, and the ground-plane view in traffic cameras ("bird's-eye view").
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why add a third coordinate 1 to (x, y)?",
+      options: ["To store colour", "So translation (and perspective) can be written as a matrix product", "To make points unique", "For sub-pixel accuracy"],
+      answer: 1,
+      explanation: "With (x, y, 1), translation is the third column of a 3 × 3 matrix.",
+    },
+    {
+      question: "OpenCV's getRotationMatrix2D returns a 2 × 3 matrix. What is missing?",
+      options: ["The rotation", "The last row [0, 0, 1]", "The translation", "Nothing; it is 3 × 3"],
+      answer: 1,
+      explanation: "Affine maps always have last row [0, 0, 1], so OpenCV leaves it out.",
+    },
+    {
+      question: "An affine map turns a rectangle into…",
+      options: ["Any quadrilateral", "A parallelogram", "Always a rectangle", "A circle"],
+      answer: 1,
+      explanation: "Parallel lines stay parallel; perspective (converging edges) needs a homography.",
+    },
+    {
+      question: "How many point pairs fix a homography?",
+      options: ["2", "3", "4", "8"],
+      answer: 2,
+      explanation: "8 unknowns, 2 equations per pair.",
+    },
+    {
+      question: "In a perspective image of a rectangle, the average of the four corner positions is…",
+      options: ["Exactly the centre", "Generally not the centre", "The vanishing point", "Always 0"],
+      answer: 1,
+      explanation: "Perspective does not keep ratios; the diagonals' intersection is the true centre.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Compose: first rotate 90° (image convention, R = [[0, −1], [1, 0]]) about the origin, then translate by (100, 0). Write the 3 × 3 matrix and apply it to (10, 0).
+
+<Solution>
+
+M = T · R = [[0, −1, 100], [1, 0, 0], [0, 0, 1]]. (10, 0, 1) → (0·10 − 1·0 + 100, 1·10 + 0, 1) = **(100, 10)**. Check: rotating (10, 0) gives (0, 10), translating gives (100, 10).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using H from Code example 3, map the four image corners of the label with `cv2.perspectiveTransform` and confirm they land on the rectangle. Then map the image point (160, 100) and say where it lies on the label.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+corners = np.float32([[70, 40], [270, 62], [255, 170], [52, 140]])
+target = np.float32([[0, 0], [240, 0], [240, 120], [0, 120]])
+H = cv2.getPerspectiveTransform(corners, target)
+back = cv2.perspectiveTransform(corners.reshape(-1, 1, 2), H).reshape(-1, 2).round(2) + 0.0   # + 0.0 turns -0.0 into 0.0
+print("corners ->", back.tolist())
+print("(160, 100) ->", cv2.perspectiveTransform(np.float32([[[160, 100]]]), H).ravel().round(1))
+```
+
+Output:
+
+```text
+corners -> [[0.0, 0.0], [240.0, 0.0], [240.0, 120.0], [0.0, 120.0]]
+(160, 100) -> [121.7  57.5]
+```
+
+The image point (160, 100) lies at about (121.7, 57.5) on the 240 × 120 label: almost exactly its centre (120, 60).
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A camera looks at a conveyor at 30° from vertical. A colleague measures part lengths in the raw image with one mm/px factor from a ruler placed in the middle. What goes wrong, and how do you fix it?
+
+<Solution>
+
+Because of perspective, the scale changes across the image: parts on the near side look bigger than on the far side, so lengths are too long near the camera and too short far away (and depend on orientation). Fix: compute a homography from 4+ known marks on the belt plane, rectify (or map edge points through H), and then use one mm/px factor in the rectified view. Parts must be thin compared with the camera distance, or their height adds error.
+
+</Solution>
+
+## References
+
+1. R. Hartley and A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004, Chapter 2 (Projective geometry and transformations of 2D) and Chapter 4 (Estimation – 2D projective transformations).
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022, Section 2.1 (Geometric primitives and transformations) and Section 8.1 (Pairwise alignment).
+3. OpenCV 4.13.0 documentation, *Geometric image transformations* (`getAffineTransform`, `getPerspectiveTransform`, `warpPerspective`): [docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html](https://docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html); `findHomography`: [docs.opencv.org/4.13.0/d9/d0c/group__calib3d.html](https://docs.opencv.org/4.13.0/d9/d0c/group__calib3d.html); `perspectiveTransform`: [docs.opencv.org/4.13.0/d2/de8/group__core__array.html](https://docs.opencv.org/4.13.0/d2/de8/group__core__array.html).

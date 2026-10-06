@@ -1,0 +1,331 @@
+export const meta = {
+  number: "28.2",
+  title: "Level sets",
+  minutes: 30,
+  objectives: [
+    "Represent a contour as the zero line of a function φ and see how it can split and merge",
+    "Explain the Chan–Vese model: region means instead of edges",
+    "Implement Chan–Vese segmentation in NumPy and choose μ, λ and the start",
+    "Compare level sets with snakes",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 28.2 (Module 28).
+  Lab: ActiveContourLab mode "levelset" (lib/active-ops.ts; equals the NumPy code in this chapter).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 28.2 Level sets
+
+<Definition term="Level set method">a way to represent and move contours without points: the contour is the set of pixels where a function φ(x, y) equals zero, with φ > 0 inside and φ < 0 outside. Changing φ moves the contour, which can split into several pieces or merge, automatically.</Definition>
+
+A snake (28.1) is a list of points: it cannot split around two objects, and its points need constant care (resampling, avoiding loops). Osher and Sethian [1] proposed moving a whole function instead: the contour is wherever that function crosses zero. Chan and Vese [2] combined this with a region-based energy that needs no edges at all, which makes it work on blurred or noisy objects that have no clear gradient.
+
+## 1. An analogy
+
+A landscape partly under water. The coastline is where the ground meets the water level (φ = 0). Raise or lower the land, and the coastline moves. Where a ridge sinks below water, one island splits into two; where a valley rises, two islands join. Nobody has to track the coastline point by point; it simply is where land and water meet.
+
+## 2. A worked example by hand
+
+Values of φ along one row of pixels:
+
+```text
+x:  0     1     2     3     4     5     6     7     8
+φ: −1     1     2     1    0.5    1     2     1    −1
+```
+
+φ > 0 from x = 1 to 7: **one** region. Now lower φ everywhere by 0.75:
+
+```text
+φ: −1.75  0.25  1.25  0.25  −0.25  0.25  1.25  0.25  −1.75
+```
+
+φ > 0 at x = 1–3 and x = 5–7, with x = 4 now negative: **two** regions. One smooth change of φ split the contour: no points were cut, reconnected or renumbered.
+
+## 3. Chan–Vese: regions instead of edges
+
+The Chan–Vese model ("active contours without edges") splits the image into inside (φ > 0) and outside, each described by its mean grey value, c1 and c2. Its energy:
+
+E = μ · length(contour) + λ1 Σ_inside (I − c1)² + λ2 Σ_outside (I − c2)²
+
+<Flow
+  steps={[
+    { label: "Image I in [0, 1]; start φ (circle, checkerboard …)", tone: "data" },
+    { label: "c1 = mean of I where φ > 0; c2 = mean where φ ≤ 0", tone: "process" },
+    { label: "φ ← φ + dt · δ(φ) · (μ κ − λ1 (I − c1)² + λ2 (I − c2)²)", tone: "process" },
+    { label: "Repeat until stable", tone: "process" },
+    { label: "Segmentation: φ > 0", tone: "result" },
+  ]}
+/>
+
+- A pixel that fits the inside mean better than the outside mean raises φ (moves inside), and the other way round.
+- **κ** is the curvature of the level lines of φ; the μ κ term shortens and smooths the contour (it removes small noise regions).
+- **δ(φ)** is a smoothed spike around φ = 0, so changes happen mostly near the current contour; with its smooth tails, regions far away can still appear.
+
+Because the model compares region means, it needs no gradient: it segments objects with soft or noisy borders, as long as inside and outside differ in mean brightness.
+
+## 4. On the test image
+
+The image from 28.1 (slotted disc and two small discs, noise σ 10). Chan–Vese with μ = 0.2, λ1 = λ2 = 1, dt = 0.5, scored against all three objects:
+
+| Start | Iterations | Regions (φ > 0) | IoU | c1, c2 |
+| --- | --- | --- | --- | --- |
+| circle (radius 40) over the slotted disc | 100 | **3** | 0.956 | 167.1, 62.1 |
+| same | 300 | 3 | 0.985 | 166.4, 61.5 |
+| checkerboard | 100 | 3 | **0.992** | 165.8, 61.2 |
+| small circle in an empty corner | 100 | 5 | 0.000 | 55.0, 86.8 |
+
+From a single circle, the contour enters the slot and **splits off** two new regions for the small discs, which the start did not touch: a snake could do neither. The checkerboard start (many small regions everywhere) converges fastest. The corner start fails: its inside is background, so "inside" learns the dark mean (c1 = 55) and the method segments the dark noise instead. Chan–Vese finds a two-phase split, but which phase is "inside" depends on the start; check c1 > c2 or invert.
+
+<ActiveContourLab mode="levelset" caption="Chan–Vese level set (same formulas as the NumPy code). Start from the circle and press Play: watch the contour fill the slot and new regions appear on the two small discs. Try the checkerboard and the corner circle. Set μ to 0 to see noise specks survive; raise it to smooth them away."/>
+
+## 5. Snakes vs level sets
+
+| | Snake (28.1) | Level set (Chan–Vese) |
+| --- | --- | --- |
+| Representation | n points | a function on the whole grid |
+| Topology | fixed | splits and merges |
+| Driven by | edges (+ balloon) | region means (no edges needed) |
+| Start | near the object | anywhere (a checkerboard works) |
+| Cost per step | tiny (n points) | every pixel |
+| Sub-pixel outline | yes | from interpolating φ = 0 |
+
+## 6. Industrial use
+
+- **Medical imaging**: organs, tumours and cells with soft borders (CT, MRI, ultrasound, microscopy).
+- **Low-contrast inspection**: blurred blobs, stains and coatings whose borders have no strong gradient.
+- **Many objects of one kind**: cells, droplets, particles: one level set captures them all.
+- **Shape priors**: level sets can include learned shape terms to segment partly hidden objects.
+
+## What you should remember from 28.2
+
+<Takeaways>
+<Takeaway n={1} title="Zero line">The contour is φ = 0; inside φ > 0.</Takeaway>
+<Takeaway n={2} title="Topology for free">Regions split and merge as φ changes.</Takeaway>
+<Takeaway n={3} title="Chan–Vese">Region means c1, c2 instead of edges; μ smooths the contour.</Takeaway>
+<Takeaway n={4} title="Cost">Work on every pixel every step; much slower than a snake.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Inside mean c1 = 0.6, outside mean c2 = 0.2, λ1 = λ2 = 1. A pixel has I = 0.5. Does the data term push it inside or outside?
+
+<Solution>
+
+−(0.5 − 0.6)² + (0.5 − 0.2)² = −0.01 + 0.09 = **+0.08 > 0**: φ increases, the pixel moves **inside**.
+
+</Solution>
+
+**Q2.** After convergence c1 < c2. What does that mean?
+
+<Solution>
+
+The "inside" region is the darker one: the segmentation is of the dark phase (here the background). Invert the mask (or start differently).
+
+</Solution>
+
+### Next: 29.1 Chain codes
+
+Module 29 describes the shapes we have segmented: chain codes, Hu moments, Fourier descriptors and shape matching.
+
+## Code
+
+Three examples: splitting in 1D, Chan–Vese in NumPy, and the effect of the start.
+
+### 1. A split in one dimension
+
+```python
+import numpy as np
+import cv2
+
+phi = np.array([-1, 1, 2, 1, 0.5, 1, 2, 1, -1])
+for shift in (0, 0.75):
+    inside = (phi - shift) > 0
+    n = cv2.connectedComponents(inside.astype(np.uint8)[None, :])[0] - 1
+    print("lowered by", shift, "->", inside.astype(int).tolist(), "regions:", n)
+```
+
+Output:
+
+```text
+lowered by 0 -> [0, 1, 1, 1, 1, 1, 1, 1, 0] regions: 1
+lowered by 0.75 -> [0, 1, 1, 1, 0, 1, 1, 1, 0] regions: 2
+```
+
+### 2. Chan–Vese in NumPy
+
+```python
+img = cv2.imread("sample-snake.png", cv2.IMREAD_GRAYSCALE).astype(np.float64) / 255
+H, W = img.shape
+
+def curvature(phi):
+    py, px = np.gradient(phi)                                         # np.gradient returns (d/dy, d/dx)
+    norm = np.sqrt(px ** 2 + py ** 2) + 1e-8
+    nyy, _ = np.gradient(py / norm)
+    _, nxx = np.gradient(px / norm)
+    return nxx + nyy                                                   # div(∇φ / |∇φ|)
+
+def chan_vese(phi, iters, mu=0.2, l1=1.0, l2=1.0, dt=0.5, eps=1.0):
+    for _ in range(iters):
+        inside = phi > 0
+        c1, c2 = img[inside].mean(), img[~inside].mean()
+        delta = eps / (np.pi * (eps ** 2 + phi ** 2))                  # smoothed Dirac delta
+        phi = phi + dt * delta * (mu * curvature(phi) - l1 * (img - c1) ** 2 + l2 * (img - c2) ** 2)
+    return phi, c1, c2
+
+big = np.zeros((H * 4, W * 4), np.uint8)
+cv2.circle(big, (280, 300), 180, 255, -1); cv2.rectangle(big, (240, 100), (320, 340), 0, -1)
+cv2.circle(big, (640, 180), 64, 255, -1); cv2.circle(big, (660, 440), 80, 255, -1)
+truth = cv2.resize(big, (W, H), interpolation=cv2.INTER_AREA) > 127      # all three objects
+
+yy, xx = np.mgrid[0:H, 0:W]
+start = (40 - np.hypot(xx - 100, yy - 75)) / 40                         # circle of radius 40, scaled
+for iters in (100, 300):
+    phi, c1, c2 = chan_vese(start.copy(), iters)
+    m = phi > 0
+    n = cv2.connectedComponents(m.astype(np.uint8))[0] - 1
+    iou = (m & truth).sum() / (m | truth).sum()
+    print(f"{iters} iterations: {n} regions, IoU {iou:.3f}, c1 {c1 * 255:.1f}, c2 {c2 * 255:.1f}")
+```
+
+Output:
+
+```text
+100 iterations: 3 regions, IoU 0.956, c1 167.1, c2 62.1
+300 iterations: 3 regions, IoU 0.985, c1 166.4, c2 61.5
+```
+
+### 3. The start matters
+
+```python
+starts = {"checkerboard": np.sin(np.pi * xx / 5) * np.sin(np.pi * yy / 5),
+          "corner circle": (10 - np.hypot(xx - 30, yy - 30)) / 40}
+for name, s in starts.items():
+    phi, c1, c2 = chan_vese(s.copy(), 100)
+    m = phi > 0
+    n = cv2.connectedComponents(m.astype(np.uint8))[0] - 1
+    iou = (m & truth).sum() / (m | truth).sum()
+    print(f"{name}: {n} regions, IoU {iou:.3f}, c1 {c1 * 255:.1f}, c2 {c2 * 255:.1f}")
+```
+
+Output:
+
+```text
+checkerboard: 3 regions, IoU 0.992, c1 165.8, c2 61.2
+corner circle: 5 regions, IoU 0.000, c1 55.0, c2 86.8
+```
+
+## OpenCV API notes
+
+- **No level-set or Chan–Vese function in OpenCV 4.x.** Use NumPy as above, or `skimage.segmentation.chan_vese` / `morphological_chan_vese` (scikit-image, outside the pinned environment).
+- **Useful OpenCV pieces**: `cv2.distanceTransform` (to build a signed distance function as the start: distance inside minus distance outside), `cv2.connectedComponents` (count regions), `cv2.findContours` on `(phi > 0)` (extract the contour).
+- **Speed**: each step costs a few operations per pixel; 100 steps on 200 × 150 take well under a second in NumPy. Large images: downscale, or use narrow-band or morphological approximations.
+
+## Where it fails
+
+- **More than two phases**: plain Chan–Vese separates one inside and one outside mean; objects of three different brightnesses need multiphase versions.
+- **Uneven illumination**: one mean per region is wrong; local (region-scalable) variants fit means in windows.
+- **Textured objects**: means do not separate textures; use texture features.
+- **Phase confusion**: which phase is "inside" depends on the start (check c1 > c2).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Image in 0–255 with λ = 1**: the data term is then 65 000 times larger than intended; normalise to [0, 1] or scale λ.
+- **φ with huge values** (raw signed distances in pixels) and a narrow δ: the contour barely moves; scale φ or widen ε.
+- **Forgetting that np.gradient returns (d/dy, d/dx)** for 2D arrays.
+- **Expecting edges**: Chan–Vese segments by brightness, not by gradient.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The level set equation
+
+A contour moving with normal speed F satisfies ∂φ/∂t + F |∇φ| = 0 (Osher and Sethian [1]). Geodesic active contours (Caselles, Kimmel, Sapiro 1997) write the snake's edge energy in this form, giving an edge-based level set. Re-initialising φ to a signed distance function from time to time keeps it well-behaved; Li et al.'s distance-regularised level sets avoid re-initialisation with an extra energy term.
+
+### Chan–Vese as Mumford–Shah
+
+The Chan–Vese energy [2] is the piecewise-constant case of the Mumford–Shah functional (1989): approximate the image by a function that is constant in each region, plus a penalty on the boundary length. Vese and Chan extended it to multiple phases with several level set functions.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Where is the contour in a level set method?",
+      options: ["At φ = 1", "Where φ = 0", "At the maximum of φ", "At the image edges"],
+      answer: 1,
+      explanation: "Inside φ > 0, outside φ < 0.",
+    },
+    {
+      question: "Why could the level set capture the two small discs from a circle elsewhere?",
+      options: ["It searches the image", "Regions can appear and split as φ changes everywhere", "It uses edges", "Luck"],
+      answer: 1,
+      explanation: "The smooth δ lets pixels far from the contour change sign too.",
+    },
+    {
+      question: "What does μ control in Chan–Vese?",
+      options: ["The region means", "The contour length penalty: smoothness", "The step size", "The number of regions"],
+      answer: 1,
+      explanation: "Larger μ removes small specks.",
+    },
+    {
+      question: "Chan–Vese needs…",
+      options: ["Strong edges", "Different mean brightness inside and outside", "Markers", "A colour image"],
+      answer: 1,
+      explanation: "Active contours without edges.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+c1 = 0.7, c2 = 0.3. For which grey values I does the data term push a pixel inside (λ1 = λ2)?
+
+<Solution>
+
+Inside when (I − 0.3)² > (I − 0.7)², i.e. I is closer to 0.7: **I > 0.5**, the midpoint of the two means.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+From the checkerboard start, run 100 iterations with μ = 0, 0.2 and 1. How many regions remain, and what is the IoU?
+
+<Solution>
+
+```python
+for mu in (0.0, 0.2, 1.0):
+    phi, c1, c2 = chan_vese(starts["checkerboard"].copy(), 100, mu=mu)
+    m = phi > 0
+    n = cv2.connectedComponents(m.astype(np.uint8))[0] - 1
+    print(f"mu {mu}: {n} regions, IoU {(m & truth).sum() / (m | truth).sum():.3f}")
+```
+
+Output:
+
+```text
+mu 0.0: 411 regions, IoU 0.644
+mu 0.2: 3 regions, IoU 0.992
+mu 1.0: 5 regions, IoU 0.971
+```
+
+Without the length term every noisy pixel that happens to fit the inside mean becomes a region (411 specks). μ = 0.2 removes them. μ = 1 shortens the contour so strongly that it lags behind after 100 iterations (5 regions, IoU 0.971): smoothness and accuracy trade off.
+
+</Solution>
+
+## References
+
+1. S. Osher, J. A. Sethian, "Fronts propagating with curvature-dependent speed: algorithms based on Hamilton–Jacobi formulations", *Journal of Computational Physics* 79(1), 12–49, 1988.
+2. T. F. Chan, L. A. Vese, "Active contours without edges", *IEEE Trans. Image Processing* 10(2), 266–277, 2001.
+3. V. Caselles, R. Kimmel, G. Sapiro, "Geodesic active contours", *International Journal of Computer Vision* 22(1), 61–79, 1997.
+4. D. Mumford, J. Shah, "Optimal approximations by piecewise smooth functions and associated variational problems", *Communications on Pure and Applied Mathematics* 42(5), 577–685, 1989.

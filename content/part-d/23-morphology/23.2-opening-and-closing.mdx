@@ -1,0 +1,293 @@
+export const meta = {
+  number: "23.2",
+  title: "Opening and closing",
+  minutes: 20,
+  objectives: [
+    "Define opening (erode, then dilate) and closing (dilate, then erode) and what each removes",
+    "Clean a binary mask without changing the size of the objects that remain",
+    "Choose the order and the element size for a cleanup sequence",
+    "Use directional elements to separate structures by orientation",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 23.2 (Module 23).
+  Lab: MorphLab (mode binary, open/close).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 23.2 Opening and closing
+
+<Definition term="Opening and closing">two combinations of erosion and dilation with the same structuring element. Opening (erosion, then dilation) removes white parts that the element cannot fit into: specks, thin spurs, narrow bridges. Closing (dilation, then erosion) removes black parts that the element cannot fit into: small holes, cracks, narrow gaps. Everything larger keeps its size and shape.</Definition>
+
+23.1 showed that erosion removes specks but shrinks everything, and dilation fills holes but grows everything. Applied one after the other, the second operation undoes the size change of the first wherever the first did not destroy anything. That makes opening and closing the everyday tools for cleaning masks after thresholding.
+
+## 1. An analogy
+
+Opening: roll a ball around *inside* the white shape and paint everywhere it can reach. Parts too narrow for the ball (spurs, thin bridges, specks) are never painted and vanish; wide parts are painted completely and keep their exact outline, except that sharp inner corners become rounded. Closing is the same game played with the ball in the *black* background: holes and gaps too small for the ball get filled.
+
+## 2. Two orders, two effects
+
+<Flow
+  steps={[
+    { label: "Binary mask after thresholding", tone: "data" },
+    { label: "Opening = dilate(erode(X)): removes white structures smaller than the element", tone: "process" },
+    { label: "Closing = erode(dilate(X)): removes black structures smaller than the element", tone: "process" },
+    { label: "Clean mask, object sizes preserved", tone: "result" },
+  ]}
+/>
+
+On the 1-D row from 23.1, 0, 1, 1, 0, 1, 1, 1, 1, 0 with a 1 × 3 element:
+
+- **Opening**: erosion gives 0, 0, 0, 0, 0, 1, 1, 0, 0; dilating that gives 0, 0, 0, 0, 1, 1, 1, 1, 0. The 2-pixel run is gone; the 4-pixel run is back to its full length.
+- **Closing**: dilation gives all ones; eroding that gives 1, 1, 1, 1, 1, 1, 1, 1, 1 (the row ends count as neutral). The 1-pixel gap is filled, and nothing grew beyond the original ends except at the image border.
+
+On the test mask (rectangle with holes, pepper and a notch; two discs joined by a 3-pixel bridge; specks everywhere):
+
+| Operation | White pixels | Components | Rectangle area | Black pixels inside the rectangle |
+| --- | --- | --- | --- | --- |
+| Input | 17 220 | 89 | 6 230 | 230 |
+| Erosion 3 × 3 (for comparison) | 15 017 | 21 | 5 617 | 844 |
+| **Opening 3 × 3 square** | 17 066 | **6** | **6 219** | 242 |
+| Opening 5 × 5 ellipse | 16 726 | 6 (bridge cut: the discs separate) | 6 196 | 266 |
+| **Closing 5 × 5 ellipse** | 17 349 | 84 | 6 309 | **161** |
+| Opening 3 × 3, then closing 5 × 5 | 17 140 | 6 | 6 259 | 202 |
+
+The opening removes 83 small components (the specks, and most of the 2-pixel diagonal line, which is too thin for a 3 × 3 square) while the rectangle keeps 99.8 % of its area (erosion alone keeps 90 %). The 5 × 5 elliptical opening also cuts the bridge, so the two discs become separate objects at full size. The closing fills most of the small holes and pepper; what remains black inside the rectangle is mostly the 11 × 11 notch, which is larger than the element.
+
+<MorphLab mode="binary" initialOp="open" caption="Opening and closing on the test mask (white kept, red removed, green added). Opening with 3 × 3 removes the specks with almost no red on the large shapes; raise the size to 5 to cut the bridge between the discs. Switch to closing: the small holes and pepper in the rectangle fill (green), the notch stays. Compare with plain erosion and dilation."/>
+
+## 3. Practical rules
+
+- **Opening and closing are idempotent**: applying the same opening twice changes nothing more. To remove larger noise, use a larger element, not more passes.
+- **Order matters**: open-then-close removes specks first and then fills holes; close-then-open can turn clusters of specks into blobs that the opening no longer removes. For "white objects with noise", open first.
+- **Element size = the size you want to ignore**: everything narrower than the element disappears (opening) or gets filled (closing). Choose it smaller than the smallest real feature that must survive.
+- **Element shape**: an ellipse keeps outlines natural; a square keeps axis-aligned corners square. Corners pointing into the object (concave for opening, convex for closing) get rounded to the element's radius.
+- **Iterations**: `morphologyEx(..., iterations=n)` erodes n times and then dilates n times, which equals a larger element.
+
+## 4. Industrial example
+
+After thresholding a print-inspection image, an opening with a 3 × 3 element removes isolated noise pixels and a closing with a slightly larger element joins characters broken by a light print, before connected components (25) count the characters. In weld and seam inspection, a closing with a long element along the seam bridges small gaps in the detected seam so that its length can be measured, while an opening across it removes spatter. On a conveyor of touching parts, an opening with an element just larger than the neck between parts separates them for counting (25.4).
+
+## What you should remember from 23.2
+
+<Takeaways>
+<Takeaway n={1} title="Opening">Erode then dilate: removes white things smaller than the element, keeps the rest at full size.</Takeaway>
+<Takeaway n={2} title="Closing">Dilate then erode: fills black holes and gaps smaller than the element.</Takeaway>
+<Takeaway n={3} title="Rules">Idempotent; order matters (usually open, then close); size = what to ignore.</Takeaway>
+<Takeaway n={4} title="Direction">Line-shaped elements act along one direction only.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** You want to remove white specks up to 3 pixels wide without changing the size of objects at least 10 pixels wide. Which operation and element?
+
+<Solution>
+
+An **opening** with an element larger than the specks and smaller than the objects, e.g. a 5 × 5 ellipse (or square).
+
+</Solution>
+
+**Q2.** A white object has a 2-pixel crack across it. Which operation repairs it?
+
+<Solution>
+
+A **closing** with an element wider than the crack (3 × 3 or larger in the crack's direction): the dilation bridges it, the erosion restores the outline.
+
+</Solution>
+
+### Next: 23.3 Top-hat and black-hat
+
+The difference between an image and its opening or closing: small bright or dark details on an uneven background.
+
+## Code
+
+Two examples: opening and closing on the test mask, then direction-selective opening.
+
+### 1. Cleaning the test mask
+
+```python
+import numpy as np
+import cv2
+
+mask = cv2.imread("sample-morph.png", cv2.IMREAD_GRAYSCALE)
+components = lambda m: cv2.connectedComponents(m)[0] - 1
+
+def area_at(m, y, x):                                                # area of the component under a pixel
+    n, labels = cv2.connectedComponents(m)
+    return int((labels == labels[y, x]).sum()) if labels[y, x] else 0
+
+sq3 = np.ones((3, 3), np.uint8)
+el5 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+results = {
+    "input": mask,
+    "open 3x3": cv2.morphologyEx(mask, cv2.MORPH_OPEN, sq3),
+    "open 5x5 ellipse": cv2.morphologyEx(mask, cv2.MORPH_OPEN, el5),
+    "close 5x5 ellipse": cv2.morphologyEx(mask, cv2.MORPH_CLOSE, el5),
+    "open 3, close 5": cv2.morphologyEx(cv2.morphologyEx(mask, cv2.MORPH_OPEN, sq3), cv2.MORPH_CLOSE, el5),
+}
+for name, m in results.items():
+    print(f"{name:18s} white {int((m > 0).sum()):5d} | components {components(m):2d} | rectangle {area_at(m, 30, 25)}"
+          f" | discs {area_at(m, 55, 165)} | black in rectangle {int((m[20:91, 20:111] == 0).sum())}")
+o = results["open 3x3"]
+print("opening twice == once:", np.array_equal(o, cv2.morphologyEx(o, cv2.MORPH_OPEN, sq3)))
+```
+
+Output:
+
+```text
+input              white 17220 | components 89 | rectangle 6230 | discs 5734 | black in rectangle 230
+open 3x3           white 17066 | components  6 | rectangle 6219 | discs 5727 | black in rectangle 242
+open 5x5 ellipse   white 16726 | components  6 | rectangle 6196 | discs 2821 | black in rectangle 266
+close 5x5 ellipse  white 17349 | components 84 | rectangle 6309 | discs 5755 | black in rectangle 161
+open 3, close 5    white 17140 | components  6 | rectangle 6259 | discs 5735 | black in rectangle 202
+opening twice == once: True
+```
+
+- "discs" is the component under the left disc: 5 734 pixels for both discs plus the bridge, 2 821 after the 5 × 5 opening has cut the bridge (one disc alone).
+
+### 2. Direction-selective opening
+
+```python
+import numpy as np
+import cv2
+
+grid = np.zeros((100, 160), np.uint8)
+grid[20:23, 10:150] = 255                                            # horizontal line, 3 px thick
+grid[10:90, 80:83] = 255                                             # vertical line
+cv2.putText(grid, "ok", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 255, 3)
+horizontal = cv2.morphologyEx(grid, cv2.MORPH_OPEN, np.ones((1, 40), np.uint8))   # keeps runs >= 40 px wide
+vertical = cv2.morphologyEx(grid, cv2.MORPH_OPEN, np.ones((40, 1), np.uint8))   # longer than any letter stroke
+text = cv2.subtract(grid, cv2.bitwise_or(horizontal, vertical))
+print("horizontal-line pixels:", int((horizontal > 0).sum()), "| vertical:", int((vertical > 0).sum()),
+      "| text left:", int((text > 0).sum()))
+```
+
+Output:
+
+```text
+horizontal-line pixels: 420 | vertical: 240 | text left: 530
+```
+
+- With a 25-pixel element the tall stroke of the "k" (about 26 pixels) would survive as a "vertical line": the element must be longer than any character stroke. This is the classic way to remove ruling lines from forms and tables before OCR (15.5): open with long horizontal and vertical elements, subtract.
+
+## OpenCV API notes
+
+**`cv2.morphologyEx(src, op, kernel, anchor=(-1, -1), iterations=1, borderType=..., borderValue=...)`**:
+- `op`: `cv2.MORPH_OPEN`, `cv2.MORPH_CLOSE` (also `MORPH_ERODE`, `MORPH_DILATE`, `MORPH_GRADIENT`, `MORPH_TOPHAT`, `MORPH_BLACKHAT`, `MORPH_HITMISS`).
+- `iterations=n` for OPEN: n erosions, then n dilations.
+- Works on binary and grey images (23.6).
+
+**Fill all holes regardless of size**: closing only fills holes smaller than the element; to fill every enclosed hole, flood-fill the background from the border (`cv2.floodFill`) and combine, or use contour hierarchy (24.2).
+
+## Where it fails
+
+- **Features close to the element size**: an opening that removes noise can also remove thin real features (scratches, thin text strokes).
+- **Touching objects**: opening separates them only if the neck is narrower than the element and the objects are wider.
+- **Large holes**: a closing large enough to fill them also merges nearby objects.
+- **Corners**: rounded by the element; measure corners on the unprocessed mask or with a square element.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Repeating the same opening** hoping to remove more: it is idempotent.
+- **Closing before opening on noisy masks**: specks merge into blobs that survive.
+- **Using a large element for both noise removal and hole filling**: thin parts of objects disappear.
+- **Applying opening to black-on-white objects**: invert first (opening acts on white).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Morphological filters
+
+Opening and closing are "morphological filters": increasing (if A ⊆ B then open(A) ⊆ open(B)) and idempotent. Opening is anti-extensive (the result is inside the input) and closing extensive. Alternating sequential filters (open-close with growing elements: 3, 5, 7, …) remove noise of increasing size in a controlled way [1, 2].
+
+### Opening by reconstruction
+
+A plain opening changes the outline of everything to the element's shape. Opening by reconstruction keeps every object that survives the erosion *with its original outline*: erode to find the markers, then repeatedly dilate the markers inside the original mask until nothing changes (geodesic reconstruction, Vincent 1993 [3]). Exercise 2 of 23.1 was a one-step version of this.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Opening is…",
+      options: ["Dilate then erode", "Erode then dilate", "Erode twice", "Dilate twice"],
+      answer: 1,
+      explanation: "It removes small white structures and restores the rest.",
+    },
+    {
+      question: "Which operation fills small black holes inside objects?",
+      options: ["Opening", "Closing", "Erosion", "Gradient"],
+      answer: 1,
+      explanation: "Dilate to fill, then erode to restore the outline.",
+    },
+    {
+      question: "Applying the same opening twice…",
+      options: ["Removes more noise", "Changes nothing compared with once", "Undoes the first", "Doubles the element"],
+      answer: 1,
+      explanation: "Opening is idempotent.",
+    },
+    {
+      question: "How do you remove horizontal ruling lines but keep text?",
+      options: ["Closing with a 3 × 3 square", "Opening with a long horizontal element to extract the lines, then subtract", "Erosion with a vertical element", "Median filter"],
+      answer: 1,
+      explanation: "Only long horizontal runs survive the opening.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Row 1, 1, 1, 0, 0, 1, 1, 1, 1, 1 (1 = white). Apply a closing with a 1 × 3 element, and then with a 1 × 5 element.
+
+<Solution>
+
+1 × 3: dilation 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 (the 2-pixel gap closes from both sides); erosion keeps all ones: the gap is **filled**. 1 × 5 gives the same result. A 1 × 3 closing fills gaps up to 2 pixels wide.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Find the smallest square opening that separates the two discs (that is, the discs become two components), trying sizes 3 to 9.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+for size in range(3, 10, 2):
+    opened = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((size, size), np.uint8))
+    n, labels = cv2.connectedComponents(opened)
+    separate = labels[55, 165] != labels[55, 255]
+    print(f"{size}x{size}: discs separate: {separate} | left disc area {(labels == labels[55, 165]).sum()}")
+    if separate:
+        break
+```
+
+Output:
+
+```text
+3x3: discs separate: False | left disc area 5727
+5x5: discs separate: True | left disc area 2817
+```
+
+The bridge is 3 pixels thick, so a 3 × 3 element still fits inside it; 5 × 5 does not. The separated disc keeps essentially its full area (2 817 pixels).
+
+</Solution>
+
+## References
+
+1. J. Serra, *Image Analysis and Mathematical Morphology*, Academic Press, 1982.
+2. P. Soille, *Morphological Image Analysis: Principles and Applications*, 2nd ed., Springer, 2003.
+3. L. Vincent, "Morphological grayscale reconstruction in image analysis: applications and efficient algorithms", *IEEE Trans. Image Processing* 2(2), 176–201, 1993.
+4. OpenCV 4.13.0 documentation: `morphologyEx`, `getStructuringElement`, `floodFill`. https://docs.opencv.org/4.13.0/

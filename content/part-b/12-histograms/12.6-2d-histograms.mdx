@@ -1,0 +1,305 @@
+export const meta = {
+  number: "12.6",
+  title: "2D histograms",
+  minutes: 20,
+  objectives: [
+    "Compute and read a hue–saturation histogram",
+    "See why two 1D histograms cannot replace one 2D histogram",
+    "Display 2D histograms with a log scale",
+    "Use the joint histogram of two images and mutual information",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 12.6 (last chapter of Module 12).
+  Reuses BackProjLab in mode="hist2d" (12.5).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 12.6 2D histograms
+
+<Definition term="2D histogram">a count of pixels for every combination of two values, for example (hue, saturation) of a colour image, or (value in image A, value in image B) for two images. It is a grid instead of a row of bars.</Definition>
+
+A 1D histogram answers "how many pixels have this value?". A 2D histogram answers "how many pixels have this pair of values?". It shows which values occur **together**, which is exactly what is lost when two channels are looked at separately. It is the model inside back-projection (12.5), a map of an image's colours, and, between two images, the basis of mutual information.
+
+## 1. An analogy
+
+A table of a class's heights tells you little about weights, and a table of weights little about heights. A scatter plot of height against weight shows that tall pupils are heavier, and spots the one who is not. A 2D histogram is that scatter plot with the points counted in squares.
+
+## 2. Hue against saturation
+
+<Flow
+  steps={[
+    { label: "Two channels per pixel (H, S)", tone: "data" },
+    { label: "Bin each: hue bin × saturation bin", tone: "process" },
+    { label: "Count pixels per cell", tone: "process" },
+    { label: "Grid: dense cells = common colours", tone: "result" },
+  ]}
+/>
+
+For `sample-caps.png` with 30 hue bins × 32 saturation bins, 225 of the 960 cells are used. Each object forms a compact cluster at its own (H, S); the grey belt forms a long smear:
+
+| Object | Pixels | Peak cell (H, S) | Cells used |
+| --- | --- | --- | --- |
+| Belt (grey) | 12 229 | (6, 16) | 182 |
+| Orange cap | 797 | (12, 224) | 24 |
+| Cardboard | 943 | (12, 128) | 18 |
+| Red cap | 709 | (0, 216) | 6 |
+| Crimson cap | 709 | (168, 224) | 7 |
+| Green cap | 613 | (60, 192) | 9 |
+
+- **Orange cap and cardboard share the hue cell 12** and differ only in saturation. A hue histogram alone shows one peak for both; the 2D histogram shows two clusters.
+- **The belt spreads over almost every hue** at low saturation: grey has no reliable hue (10.2), so its noise scatters it along the hue axis.
+- **Red and crimson** sit at opposite ends of the hue axis (0 and 168): hue wraps around, so they are neighbours in reality.
+
+<BackProjLab mode="hist2d" caption="The H × S histogram of the cap scene (hue left to right, saturation bottom to top; cells coloured by their hue and saturation). Click a cell to see which pixels fall into it and which object they belong to. Switch to a log scale to see the sparse clusters next to the dominant belt." />
+
+## 3. Display: log scale
+
+In most images a few cells hold most pixels: here the belt cells hold 76 % of the image. Shown linearly, everything else is invisible. Plotting **log(1 + count)** compresses the large counts (11.2) so that small clusters show up. This is for viewing only; the counts themselves are not changed.
+
+## 4. Two images: the joint histogram
+
+Put the value of a pixel in image A on one axis and the value of the **same pixel** in image B on the other. For the two cameras of 12.4 (`sample-scene.png` and `sample-scene-camb.png`) the counts lie along a narrow curve: the camera B response. If B is shifted by a few pixels, the pairs no longer match and the cloud spreads out.
+
+**Mutual information** (MI) measures how concentrated the joint histogram is compared with what independent images would give. With 64 × 64 bins:
+
+| Shift of image B | 0 px | 1 px | 2 px | 5 px | 10 px |
+| --- | --- | --- | --- | --- | --- |
+| MI (bits) | 4.15 | 2.63 | 2.54 | 2.39 | 2.23 |
+| Correlation | 0.987 | 0.944 | 0.908 | 0.832 | 0.719 |
+
+MI is highest when the images are aligned, even though their grey values are related by a non-linear curve. This is why MI is the standard similarity measure for aligning images from different sensors (for example CT and MRI).
+
+## 5. Industrial example
+
+A food sorter sets up colour classes for nuts: good (light brown), burnt (dark brown), mouldy (greenish grey). The engineer collects pixels from labelled samples and views their H × S histograms side by side. Good and burnt nuts overlap in hue but separate in saturation and value; mouldy ones form a small cluster at low saturation. The 2D view shows which channel pairs separate the classes before any classifier is trained, and the class histograms themselves become back-projection models (12.5).
+
+## What you should remember from 12.6
+
+<Takeaways>
+<Takeaway n={1} title="What">Counts for pairs of values; a grid instead of bars.</Takeaway>
+<Takeaway n={2} title="Why">Two 1D histograms lose which values occur together.</Takeaway>
+<Takeaway n={3} title="Display">Use log(1 + count); mind the hue wrap-around.</Takeaway>
+<Takeaway n={4} title="Two images">Joint histogram; mutual information peaks when images are aligned.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 2D histogram has 30 × 32 bins. How many numbers does it hold, and how many would two separate 1D histograms with the same bins hold?
+
+<Solution>
+
+**960** cells; separately **30 + 32 = 62**. The extra cells store which hue goes with which saturation.
+
+</Solution>
+
+**Q2.** Two objects have identical hue histograms and identical saturation histograms. Can their H × S histograms differ?
+
+<Solution>
+
+**Yes.** Example: object A has (orange, high S) and (red, low S); object B has (orange, low S) and (red, high S). The marginals are the same, the pairs are not.
+
+</Solution>
+
+### Next: Module 13, Thresholding
+
+From histograms to decisions: choosing a grey value that separates objects from background.
+
+## Code
+
+Two examples: an H × S histogram with OpenCV and NumPy, then the joint histogram of two images and mutual information.
+
+### 1. Hue–saturation histogram
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-caps.png")
+ids = cv2.imread("sample-caps-ids.png", cv2.IMREAD_GRAYSCALE)
+hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+h = cv2.calcHist([hsv], [0, 1], None, [30, 32], [0, 180, 0, 256])            # shape (30, 32), float32
+n, _, _ = np.histogram2d(hsv[..., 0].ravel(), hsv[..., 1].ravel(), bins=[30, 32], range=[[0, 180], [0, 256]])
+print("same as np.histogram2d:", np.array_equal(h, n.astype(np.float32)), "| total", int(h.sum()), "| non-empty", int((h > 0).sum()))
+
+names = ["belt", "orange", "red", "crimson", "green", "cardboard"]
+for o, name in enumerate(names):
+    m = (ids == o).astype(np.uint8)
+    ho = cv2.calcHist([hsv], [0, 1], m, [30, 32], [0, 180, 0, 256])          # histogram of one object (mask)
+    hb, sb = np.unravel_index(ho.argmax(), ho.shape)
+    print(f"{name:9s} {int(m.sum()):5d} px, peak cell H {hb * 6:3d} S {sb * 8:3d}, {int((ho > 0).sum())} cells")
+
+print("hue-only histogram: orange and cardboard peaks in the same bin:", int(cv2.calcHist([hsv], [0], (ids == 1).astype(np.uint8), [30], [0, 180]).argmax()),
+      int(cv2.calcHist([hsv], [0], (ids == 5).astype(np.uint8), [30], [0, 180]).argmax()))
+```
+
+Output:
+
+```text
+same as np.histogram2d: True | total 16000 | non-empty 225
+belt      12229 px, peak cell H   6 S  16, 182 cells
+orange      797 px, peak cell H  12 S 224, 24 cells
+red         709 px, peak cell H   0 S 216, 6 cells
+crimson     709 px, peak cell H 168 S 224, 7 cells
+green       613 px, peak cell H  60 S 192, 9 cells
+cardboard   943 px, peak cell H  12 S 128, 18 cells
+hue-only histogram: orange and cardboard peaks in the same bin: 2 2
+```
+
+- Rows are hue bins, columns saturation bins: `h[hb, sb]`. The bin's lower edge is `hb · 180 / 30` and `sb · 256 / 32`.
+- The mask argument gives a per-object histogram without cutting the object out.
+
+### 2. Joint histogram and mutual information
+
+```python
+import numpy as np
+import cv2
+
+a = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+b = cv2.imread("sample-scene-camb.png", cv2.IMREAD_GRAYSCALE)
+
+def mutual_information(x, y, bins=64):
+    j = cv2.calcHist([x, y], [0, 1], None, [bins, bins], [0, 256, 0, 256])   # channel 0 of x, channel 0 of y
+    p = j / j.sum()
+    px, py = p.sum(1, keepdims=True), p.sum(0, keepdims=True)
+    nz = p > 0
+    return float((p[nz] * np.log2(p[nz] / (px @ py)[nz])).sum())
+
+for shift in (0, 1, 2, 5, 10):
+    bs = np.roll(b, shift, axis=1)                                             # misalign by `shift` columns
+    print(f"shift {shift:2d} px: MI {mutual_information(a, bs):.2f} bits, correlation {np.corrcoef(a.ravel(), bs.ravel())[0, 1]:.3f}")
+```
+
+Output:
+
+```text
+shift  0 px: MI 4.15 bits, correlation 0.987
+shift  1 px: MI 2.63 bits, correlation 0.944
+shift  2 px: MI 2.54 bits, correlation 0.908
+shift  5 px: MI 2.39 bits, correlation 0.832
+shift 10 px: MI 2.23 bits, correlation 0.719
+```
+
+- `cv2.calcHist([x, y], [0, 1], ...)` treats the list of images as one stack of channels: channel 0 is x, channel 1 is y.
+- MI drops sharply after a 1-pixel shift: the joint histogram is very sensitive to alignment, which makes it a good target for registration.
+
+## OpenCV API notes
+
+**`cv2.calcHist([hsv], [0, 1], mask, [hBins, sBins], [0, 180, 0, 256])`**: returns a float32 array of shape (hBins, sBins).
+
+**Several images**: `cv2.calcHist([img1, img2], [0, 1], ...)` counts pairs across images (channels are numbered across the list).
+
+**NumPy**: `np.histogram2d(x, y, bins, range)`; note that NumPy's last bin includes the upper edge, OpenCV's ranges exclude it.
+
+**Display**: `np.log1p(h)` then `cv2.normalize(..., 0, 255, cv2.NORM_MINMAX)` and `cv2.resize(..., interpolation=cv2.INTER_NEAREST)` to enlarge the cells; or `plt.imshow(np.log1p(h), aspect="auto")`.
+
+**3D**: three channels work the same way (`[0, 1, 2]`, three bin counts), but the bins multiply quickly: 32³ = 32 768 cells.
+
+## Where it fails
+
+- **Too many bins for the data**: most cells empty, clusters break into noise. Fewer bins or smoothing the histogram.
+- **Hue wrap-around**: clusters near H = 0 and H = 179 look far apart.
+- **Low saturation**: hue is undefined; grey pixels smear along the hue axis (mask them out with S > threshold).
+- **Joint histograms need alignment**: they compare pixel pairs; a shift destroys the structure (which is also their use).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Reading rows and columns the wrong way round** (rows follow the first channel in the list).
+- **Showing a linear-scale 2D histogram** of a natural image: one bright cell, everything else black.
+- **Using 0–256 for 8-bit hue**: half of the hue bins stay empty.
+- **Comparing histograms of different sizes** without normalising (divide by the total).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Mutual information
+
+With p(a, b) the normalised joint histogram and p(a), p(b) its marginals, MI = Σ p(a, b) · log₂ (p(a, b) / (p(a) · p(b))). It is 0 for independent images and maximal when one image determines the other, whatever the (even non-monotonic) relation between their grey values. Viola and Wells, and independently Collignon, Maes et al., introduced MI for multi-modal image registration in 1995 [2, 3].
+
+### Histogram comparison
+
+`cv2.compareHist(h1, h2, method)` compares two histograms of the same shape, 1D or 2D: correlation, chi-square, intersection, Bhattacharyya distance, Kullback–Leibler divergence. Colour histograms compared this way were an early image-retrieval technique (Swain and Ballard, 1991; 12.5).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does a 2D H × S histogram show that two 1D histograms (H and S) cannot?",
+      options: ["The image size", "Which hue occurs together with which saturation", "The mean brightness", "Edges"],
+      answer: 1,
+      explanation: "The 1D histograms are the marginals; the pairing is lost.",
+    },
+    {
+      question: "Why does a grey belt appear as a long smear along the hue axis?",
+      options: ["It is colourful", "At low saturation, hue is undefined and noisy", "Because of the log scale", "A bug in calcHist"],
+      answer: 1,
+      explanation: "Small noise changes the hue of near-grey pixels a lot.",
+    },
+    {
+      question: "Why use log(1 + count) to display a 2D histogram?",
+      options: ["To change the counts", "So small clusters are visible next to huge ones", "To remove noise", "OpenCV requires it"],
+      answer: 1,
+      explanation: "It compresses large counts for viewing only.",
+    },
+    {
+      question: "Two images from different sensors are best aligned when…",
+      options: ["Their correlation is 0", "Their mutual information is highest", "Their histograms are equal", "Their means are equal"],
+      answer: 1,
+      explanation: "MI rewards any consistent relation between the grey values of corresponding pixels.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Four pixels have (H, S) = (10, 200), (12, 210), (10, 60), (95, 220). With hue bins of 30 units (0–29, 30–59, …) and saturation bins of 128 (0–127, 128–255), fill the 6 × 2 histogram.
+
+<Solution>
+
+H bin 0, S bin 1: **2** (the first two); H bin 0, S bin 0: **1** (10, 60); H bin 3, S bin 1: **1** (95, 220). All other cells 0.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Recompute the H × S histogram of `sample-caps.png` with a mask that keeps only pixels with S > 60. How many cells are non-empty now, and what fraction of the pixels is kept?
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+mask = (hsv[..., 1] > 60).astype(np.uint8)
+hm = cv2.calcHist([hsv], [0, 1], mask, [30, 32], [0, 180, 0, 256])
+print(f"non-empty cells: {int((hm > 0).sum())} | pixels kept: {mask.mean():.0%}")
+```
+
+Output:
+
+```text
+non-empty cells: 40 | pixels kept: 23%
+```
+
+Removing the low-saturation pixels removes the belt smear: 225 cells shrink to 40, essentially the five object clusters, which makes the histogram far easier to read (and a better back-projection model).
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Chapter 6 (colour image processing).
+2. P. Viola, W. M. Wells III, "Alignment by maximization of mutual information", *Proc. 5th International Conference on Computer Vision*, 16–23, 1995.
+3. A. Collignon, F. Maes, D. Delaere, D. Vandermeulen, P. Suetens, G. Marchal, "Automated multi-modality image registration based on information theory", *Information Processing in Medical Imaging*, 263–274, 1995.
+4. OpenCV 4.13.0 documentation: `calcHist`, `compareHist`; tutorial "Histograms 3: 2D Histograms". https://docs.opencv.org/4.13.0/

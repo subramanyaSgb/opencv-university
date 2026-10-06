@@ -1,0 +1,406 @@
+export const meta = {
+  number: "6.4",
+  title: "Vectorization vs loops",
+  minutes: 30,
+  objectives: [
+    "Explain why Python loops over pixels are slow and whole-array operations are fast",
+    "Rewrite per-pixel loops as NumPy expressions, np.where and look-up tables",
+    "Apply the broadcasting rules to combine arrays of different shapes",
+    "Measure speed correctly with time.perf_counter and know when a loop is fine",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 6.4 (Module 6 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+  Timings were measured on the course's 2-core cloud test machine; they vary between computers.
+*/}
+
+# 6.4 Vectorization vs loops
+
+<Definition term="Vectorization">writing an operation for the whole array at once (`img * 2`) instead of looping over pixels in Python. The work then runs in compiled, optimised code.</Definition>
+
+A 5 MP image has five million pixels. Python executes roughly tens of millions of simple steps per second, so a loop that does a few operations per pixel takes seconds. The same operation as one NumPy or OpenCV call takes milliseconds. This chapter shows how to think in arrays instead of pixels.
+
+## 1. An analogy
+
+Painting a fence. A loop is one person painting each plank, walking back to the paint bucket for every stroke. Vectorization is a spray machine that does the whole fence in one pass. The machine needs a moment to set up, so for three planks the brush is fine; for five million, it is not even close.
+
+## 2. Same result, three ways
+
+Gamma correction (out = 255 · (in/255)^0.5) on an image *(Code example 1)*:
+
+<Columns>
+<Panel title="Python loop" tone="warn">
+
+```text
+for r in range(h):
+    for c in range(w):
+        out[r, c] = round(255 * (im[r, c] / 255) ** 0.5)
+```
+
+</Panel>
+<Panel title="NumPy, whole array" tone="good">
+
+```text
+out = np.round(255 * (im / 255.0) ** 0.5).astype(np.uint8)
+```
+
+</Panel>
+</Columns>
+
+All three versions (loop, NumPy, `cv2.LUT`) give identical pixels. Their speed on a 640 × 480 image (our test machine, *Code example 2*):
+
+| Method | Time | Speed-up vs loop |
+| --- | --- | --- |
+| Python loop | 155 ms | 1× |
+| NumPy expression | 2.5 ms | about 60× |
+| `cv2.LUT` (look-up table) | 0.09 ms | about 1700× |
+
+At 25 fps you have 40 ms per frame: the loop alone would not keep up even on this small image.
+
+## 3. Why loops are slow
+
+Every Python step checks types, creates objects and dispatches methods. In `out[r, c] = …`, reading one uint8 creates a Python number, the maths runs on Python floats, and the result is converted back: hundreds of machine instructions per pixel. A NumPy expression does the type checking **once**, then runs a tight compiled loop; OpenCV adds SIMD instructions (several pixels per instruction) and multiple threads.
+
+## 4. Look-up tables
+
+For 8-bit images every point operation has only **256 possible inputs**. Compute the 256 answers once, then replace each pixel by its table entry: `cv2.LUT(img, table)` or `table[img]` in NumPy. Gamma, contrast curves, thresholds, colour maps: anything that depends only on the pixel's own value (Part B).
+
+## 5. Broadcasting: combining different shapes
+
+NumPy can combine arrays of different shapes if they fit, without copying. Line the shapes up **from the right**; each pair of sizes must be **equal, or one of them 1** (missing axes count as 1). Size-1 axes are stretched.
+
+| a | b | a + b | Typical use |
+| --- | --- | --- | --- |
+| (200, 320, 3) | (3,) | (200, 320, 3) | per-channel mean or gain |
+| (200, 320) | (320,) | (200, 320) | per-column correction |
+| (200, 320) | (200, 1) | (200, 320) | per-row correction |
+| (200, 320) | (200,) | **error** | 200 is lined up with 320 |
+| (200, 320, 3) | (200, 320, 1) | (200, 320, 3) | a mask applied to all channels |
+
+<BroadcastLab caption="Type two shapes (or pick an example). They are aligned from the right; amber size-1 axes are stretched, red pairs clash." />
+
+The (200, 320) with (200,) error is the classic: to apply one value per **row**, give it a column axis: `values[:, None]` → (200, 1) *(Code example 3)*.
+
+## 6. Conditions without loops
+
+- **Boolean arrays**: `img > 200` gives True/False per pixel; `np.count_nonzero(img > 200)` counts them.
+- **`np.where(cond, a, b)`**: element-wise if/else.
+- **Masked assignment**: `img[img > 250] = 250` (6.2).
+- **Combine conditions** with `&`, `|`, `~` and parentheses: `(img > 50) & (img < 100)`.
+
+## 7. When a loop is fine
+
+- Loops over **objects** (a few hundred contours, detections, parts) rather than pixels.
+- Loops over **frames** or files.
+- Prototypes on tiny images, run once.
+
+When a pixel algorithm truly cannot be vectorised (a custom recursive filter), compile it: **Numba** (`@njit`) or Cython turn the loop into machine code, or implement it in C++ (Module 8).
+
+## 8. Measuring speed
+
+- Use `time.perf_counter()` around the code, repeat several times and take the **minimum** or median (the first call includes warm-up).
+- Measure on realistic image sizes; small tests hide memory effects.
+- `cv2.getTickCount()` / `cv2.getTickFrequency()` and `%timeit` in Jupyter do the same job. Module 7.7 covers profiling a whole pipeline.
+
+## 9. Industrial example
+
+Flat-field correction (2.5) on every frame of a 5 MP line:
+
+<Flow
+  steps={[
+    { label: "Calibrate once: dark (H, W) and gain (H, W) as float32", tone: "data" },
+    { label: "Per frame: (frame − dark) / gain, one NumPy expression", tone: "process" },
+    { label: "np.clip + astype(np.uint8)", tone: "process" },
+    { label: "≈ tens of ms per frame instead of tens of seconds", tone: "result" },
+  ]}
+/>
+
+With broadcasting, a gain that varies only along x can be stored as one row (W,) instead of a full image.
+
+## What you should remember from 6.4
+
+<Takeaways>
+<Takeaway n={1} title="Rule">Never loop over pixels in Python; operate on whole arrays.</Takeaway>
+<Takeaway n={2} title="Speed">NumPy ≈ 10–100× faster than loops; OpenCV and LUTs faster still.</Takeaway>
+<Takeaway n={3} title="LUT">For 8-bit point operations, compute 256 answers once: cv2.LUT.</Takeaway>
+<Takeaway n={4} title="Broadcasting">Align shapes from the right; sizes equal or 1; add axes with [:, None].</Takeaway>
+<Takeaway n={5} title="Measure">perf_counter, repeat, take the minimum; loops are fine over objects, not pixels.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Rewrite without a loop: `for r…: for c…: if img[r, c] > 128: out[r, c] = 255 else: out[r, c] = 0`.
+
+<Solution>
+
+`out = np.where(img > 128, 255, 0).astype(np.uint8)` (or `cv2.threshold(img, 128, 255, cv2.THRESH_BINARY)[1]`).
+
+</Solution>
+
+**Q2.** Can (480, 640, 3) and (480, 1, 3) be broadcast? Result?
+
+<Solution>
+
+Yes: 3 = 3, 640 vs 1 (stretch), 480 = 480 → **(480, 640, 3)**: one colour per row.
+
+</Solution>
+
+**Q3.** You need one gain per row of a (480, 640) image, stored as shape (480,). How do you multiply?
+
+<Solution>
+
+`img * gains[:, None]` (shape (480, 1)). Without the new axis, NumPy would try to align 480 with 640 and fail.
+
+</Solution>
+
+### Next: 6.5 Plotting with matplotlib
+
+Showing images, profiles and histograms correctly: colour order, value ranges and colour maps.
+
+## Code
+
+Three examples: a loop, NumPy and a LUT give the same result; timing them; and broadcasting with np.where. Copy the sample images next to the script.
+
+### 1. From scratch, NumPy and OpenCV: the same gamma curve three ways
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)[:60, :80]     # a small crop: Python loops are slow
+
+def gamma_loop(im, g=0.5):
+    out = np.empty_like(im)
+    for r in range(im.shape[0]):
+        for c in range(im.shape[1]):
+            out[r, c] = round(255 * (im[r, c] / 255) ** g)              # one pixel at a time, in Python
+    return out
+
+def gamma_numpy(im, g=0.5):
+    return np.round(255 * (im / 255.0) ** g).astype(np.uint8)            # the whole array at once
+
+lut = np.round(255 * (np.arange(256) / 255.0) ** 0.5).astype(np.uint8)   # 256 answers, computed once
+a, b, c = gamma_loop(img), gamma_numpy(img), cv2.LUT(img, lut)
+print("loop == NumPy:", np.array_equal(a, b), "| NumPy == cv2.LUT:", np.array_equal(b, c))
+print("pixel 100 ->", lut[100], "| first row:", c[0, :6])
+```
+
+Output:
+
+```text
+loop == NumPy: True | NumPy == cv2.LUT: True
+pixel 100 -> 160 | first row: [101 111 111  98 101 100]
+```
+
+- `np.empty_like(im)` allocates an array of the same shape and dtype without initialising it.
+- `cv2.LUT(src, lut)`: `lut` must have 256 entries (uint8 input); the output has the LUT's dtype.
+- Python's `round` and NumPy's `np.round` both round halves to even, so the results match exactly.
+
+### 2. Timing the three versions
+
+```python
+import time
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(0)
+img = rng.integers(0, 256, (480, 640), dtype=np.uint8)
+lut = np.round(255 * (np.arange(256) / 255.0) ** 0.5).astype(np.uint8)
+
+def loop(im):
+    out = np.empty_like(im)
+    for r in range(im.shape[0]):
+        for c in range(im.shape[1]):
+            out[r, c] = round(255 * (im[r, c] / 255) ** 0.5)
+    return out
+
+def best_time(f, repeats):
+    times = []
+    for _ in range(repeats):
+        t0 = time.perf_counter()
+        f(img)
+        times.append(time.perf_counter() - t0)
+    return min(times)                                            # the minimum is least disturbed by other programs
+
+t_loop = best_time(loop, 1)
+t_np = best_time(lambda im: np.round(255 * (im / 255.0) ** 0.5).astype(np.uint8), 20)
+t_lut = best_time(lambda im: cv2.LUT(im, lut), 50)
+print(f"loop {t_loop * 1e3:.0f} ms | NumPy {t_np * 1e3:.2f} ms | LUT {t_lut * 1e3:.3f} ms")
+print(f"speed-up: NumPy {t_loop / t_np:.0f}x, LUT {t_loop / t_lut:.0f}x")
+```
+
+Typical result on our 2-core test machine (yours will differ):
+
+```text
+loop 155 ms | NumPy 2.53 ms | LUT 0.088 ms
+speed-up: NumPy 61x, LUT 1762x
+```
+
+- `time.perf_counter()` is the most precise wall-clock timer in Python.
+- Timings are not reproducible to the digit: run them on your own computer; the **ratios** are what matters.
+
+### 3. NumPy: broadcasting and np.where
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png").astype(np.float64)        # (200, 320, 3)
+mean = img.mean(axis=(0, 1))                                    # shape (3,): one mean per channel
+centred = img - mean                                            # (200, 320, 3) - (3,) -> broadcast
+print("channel means:", mean.round(1), "-> after centring:", centred.mean(axis=(0, 1)).round(3) + 0.0)
+
+gray = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+col_gain = np.linspace(0.8, 1.2, 320, dtype=np.float32)          # shape (320,): one gain per column (lens shading)
+row_offset = np.arange(200, dtype=np.float32)[:, None] * 0.05    # shape (200, 1): one offset per row
+corrected = gray / col_gain - row_offset                          # (200,320) / (320,) - (200,1)
+print("shapes:", gray.shape, col_gain.shape, row_offset.shape, "->", corrected.shape)
+
+bright = np.where(gray > 200, 255, 0).astype(np.uint8)           # elementwise if/else
+print("pixels > 200:", int(np.count_nonzero(gray > 200)), "| np.where result:", bright.dtype, bright.max())
+```
+
+Output:
+
+```text
+channel means: [42.9 56.5 62.4] -> after centring: [0. 0. 0.]
+shapes: (200, 320) (320,) (200, 1) -> (200, 320)
+pixels > 200: 7800 | np.where result: uint8 255
+```
+
+- `mean(axis=(0, 1))` averages over rows and columns, keeping the channel axis.
+- `[:, None]` turns a (200,) vector into a (200, 1) column so it lines up with rows.
+- `+ 0.0` turns −0.0 (a rounding artefact) into 0.0 for printing.
+
+## OpenCV API notes
+
+**Whole-image operations**: almost every OpenCV function processes the full array in optimised C++ (SIMD, often multi-threaded). `cv2.setNumThreads(n)` / `cv2.getNumThreads()` control threading; `cv2.useOptimized()` reports whether SIMD paths are enabled.
+
+**`cv2.LUT(src, lut)`**: 256-entry table for 8-bit images (one table for all channels, or a 3-channel table for per-channel curves).
+
+**Timing**: `cv2.getTickCount()`, `cv2.getTickFrequency()`; `cv2.TickMeter` (start/stop/getTimeMilli).
+
+## Where it fails
+
+- **Memory**: vectorised expressions create temporary arrays; on very large images, chained expressions can use several times the image size. Use in-place operations (`np.multiply(a, b, out=a)`) or OpenCV functions with `dst=`.
+- **Data-dependent algorithms** (flood fill, region growing, recursive filters) do not vectorise naturally; use OpenCV's implementations or Numba.
+- **Tiny arrays**: for a 5 × 5 array the setup cost of NumPy dominates; speed differences vanish.
+- **float64 everywhere** doubles memory traffic compared with float32 and can make NumPy slower than needed.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Nested `for` loops over rows and columns** in production code.
+- **Broadcasting by accident**: (200, 320) with (200,) fails, but (320, 320) with (320,) silently applies the values per column when you meant per row.
+- **Timing only one run**, including warm-up and caching.
+- **Using `and`/`or` with arrays** instead of `&`/`|` (and forgetting parentheses: `img > 50 & img < 100` is wrong).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Ufuncs and SIMD
+
+NumPy's element-wise operations are "universal functions" (ufuncs) written in C, many with SIMD versions for common CPUs. OpenCV's core uses its own "universal intrinsics" to generate SIMD code for x86 (SSE/AVX), ARM (NEON) and others from one source [1][2].
+
+### Memory bandwidth
+
+Many simple image operations are limited by how fast memory can be read and written, not by arithmetic. That is why fusing several operations into one pass (a LUT, one OpenCV function, or a compiled kernel) can be much faster than a chain of separate NumPy expressions.
+
+### Numba
+
+Numba compiles Python functions with loops to machine code using LLVM; with `@njit(parallel=True)` and `prange` it can also use several cores. It is a good tool for custom pixel algorithms that NumPy cannot express [3].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why is a Python double loop over pixels slow?",
+      options: ["Python cannot do arithmetic", "Every step goes through the interpreter with type checks and object creation", "NumPy arrays are slow to index", "It uses only one core"],
+      answer: 1,
+      explanation: "The per-element overhead of the interpreter dominates.",
+    },
+    {
+      question: "Which shapes broadcast to (480, 640)?",
+      options: ["(480,) and (480, 640)", "(640,) and (480, 640)", "(480, 640, 1) and (640,)", "(2, 640) and (480, 640)"],
+      answer: 1,
+      explanation: "Aligned from the right: 640 = 640, the missing axis counts as 1.",
+    },
+    {
+      question: "Best tool for an arbitrary 8-bit curve (e.g. gamma) applied to every pixel?",
+      options: ["A Python loop", "np.vectorize", "cv2.LUT", "A list comprehension"],
+      answer: 2,
+      explanation: "Only 256 inputs exist: compute them once and look them up.",
+    },
+    {
+      question: "How should you time a function?",
+      options: ["One call with time.time()", "Several calls with time.perf_counter(), take the minimum or median", "Count lines of code", "Use print timestamps"],
+      answer: 1,
+      explanation: "Repeat to remove warm-up and noise; perf_counter is the precise timer.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Give the result shape or say "error": (a) (5, 4) + (4,); (b) (5, 4) + (5,); (c) (5, 1, 3) + (4, 3); (d) (3,) + (3, 1).
+
+<Solution>
+
+(a) **(5, 4)**; (b) **error** (4 vs 5); (c) **(5, 4, 3)**; (d) **(3, 3)**: an "outer" combination.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Without loops, count the pixels of `sample-color.png` that are "red": R > 150, G < 80 and B < 80. Then make a uint8 mask image (255 for red, 0 otherwise) with `np.where`.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+b, g, r = img[:, :, 0], img[:, :, 1], img[:, :, 2]               # views (6.2)
+red = (r > 150) & (g < 80) & (b < 80)                           # parentheses are required
+mask = np.where(red, 255, 0).astype(np.uint8)
+print("red pixels:", int(np.count_nonzero(red)), "| mask:", mask.shape, mask.dtype, np.unique(mask))
+```
+
+Output:
+
+```text
+red pixels: 5525 | mask: (200, 320) uint8 [  0 255]
+```
+
+The red circle; the orange bar fails the G < 80 test. `cv2.inRange(img, (0, 0, 151), (79, 79, 255))` does the same in one OpenCV call (Part B).
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A script computes the mean brightness of 300 detected parts per frame with a Python loop over the parts (each part an ROI slice + `.mean()`). Is this a performance problem?
+
+<Solution>
+
+Probably not: the loop runs 300 times per frame, and each iteration does vectorised work on a whole ROI. The overhead is a few hundred Python steps, typically well under a millisecond. Loops over objects are fine; loops over pixels are not. Measure before optimising.
+
+</Solution>
+
+## References
+
+1. C. R. Harris et al., "Array programming with NumPy," *Nature*, vol. 585, pp. 357–362, 2020.
+2. OpenCV 4.13.0 documentation, *Universal intrinsics* and *How to scan images, lookup tables and time measurement with OpenCV*: [docs.opencv.org/4.13.0/db/da5/tutorial_how_to_scan_images.html](https://docs.opencv.org/4.13.0/db/da5/tutorial_how_to_scan_images.html).
+3. S. K. Lam, A. Pitrou and S. Seibert, "Numba: a LLVM-based Python JIT compiler," *Proceedings of the Second Workshop on the LLVM Compiler Infrastructure in HPC*, 2015.
+4. NumPy documentation, *Broadcasting*: [numpy.org/doc/stable/user/basics.broadcasting.html](https://numpy.org/doc/stable/user/basics.broadcasting.html).

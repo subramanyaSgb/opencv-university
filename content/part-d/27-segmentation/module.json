@@ -1,0 +1,13 @@
+{
+  "number": 27,
+  "title": "Segmentation",
+  "summary": "Splitting an image into meaningful regions: region growing, k-means, mean shift, watershed, GrabCut and superpixels.",
+  "chapters": [
+    { "number": "27.1", "slug": "27.1-region-growing", "title": "Region growing" },
+    { "number": "27.2", "slug": "27.2-k-means", "title": "K-means" },
+    { "number": "27.3", "slug": "27.3-mean-shift", "title": "Mean shift" },
+    { "number": "27.4", "slug": "27.4-watershed", "title": "Watershed" },
+    { "number": "27.5", "slug": "27.5-grabcut-and-graph-cut", "title": "GrabCut and graph cut" },
+    { "number": "27.6", "slug": "27.6-superpixels", "title": "Superpixels" }
+  ]
+}

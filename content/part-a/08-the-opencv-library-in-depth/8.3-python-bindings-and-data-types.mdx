@@ -1,0 +1,418 @@
+export const meta = {
+  number: "8.3",
+  title: "Python bindings and data types",
+  minutes: 30,
+  objectives: [
+    "Explain how cv2 turns a NumPy array into a cv::Mat and back, and when it copies",
+    "Choose dtypes and shapes that each common function accepts",
+    "Pass points, sizes and colours in the form the bindings expect",
+    "Read binding error messages (Overload resolution failed, Layout incompatible, unsupported depth) and fix them",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 8.3 (Module 8 plan).
+  BindingLab data was recorded by running every combination on opencv-python-headless 4.13.0.92.
+  Reference tail: all Python output is compared automatically.
+*/}
+
+# 8.3 Python bindings and data types
+
+<Definition term="Python bindings">the generated glue code in `cv2` that converts Python arguments (NumPy arrays, tuples, numbers) into C++ types (cv::Mat, cv::Point, cv::Scalar), calls the C++ function, and converts the results back into Python objects.</Definition>
+
+8.2 showed the C++ side. This chapter is the border crossing: what `cv2` accepts, what it gives back, what it copies, and why some perfectly good NumPy arrays produce errors.
+
+## 1. An analogy
+
+A border crossing with an interpreter. The traveller (your array) arrives with a passport (dtype, shape, strides). The interpreter writes a C++ visa (a Mat header) pointing at the traveller's luggage (the pixel memory), without unpacking it. If the luggage is not packed the way C++ expects (pixels with gaps between them), it has to be repacked first (a copy). Some passports are not accepted at all (bool). On the way back, the interpreter hands you the results as Python objects.
+
+## 2. Arrays become Mats
+
+<Flow
+  steps={[
+    { label: "NumPy array: dtype, shape, strides, data pointer", tone: "world" },
+    { label: "dtype → depth, last axis → channels (if 3-D)", tone: "data" },
+    { label: "Packed pixels? Share the memory. Gaps? Copy first", tone: "process" },
+    { label: "cv::Mat header → C++ function", tone: "result" },
+  ]}
+/>
+
+| NumPy dtype | Mat depth | Notes |
+| --- | --- | --- |
+| uint8 | CV_8U | the normal image type |
+| int8 | CV_8S | few functions support it |
+| uint16 | CV_16U | 10–16-bit camera images |
+| int16 | CV_16S | derivative images (Sobel with `cv2.CV_16S`) |
+| int32 | CV_32S | labels, coordinates |
+| float32 | CV_32F | the normal float type |
+| float64 | CV_64F | NumPy's default float; many but not all functions |
+| float16 | CV_16F | storage and DNN; almost no image functions |
+| int64 | converted to CV_32S | NumPy's default int; OpenCV has no 64-bit integer images |
+| bool | rejected | convert masks to uint8 first |
+
+Shape rules: `(h, w)` → 1 channel; `(h, w, c)` → c channels (`c` from 1 to 512, `CV_CN_MAX`). A `(h, w, 1)` array is accepted, but outputs come back as `(h, w)`.
+
+## 3. When the binding copies
+
+A Mat needs **rows with a fixed step** and **pixels packed inside a row** (channel values next to each other). The row step can be anything, so ROIs are shared. Pixels with gaps cannot be described by a Mat:
+
+| Array | Packed? | Input | Output (`dst=`, drawing) |
+| --- | --- | --- | --- |
+| `img` | yes | shared | written in place |
+| `img[10:50, 20:80]` (ROI) | yes (only rows skip) | shared | written in place |
+| `img[:, ::2]` (every 2nd column) | no | copied | error |
+| `img[:, :, 0]` (one channel of BGR) | no | copied | error |
+| `img.T` (transposed) | no | copied | error |
+| `np.ascontiguousarray(x)` | yes | shared | written in place |
+
+For inputs the copy is invisible (only slower). For outputs it cannot work: the result would go into the copy, not your array, so the binding refuses with **"Layout of the output array … is incompatible with cv::Mat"**. Fix with `np.ascontiguousarray()` or `.copy()` and use the returned array.
+
+## 4. What each function accepts
+
+Not every C++ function supports every depth or channel count. The lab below was recorded by running every combination on OpenCV 4.13.0.
+
+<BindingLab caption="Pick a function, a dtype, a shape and a memory layout. The result and the error message are what cv2 4.13.0 actually does." />
+
+Things to try:
+
+- `Canny` with float32: only 8-bit is supported (it accepts 1 to 4 channels).
+- `cvtColor BGR→GRAY` with `(h, w)`: wrong number of channels; with float64: unsupported depth. uint8, uint16 and float32 work.
+- `GaussianBlur` with `(h, w, 1)`: works, but the result shape is `(6, 8)`.
+- `rectangle` with `every 2nd column`: layout error; with `contiguous`: drawn in place.
+- Any function with `bool`: rejected.
+
+A rule of thumb: **uint8 and float32 work almost everywhere**; uint16 and float64 in many filters; everything else, check the docs or try.
+
+## 5. Numbers, points, sizes and colours
+
+| C++ type | Python form | Example |
+| --- | --- | --- |
+| `cv::Point` | tuple of 2 **ints** | `(30, 20)`; `(30.0, 20.0)` is an error |
+| `cv::Point2f` | tuple of 2 numbers | `cv2.getRotationMatrix2D((30.5, 20.5), 15, 1.0)` |
+| `cv::Size` | `(width, height)` ints | `(5, 5)`, `(640, 480)` |
+| `cv::Rect` | `(x, y, w, h)` ints | `cv2.boundingRect` returns one |
+| `cv::Scalar` | number or tuple of up to 4 | `255`, `(255, 0, 0)` |
+| `std::vector<cv::Point>` | `int32` array `(n, 1, 2)` or `(n, 2)` | contours, polygons |
+| output arguments | return values | `ret, dst = cv2.threshold(...)` |
+| `bool` / `double` results | Python `bool` / `float` | `ret` above is a float |
+
+Integer coordinates are the most common surprise: drawing functions and `cv::Point` want ints. Round explicitly: `(int(round(x)), int(round(y)))`. NumPy integer scalars (`np.int64(30)`) are accepted.
+
+## 6. Reading binding errors
+
+| Message contains | Meaning | Usual fix |
+| --- | --- | --- |
+| `Overload resolution failed` | No version of the function accepted these argument types; each line below explains why one version failed | read the first line under it |
+| `Can't parse 'center'. Sequence item with index 0 has a wrong type` | a float where an int is needed | `int(round(x))` |
+| `src data type = bool is not supported` | bool array | `.astype(np.uint8) * 255` |
+| `Layout of the output array … is incompatible with cv::Mat` | output array is not packed | `np.ascontiguousarray()` |
+| `Expected Ptr<cv::UMat> for argument` | only the UMat overload was left; ignore, look at the other lines | — |
+| `Unsupported depth` / `Unsupported combination of source format (=N)` | depth not implemented; N is the type number (8.2) | `.astype(np.float32)` or `np.uint8` |
+| `Bad number of channels` / `scn is 1` | 1 channel where 3 or 4 are needed (or the opposite) | check `.shape`; convert with `cvtColor` |
+| `!_src.empty()` | the image is empty: usually `imread` returned `None` | check the file path |
+
+The C++ assertion text (`'VDepth::contains(depth)' where 'depth' is 6 (CV_64F)`) is long but useful: it names the failed condition and the actual value.
+
+## 7. Industrial example
+
+A data scientist hands over a NumPy pipeline: images are float64 in 0…1 (NumPy's default), masks are bool, coordinates come from a model as float arrays. Ported naively to OpenCV, it fails in three places: `cv2.cvtColor` rejects float64, `cv2.findContours` rejects the bool mask, and `cv2.circle` rejects the float centres. The fixes are one line each, at the border: convert images to float32 (or uint8 with scaling), masks to uint8 0/255, and points to rounded ints. Doing these conversions once, at the start of the OpenCV part, keeps the rest of the code clean.
+
+## What you should remember from 8.3
+
+<Takeaways>
+<Takeaway n={1} title="Mapping">dtype → depth, last axis → channels; int64 becomes int32, bool is rejected.</Takeaway>
+<Takeaway n={2} title="Copies">Packed pixels are shared (ROIs too); gaps between pixels force a copy for inputs and an error for outputs.</Takeaway>
+<Takeaway n={3} title="Safe types">uint8 and float32 work almost everywhere.</Takeaway>
+<Takeaway n={4} title="Arguments">Points and sizes are int tuples, Size is (width, height), outputs are return values.</Takeaway>
+<Takeaway n={5} title="Errors">Read the line under "Overload resolution failed" and the assertion's actual value.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** `cv2.Canny(img.astype(np.float32), 50, 150)` fails. Why?
+
+<Solution>
+
+Canny supports only 8-bit input (`_src.depth() == CV_8U`). Pass a uint8 image.
+
+</Solution>
+
+**Q2.** Is `img[100:200, 50:150]` shared or copied when passed to `cv2.GaussianBlur`? And `img[:, :, 2]`?
+
+<Solution>
+
+The ROI is **shared** (only the row step differs). The single channel is **copied**: its pixels are 3 bytes apart, which a Mat cannot describe.
+
+</Solution>
+
+**Q3.** `cv2.circle(img, (12.4, 30.8), 3, 255, -1)` fails. Fix it.
+
+<Solution>
+
+`cv2.circle(img, (int(round(12.4)), int(round(30.8))), 3, 255, -1)` → centre `(12, 31)`.
+
+</Solution>
+
+### Next: 8.4 Contrib modules
+
+The extra modules in opencv_contrib: what is there, how to install them, and when they are worth it.
+
+## Code
+
+Three examples: predicting what the binding does with an array, argument conversion in practice, and reading the built-in help.
+
+### 1. From scratch: predict the Mat
+
+The rules of sections 2 and 3 as a function:
+
+```python
+import numpy as np
+import cv2
+
+DEPTH = {np.uint8: "8U", np.int8: "8S", np.uint16: "16U", np.int16: "16S", np.int32: "32S",
+         np.float32: "32F", np.float64: "64F", np.float16: "16F"}
+
+def as_mat(a):
+    """What the cv2 binding does with array a (as input), by the rules in this chapter."""
+    if a.dtype == np.bool_:
+        return "rejected: bool is not supported"
+    dt = np.int32 if a.dtype == np.int64 else a.dtype.type        # int64 inputs become int32
+    cn = 1 if a.ndim == 2 else a.shape[2]
+    packed = a.strides[-1] == a.itemsize and (a.ndim == 2 or a.strides[1] == cn * a.itemsize)
+    copy = a.dtype == np.int64 or not packed
+    return f"CV_{DEPTH[dt]}C{cn} {a.shape[0]}x{a.shape[1]}, {'copied' if copy else 'shared (no copy)'}"
+
+img = np.zeros((6, 8, 3), np.uint8)
+for name, a in [("img", img), ("img[1:5, 2:6]", img[1:5, 2:6]), ("img[:, ::2]", img[:, ::2]),
+                ("img[:, :, 0]", img[:, :, 0]), ("img.astype(np.float32)", img.astype(np.float32)),
+                ("np.zeros((6, 8), np.int64)", np.zeros((6, 8), np.int64)), ("img > 0", (img > 0)[:, :, 0])]:
+    print(f"{name:28s} -> {as_mat(a)}")
+
+for name, v in [("img[1:5, 2:6]", img[1:5, 2:6]), ("img[:, :, 0]", img[:, :, 0])]:
+    try:
+        cv2.rectangle(v, (0, 0), (2, 2), (255, 255, 255), -1)
+        print(f"draw into {name}: in place, img now sums to {int(img.sum())}")
+    except cv2.error as e:
+        print(f"draw into {name}: error:", [l for l in str(e).splitlines() if "Layout" in l][0].strip(" >-"))
+```
+
+Output:
+
+```text
+img                          -> CV_8UC3 6x8, shared (no copy)
+img[1:5, 2:6]                -> CV_8UC3 4x4, shared (no copy)
+img[:, ::2]                  -> CV_8UC3 6x4, copied
+img[:, :, 0]                 -> CV_8UC1 6x8, copied
+img.astype(np.float32)       -> CV_32FC3 6x8, shared (no copy)
+np.zeros((6, 8), np.int64)   -> CV_32SC1 6x8, copied
+img > 0                      -> rejected: bool is not supported
+draw into img[1:5, 2:6]: in place, img now sums to 6885
+draw into img[:, :, 0]: error: Layout of the output array img is incompatible with cv::Mat
+```
+
+- 6885 = 3 × 3 pixels × 3 channels × 255: the ROI was drawn into `img` itself.
+- The single-channel view fails as an output exactly as the table in section 3 predicts.
+
+### 2. OpenCV: arguments and return values
+
+```python
+import numpy as np
+import cv2
+
+img = np.zeros((40, 60, 3), np.uint8)
+for center in [(30, 20), (30.0, 20.0), (np.int64(30), np.int64(20)), np.array([30, 20])]:
+    try:
+        cv2.circle(img, center, 5, (0, 0, 255), -1)
+        print(f"{type(center[0]).__name__:8s} center: ok")
+    except cv2.error as e:
+        print(f"{type(center[0]).__name__:8s} center: error:", str(e).splitlines()[-1].strip(" >-"))
+
+one = np.zeros((4, 4, 1), np.uint8)
+print("(4, 4, 1) in ->", cv2.GaussianBlur(one, (3, 3), 0).shape, "out")
+ret, bw = cv2.threshold(np.array([[10, 200]], np.uint8), 100, 255, cv2.THRESH_BINARY)
+print("threshold returns:", type(ret).__name__, ret, "and", bw.tolist())
+b = cv2.add(np.uint8([[250]]), np.uint8([[10]]))
+print("cv2.add saturates:", b.tolist(), "| numpy wraps:", (np.uint8([[250]]) + np.uint8([[10]])).tolist())
+```
+
+Output:
+
+```text
+int      center: ok
+float    center: error: Can't parse 'center'. Sequence item with index 0 has a wrong type
+int64    center: ok
+int64    center: ok
+(4, 4, 1) in -> (4, 4) out
+threshold returns: float 100.0 and [[0, 255]]
+cv2.add saturates: [[255]] | numpy wraps: [[4]]
+```
+
+- A small NumPy integer array works as a point too; float tuples do not.
+- `cv2.add` on 2-D arrays follows OpenCV's saturating arithmetic, NumPy's `+` wraps around (6.4). Use 2-D arrays, not 1-D lists of ≤ 4 numbers, which the binding may read as a Scalar (6.4).
+
+### 3. OpenCV: the built-in help
+
+```python
+import numpy as np
+import cv2
+
+print(cv2.GaussianBlur.__doc__.splitlines()[0])
+print(cv2.threshold.__doc__.splitlines()[0])
+print(cv2.findContours.__doc__.splitlines()[0])
+```
+
+Output:
+
+```text
+GaussianBlur(src, ksize, sigmaX[, dst[, sigmaY[, borderType[, hint]]]]) -> dst
+threshold(src, thresh, maxval, type[, dst]) -> retval, dst
+findContours(image, mode, method[, contours[, hierarchy[, offset]]]) -> contours, hierarchy
+```
+
+- Brackets mark optional arguments; everything after `->` is returned. `dst` appears both as an optional input (to reuse memory) and as the result.
+- `help(cv2.GaussianBlur)` prints the full C++ documentation, including which depths are supported for many functions.
+
+## OpenCV API notes
+
+**Help and types**: `help(cv2.func)`, `cv2.func.__doc__`; the wheels ship type stubs (`cv2/__init__.pyi`), so editors show signatures and types.
+
+**Conversions**: `np.ascontiguousarray(a)`, `a.astype(np.uint8)`, `a.astype(np.float32)`, `cv2.convertScaleAbs(a, alpha, beta)` (any depth → uint8 with scaling and absolute value), `cv2.normalize(a, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)`.
+
+**Depth constants**: `cv2.CV_8U`, `cv2.CV_16S`, `cv2.CV_32F`, `cv2.CV_64F`; `ddepth=-1` means "same as the input" in filters.
+
+**Output arrays**: most functions accept `dst=`; it is used only if its shape and dtype match, otherwise a new array is returned. Always use the return value.
+
+## Where it fails
+
+- **Silent copies**: non-packed inputs work but are copied each call; in a fast loop over many frames this costs time and memory.
+- **Overload ambiguity**: a 1-D array or a short list can be read as a Scalar instead of an image (6.4); keep images 2-D or 3-D.
+- **Python ints out of range**: values passed as colours or thresholds are converted to C++ `double` or `int`; very large Python ints overflow with an error.
+- **Lists of arrays** (`std::vector<Mat>`): tuples are returned from functions like `cv2.split` and `cv2.findContours`; in-place modification of their elements behaves like any NumPy array.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Passing bool masks**: convert to uint8 0/255.
+- **Float coordinates** in drawing and `cv::Point` arguments.
+- **float64 images** into functions that need uint8 or float32 (`cvtColor`, `Canny`).
+- **Drawing into a channel view** (`img[:, :, 0]`) or a strided slice.
+- **Ignoring the return value** and expecting `dst=` to always be filled.
+- **(w, h) vs (h, w)**: `Size` is (width, height); `shape` is (height, width).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The generated wrapper
+
+For each exported function, the generator writes a C++ wrapper that tries each overload (`Mat`, then `UMat` …) in turn: it parses every argument with `pyopencv_to()` and, if one fails, records why and tries the next overload. If none succeeds, you get "Overload resolution failed" with one line per overload. Results are converted back with `pyopencv_from()` [1].
+
+### Memory ownership
+
+When the binding allocates an output Mat, it uses a NumPy allocator: the Mat's buffer is a NumPy array, so the returned array owns the memory and no extra copy is needed on the way back. When it wraps your input array, the Mat points into NumPy's buffer and keeps a reference to the array for the duration of the call [1].
+
+### The GIL
+
+The bindings release Python's global interpreter lock (GIL) during most C++ calls. That is why OpenCV calls in several Python threads can run in parallel (a capture thread and a processing thread, 7.4), while pure-Python code in threads cannot. TODO: verify which functions keep the GIL in 4.13.0.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does cv2 do with an int64 NumPy array passed as an input image?",
+      options: ["Rejects it", "Converts it to int32 (CV_32S)", "Uses CV_64S", "Converts it to float64"],
+      answer: 1,
+      explanation: "OpenCV has no 64-bit integer depth; the binding converts to int32.",
+    },
+    {
+      question: "Which view can be used as an output (drawn in place)?",
+      options: ["img[:, ::2]", "img[:, :, 1]", "img[20:60, 10:90]", "img.T"],
+      answer: 2,
+      explanation: "An ROI only changes the row step; pixels stay packed.",
+    },
+    {
+      question: "cv2.circle(img, (10.0, 5.0), 3, 255) raises an error. Why?",
+      options: ["The radius is too small", "cv::Point needs integer coordinates", "img must be float", "255 is not a colour"],
+      answer: 1,
+      explanation: "Round and convert to int.",
+    },
+    {
+      question: "A (h, w, 1) uint8 image through GaussianBlur comes back as…",
+      options: ["(h, w, 1)", "(h, w)", "(1, h, w)", "an error"],
+      answer: 1,
+      explanation: "A 1-channel Mat is returned as a 2-D array.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+For each array, say whether `cv2.medianBlur(a, 3)` gets a shared Mat, a copy, or an error is likely: (a) uint8 `(480, 640)`; (b) uint8 `(480, 640, 3)[::2, ::2]`; (c) bool `(480, 640)`; (d) uint8 `(480, 640, 3)[..., ::-1]` (BGR→RGB by slicing).
+
+<Solution>
+
+(a) shared; (b) copied (columns every 2nd pixel: gaps); (c) error (bool); (d) copied (negative channel stride: not packed in C order). Note (d) is the classic case where `cv2.cvtColor(a, cv2.COLOR_BGR2RGB)` is better than slicing when the result goes back into OpenCV.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Write `to_cv(a)` that prepares any array for OpenCV: bool → uint8 0/255, float64 → float32, int64 → int32, and non-packed → contiguous copy. Print dtype, shape and contiguity before and after for a bool mask, a float64 image and a transposed uint8 image.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+def to_cv(a):
+    if a.dtype == np.bool_:
+        a = a.astype(np.uint8) * 255
+    elif a.dtype == np.float64:
+        a = a.astype(np.float32)
+    elif a.dtype == np.int64:
+        a = a.astype(np.int32)
+    return np.ascontiguousarray(a)
+
+tests = {"bool mask": np.zeros((4, 6), bool), "float64 image": np.zeros((4, 6, 3)),
+         "transposed uint8": np.zeros((6, 4), np.uint8).T}
+for name, a in tests.items():
+    b = to_cv(a)
+    print(f"{name:16s}: {a.dtype}{a.shape} C={a.flags['C_CONTIGUOUS']} -> {b.dtype}{b.shape} C={b.flags['C_CONTIGUOUS']}")
+    cv2.rectangle(b, (0, 0), (1, 1), 255, -1)    # works now: packed, supported dtype
+```
+
+Output:
+
+```text
+bool mask       : bool(4, 6) C=True -> uint8(4, 6) C=True
+float64 image   : float64(4, 6, 3) C=True -> float32(4, 6, 3) C=True
+transposed uint8: uint8(4, 6) C=False -> uint8(4, 6) C=True
+```
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A loop processes 5 MP colour frames and calls `cv2.GaussianBlur(frame[:, :, 1], (5, 5), 0)` to blur the green channel. It is slower than expected. Why, and what is faster?
+
+<Solution>
+
+`frame[:, :, 1]` is not packed, so the binding copies 5 MP into a new Mat on every call before blurring. Faster: `g = cv2.extractChannel(frame, 1)` (or `cv2.split`) once, which produces a packed array, then blur it; or convert the whole pipeline to work on one channel from the start.
+
+</Solution>
+
+## References
+
+1. OpenCV 4.13.0 documentation, Python tutorials: "How OpenCV-Python Bindings Works". https://docs.opencv.org/4.13.0/
+2. OpenCV 4.13.0 documentation, core module: `cv::Mat` and type constants. https://docs.opencv.org/4.13.0/
+3. NumPy documentation: "Internal memory layout of an ndarray", `ndarray.strides`, `numpy.ascontiguousarray`. https://numpy.org/doc/stable/
+4. opencv-python project: packages and type stubs. https://github.com/opencv/opencv-python

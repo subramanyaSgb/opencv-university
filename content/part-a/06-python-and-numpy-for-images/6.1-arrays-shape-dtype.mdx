@@ -1,0 +1,410 @@
+export const meta = {
+  number: "6.1",
+  title: "Arrays, shape, dtype",
+  minutes: 30,
+  objectives: [
+    "Read every attribute of an image array: shape, ndim, size, dtype, itemsize, nbytes, strides",
+    "Choose the right dtype and know which ones OpenCV accepts",
+    "Avoid NumPy's default dtypes (float64, int64) when creating images",
+    "Change the number and order of axes: channel axis, batches, channels-first",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 6.1 (Module 6 plan).
+  Reference tail: printed outputs produced by opencv-python 4.13.0.92 with NumPy 2.5.3.
+*/}
+
+# 6.1 Arrays, shape, dtype
+
+<Definition term="NumPy array">the data structure behind every image in Python: a block of memory holding numbers of one type (the dtype), plus a shape that says how to read it as rows, columns and channels.</Definition>
+
+`cv2.imread` does not return a special "image" object: it returns a plain **NumPy array**. Everything in this course, from adding brightness to training a network, works on these arrays. Knowing exactly what an array is saves hours of debugging.
+
+## 1. An analogy
+
+A warehouse shelf with numbered boxes in one long line. The **dtype** says how big each box is (1 byte, 2 bytes, 4 bytes …). The **shape** is a reading rule: "take the boxes 320 at a time as rows, 3 per pixel". The boxes stay in one line; only the rule changes when you reshape.
+
+## 2. The attributes
+
+For `img = cv2.imread("sample-color.png")` *(Code example 1)*:
+
+| Attribute | Value | Meaning |
+| --- | --- | --- |
+| `img.shape` | (200, 320, 3) | rows (height), columns (width), channels |
+| `img.ndim` | 3 | number of axes |
+| `img.size` | 192 000 | number of values |
+| `img.dtype` | uint8 | type of each value |
+| `img.itemsize` | 1 | bytes per value |
+| `img.nbytes` | 192 000 | size × itemsize (4.1) |
+| `img.strides` | (960, 3, 1) | bytes to jump one row, one column, one channel |
+
+Shape is always **(height, width, channels)**: rows first (3.4). OpenCV functions that take a size want **(width, height)**: the opposite order.
+
+## 3. Common dtypes
+
+| dtype | Bytes | Range | Typical use |
+| --- | --- | --- | --- |
+| `uint8` | 1 | 0 … 255 | normal 8-bit images, masks |
+| `uint16` | 2 | 0 … 65 535 | 10–16-bit camera images (4.4) |
+| `int16` | 2 | −32 768 … 32 767 | derivatives, differences (5.5) |
+| `int32` | 4 | ± 2.1 billion | label images, sums |
+| `float32` | 4 | ± 3.4·10³⁸, about 7 digits | calculations, normalised images (0–1) |
+| `float64` | 8 | about 16 digits | NumPy's default; statistics, geometry |
+| `bool` | 1 | False / True | masks from comparisons (`img > 128`) |
+
+`np.iinfo(np.uint8)` and `np.finfo(np.float32)` print the exact limits.
+
+## 4. What OpenCV accepts
+
+OpenCV works with a fixed set of "depths": 8-bit and 16-bit unsigned/signed integers, 32-bit integers, and 32-/64-bit floats. Not every function supports all of them *(Code example 2)*:
+
+| dtype | `cv2.cvtColor` |
+| --- | --- |
+| uint8 | ok |
+| uint16 | ok |
+| float32 | ok |
+| float64 | error: unsupported depth |
+| int32 | error: unsupported depth |
+
+Rule of thumb: **uint8 for images, float32 for calculations**. `bool` arrays are not accepted at all; convert masks with `mask.astype(np.uint8) * 255`.
+
+## 5. The default-dtype trap
+
+NumPy's creation functions default to **float64** or **int64**:
+
+| Code | dtype |
+| --- | --- |
+| `np.zeros((2, 2))` | float64 |
+| `np.full((2, 2), 255)` | int64 |
+| `np.array([[1, 2]])` | int64 |
+| `np.zeros((2, 2), np.uint8)` | uint8 |
+
+An "image" made with `np.full((480, 640), 255)` takes 8 bytes per pixel and is rejected by many OpenCV functions. **Always pass the dtype** when creating image arrays.
+
+## 6. Memory layout and strides
+
+Values are stored in **C order** (row-major): the whole of row 0, then row 1 …; inside a pixel, B then G then R. The strides say how many bytes to jump for one step along each axis, so the byte offset of `img[r, c, ch]` is
+
+<Equation terms={[{ value: "offset" }, { op: "=", value: "r · 960 + c · 3 + ch · 1", result: true }]} />
+
+for our 320-wide BGR image. Strides are why reshaping is free and why some slices and transposes are not "contiguous" (6.2).
+
+## 7. Try it
+
+<ArrayLab caption="A small image array. Change its shape and dtype, click a value and see where it lives in memory and how strides give its byte offset." />
+
+Things to try: switch to float32 (every box 4 bytes, strides × 4); 1 channel (strides lose their last entry); click the last value (offset = nbytes − itemsize).
+
+## 8. Changing axes
+
+Different tools expect different layouts *(Code example 3)*:
+
+| Layout | Shape | Who uses it |
+| --- | --- | --- |
+| Gray | (H, W) | OpenCV, NumPy |
+| Gray with channel axis | (H, W, 1) | some deep-learning code |
+| Colour, channels last | (H, W, 3) | OpenCV, NumPy, matplotlib (as RGB) |
+| Batch, channels last | (N, H, W, 3) | TensorFlow / Keras |
+| Batch, channels first | (N, 3, H, W) | PyTorch, ONNX models, `cv2.dnn.blobFromImage` |
+
+- Add an axis: `gray[..., None]` or `np.expand_dims(gray, -1)`.
+- Stack images: `np.stack([a, b, c], axis=-1)` (new last axis), `np.stack(list)` (new first axis).
+- Reorder axes: `batch.transpose(0, 3, 1, 2)`.
+- Change the reading rule: `img.reshape(-1)` (one long row), `flat.reshape(200, 320)`.
+
+## 9. Industrial example
+
+A line-scan camera (2.10) delivers 2048 pixels per line; 1000 lines form one frame. The SDK gives a flat buffer of 2 048 000 bytes:
+
+<Flow
+  steps={[
+    { label: "Buffer: 2 048 000 bytes (Mono8)", tone: "world" },
+    { label: "np.frombuffer(buf, np.uint8)", tone: "process" },
+    { label: ".reshape(1000, 2048): shape (lines, pixels)", tone: "process" },
+    { label: "A normal image for OpenCV, no copy", tone: "result" },
+  ]}
+/>
+
+For Mono16 the dtype is `np.uint16` and the same buffer holds half as many pixels: dtype and shape together decide how bytes become an image.
+
+## What you should remember from 6.1
+
+<Takeaways>
+<Takeaway n={1} title="Shape">(height, width, channels); OpenCV sizes are (width, height).</Takeaway>
+<Takeaway n={2} title="dtype">uint8 for images, uint16 for >8-bit data, float32 for maths, int16/int32 for signed results.</Takeaway>
+<Takeaway n={3} title="OpenCV">Not every function takes every dtype: float64, int32 and bool often fail.</Takeaway>
+<Takeaway n={4} title="Defaults">np.zeros → float64, np.full/array of ints → int64: always pass the dtype.</Takeaway>
+<Takeaway n={5} title="Axes">expand_dims / stack / transpose / reshape to match what a tool expects.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 1280 × 1024 colour image in float32. Shape, nbytes and strides?
+
+<Solution>
+
+Shape **(1024, 1280, 3)**; nbytes = 1024 × 1280 × 3 × 4 = **15 728 640**; strides **(15360, 12, 4)**.
+
+</Solution>
+
+**Q2.** What is wrong with `mask = np.zeros((480, 640)); cv2.circle(mask, (320, 240), 50, 255, -1)`?
+
+<Solution>
+
+The mask is **float64** (NumPy's default). Drawing works, but many later functions (for example `cv2.bitwise_and` with an 8-bit image) reject or mis-handle it. Use `np.zeros((480, 640), np.uint8)`.
+
+</Solution>
+
+**Q3.** A model needs (1, 3, 224, 224). You have a 224 × 224 BGR image. Which operations?
+
+<Solution>
+
+`img.transpose(2, 0, 1)[None]` (or `np.expand_dims(img.transpose(2, 0, 1), 0)`), usually after converting BGR→RGB and to float32 with the model's scaling.
+
+</Solution>
+
+### Next: 6.2 Slicing and views
+
+Cutting regions out of arrays, and the surprise that most cuts are not copies.
+
+## Code
+
+Three examples: inspecting an image array, dtypes and OpenCV, and changing axes. Copy the sample images next to the script.
+
+### 1. NumPy: everything an image array tells you
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-color.png")
+print("shape   :", img.shape, "-> (rows, columns, channels)")
+print("ndim    :", img.ndim, "| size:", img.size, "values")
+print("dtype   :", img.dtype, "| itemsize:", img.itemsize, "byte | nbytes:", img.nbytes)
+print("strides :", img.strides, "| C-contiguous:", img.flags["C_CONTIGUOUS"])
+print("pixel [100, 70] =", img[100, 70], "(B, G, R)")
+for t in [np.uint8, np.uint16, np.int16, np.float32]:
+    info = np.iinfo(t) if np.issubdtype(t, np.integer) else np.finfo(t)
+    print(f"{np.dtype(t).name:8s}: {np.dtype(t).itemsize} bytes, range {info.min:.6g} .. {info.max:.6g}")
+```
+
+Output:
+
+```text
+shape   : (200, 320, 3) -> (rows, columns, channels)
+ndim    : 3 | size: 192000 values
+dtype   : uint8 | itemsize: 1 byte | nbytes: 192000
+strides : (960, 3, 1) | C-contiguous: True
+pixel [100, 70] = [  0   0 220] (B, G, R)
+uint8   : 1 bytes, range 0 .. 255
+uint16  : 2 bytes, range 0 .. 65535
+int16   : 2 bytes, range -32768 .. 32767
+float32 : 4 bytes, range -3.40282e+38 .. 3.40282e+38
+```
+
+- `img.flags` shows memory properties; `C_CONTIGUOUS` means rows are stored back to back without gaps.
+- `np.issubdtype(t, np.integer)` checks for any integer type; integer limits come from `np.iinfo`, float limits from `np.finfo`.
+
+### 2. NumPy and OpenCV: default dtypes and supported depths
+
+```python
+import numpy as np
+import cv2
+
+for name, a in [("np.zeros((2, 2))", np.zeros((2, 2))), ("np.full((2, 2), 255)", np.full((2, 2), 255)),
+                ("np.array([[1, 2]])", np.array([[1, 2]])), ("np.zeros((2, 2), np.uint8)", np.zeros((2, 2), np.uint8))]:
+    print(f"{name:28s} -> dtype {a.dtype}")
+for dt in [np.uint8, np.uint16, np.float32, np.float64, np.int32]:
+    a = np.zeros((4, 4, 3), dt)
+    try:
+        cv2.cvtColor(a, cv2.COLOR_BGR2GRAY)
+        result = "ok"
+    except cv2.error:
+        result = "cv2.error: unsupported depth"
+    print(f"cvtColor on {np.dtype(dt).name:8s}: {result}")
+```
+
+Output:
+
+```text
+np.zeros((2, 2))             -> dtype float64
+np.full((2, 2), 255)         -> dtype int64
+np.array([[1, 2]])           -> dtype int64
+np.zeros((2, 2), np.uint8)   -> dtype uint8
+cvtColor on uint8   : ok
+cvtColor on uint16  : ok
+cvtColor on float32 : ok
+cvtColor on float64 : cv2.error: unsupported depth
+cvtColor on int32   : cv2.error: unsupported depth
+```
+
+- OpenCV raises `cv2.error` (an exception class) when a depth is not supported; the message names the depth (for example `CV_64F`).
+- Since NumPy 2.0 the default integer is 64-bit on all platforms (including Windows).
+
+### 3. NumPy: adding, stacking and reordering axes
+
+```python
+import numpy as np
+import cv2
+
+gray = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)        # (200, 320)
+print("gray            :", gray.shape)
+print("gray[..., None] :", gray[..., None].shape, "(a channel axis of size 1)")
+bgr = np.stack([gray, gray, gray], axis=-1)                        # same as cv2.merge([gray, gray, gray])
+print("stacked to BGR  :", bgr.shape, "| equals cv2.merge:", np.array_equal(bgr, cv2.merge([gray, gray, gray])))
+batch = np.stack([bgr, bgr, bgr, bgr])                             # 4 images: (N, H, W, C)
+print("batch (N,H,W,C) :", batch.shape)
+chw = batch.transpose(0, 3, 1, 2)                                  # channels first, as many deep-learning models expect
+print("batch (N,C,H,W) :", chw.shape, "| contiguous:", chw.flags["C_CONTIGUOUS"])
+flat = gray.reshape(-1)                                           # one long row of 64000 values
+print("flat            :", flat.shape, "| back:", flat.reshape(200, 320).shape)
+```
+
+Output:
+
+```text
+gray            : (200, 320)
+gray[..., None] : (200, 320, 1) (a channel axis of size 1)
+stacked to BGR  : (200, 320, 3) | equals cv2.merge: True
+batch (N,H,W,C) : (4, 200, 320, 3)
+batch (N,C,H,W) : (4, 3, 200, 320) | contiguous: False
+flat            : (64000,) | back: (200, 320)
+```
+
+- `...` (Ellipsis) means "all the other axes"; `None` inserts a new axis of size 1.
+- `transpose` only changes the strides, not the data, so the result is not contiguous; `np.ascontiguousarray` makes a compact copy when a library needs one.
+- `reshape(-1)`: −1 means "whatever size makes it fit".
+
+## OpenCV API notes
+
+**Image depths**: `CV_8U` (uint8), `CV_8S`, `CV_16U` (uint16), `CV_16S` (int16), `CV_32S` (int32), `CV_32F` (float32), `CV_64F` (float64); `CV_16F` (float16) exists but few functions accept it. Python arrays map to these automatically. Other NumPy types: `uint32` and `bool` are rejected; `int64` is either rejected (e.g. `GaussianBlur`) or silently converted to int32 (e.g. `cv2.add` returns int32), checked on 4.13.0.
+
+**Channels**: up to 4 for most image functions (more for some core functions); `cv2.split` / `cv2.merge` split and join channels (3.3).
+
+**Sizes**: `cv2.resize(img, (width, height))`, `cv2.VideoWriter(…, (width, height))`, `cv2.warpAffine(…, (width, height))`: always (width, height), the reverse of `img.shape[:2]`.
+
+**DNN layout**: `cv2.dnn.blobFromImage(img, scalefactor, size, mean, swapRB)` returns an (N, C, H, W) float32 array (Part H).
+
+## Where it fails
+
+- **Non-contiguous arrays** (some slices, transposes) are accepted by most OpenCV functions but may be copied internally or rejected by others (some drawing functions, external libraries); `np.ascontiguousarray` fixes it.
+- **Huge arrays**: a 100-frame float64 stack of 5 MP colour images needs 12 GB. Choose dtypes deliberately.
+- **Endianness and packed formats** from cameras (4.4) need explicit dtypes (`'<u2'`) and unpacking.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Creating images without a dtype** (`np.zeros((h, w))` is float64).
+- **Confusing shape (h, w) with OpenCV's size (w, h)**.
+- **Passing a bool mask to OpenCV**; convert to uint8 first.
+- **Transposing a colour image with `.T`**: it also reverses the channel axis (5.1).
+- **Assuming `cv2.imread` always returns 3 channels**: grayscale PNGs read with `IMREAD_UNCHANGED` have 2 dimensions.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The array object
+
+A NumPy array is a pointer to memory, a dtype, a shape and strides. Many operations (slicing, transposing, reshaping a contiguous array, adding axes) just create a new header with different shape and strides pointing to the **same memory**: no data is copied [1]. 6.2 explores what that means.
+
+### cv::Mat and the Python bindings
+
+In C++, OpenCV images are `cv::Mat` objects with rows, cols, a type such as `CV_8UC3` (depth + channels) and a step (row stride). The Python bindings convert between NumPy arrays and `cv::Mat` without copying whenever the layout allows (Module 8) [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "img.shape is (480, 640, 3). How wide is the image?",
+      options: ["480", "640", "3", "1920"],
+      answer: 1,
+      explanation: "Shape is (height, width, channels).",
+    },
+    {
+      question: "Which dtype does np.zeros((100, 100)) produce?",
+      options: ["uint8", "int64", "float64", "float32"],
+      answer: 2,
+      explanation: "NumPy's default for zeros/ones/empty is float64.",
+    },
+    {
+      question: "Which dtype does cv2.cvtColor NOT accept?",
+      options: ["uint8", "uint16", "float32", "float64"],
+      answer: 3,
+      explanation: "cvtColor supports 8U, 16U and 32F; convert float64 with astype(np.float32).",
+    },
+    {
+      question: "For a C-ordered uint8 BGR image 320 pixels wide, the strides are…",
+      options: ["(1, 3, 960)", "(960, 3, 1)", "(320, 3, 1)", "(3, 960, 1)"],
+      answer: 1,
+      explanation: "One row = 320 × 3 bytes; one pixel = 3 bytes; one channel = 1 byte.",
+    },
+    {
+      question: "A model expects (N, C, H, W). Your batch is (N, H, W, C). Use…",
+      options: ["reshape(N, C, H, W)", "transpose(0, 3, 1, 2)", "swapaxes(1, 2)", ".T"],
+      answer: 1,
+      explanation: "transpose reorders axes; reshape would scramble the values.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A uint16 gray image has shape (1024, 1280). Give its strides and the byte offset of pixel [10, 20].
+
+<Solution>
+
+Strides **(2560, 2)**. Offset = 10 · 2560 + 20 · 2 = **25 640** bytes.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Simulate a Mono16 camera buffer of 6 × 8 pixels (values 0 … 47 as little-endian uint16 bytes) and turn it into an image with `np.frombuffer` and `reshape`. Print the shape, dtype, strides and the value at row 2, column 3.
+
+<Solution>
+
+```python
+import numpy as np
+
+buffer = np.arange(48, dtype="<u2").tobytes()          # 96 bytes, as a camera SDK would deliver them
+img = np.frombuffer(buffer, dtype="<u2").reshape(6, 8)  # '<u2' = little-endian unsigned 16-bit
+print("bytes:", len(buffer), "| shape:", img.shape, "| dtype:", img.dtype, "| strides:", img.strides)
+print("img[2, 3] =", img[2, 3])
+```
+
+Output:
+
+```text
+bytes: 96 | shape: (6, 8) | dtype: uint16 | strides: (16, 2)
+img[2, 3] = 19
+```
+
+Row 2 starts at value 16; column 3 adds 3: **19**. The same 96 bytes read as `np.uint8` would give 96 values: dtype decides how bytes become pixels.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague's script runs out of memory when it stacks 200 frames from a 5 MP colour camera after `frame.astype(float)`. Estimate the memory and suggest a fix.
+
+<Solution>
+
+`astype(float)` is float64: 2448 × 2048 × 3 × 8 bytes ≈ 120 MB per frame, **24 GB** for 200. Keep frames as uint8 (3 GB), convert to float32 only when needed (12 GB → 6 GB with float32), or process frames one at a time with a running mean (`cv2.accumulate`).
+
+</Solution>
+
+## References
+
+1. C. R. Harris et al., "Array programming with NumPy," *Nature*, vol. 585, pp. 357–362, 2020.
+2. OpenCV 4.13.0 documentation, *Mat: the basic image container* and *Basic operations with images*: [docs.opencv.org/4.13.0/d6/d6d/tutorial_mat_the_basic_image_container.html](https://docs.opencv.org/4.13.0/d6/d6d/tutorial_mat_the_basic_image_container.html).
+3. NumPy documentation, *The N-dimensional array (ndarray)* and *Data type objects (dtype)*: [numpy.org/doc/stable/reference/arrays.ndarray.html](https://numpy.org/doc/stable/reference/arrays.ndarray.html).

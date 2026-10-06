@@ -1,0 +1,297 @@
+export const meta = {
+  number: "16.4",
+  title: "Interpolation",
+  minutes: 25,
+  objectives: [
+    "Explain why warps and resizing need interpolation",
+    "Compute nearest-neighbour and bilinear values by hand",
+    "Compare nearest, bilinear, bicubic, area and Lanczos: sharpness, overshoot, speed, aliasing",
+    "Choose the interpolation flag for enlarging, shrinking, masks and measurement",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 16.4 (Module 16 plan).
+  New lab: InterpLab (lib/warp-ops resizeGray matches cv2.resize within 1 level on recorded tests).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 16.4 Interpolation
+
+<Definition term="Interpolation">estimating the value of an image between its pixels. Every warp and resize asks "what is the grey value at position (12.37, 40.81)?", and the interpolation method answers it from the surrounding pixels.</Definition>
+
+Inverse mapping (16.1) sends each output pixel to a position in the input, and that position is almost never a whole pixel. The rule used to fill in the value decides whether the result is blocky, smooth, sharp with halos, or aliased. It is a small choice with visible consequences, and different tasks need different answers.
+
+## 1. An analogy
+
+Guessing the temperature at 10:20 from readings taken every hour. Use the 10:00 reading (nearest); draw a straight line between 10:00 and 11:00 (linear); or fit a smooth curve through several readings around it (cubic). The smooth curve may overshoot a little when the temperature jumps suddenly.
+
+## 2. Nearest and bilinear by hand
+
+<Flow
+  steps={[
+    { label: "Source position (x, y) = whole part + fraction (fx, fy)", tone: "data" },
+    { label: "Nearest: take the closest pixel", tone: "process" },
+    { label: "Bilinear: weight the 4 neighbours by (1 − fx, fx) × (1 − fy, fy)", tone: "process" },
+    { label: "Bicubic: weight 4 × 4 neighbours with a cubic kernel", tone: "result" },
+  ]}
+/>
+
+Four neighbouring pixels: top row 10, 20; bottom row 30, 40. The source position is fx = 0.25 to the right of the left column and fy = 0.5 below the top row.
+
+```text
+top row:     0.75 · 10 + 0.25 · 20 = 12.5
+bottom row:  0.75 · 30 + 0.25 · 40 = 32.5
+result:      0.5 · 12.5 + 0.5 · 32.5 = 22.5
+```
+
+Nearest neighbour would return 10 (fx < 0.5, fy rounds to the top row by convention): no new values, just copies.
+
+A step from 50 to 200, enlarged 4× (real `cv2.resize` values):
+
+| Method | Values across the edge |
+| --- | --- |
+| nearest | 50, 50, 50, 200, 200, 200 (hard step, blocks) |
+| linear | 50, 69, 106, 144, 181, 200 (straight ramp) |
+| cubic | 48, 40, 34, 39, 66, 104, 146, 184, 211, 216, 210 (sharper ramp, undershoot to 34 and overshoot to 216) |
+| Lanczos-4 | 31 … 219 (sharpest, strongest ringing) |
+
+<InterpLab caption="Enlarge a crop of the rectified label: compare blocks, ramps and the small halos of bicubic in the row profile. Then shrink the zone plate: nearest and bilinear pick isolated samples and produce false rings (aliasing); area averages and stays smooth." />
+
+## 3. Shrinking: aliasing, and why INTER_AREA
+
+When an image is made smaller, each output pixel covers several input pixels. Nearest and bilinear still look at only 1 or 4 of them, so fine patterns are sampled too sparsely and fold into false coarse patterns (3.5). `INTER_AREA` averages all input pixels under each output pixel, which is a built-in low-pass filter.
+
+Shrinking the zone plate 4× (difference to a properly blurred-then-shrunk reference, mean absolute error):
+
+| Method | Error |
+| --- | --- |
+| nearest | 80.1 |
+| linear | 48.9 |
+| area | **15.8** |
+
+## 4. Choosing
+
+| Task | Flag | Why |
+| --- | --- | --- |
+| Shrinking | `INTER_AREA` | averages, no aliasing |
+| Enlarging, general | `INTER_LINEAR` (default) or `INTER_CUBIC` | smooth; cubic sharper |
+| Enlarging for display, high quality | `INTER_LANCZOS4` or `INTER_CUBIC` | sharpest, slight ringing |
+| Label masks, class maps | `INTER_NEAREST` | never invents in-between values (no class "1.5") |
+| Measurement after a warp | `INTER_LINEAR` or `INTER_CUBIC` | sub-pixel positions preserved; nearest shifts edges by up to half a pixel |
+| Real time, many warps | `INTER_LINEAR` | good quality per cost |
+
+Note that bicubic and Lanczos can produce values outside the input's range (the crop's 20–235 became 6–254 with bicubic); for 8-bit images they are clipped, for float images they are not.
+
+## 5. Industrial example
+
+A gauge-reading system rectifies analogue dial images (16.3) and then measures the needle angle along a circle (16.5). With `INTER_NEAREST`, the needle's edge positions jumped by whole pixels and the reading jittered in visible steps between frames; with `INTER_LINEAR` the edge moved smoothly with the needle, and the jitter fell to the level set by camera noise. The segmentation masks used for training the needle detector, however, were resized with `INTER_NEAREST` so that they remained pure 0/1.
+
+## What you should remember from 16.4
+
+<Takeaways>
+<Takeaway n={1} title="Why">Warps and resizes ask for values between pixels.</Takeaway>
+<Takeaway n={2} title="Methods">Nearest (copies), linear (4 pixels), cubic (16, sharper, overshoot), Lanczos (64), area (average).</Takeaway>
+<Takeaway n={3} title="Shrink">INTER_AREA, or blur first: avoids aliasing.</Takeaway>
+<Takeaway n={4} title="Masks">INTER_NEAREST so labels stay labels.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Neighbours 100 (left) and 200 (right) on one row; the source position is 0.3 of the way from left to right. What do nearest and linear return?
+
+<Solution>
+
+Nearest: **100** (0.3 < 0.5). Linear: 0.7 · 100 + 0.3 · 200 = **130**.
+
+</Solution>
+
+**Q2.** Why must a segmentation mask with class ids 0, 1, 2 not be resized with `INTER_LINEAR`?
+
+<Solution>
+
+Linear interpolation creates **in-between values** at boundaries (between class 0 and 2 it produces 1), which are wrong labels. Use `INTER_NEAREST`.
+
+</Solution>
+
+### Next: 16.5 Remap and polar
+
+Arbitrary pixel mappings: maps, lens undistortion, and unwrapping round objects.
+
+## Code
+
+Two examples: interpolation of an edge and value ranges, then shrinking with and without averaging.
+
+### 1. An edge, enlarged
+
+```python
+import numpy as np
+import cv2
+
+row = np.array([[50, 50, 50, 200, 200, 200]], np.uint8)
+for name, flag in [("nearest", cv2.INTER_NEAREST), ("linear", cv2.INTER_LINEAR), ("cubic", cv2.INTER_CUBIC), ("lanczos", cv2.INTER_LANCZOS4)]:
+    print(f"{name:8s}", cv2.resize(row, (24, 1), interpolation=flag).ravel().tolist())
+
+img = cv2.imread("sample-label-rectified.png", cv2.IMREAD_GRAYSCALE)
+crop = img[80:104, 70:110]
+print("crop range:", crop.min(), "to", crop.max())
+for name, flag in [("nearest", cv2.INTER_NEAREST), ("linear", cv2.INTER_LINEAR), ("cubic", cv2.INTER_CUBIC)]:
+    up = cv2.resize(crop, None, fx=6, fy=6, interpolation=flag)
+    print(f"{name:8s} x6: range {up.min()} to {up.max()}, {len(np.unique(up))} distinct values")
+```
+
+Output:
+
+```text
+nearest  [50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200]
+linear   [50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 69, 106, 144, 181, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200]
+cubic    [50, 50, 50, 50, 50, 50, 48, 40, 34, 39, 66, 104, 146, 184, 211, 216, 210, 202, 200, 200, 200, 200, 200, 200]
+lanczos  [48, 48, 52, 56, 57, 54, 45, 36, 31, 39, 65, 103, 147, 185, 211, 219, 214, 205, 196, 193, 194, 198, 202, 202]
+crop range: 20 to 235
+nearest  x6: range 20 to 235, 126 distinct values
+linear   x6: range 20 to 235, 216 distinct values
+cubic    x6: range 6 to 254, 248 distinct values
+```
+
+- Nearest never creates new values; linear stays within the neighbours' range; cubic and Lanczos overshoot at edges (ringing) and are then clipped to 0–255.
+
+### 2. Shrinking a zone plate
+
+```python
+import numpy as np
+import cv2
+
+z = cv2.imread("sample-zoneplate.png", cv2.IMREAD_GRAYSCALE)                   # 200 x 320, frequency rises outwards
+ref = cv2.resize(cv2.GaussianBlur(z, (0, 0), 2), (80, 50), interpolation=cv2.INTER_AREA)   # blurred first: alias-free reference
+for name, flag in [("nearest", cv2.INTER_NEAREST), ("linear", cv2.INTER_LINEAR), ("area", cv2.INTER_AREA)]:
+    small = cv2.resize(z, (80, 50), interpolation=flag)
+    print(f"{name:8s} std {small.std():5.1f} | mean abs error vs reference {np.abs(small.astype(int) - ref).mean():5.1f}")
+```
+
+Output:
+
+```text
+nearest  std  92.0 | mean abs error vs reference  80.1
+linear   std  63.6 | mean abs error vs reference  48.9
+area     std  33.5 | mean abs error vs reference  15.8
+```
+
+- The high standard deviation of the nearest result is not detail: it is the aliased false rings at full contrast. Area averaging removes the patterns that cannot be represented at the smaller size.
+
+## OpenCV API notes
+
+**Flags** (for `resize`, `warpAffine`, `warpPerspective`, `remap`): `INTER_NEAREST`, `INTER_LINEAR` (default), `INTER_CUBIC` (4 × 4, a = −0.75), `INTER_AREA` (resize only; for enlarging it behaves like nearest/linear), `INTER_LANCZOS4` (8 × 8), `INTER_LINEAR_EXACT` (bit-exact linear), `INTER_NEAREST_EXACT`.
+
+**Downscaling by 2**: `cv2.pyrDown` (Gaussian blur + decimate, 20.1) is an alternative to `INTER_AREA`.
+
+**Speed** (rough order, fastest first): nearest, linear, area (for integer factors), cubic, Lanczos.
+
+## Where it fails
+
+- **No method adds detail**: enlarging cannot recover what the sensor did not resolve (super-resolution, 19.6, learns plausible detail instead).
+- **Ringing** from cubic/Lanczos around strong edges can create false edges for later edge detection.
+- **Aliasing** if you shrink with warps (`warpAffine` has no area mode); blur first.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Default `INTER_LINEAR` for large downscales** (aliasing): use `INTER_AREA`.
+- **Linear interpolation of label masks.**
+- **Expecting cubic results to stay within the input range** in float images.
+- **Interpolating repeatedly** (rotate, then resize, then rotate): combine into one matrix.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Interpolation kernels
+
+All these methods are convolution with a kernel: nearest uses a box of width 1, linear a triangle of width 2, OpenCV's cubic the Keys kernel with a = −0.75 (width 4), Lanczos a windowed sinc (width 8). The ideal kernel for band-limited signals is the infinite sinc; the others are practical approximations with different trade-offs between sharpness, ringing and cost [1, 2].
+
+### Area interpolation and anti-aliasing
+
+Shrinking by a factor k should first remove frequencies above the new Nyquist limit (half the new sampling rate, 3.5). Area averaging is a box filter of width k; it is not a perfect low-pass filter (its response has side lobes) but is cheap and usually good enough. Pillow and some deep-learning pipelines use an "antialias" option that widens the interpolation kernel by the scale factor instead.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which interpolation should you use to shrink an image by 4?",
+      options: ["INTER_NEAREST", "INTER_LINEAR", "INTER_AREA", "INTER_CUBIC"],
+      answer: 2,
+      explanation: "It averages all covered pixels and avoids aliasing.",
+    },
+    {
+      question: "Bilinear interpolation uses how many input pixels?",
+      options: ["1", "4", "16", "64"],
+      answer: 1,
+      explanation: "The 2 × 2 neighbours.",
+    },
+    {
+      question: "Why can bicubic results lie outside the input range?",
+      options: ["A bug", "Its kernel has negative lobes that overshoot at edges", "It adds noise", "It uses float"],
+      answer: 1,
+      explanation: "Ringing: undershoot and overshoot near steps.",
+    },
+    {
+      question: "Which flag keeps a class-id mask valid when resized?",
+      options: ["INTER_NEAREST", "INTER_LINEAR", "INTER_CUBIC", "INTER_LANCZOS4"],
+      answer: 0,
+      explanation: "It only copies existing values.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Neighbours: top 0, 100; bottom 100, 200. Compute bilinear values at (fx, fy) = (0.5, 0.5) and (0.25, 0.75).
+
+<Solution>
+
+(0.5, 0.5): top 50, bottom 150 → **100**. (0.25, 0.75): top 0.75·0 + 0.25·100 = 25; bottom 0.75·100 + 0.25·200 = 125; 0.25·25 + 0.75·125 = **100**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Rotate the rectified label by 1° ten times in a row (`INTER_LINEAR`) and compare with one rotation by 10°. Report the mean absolute difference to the single rotation inside the central region.
+
+<Solution>
+
+```python
+import numpy as np
+import cv2
+
+h, w = img.shape
+once = cv2.warpAffine(img, cv2.getRotationMatrix2D((w / 2, h / 2), 10, 1), (w, h), flags=cv2.INTER_LINEAR)
+step = img.copy()
+for _ in range(10):
+    step = cv2.warpAffine(step, cv2.getRotationMatrix2D((w / 2, h / 2), 1, 1), (w, h), flags=cv2.INTER_LINEAR)
+c = np.s_[60:140, 80:240]
+print(f"mean abs difference, 10 x 1 deg vs 1 x 10 deg: {np.abs(step[c].astype(int) - once[c]).mean():.2f} | sharpness (std of Laplacian): once {cv2.Laplacian(once[c], cv2.CV_64F).std():.1f}, ten steps {cv2.Laplacian(step[c], cv2.CV_64F).std():.1f}")
+```
+
+Output:
+
+```text
+mean abs difference, 10 x 1 deg vs 1 x 10 deg: 5.09 | sharpness (std of Laplacian): once 28.5, ten steps 15.1
+```
+
+Each bilinear step averages neighbours a little; ten steps blur the text noticeably (almost half of the edge strength lost). Compose transforms into one matrix and interpolate once.
+
+</Solution>
+
+## References
+
+1. R. Keys, "Cubic convolution interpolation for digital image processing", *IEEE Transactions on Acoustics, Speech, and Signal Processing* 29(6), 1153–1160, 1981.
+2. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022: Section 3.5 (pyramids and interpolation).
+3. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018: Section 2.4 (image interpolation).
+4. OpenCV 4.13.0 documentation: `resize`, `InterpolationFlags`, `pyrDown`. https://docs.opencv.org/4.13.0/

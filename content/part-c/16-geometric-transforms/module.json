@@ -1,0 +1,12 @@
+{
+  "number": 16,
+  "title": "Geometric transforms",
+  "summary": "Moving pixels instead of changing their values: translation, scaling, rotation, affine and perspective warps, interpolation, remapping and polar unwrapping.",
+  "chapters": [
+    { "number": "16.1", "slug": "16.1-translate-scale-rotate", "title": "Translate, scale, rotate" },
+    { "number": "16.2", "slug": "16.2-affine", "title": "Affine" },
+    { "number": "16.3", "slug": "16.3-perspective", "title": "Perspective" },
+    { "number": "16.4", "slug": "16.4-interpolation", "title": "Interpolation" },
+    { "number": "16.5", "slug": "16.5-remap-and-polar", "title": "Remap and polar" }
+  ]
+}

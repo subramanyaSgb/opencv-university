@@ -1,0 +1,13 @@
+{
+  "number": 23,
+  "title": "Morphology",
+  "summary": "Shaping images with a structuring element: erosion and dilation, opening and closing, top-hat and black-hat, skeletons, the distance transform and grey-level morphology.",
+  "chapters": [
+    { "number": "23.1", "slug": "23.1-erosion-and-dilation", "title": "Erosion and dilation" },
+    { "number": "23.2", "slug": "23.2-opening-and-closing", "title": "Opening and closing" },
+    { "number": "23.3", "slug": "23.3-top-hat-and-black-hat", "title": "Top-hat and black-hat" },
+    { "number": "23.4", "slug": "23.4-skeleton-and-thinning", "title": "Skeleton and thinning" },
+    { "number": "23.5", "slug": "23.5-distance-transform", "title": "Distance transform" },
+    { "number": "23.6", "slug": "23.6-grayscale-morphology", "title": "Grayscale morphology" }
+  ]
+}
