@@ -1,0 +1,328 @@
+export const meta = {
+  number: "39.4",
+  title: "Hardware decoding",
+  minutes: 22,
+  objectives: [
+    "Explain what hardware video decoding actually offloads, and why that is not the same as 'always faster'",
+    "Request hardware acceleration from cv2.VideoCapture correctly, and check what it actually used",
+    "Read this chapter's own real benchmark and know why software decode won every single time",
+    "Know the real failure mode a mismatched GPU driver causes, from an actual error message",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 39.4 (Part G, Module 39).
+  Real hardware on this machine (checked via PowerShell Get-CimInstance Win32_VideoController):
+  Intel(R) UHD Graphics 630 and NVIDIA Quadro T2000 (4 GB), NVIDIA driver 32.0.15.9716.
+  Real local findings, all measured on this machine, nothing invented:
+  - `ffmpeg -hwaccels` lists cuda, vaapi, dxva2, qsv, d3d11va, opencl, vulkan, d3d12va, amf as
+    compiled-in methods (not a guarantee any one of them has matching hardware/drivers here).
+  - A real h264_nvenc (hardware ENCODE) attempt failed outright: "Driver does not support the
+    required nvenc API version. Required: 13.1 Found: 13.0" / "The minimum required Nvidia
+    driver for nvenc is 610.00 or newer" -- a genuine, common real-world failure mode (outdated
+    driver), not simulated.
+  - Real decode-only ffmpeg CLI benchmarks (`-f null -`, wall-clock "real" time):
+    1280x720/20s: software 0.376s, cuda(NVDEC) 0.787s, d3d11va 1.558s.
+    1920x1080/60s, single stream: software 1.940s, cuda 2.957s.
+    1920x1080/60s, FOUR PARALLEL streams (simulating multiple cameras): software 8.278s total,
+    cuda 10.604s total. Software decode was faster in every single one of these real tests.
+  - A real, clean cv2.VideoCapture benchmark (same 1080p/60s/1800-frame file, decoding every
+    frame through a Python loop) across CAP_PROP_HW_ACCELERATION modes: default 146.4 fps,
+    VIDEO_ACCELERATION_NONE 210.7 fps, ANY 79.3 fps (auto-selected D3D11, confirmed via
+    cap.get(CAP_PROP_HW_ACCELERATION) == 2.0), D3D11 explicit 77.3 fps. Software fastest again.
+  - Confirmed cv2.VideoCapture's own HW fallback/reporting behaviour matches OpenCV's documented
+    API (docs.opencv.org/4.13.0/db/dc4/group__videoio__hwaccel.html): the property must be set via
+    the constructor's params argument, exactly like 39.2's CAP_PROP_OPEN_TIMEOUT_MSEC finding.
+  Lab: HwDecodeLab (apps/web/components/visuals/HwDecodeLab.tsx) -- this chapter's own real,
+  recorded cv2 benchmark numbers (not a simulation).
+*/}
+
+# 39.4 Hardware decoding
+
+<Definition term="Hardware video decoding">using a dedicated, fixed-function circuit on a GPU (or a separate chip) to turn compressed video bytes back into raw frames, instead of the CPU's general-purpose cores doing that work in software.</Definition>
+
+39.3 found that this build only has FFmpeg (plus a camera-only DSHOW backend) actually available. This chapter asks a different question: when hardware decode *is* available, as it genuinely is on this machine, does it actually help? The honest, measured answer here is no — and understanding exactly why is the real lesson.
+
+## 1. An analogy
+
+A CPU core is a skilled general-purpose worker who can do anything, including decode video, but has to split attention across everything else running on the machine. A hardware decoder is a single-purpose machine that can *only* decode video — nothing else — but normally does that one job with very little supervision needed, freeing the general-purpose worker for other tasks entirely. A single-purpose machine is not automatically *faster* at its one job than a skilled generalist with nothing else to do right now; it is reliably *available* without competing for the same resources.
+
+## 2. Where the actual decoding happens
+
+<Flow
+  steps={[
+    { label: "Compressed video bytes (H.264, H.265, ...)", tone: "data" },
+    { label: "Software: CPU cores run the decoder", tone: "process" },
+    { label: "Hardware: GPU's fixed-function decode engine (NVDEC, Quick Sync, D3D11VA/DXVA2...)", tone: "process" },
+    { label: "Raw frames, either way", tone: "result" },
+  ]}
+/>
+
+Both paths produce the same raw frames. The difference is *which silicon* did the work, and what else that silicon was free to do at the same time. `cv2.VideoCapture` can request either, through `CAP_PROP_HW_ACCELERATION` [1] — but as this chapter will show, requesting it and *benefiting* from it are two different things.
+
+## 3. This chapter's own, real benchmark
+
+<HwDecodeLab caption="Real, measured decode throughput on this machine (Intel UHD 630 + NVIDIA Quadro T2000), decoding every frame of the same real 1920x1080, 60 s clip through cv2.VideoCapture. Click a mode to read why."/>
+
+Four real `cv2.VideoCapture` runs, same 1080p, 60-second, 1800-frame H.264 file, decoding every single frame through a Python loop:
+
+| Mode requested | `CAP_PROP_HW_ACCELERATION` reported back | Frames/second |
+| --- | --- | --- |
+| (default, no flag) | `NONE` (0) | 146.4 |
+| `VIDEO_ACCELERATION_NONE` | `NONE` (0) | 210.7 |
+| `VIDEO_ACCELERATION_ANY` | `D3D11` (2) | 79.3 |
+| `VIDEO_ACCELERATION_D3D11` | `D3D11` (2) | 77.3 |
+
+Software decode won by a wide margin, every time, on this exact machine. Asking for `ANY` acceleration genuinely engaged real D3D11 hardware decoding (confirmed by the reported value) — it was simply slower here, not merely "not better."
+
+## 4. A worked example by hand: is it fast enough anyway?
+
+Real-time playback of a 30 fps stream needs sustained decode throughput of at least 30 fps — any slower, and frames pile up or get skipped (39.1's buffering idea). Checking each of Section 3's four measured rates against that bar:
+
+146.4, 210.7, 79.3 and 77.3 fps are all comfortably above 30 fps. Even the *slowest* measured mode here (D3D11 hardware decode, 77.3 fps) is 77.3 ÷ 30 ≈ **2.6× faster than real time needs** — slower than software on this machine, yes, but still more than fast enough for one real-time 1080p stream. The practical lesson is not "hardware decode is bad here," it is "on this machine, for this one stream, neither path is the bottleneck — so the question of which is 'faster' barely matters for this specific job."
+
+## 5. Industrial context: when hardware decode actually matters
+
+Section 3's single-stream result does not mean hardware decode is pointless — it means this particular machine, for this particular single-stream test, did not need it. Hardware decode earns its place in two different real scenarios:
+
+- **Many simultaneous streams**: an NVR or monitoring wall decoding 16 or 32 RTSP cameras at once needs that many decodes running together; dedicated decode silicon can handle many streams in parallel without competing with the CPU work that also has to run (recording, analytics, a UI).
+- **A CPU that is busy with something else**: if the CPU is already saturated running a detector or tracker on every frame (37.x), offloading decode to the GPU can free real CPU time for that other work, even if the GPU's raw decode speed is not dramatically higher.
+
+This chapter's own repeated real test — even with 4 *parallel* streams (Code section 3) — still showed software decode winning on this specific hardware and driver combination. That is a genuine result for this machine, not a universal rule: always benchmark the actual target hardware before designing around an assumed hardware-decode advantage.
+
+## What you should remember from 39.4
+
+<Takeaways>
+<Takeaway n={1} title="Offload, not automatically faster">Hardware decode frees the CPU; it does not guarantee a shorter wall-clock time, as this chapter's own numbers showed.</Takeaway>
+<Takeaway n={2} title="Check what you actually got">`cap.get(CAP_PROP_HW_ACCELERATION)` after opening tells you the real, engaged mode — never assume a request succeeded.</Takeaway>
+<Takeaway n={3} title="Benchmark your own hardware">This chapter's result (software winning) is specific to this machine and driver — measure before you design around an assumption.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A camera stream runs at 60 fps. A decode path sustains 55 fps. Is that fast enough for real-time playback, and why?
+
+<Solution>
+
+**No** — 55 fps is *below* the 60 fps the stream actually needs, so frames will accumulate faster than they can be decoded; the system falls behind in real time (39.1, 39.2's buffering idea), unlike Section 4's example where every measured mode cleared the 30 fps bar comfortably.
+
+</Solution>
+
+## Code
+
+### 1. NumPy check: is a given decode rate fast enough?
+
+```python
+import numpy as np
+
+measured_fps = np.array([146.4, 210.7, 79.3, 77.3])   # this chapter's own 4 real measurements
+required_fps = 30
+print("headroom (x real time):", np.round(measured_fps / required_fps, 2))
+```
+
+Output:
+
+```text
+headroom (x real time): [4.88 7.02 2.64 2.58]
+```
+
+### 2. The real cv2.VideoCapture hardware-acceleration benchmark
+
+```python
+# Needs a local 1080p/60s benchmark file (not shipped with the repo; see the chapter text)
+import cv2
+import time
+
+def bench(accel_val):
+    if accel_val is None:
+        cap = cv2.VideoCapture("bench_1080p_60s.mp4", cv2.CAP_FFMPEG)
+    else:
+        cap = cv2.VideoCapture("bench_1080p_60s.mp4", cv2.CAP_FFMPEG, (cv2.CAP_PROP_HW_ACCELERATION, accel_val))
+    reported = cap.get(cv2.CAP_PROP_HW_ACCELERATION)
+    t0 = time.perf_counter()
+    n = 0
+    while cap.read()[0]:
+        n += 1
+    elapsed = time.perf_counter() - t0
+    cap.release()
+    return reported, n, elapsed
+
+for name, val in [("default", None), ("NONE", cv2.VIDEO_ACCELERATION_NONE),
+                  ("ANY", cv2.VIDEO_ACCELERATION_ANY), ("D3D11", cv2.VIDEO_ACCELERATION_D3D11)]:
+    reported, n, elapsed = bench(val)
+    print(f"{name:8s}: HW_ACCELERATION={reported:.0f}, {n} frames in {elapsed:.2f}s ({n/elapsed:.1f} fps)")
+```
+
+Typical output (one machine: Intel UHD 630 + NVIDIA Quadro T2000, real local 1080p/60s/1800-frame file):
+
+```text
+default : HW_ACCELERATION=0, 1800 frames in 12.30s (146.4 fps)
+NONE    : HW_ACCELERATION=0, 1800 frames in 8.54s (210.7 fps)
+ANY     : HW_ACCELERATION=2, 1800 frames in 22.69s (79.3 fps)
+D3D11   : HW_ACCELERATION=2, 1800 frames in 23.28s (77.3 fps)
+```
+
+### 3. The real ffmpeg CLI comparison, including 4 parallel streams
+
+```bash
+# Needs multiple real GPU/CPU decode runs timed with the shell (not a single Python call)
+time ffmpeg -i bench_1080p_60s.mp4 -f null -                      # software
+time ffmpeg -hwaccel cuda -i bench_1080p_60s.mp4 -f null -         # NVDEC hardware decode
+
+# four simultaneous streams, simulating four cameras
+time ( for i in 1 2 3 4; do ffmpeg -i bench_1080p_60s.mp4 -f null - & done; wait )
+time ( for i in 1 2 3 4; do ffmpeg -hwaccel cuda -i bench_1080p_60s.mp4 -f null - & done; wait )
+```
+
+Real results on this machine:
+
+```text
+single stream, software : 1.940s
+single stream, cuda      : 2.957s
+4 parallel, software     : 8.278s total
+4 parallel, cuda          : 10.604s total
+```
+
+### 4. A real hardware-encode failure, for contrast
+
+```bash
+ffmpeg -f lavfi -i testsrc=size=320x240:duration=1 -c:v h264_nvenc output.mp4
+```
+
+```text
+[h264_nvenc] Driver does not support the required nvenc API version. Required: 13.1 Found: 13.0
+[h264_nvenc] The minimum required Nvidia driver for nvenc is 610.00 or newer
+```
+
+A completely different, real failure mode from Section 3's results: this is not "hardware decode was slower," it is "hardware *encode* could not even start," because the installed NVIDIA driver is one version behind what this `ffmpeg` build's NVENC path requires. Decode (NVDEC) and encode (NVENC) are different hardware blocks with different driver-version requirements — one working does not guarantee the other does.
+
+## OpenCV API notes
+
+- **`cv2.CAP_PROP_HW_ACCELERATION`**: open-only; must be set through the `cv2.VideoCapture(path, apiPreference, params)` constructor's `params` argument, the same pattern 39.2 found for `CAP_PROP_OPEN_TIMEOUT_MSEC` — setting it with `.set()` on an already-open capture has no effect [1].
+- **`cv2.VIDEO_ACCELERATION_{NONE, ANY, D3D11, MFX, ...}`**: the request. After opening, `cap.get(cv2.CAP_PROP_HW_ACCELERATION)` reports what was *actually* engaged — Section 3's own test shows `ANY` resolving to a concrete `D3D11` (2.0), confirmed, not assumed.
+- **Graceful fallback**: OpenCV's own documentation [1] states that if a requested hardware decoder/encoder cannot be found or fails to initialise, `VideoCapture`/`VideoWriter` falls back to software automatically — a request for hardware acceleration is a *preference*, not a guarantee, and checking the reported value after opening is the only way to know what really happened.
+- **Supported combinations are backend- and platform-specific**: on Windows, FFmpeg supports `D3D11` and `MFX`; MSMF supports `D3D11` — this build only has the FFmpeg backend at all (39.3), so `D3D11` was the only hardware path available to test here.
+
+## Where it fails
+
+- **A mismatched GPU driver can block hardware acceleration entirely** — Section 4/Code 4's real NVENC failure is exactly this: the installed driver was one version behind the minimum this `ffmpeg` build's NVENC path required.
+- **Hardware decode's startup/context cost can dominate a short clip** — on this machine, even a 60-second 1080p clip did not amortise that cost away; a genuinely long-running, many-stream production workload is a different situation this chapter's single-machine test cannot speak to directly.
+- **"Available" does not mean "beneficial here"** — this chapter's own `ANY` request genuinely engaged real D3D11 hardware decoding and was still the slower choice; always measure on the actual target hardware rather than assuming hardware acceleration is the better option.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming hardware acceleration is always faster** — this chapter's own repeated, real measurements (single stream, and 4 parallel streams) showed software decode winning every time on this specific machine.
+- **Calling `.set(CAP_PROP_HW_ACCELERATION, ...)` on an already-open `VideoCapture`** and expecting it to take effect — like 39.2's `CAP_PROP_OPEN_TIMEOUT_MSEC`, this property only applies through the constructor's `params` argument.
+- **Not checking `cap.get(CAP_PROP_HW_ACCELERATION)` after opening** — a silent software fallback looks identical to a successful open unless you check what was actually engaged.
+- **Treating a hardware ENCODE failure as evidence hardware DECODE is also broken** — Code section 4's NVENC failure and Section 3's working (if slower) NVDEC/D3D11 decode are genuinely different hardware paths with different requirements.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why hardware decode has a fixed overhead
+
+Engaging a hardware decode path typically means creating a GPU context, negotiating a memory surface format, and — unless the whole pipeline stays on the GPU — copying decoded frames back across the PCIe bus into regular system memory before a library like OpenCV can touch them as a NumPy array. For a short-lived process that decodes once and exits, as every benchmark in this chapter did, that fixed setup and transfer cost is paid in full every run; a long-running service that keeps the GPU context open across many streams or a long session amortises it away instead, which this single-machine, single-run style of test cannot show directly.
+
+### NVDEC, Quick Sync, D3D11VA/DXVA2, VA-API
+
+NVDEC is NVIDIA's dedicated video-decode hardware block, accessed here through CUDA; Intel Quick Sync (QSV) is Intel's equivalent on supported Intel GPUs (including this machine's UHD 630); D3D11VA and the older DXVA2 are Windows's own vendor-neutral APIs that can route to whichever GPU's decoder is registered; VA-API is the equivalent on Linux. `ffmpeg -hwaccels` (Code section 3) lists which of these a given FFmpeg build was compiled to support — not which ones have working hardware and drivers on the machine actually running it.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "In this chapter's own real benchmark, which decode mode was fastest on this machine?",
+      options: ["VIDEO_ACCELERATION_D3D11", "VIDEO_ACCELERATION_ANY", "VIDEO_ACCELERATION_NONE (forced software)", "They were all exactly equal"],
+      answer: 2,
+      explanation: "Section 3: 210.7 fps for forced software, vs 79.3 and 77.3 fps for the two hardware-engaged modes.",
+    },
+    {
+      question: "What does hardware video decoding actually guarantee?",
+      options: ["A faster wall-clock decode time in every case", "That the decode work happens on dedicated silicon instead of the CPU -- which frees the CPU, but is not automatically faster", "That the file will always open successfully", "That no GPU driver is required"],
+      answer: 1,
+      explanation: "Section 1/2 and this chapter's own measured results: offload, not a speed guarantee.",
+    },
+    {
+      question: "This chapter's real NVENC test failed with a specific error. What was the actual cause?",
+      options: ["The GPU has no encoder hardware at all", "The installed NVIDIA driver version was older than what this ffmpeg build's NVENC path required", "The input video was corrupted", "NVENC only works with H.265, not H.264"],
+      answer: 1,
+      explanation: "Code section 4: 'Driver does not support the required nvenc API version' -- a real driver-version mismatch.",
+    },
+    {
+      question: "How should CAP_PROP_HW_ACCELERATION be set so it actually takes effect?",
+      options: ["cap.set(CAP_PROP_HW_ACCELERATION, value) any time after opening", "Only through the cv2.VideoCapture(path, apiPreference, params) constructor's params argument", "It cannot be set at all in Python", "Through an environment variable only"],
+      answer: 1,
+      explanation: "OpenCV API notes: an open-only property, same constructor-params pattern as 39.2's CAP_PROP_OPEN_TIMEOUT_MSEC.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A decode path sustains 45 fps. The stream it is decoding runs at 25 fps. How much headroom (as a multiple of real time) does this leave, and is it fast enough?
+
+<Solution>
+
+Headroom = 45 ÷ 25 = **1.8×** real time. Yes, it is fast enough — anything above 1.0× keeps up; 1.8× leaves a comfortable margin, though far less than Section 4's own 2.6×–7.0× examples.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, write a version that only prints whether each mode kept up with a hypothetical 60 fps requirement (rather than the full timing detail).
+
+<Solution>
+
+```python
+# Needs a local 1080p/60s benchmark file (not shipped with the repo; see the chapter text)
+import cv2
+
+def bench_ok(accel_val, required_fps=60):
+    if accel_val is None:
+        cap = cv2.VideoCapture("bench_1080p_60s.mp4", cv2.CAP_FFMPEG)
+    else:
+        cap = cv2.VideoCapture("bench_1080p_60s.mp4", cv2.CAP_FFMPEG, (cv2.CAP_PROP_HW_ACCELERATION, accel_val))
+    import time
+    t0 = time.perf_counter()
+    n = 0
+    while cap.read()[0]:
+        n += 1
+    fps = n / (time.perf_counter() - t0)
+    cap.release()
+    return fps, fps >= required_fps
+
+for name, val in [("default", None), ("NONE", cv2.VIDEO_ACCELERATION_NONE),
+                  ("ANY", cv2.VIDEO_ACCELERATION_ANY)]:
+    fps, ok = bench_ok(val)
+    print(f"{name:8s}: {fps:.1f} fps -- {'keeps up' if ok else 'FALLS BEHIND'} with 60 fps")
+```
+
+Using this chapter's own real numbers (146.4, 210.7 and 79.3 fps respectively), all three would print "keeps up with 60 fps" — every mode measured in this chapter cleared even a demanding 60 fps real-time requirement for this one stream.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague reads this chapter and concludes "hardware decoding is pointless, we should never use it." Based on Section 5, what is wrong with that conclusion, and what would you tell them to do before deciding either way for their own project?
+
+<Solution>
+
+This chapter's result is specific to one machine (Intel UHD 630 + NVIDIA Quadro T2000, with an NVIDIA driver too old for this build's NVENC path) decoding one stream at a time, or four in parallel, and only for raw decode wall-clock time. It does not test the scenario where hardware decode actually earns its place: many more simultaneous streams than CPU cores can comfortably handle, or a CPU that is already busy running detection/tracking work on every frame, where the real win is freeing CPU time rather than raw decode speed. The right next step is not to generalise from this one measurement either way, but to benchmark their own actual target hardware, driver versions, and real workload (how many streams, what else the CPU needs to do) the same way this chapter did, and decide from that.
+
+</Solution>
+
+## References
+
+1. OpenCV 4.13.0 documentation: *Hardware-accelerated video decoding and encoding*. https://docs.opencv.org/4.13.0/db/dc4/group__videoio__hwaccel.html
+2. OpenCV 4.13.0 documentation: `VideoAccelerationType`, `VideoCaptureProperties`. https://docs.opencv.org/4.13.0/
+3. FFmpeg documentation: hardware acceleration (`-hwaccel`), NVDEC/NVENC, Quick Sync (QSV), D3D11VA/DXVA2. https://trac.ffmpeg.org/wiki/HWAccelIntro
