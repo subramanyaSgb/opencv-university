@@ -1,0 +1,337 @@
+export const meta = {
+  number: "36.8",
+  title: "Clustering",
+  minutes: 22,
+  objectives: [
+    "Build a dendrogram by hand with single-linkage agglomerative clustering",
+    "Explain why clustering needs no labels, unlike every classifier earlier in this module",
+    "Use the elbow method to judge how many clusters a dataset actually supports",
+    "Check how well k-means (with no labels) rediscovers known classes",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 36.8 (Part F, Module 36; closes the module).
+  k-means itself is covered in full in 27.2 (segmentation); this chapter assumes that algorithm and applies
+  it to feature vectors instead of pixel colours, plus genuinely new material: agglomerative clustering
+  (no cv2 equivalent) and the elbow method.
+  Lab: ClusterLab (apps/web/components/visuals/ClusterLab.tsx) — live k-means (k slider) on the same
+  texture tile feature space as 36.1-36.7, run with no labels; toggle to compare against true classes.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 36.8 Clustering
+
+<Definition term="Clustering">grouping data by similarity alone, with no predefined classes and no labelled examples — the opposite setup from every other classifier in this module, which all needed labelled training data to learn from.</Definition>
+
+36.1–36.7 all answered "which of these known categories does this point belong to?", learned from labelled examples. Clustering asks a different question: "does this data have any natural groups at all, and if so, what are they?" — with nobody telling the algorithm in advance how many groups to expect or what they represent.
+
+## 1. An analogy
+
+Being handed a box of unsorted buttons with no instructions, and asked to group them sensibly. Nobody told you the categories in advance ("4-hole," "2-hole," "by colour"); you look at the buttons, notice they fall into a few natural groups, and sort them that way. A different box of buttons might naturally fall into a different number of groups — clustering doesn't assume the answer, it looks for it.
+
+## 2. Two ways to cluster
+
+<Flow
+  steps={[
+    { label: "Unlabelled feature vectors", tone: "data" },
+    { label: "k-means: pick k, assign to nearest centre, update centres, repeat (27.2)", tone: "process" },
+    { label: "or: agglomerative — merge the closest pair of clusters, repeat, until one remains", tone: "process" },
+    { label: "A grouping (and, for agglomerative, a full merge history)", tone: "result" },
+  ]}
+/>
+
+- **k-means** (27.2 covers the algorithm in full, there applied to pixel colours for segmentation) needs `k` chosen in advance, and gives one flat partition of the data.
+- **Agglomerative (hierarchical) clustering** starts with every point as its own cluster, and repeatedly merges the two *closest* clusters, one merge at a time, until only one cluster remains — recording the whole merge history (a **dendrogram**) rather than committing to one specific number of clusters upfront. **Single linkage** defines the distance between two clusters as the distance between their closest pair of members (other linkage choices exist — complete, average — defining "cluster distance" differently).
+- Neither method uses any labels. Both can be checked afterwards, if labels happen to be available (as in Section 4), to see whether the discovered groups match something meaningful — but nothing about the clustering process itself depends on that.
+
+## 3. A worked example by hand: a dendrogram by single linkage
+
+Five points on a line: 1, 2, 5, 6, 10. Starting with five separate clusters, merge the closest pair at each step (single linkage: closest pair of actual points, one from each cluster):
+
+| Step | Merge | Distance |
+| --- | --- | --- |
+| 1 | [1] + [2] → [1, 2] | 1 |
+| 2 | [5] + [6] → [5, 6] | 1 |
+| 3 | [1, 2] + [5, 6] → [1, 2, 5, 6] | 3 (closest pair: 2 and 5) |
+| 4 | [1, 2, 5, 6] + [10] → [1, 2, 5, 6, 10] | 4 (closest pair: 6 and 10) |
+
+Reading the merge distances (1, 1, 3, 4) is reading the dendrogram: two small, early merges (1 and 2; 5 and 6) happen almost immediately (they're genuinely close), then a bigger jump (distance 3) to join those two little groups, then the biggest jump (distance 4) to bring in the outlier, 10. **Cutting** the dendrogram at any height gives a clustering at that level of coarseness — cutting between heights 1 and 3 gives three clusters ([1,2], [5,6], [10]); cutting above height 4 gives one cluster (everything).
+
+## 4. Rediscovering known classes, and choosing k
+
+<ClusterLab caption="k-means run with NO labels on the same texture tile feature space as 36.1-36.7. Toggle between the discovered clusters and the true classes -- and try different k."/>
+
+Running k-means with k=3 on all 243 tile feature vectors (mean, std; 35.1's woven/smooth/blotchy), **using no labels at all**, then matching each discovered cluster to whichever true class is most common inside it:
+
+| k | WCSS (total within-cluster distance²) |
+| --- | --- |
+| 1 | 193,760 |
+| 2 | 122,124 |
+| 3 | 82,913 |
+| 4 | 55,777 |
+| 5 | 44,034 |
+| 6 | 32,455 |
+
+WCSS always falls as k grows (more clusters can only fit the data at least as well) — the **elbow method** looks for where the drop slows down noticeably, suggesting extra clusters are giving diminishing returns rather than finding real structure. Here the drop from k=2→3 (39,211) is a smaller step than k=1→2 (71,636), and the steps keep shrinking gradually after that without one single dramatic bend — a reminder that real data doesn't always produce the textbook-clean elbow, even when (as here) the true number of groups is actually known to be 3.
+
+At k=3 specifically, matching clusters to true classes gives **72.4% agreement** — far better than chance (33% for 3 balanced classes), but far from perfect. k-means, using only (mean, std) and no labels, correctly recovers most of the three textures' structure, but the known overlap between Woven and Blotchy (36.2, 36.4) costs real agreement — clustering is only as good as the features it's given, exactly 36.1's lesson, now with no labels to fall back on at all.
+
+## 5. Industrial use
+
+- **Exploring new data with no ground truth**: before any labelling effort, clustering can reveal whether a sensor's readings naturally fall into groups worth investigating.
+- **Pre-labelling at scale**: cluster first, then have a person assign a real label to each cluster (far cheaper than labelling every single example individually) — a common practical shortcut.
+- **Anomaly flagging**: a point far from every cluster centre (unlike anything already seen) is a candidate anomaly, without ever having been given examples of what "anomalous" looks like (55.6).
+
+## What you should remember from 36.8
+
+<Takeaways>
+<Takeaway n={1} title="No labels, ever">Clustering groups by similarity alone — nothing about the process uses or needs known categories.</Takeaway>
+<Takeaway n={2} title="Two families">k-means (flat, needs k upfront) and agglomerative (a full merge history, cut at any level).</Takeaway>
+<Takeaway n={3} title="The elbow method">Where WCSS stops dropping quickly is a rough guide to how many clusters the data really supports.</Takeaway>
+<Takeaway n={4} title="Clusters vs classes">Discovered clusters often resemble known classes reasonably well, but agreement is rarely perfect — clustering finds structure in the data, not necessarily the structure a person cares about.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Three points: 2, 3, 9. Using single-linkage agglomerative clustering, what merges first, and at what distance?
+
+<Solution>
+
+Pairwise distances: |2−3|=1, |2−9|=7, |3−9|=6. The smallest is 1, so **2 and 3 merge first, at distance 1**.
+
+</Solution>
+
+**Q2.** A dataset's WCSS drops from 1000 (k=1) to 400 (k=2) to 390 (k=3) to 380 (k=4). Where is the elbow, and what does it suggest?
+
+<Solution>
+
+The huge drop is between k=1 and k=2 (600); after that, the drops are tiny (10, then 10). The elbow is at **k=2** — the data likely has two real groups, and further splitting barely improves the fit at all.
+
+</Solution>
+
+### Next: Module 37, Classical detection and faces
+
+## Code
+
+### 1. The dendrogram, from scratch with NumPy
+
+```python
+import numpy as np
+import cv2
+
+points = [1, 2, 5, 6, 10]
+clusters = [[p] for p in points]
+
+def cluster_dist(a, b):
+    return min(abs(x - y) for x in a for y in b)
+
+merges = []
+while len(clusters) > 1:
+    best = None
+    for i in range(len(clusters)):
+        for j in range(i + 1, len(clusters)):
+            d = cluster_dist(clusters[i], clusters[j])
+            if best is None or d < best[0]:
+                best = (d, i, j)
+    d, i, j = best
+    merges.append((d, clusters[i][:], clusters[j][:]))
+    merged = clusters[i] + clusters[j]
+    clusters = [c for idx, c in enumerate(clusters) if idx not in (i, j)] + [merged]
+
+for d, a, b in merges:
+    print(f"merge {a} + {b} at distance {d}")
+```
+
+Output:
+
+```text
+merge [1] + [2] at distance 1
+merge [5] + [6] at distance 1
+merge [1, 2] + [5, 6] at distance 3
+merge [10] + [1, 2, 5, 6] at distance 4
+```
+
+### 2. k-means with no labels, and the elbow
+
+```python
+TILE = 8
+def tile_features(img):
+    h, w = img.shape
+    feats = []
+    for ty in range(h // TILE):
+        for tx in range(w // TILE):
+            patch = img[ty * TILE:(ty + 1) * TILE, tx * TILE:(tx + 1) * TILE].astype(np.float64)
+            feats.append((patch.mean(), patch.std()))
+    return np.array(feats)
+
+names = ["woven", "smooth", "blotchy"]
+classes = {n: tile_features(cv2.imread(f"sample-texture-{n}.png", cv2.IMREAD_GRAYSCALE)) for n in names}
+X = np.vstack([classes[n] for n in names]).astype(np.float32)
+y_true = np.array(sum(([i] * len(classes[n]) for i, n in enumerate(names)), []), dtype=np.int32)
+
+crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.001)
+cv2.setRNGSeed(42)
+wcss, labels, centers = cv2.kmeans(X, 3, None, crit, 10, cv2.KMEANS_PP_CENTERS)      # k=3, NO y_true used here
+labels = labels.ravel()
+
+from collections import Counter
+correct = 0
+for c in range(3):
+    mask = labels == c
+    majority = Counter(y_true[mask]).most_common(1)[0][0]
+    correct += (y_true[mask] == majority).sum()
+print(f"k=3 agreement with true classes: {correct / len(y_true):.3f}")
+
+for k in range(1, 7):
+    cv2.setRNGSeed(42)
+    w, _, _ = cv2.kmeans(X, k, None, crit, 10, cv2.KMEANS_PP_CENTERS)
+    print(f"k={k}: WCSS={w:.0f}")
+```
+
+Output:
+
+```text
+k=3 agreement with true classes: 0.724
+k=1: WCSS=193760
+k=2: WCSS=122124
+k=3: WCSS=82913
+k=4: WCSS=55777
+k=5: WCSS=44034
+k=6: WCSS=32455
+```
+
+## OpenCV API notes
+
+- **`cv2.kmeans(data, K, bestLabels, criteria, attempts, flags)`**: see 27.2 for the full signature; `data` here is feature vectors (mean, std per tile) rather than pixel colours — the algorithm itself is identical, only what counts as a "point" has changed.
+- **No agglomerative/hierarchical clustering function in core OpenCV** (confirmed: no `cv2.hierarchicalClustering` or similar exists) — Section 3's dendrogram is built entirely from scratch; a general-purpose library like `scipy.cluster.hierarchy` (outside this course's pinned OpenCV/NumPy stack) would be the practical choice for real hierarchical clustering work.
+- **`labels` from `cv2.kmeans` are arbitrary cluster indices**, not aligned with any true class numbering — matching clusters to known labels (as in Section 4 and the Code section) always needs an explicit step like majority voting, done only for *checking*, never used by the clustering algorithm itself.
+- **`cv2.setRNGSeed`** makes `cv2.kmeans`'s random centre initialisation reproducible, used above and in the lab so the same run can be checked and discussed consistently.
+
+## Where it fails
+
+- **k-means needs `k` chosen in advance**: the elbow method (Section 4) gives a rough guide, not a certain answer, and real data (as seen there) doesn't always produce an unambiguous elbow.
+- **k-means assumes roughly round, similarly-sized clusters** (same limitation as 36.1's nearest-centroid, since k-means is essentially iterated nearest-centroid classification) — exactly why it only reached 72.4% agreement here, given Blotchy's much larger spread than the other two classes.
+- **Agglomerative clustering's naive implementation is slow for large datasets** (Section 3's approach checks every pair of clusters at every step); real implementations use more efficient data structures, and the full dendrogram can still be expensive to compute and store for very large datasets.
+- **Clustering can find structure that doesn't mean anything useful**: it is purely a function of the chosen features and distance measure, with no concept of what a human would consider a meaningful group — exactly why checking against known labels, when available, matters (Section 4).
+- Superseded in many modern settings by learned embeddings (Part J) combined with clustering in that learned space, rather than clustering raw hand-built features directly.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Treating cluster indices as meaningful labels**: cluster 0 from one run and cluster 0 from a different run (or a different k) have no guaranteed relationship to each other or to any real category.
+- **Picking k purely by the elbow method without sanity-checking the result**: Section 4's elbow was genuinely ambiguous; always look at the actual clusters found, not just the WCSS numbers.
+- **Expecting clustering to achieve the same accuracy as a trained classifier** on the same data: Section 4's 72.4% (no labels) is naturally well below what a supervised classifier achieves on the same features (e.g. 36.2's Bayes classifier, with labels, agreed with nearest-centroid on the easy cases and made principled calls on the hard ones) — clustering is solving a strictly harder problem (find the groups *and* implicitly their boundaries) with strictly less information (no labels at all).
+- **Running k-means once and trusting the result**: different random initialisations can converge to different local optima; `attempts` (running several times and keeping the best) and a fixed seed for reproducibility (OpenCV API notes above) both matter.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Other linkage criteria
+
+Single linkage (Section 3, closest pair of points) can produce long, straggly "chains" of merges. **Complete linkage** (farthest pair of points between two clusters) and **average linkage** (mean distance between all cross-cluster pairs) are common alternatives that tend to produce more compact, evenly-sized clusters, at the cost of being somewhat more expensive to update as clusters merge.
+
+### Silhouette score
+
+An alternative to the elbow method for choosing k: for each point, compare its average distance to points in its own cluster against its average distance to points in the nearest other cluster; a score near +1 means a point fits its cluster well and is far from others, near 0 means it's on a boundary, negative means it may be in the wrong cluster. Averaging this over all points gives one number per choice of k, often clearer to interpret than an ambiguous WCSS elbow.
+
+### DBSCAN and density-based clustering
+
+k-means and agglomerative clustering both struggle with clusters of very different shapes or densities. Density-based methods (DBSCAN and relatives, not in `cv2`) group points that are densely packed together, and explicitly label sparse points as noise rather than forcing them into the nearest cluster regardless — a genuinely different approach from "which centre is nearest" or "which pair is closest."
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is the fundamental difference between clustering and every classifier earlier in this module (36.1-36.7)?",
+      options: ["Clustering is always more accurate", "Clustering uses no labelled training data at all; the others all learned from labelled examples", "Clustering only works on images", "There is no real difference"],
+      answer: 1,
+      explanation: "Section 1-2: clustering is unsupervised; 36.1-36.7 are all supervised.",
+    },
+    {
+      question: "In the worked dendrogram (Section 3), why did {1,2} and {5,6} merge before either joined the outlier, 10?",
+      options: ["Alphabetical order", "Single linkage always merges the two closest clusters first, and 1-2 (distance 1) and 5-6 (distance 1) were both closer than any pair involving 10", "A random choice", "10 was excluded from clustering"],
+      answer: 1,
+      explanation: "The merge distances (1, 1, 3, 4) directly reflect how close each pair of clusters was at each step.",
+    },
+    {
+      question: "In Section 4, k-means (no labels) reached 72.4% agreement with the true texture classes at k=3. Why not higher?",
+      options: ["A bug in cv2.kmeans", "k-means assumes roughly equal, round clusters, but Blotchy's spread is much larger than Woven's or Smooth's -- the same kind of mismatch 36.1's nearest-centroid struggled with", "k=3 was the wrong choice", "Clustering cannot exceed 50% agreement"],
+      answer: 1,
+      explanation: "k-means is essentially iterated nearest-centroid classification, inheriting the same equal-cluster-size assumption.",
+    },
+    {
+      question: "What does the elbow method look for?",
+      options: ["The largest possible k", "The point where adding more clusters stops reducing WCSS by much, suggesting diminishing returns", "The smallest WCSS value overall", "A perfect clustering"],
+      answer: 1,
+      explanation: "WCSS always decreases as k grows; the elbow looks for where that decrease slows down meaningfully.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Four points: 10, 11, 20, 30. Build the single-linkage dendrogram (list each merge and its distance).
+
+<Solution>
+
+Pairwise distances: |10-11|=1, |10-20|=10, |10-30|=20, |11-20|=9, |11-30|=19, |20-30|=10.
+Merge 1: [10]+[11] at distance 1 (smallest).
+Remaining distances: [10,11] to [20] = min(10,9) = 9; [10,11] to [30] = min(20,19) = 19; [20] to [30] = 10.
+Merge 2: [10,11]+[20] at distance 9.
+Remaining: [10,11,20] to [30] = min(19, 10) = 10.
+Merge 3: [10,11,20]+[30] at distance 10.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the Code section's `X` and `y_true`, run k-means with k=2 instead of 3 (no labels), and report which two true classes end up sharing a cluster most often.
+
+<Solution>
+
+```python
+cv2.setRNGSeed(42)
+wcss2, labels2, centers2 = cv2.kmeans(X, 2, None, crit, 10, cv2.KMEANS_PP_CENTERS)
+labels2 = labels2.ravel()
+for c in range(2):
+    mask = labels2 == c
+    counts = Counter(y_true[mask])
+    print(f"cluster {c}: {dict(counts)}")
+```
+
+Output:
+
+```text
+cluster 0: {np.int32(1): 81, np.int32(2): 41}
+cluster 1: {np.int32(0): 81, np.int32(2): 40}
+```
+
+(class 0 = woven, 1 = smooth, 2 = blotchy). With only 2 clusters for 3 real classes, Woven and Smooth each land entirely in their own cluster (81 tiles apiece) — but Blotchy gets split almost exactly in half (41 tiles join Smooth's cluster, 40 join Woven's). Blotchy, the widest-spread class throughout this module, is the one that doesn't fit cleanly into either cluster when forced down to just two — exactly the kind of cost that comes from choosing too few clusters.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague has 10,000 unlabelled images of manufactured parts and wants to know how many distinct part types are in the batch, with no existing catalogue to check against. How would you approach this using this chapter's tools, and what would you still need to be careful about?
+
+<Solution>
+
+Extract features from each image (any of Module 35's descriptors, depending on what distinguishes the part types visually), then run k-means across a range of k values and use the elbow method (Section 4) to narrow down a plausible range for the number of distinct types, possibly combined with the silhouette score (Go deeper) for a clearer signal than WCSS alone. The caveats from this chapter still apply directly: the elbow may be ambiguous (Section 4's own real example), k-means assumes round, similarly-sized clusters which may not match how the real part types vary in appearance, and the final answer should be spot-checked by actually looking at a sample of images from each discovered cluster — clustering suggests structure, it does not certify it.
+
+</Solution>
+
+## References
+
+1. S. C. Johnson, "Hierarchical clustering schemes," *Psychometrika* 32(3), 1967, pp. 241–254.
+2. P. J. Rousseeuw, "Silhouettes: a graphical aid to the interpretation and validation of cluster analysis," *Journal of Computational and Applied Mathematics* 20, 1987, pp. 53–65.
+3. OpenCV 4.13.0 documentation: `cv2.kmeans`. https://docs.opencv.org/4.13.0/

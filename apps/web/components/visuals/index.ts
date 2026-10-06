@@ -152,3 +152,4 @@ export { SvmLab } from "./SvmLab";
 export { TreeLab } from "./TreeLab";
 export { BoostLab } from "./BoostLab";
 export { PcaReduceLab } from "./PcaReduceLab";
+export { ClusterLab } from "./ClusterLab";
