@@ -1,0 +1,356 @@
+export const meta = {
+  number: "34.5",
+  title: "Homography",
+  minutes: 25,
+  objectives: [
+    "Explain when a homography relates two images and what its 8 parameters do",
+    "Compute a homography from 4 point pairs with the direct linear transform",
+    "Use RANSAC to estimate a homography from matches with outliers, and compute the number of iterations",
+    "Use cv2.findHomography and cv2.warpPerspective and check the result",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 34.5 (Part F, Module 34).
+  Lab: DescLab mode "homography" (normalised DLT + seeded RANSAC; corner error against POSTER_H).
+  Reference tail: all examples are deterministic (cv2.setRNGSeed) and compared automatically.
+*/}
+
+# 34.5 Homography
+
+<Definition term="Homography">a 3 × 3 matrix H that maps points of one image of a plane to the other image of the same plane: (x', y', w')ᵀ = H · (x, y, 1)ᵀ, then divide by w'. It has 8 degrees of freedom and is determined by 4 point correspondences. Estimated robustly from feature matches with RANSAC, it locates a flat object, aligns images and stitches panoramas.</Definition>
+
+Chapter 16.3 introduced the homography for rectifying a label from four clicked corners. Here the four points come from feature matches: hundreds of them, some wrong. The tools are the direct linear transform (DLT) to compute H from points, and RANSAC to ignore the wrong ones.
+
+## 1. An analogy
+
+A slide projected onto a tilted screen: every point of the slide lands somewhere on the screen, straight lines stay straight, but rectangles become general four-sided shapes. That mapping is a homography. Knowing where 4 corners land fixes it completely, and then you know where every other point goes.
+
+## 2. When a homography applies
+
+Two images are related by a homography when:
+
+- they show a **plane** (a label, a sheet, a poster, a floor, a PCB) from any two viewpoints, or
+- the camera **only rotates** about its centre (any scene), which is why panoramas work (34.6).
+
+For a 3D scene seen from two different positions, no single homography fits: points at different depths move differently (parallax). Then you need the fundamental matrix (42.2).
+
+<Flow
+  steps={[
+    { label: "Matches (with outliers)", tone: "data" },
+    { label: "RANSAC: pick 4 random matches → H by DLT → count inliers (reprojection error ≤ threshold)", tone: "process" },
+    { label: "Keep the H with most inliers; refit on all its inliers", tone: "process" },
+    { label: "H, inlier mask → warp, locate, verify", tone: "result" },
+  ]}
+/>
+
+**DLT.** Each pair (x, y) → (u, v) gives two linear equations in the 9 entries of H (after multiplying out the division). Four pairs give 8 equations for 8 unknowns (H is only defined up to scale). With more pairs, the least-squares solution is the singular vector of the smallest singular value. Normalising the points first (centroid at 0, mean distance √2, Hartley) makes it numerically stable.
+
+**RANSAC** (RANdom SAmple Consensus, Fischler and Bolles 1981): fit to a minimal random sample, count how many matches agree, repeat, keep the best. One wrong match in the sample spoils the fit, so the number of iterations N needed to draw at least one clean sample with confidence p, when a fraction w of the matches are inliers and s = 4 points are drawn each time, is
+
+```text
+N = log(1 − p) / log(1 − w^s)
+```
+
+## 3. A worked example by hand
+
+How many RANSAC iterations for p = 0.99?
+
+| Inlier ratio w | w⁴ | N = log(0.01) / log(1 − w⁴) |
+| --- | --- | --- |
+| 0.8 | 0.410 | −4.605 / −0.527 = **9** |
+| 0.5 | 0.0625 | −4.605 / −0.0645 = **72** |
+| 0.3 | 0.0081 | −4.605 / −0.00813 = **567** |
+
+The inlier ratio matters enormously, which is why a good ratio test (34.4) before RANSAC pays off.
+
+Degrees of freedom: a homography has 9 entries minus 1 for scale = **8**; each point pair gives 2 equations, so **4** pairs, no three of them on a line.
+
+## 4. On the poster pair
+
+149 ORB ratio-test matches (145 correct, 4 wrong). The true homography is known, so we measure the **mean corner error**: how far the poster's four corners land from their true positions.
+
+| Method | Inliers (≤ 3 px) | Mean corner error |
+| --- | --- | --- |
+| all points, least squares | 59 | **39.25 px** |
+| RANSAC | 146 | 0.77 px |
+| LMEDS | 145 | 0.79 px |
+| USAC_MAGSAC | 146 | 0.73 px |
+
+Only 4 wrong matches out of 149 pull the least-squares estimate 39 px off. Any robust method recovers H to under a pixel.
+
+**Checking the alignment**: warping the poster with the estimated H onto view B (and undoing the known brightness change), the mean absolute difference is 3.26 grey levels; with the true H it is 2.65 (the rest is noise and interpolation).
+
+<DescLab mode="homography" detector="ORB" caption="RANSAC on the poster matches. Green = inlier, red = outlier. Change the threshold and the number of iterations, draw new random samples, and watch the inlier count and the corner error against the true homography. Switch to the overlay or the difference image to judge the alignment by eye: flat grey means perfect."/>
+
+## 5. Industrial use
+
+- **Locating flat parts**: find a reference image of a label, box face or PCB in the camera image and get its exact pose in the image plane; then inspect in the reference frame.
+- **Document and label rectification** (16.3) with automatic corners from matching.
+- **Panoramas** and large-part mosaics (34.6).
+- **Bird's-eye views** of floors and conveyors (41.7).
+
+## What you should remember from 34.5
+
+<Takeaways>
+<Takeaway n={1} title="When">A plane seen twice, or a camera that only rotates.</Takeaway>
+<Takeaway n={2} title="DLT">8 unknowns, 2 equations per pair → 4 pairs minimum; least squares with more.</Takeaway>
+<Takeaway n={3} title="RANSAC">Minimal samples, count inliers, refit; N = log(1 − p) / log(1 − w⁴).</Takeaway>
+<Takeaway n={4} title="Outliers">4 bad matches in 149 gave 39 px error without RANSAC, 0.77 px with it.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** 60 % of your matches are inliers. How many RANSAC iterations for 99 % confidence?
+
+<Solution>
+
+w⁴ = 0.1296; N = log(0.01) / log(0.8704) = −4.605 / −0.1388 ≈ **34**.
+
+</Solution>
+
+**Q2.** H maps (0, 0) to (95, −10). What does that tell you?
+
+<Solution>
+
+The poster's top-left corner lies at (95, −10) in view B: just above the image. That is the translation part, H[0, 2] and H[1, 2], because x = y = 0.
+
+</Solution>
+
+### Next: 34.6 Stitching
+
+## Code
+
+### 1. DLT from scratch for 4 points
+
+```python
+import numpy as np
+import cv2
+
+src = np.array([[0, 0], [100, 0], [100, 60], [0, 60]], np.float64)        # a 100 × 60 label, flat
+dst = np.array([[20, 10], [115, 25], [110, 90], [12, 70]], np.float64)     # where its corners appear in the photo
+
+def dlt(src, dst):
+    """Direct linear transform: two equations per point pair, solve A h = 0 by SVD."""
+    A = []
+    for (x, y), (u, v) in zip(src, dst):
+        A.append([-x, -y, -1, 0, 0, 0, u * x, u * y, u])
+        A.append([0, 0, 0, -x, -y, -1, v * x, v * y, v])
+    _, _, Vt = np.linalg.svd(np.array(A))
+    H = Vt[-1].reshape(3, 3)                                     # right singular vector of the smallest singular value
+    return H / H[2, 2]
+
+H = dlt(src, dst)
+print(np.round(H, 4))
+print("max difference to cv2.getPerspectiveTransform:", float(np.abs(H - cv2.getPerspectiveTransform(src.astype(np.float32), dst.astype(np.float32))).max().round(8)))
+p = H @ np.array([50, 30, 1.0])
+print("label centre (50, 30) appears at", np.round(p[:2] / p[2], 2))
+```
+
+Output:
+
+```text
+[[ 8.736e-01 -1.401e-01  2.000e+01]
+ [ 1.334e-01  9.603e-01  1.000e+01]
+ [-7.000e-04 -6.000e-04  1.000e+00]]
+max difference to cv2.getPerspectiveTransform: 0.0
+label centre (50, 30) appears at [62.62 47.88]
+```
+
+The centre of the label does not land in the middle of the four mapped corners' bounding box: perspective is not affine.
+
+### 2. cv2.findHomography: least squares vs robust methods
+
+```python
+a = cv2.imread("sample-poster.png", cv2.IMREAD_GRAYSCALE)
+b = cv2.imread("sample-poster-b.png", cv2.IMREAD_GRAYSCALE)
+c, s = 0.75 * np.cos(np.radians(25)), 0.75 * np.sin(np.radians(25))
+H_true = np.array([[c, -s, 95], [s, c, -10], [0.0004, -0.0003, 1.0]])
+orb = cv2.ORB_create(1000)
+ka, da = orb.detectAndCompute(a, None)
+kb, db = orb.detectAndCompute(b, None)
+good = [m for m, n in cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(da, db, k=2) if m.distance < 0.75 * n.distance]
+src = np.float32([ka[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+dst = np.float32([kb[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+corners = np.float32([[0, 0], [320, 0], [320, 240], [0, 240]]).reshape(-1, 1, 2)
+
+def corner_error(H):
+    return float(np.linalg.norm(cv2.perspectiveTransform(corners, H) - cv2.perspectiveTransform(corners, H_true), axis=2).mean())
+
+print(len(good), "ratio-test matches")
+for name, method in [("all points (least squares)", 0), ("RANSAC", cv2.RANSAC), ("LMEDS", cv2.LMEDS), ("USAC_MAGSAC", cv2.USAC_MAGSAC)]:
+    cv2.setRNGSeed(1)
+    H, mask = cv2.findHomography(src, dst, method, 3.0)
+    print(f"{name:27s} inliers {int(mask.sum()) if mask is not None else len(good):3d}   mean corner error {corner_error(H):.2f} px")
+```
+
+Output:
+
+```text
+149 ratio-test matches
+all points (least squares)  inliers  59   mean corner error 39.25 px
+RANSAC                      inliers 146   mean corner error 0.77 px
+LMEDS                       inliers 145   mean corner error 0.79 px
+USAC_MAGSAC                 inliers 146   mean corner error 0.73 px
+```
+
+`cv2.setRNGSeed(1)` makes RANSAC's random samples repeatable, so the numbers do not change between runs.
+
+### 3. Warp and check the alignment
+
+```python
+cv2.setRNGSeed(1)
+H, mask = cv2.findHomography(src, dst, cv2.RANSAC, 3.0)
+for name, M in [("estimated H", H), ("true H", H_true)]:
+    warped = cv2.warpPerspective(a, M, (b.shape[1], b.shape[0]))
+    valid = cv2.warpPerspective(np.full_like(a, 255), M, (b.shape[1], b.shape[0])) == 255
+    diff = np.abs(warped.astype(float) * 0.7 + 30 - b)[valid]        # undo the known gain/offset of view B
+    print(f"{name}: mean |A warped - B| = {diff.mean():.2f} grey levels over {int(valid.sum())} pixels")
+```
+
+Output:
+
+```text
+estimated H: mean |A warped - B| = 3.26 grey levels over 37302 pixels
+true H: mean |A warped - B| = 2.65 grey levels over 37237 pixels
+```
+
+## OpenCV API notes
+
+- **`cv2.findHomography(srcPoints, dstPoints, method=0, ransacReprojThreshold=3, mask=None, maxIters=2000, confidence=0.995)`**: points float32 N × 1 × 2 (or N × 2), N ≥ 4. Returns `(H, mask)`; H float64 3 × 3 normalised to H[2, 2] = 1, or `None` if it fails; mask uint8 N × 1, 1 = inlier.
+  - `method`: 0 (least squares on all points), `RANSAC`, `LMEDS` (no threshold; needs > 50 % inliers), `RHO`, and the USAC family (`USAC_DEFAULT`, `USAC_MAGSAC`, `USAC_ACCURATE`, …).
+  - `ransacReprojThreshold`: maximum distance in pixels (in the destination image) for an inlier; 1–5 px typical.
+- **`cv2.getPerspectiveTransform(src4, dst4)`**: exactly 4 points (float32), no robustness.
+- **`cv2.warpPerspective(src, H, (w, h), flags=cv2.INTER_LINEAR, borderMode=..., borderValue=...)`**: maps src into the destination frame; add `cv2.WARP_INVERSE_MAP` if H maps destination to source.
+- **`cv2.perspectiveTransform(pts, H)`**: points N × 1 × 2 float.
+- **`cv2.setRNGSeed(n)`**: fixes OpenCV's random generator (RANSAC samples) for reproducible tests.
+
+## Where it fails
+
+- **Non-planar scenes with camera translation**: no homography fits; RANSAC picks the dominant plane and calls the rest outliers.
+- **Few or clustered inliers**: H is poorly constrained away from the matched area; check that inliers cover the object.
+- **Degenerate samples**: three of the four points on a line; OpenCV rejects such samples.
+- **Strong lens distortion**: straight lines are not straight; undistort first (41.3).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Swapping source and destination**: H maps the first argument to the second; the inverse is `np.linalg.inv(H)`.
+- **Using all matches without RANSAC**: a few outliers destroy the estimate (39 px here).
+- **Trusting H without checking**: count inliers, check that the warped corners form a sensible (convex, not tiny, not flipped) shape.
+- **Threshold in the wrong image's pixels**: the reprojection error is measured in the destination image.
+- **Forgetting the division by w** when applying H by hand.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Normalised DLT
+
+Hartley [2] showed that the plain DLT is badly conditioned because pixel coordinates (hundreds) and the constant 1 have very different magnitudes. Translating each point set to its centroid and scaling it to mean distance √2 before solving, then undoing the normalisation, makes the estimate far more accurate. OpenCV refines the DLT result further by minimising the reprojection error with Levenberg–Marquardt.
+
+### RANSAC variants
+
+MSAC and MLESAC score hypotheses by a truncated or likelihood-based error rather than an inlier count; PROSAC samples the best-ranked matches first; LO-RANSAC adds local optimisation of good hypotheses; MAGSAC++ marginalises over the threshold. OpenCV's USAC framework (since 4.5) combines these [4].
+
+### Decomposing H
+
+For a calibrated camera, H of a plane can be decomposed into rotation, translation (up to scale) and plane normal (`cv2.decomposeHomographyMat`), giving up to four solutions to be disambiguated with visibility constraints (Module 41).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "How many point correspondences determine a homography?",
+      options: ["2", "3", "4", "8"],
+      answer: 2,
+      explanation: "8 unknowns, 2 equations per pair.",
+    },
+    {
+      question: "Two photos of a 3D machine taken from two different positions. Can one homography align them?",
+      options: ["Yes, always", "Only the parts that lie in one plane (or if the camera only rotated)", "Only with RANSAC", "Only with SIFT"],
+      answer: 1,
+      explanation: "Parallax breaks the homography for points off the plane.",
+    },
+    {
+      question: "Inlier ratio 0.5, p = 0.99, 4-point samples. RANSAC needs about…",
+      options: ["9 iterations", "72 iterations", "567 iterations", "4 iterations"],
+      answer: 1,
+      explanation: "log(0.01) / log(1 − 0.0625).",
+    },
+    {
+      question: "149 matches with 4 outliers; least squares on all of them gave a corner error of…",
+      options: ["0.77 px", "3 px", "39.25 px", "0 px"],
+      answer: 2,
+      explanation: "Least squares is not robust; RANSAC gave 0.77 px.",
+    },
+    {
+      question: "findHomography(src, dst) returns H. To map a point from dst back to src you use…",
+      options: ["H", "Hᵀ", "H⁻¹", "−H"],
+      answer: 2,
+      explanation: "The inverse homography.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+H = [[2, 0, 10], [0, 2, 20], [0, 0.01, 1]]. Where does (10, 0) go? And (10, 100)?
+
+<Solution>
+
+(10, 0): (2·10 + 10, 20, 0 + 1) = (30, 20, 1) → **(30, 20)**. (10, 100): (30, 200 + 20, 1 + 1) = (30, 220, 2) → **(15, 110)**. The perspective row makes points further down shrink toward the origin.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Run RANSAC with thresholds 0.5, 1, 3 and 10 px (seed 1). Report inliers and corner error for each.
+
+<Solution>
+
+```python
+for t in (0.5, 1.0, 3.0, 10.0):
+    cv2.setRNGSeed(1)
+    H, mask = cv2.findHomography(src, dst, cv2.RANSAC, t)
+    print(f"threshold {t:4}: {int(mask.sum())} inliers, corner error {corner_error(H):.2f} px")
+```
+
+Output:
+
+```text
+threshold  0.5: 43 inliers, corner error 2.87 px
+threshold  1.0: 111 inliers, corner error 1.23 px
+threshold  3.0: 146 inliers, corner error 0.77 px
+threshold 10.0: 147 inliers, corner error 0.81 px
+```
+
+Too small a threshold rejects good matches (keypoint positions have about 1 px of noise), and the fit rests on too few points: 2.87 px error at 0.5 px. At 10 px one wrong match is accepted as an inlier and the error rises slightly. 3 px is the best of these here.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+You locate labels on boxes on a conveyor with a homography from a reference label image. Sometimes H is found with only 12 inliers, all in one corner of the label, and the warped label is badly distorted. What checks would you add?
+
+<Solution>
+
+A minimum number of inliers (e.g. ≥ 25), a minimum spread (inliers' convex hull covers, say, 30 % of the label area), and a sanity check of the warped corners (convex quadrilateral, area within the expected range, no flip: same orientation sign). Reject and retry on the next frame otherwise.
+
+</Solution>
+
+## References
+
+1. M. A. Fischler, R. C. Bolles, "Random sample consensus: a paradigm for model fitting with applications to image analysis and automated cartography," *Communications of the ACM* 24(6), 1981, pp. 381–395.
+2. R. I. Hartley, "In defense of the eight-point algorithm," *IEEE Trans. PAMI* 19(6), 1997, pp. 580–593.
+3. R. Hartley, A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004, Chapter 4.
+4. R. Raguram, O. Chum, M. Pollefeys, J. Matas, J.-M. Frahm, "USAC: a universal framework for random sample consensus," *IEEE Trans. PAMI* 35(8), 2013, pp. 2022–2038; D. Baráth, J. Noskova, M. Ivashechkin, J. Matas, "MAGSAC++, a fast, reliable and accurate robust estimator," *Proc. IEEE CVPR*, 2020.
+5. OpenCV 4.13.0 documentation: `findHomography`, `getPerspectiveTransform`, `warpPerspective`, `perspectiveTransform`; tutorial "Features2D + Homography to find a known object". https://docs.opencv.org/4.13.0/

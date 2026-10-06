@@ -35,7 +35,7 @@
       "id": "part-f",
       "letter": "F",
       "title": "Features and recognition",
-      "modules": ["33-interest-points"]
+      "modules": ["33-interest-points", "34-descriptors-and-matching"]
     }
   ]
 }

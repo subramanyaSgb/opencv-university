@@ -1,0 +1,341 @@
+export const meta = {
+  number: "34.2",
+  title: "ORB and BRIEF",
+  minutes: 22,
+  objectives: [
+    "Build a BRIEF binary descriptor from pairwise intensity tests by hand",
+    "Compare binary descriptors with the Hamming distance (XOR + bit count)",
+    "Explain what ORB adds: FAST on a pyramid, Harris ranking, orientation by intensity centroid, steered BRIEF",
+    "Use cv2.ORB_create and read its parameters and output",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 34.2 (Part F, Module 34).
+  Lab: DescLab modes "brief" (generic BRIEF, steered vs not) and "keypoints" (ORB).
+  Reference tail: deterministic examples compared automatically; timing labelled typical output.
+*/}
+
+# 34.2 ORB and BRIEF
+
+<Definition term="BRIEF and ORB">BRIEF (Binary Robust Independent Elementary Features) describes a smoothed patch by 256 yes/no answers to "is pixel p darker than pixel q?" for fixed pairs (p, q); descriptors are compared by counting differing bits. ORB (Oriented FAST and Rotated BRIEF) combines FAST keypoints on an image pyramid with an orientation and a rotated, learned BRIEF, giving a fast, free alternative to SIFT.</Definition>
+
+SIFT's 128 floating-point numbers are accurate but slow to compute and to compare. BRIEF (Calonder et al., 2010) asked how far you can get with single bits. ORB (Rublee et al., 2011, at Willow Garage, where OpenCV was developed then) fixed BRIEF's weak point, rotation, and became the default feature on robots, phones and in ORB-SLAM.
+
+## 1. An analogy
+
+Describing a face with a list of questions: "Is the left eye darker than the cheek? Is the hair darker than the forehead? …" 256 such yes/no answers are a compact fingerprint. Two photos of the same face give mostly the same answers; a different face gives about half different. If the second photo is tilted, you must tilt your question points too, or you compare the eye with the ear.
+
+## 2. BRIEF: bits from intensity tests
+
+<Flow
+  steps={[
+    { label: "Patch around the keypoint (31 × 31)", tone: "data" },
+    { label: "Smooth (noise would flip bits)", tone: "process" },
+    { label: "256 fixed point pairs (p, q): bit = 1 if I(p) < I(q)", tone: "process" },
+    { label: "32 bytes; compare with Hamming distance", tone: "result" },
+  ]}
+/>
+
+The **Hamming distance** between two bit strings is the number of positions where they differ: XOR the bytes and count the 1 bits. CPUs have an instruction for counting bits (popcount), so comparing two 256-bit descriptors costs a handful of operations, far less than 128 float subtractions and squares.
+
+What do the numbers mean? Two unrelated patches differ in about half the bits (≈ 128 of 256). The same point seen again should differ in far fewer.
+
+## 3. A worked example by hand
+
+A smoothed 3 × 3 patch and four tests (positions as row, column):
+
+<PixelMatrix values={[[40, 90, 120], [60, 100, 140], [80, 110, 150]]} />
+
+| Test | p | q | I(p) | I(q) | I(p) < I(q)? | Bit |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | (0, 0) | (2, 2) | 40 | 150 | yes | 1 |
+| 2 | (0, 2) | (2, 0) | 120 | 80 | no | 0 |
+| 3 | (1, 0) | (1, 2) | 60 | 140 | yes | 1 |
+| 4 | (2, 1) | (0, 1) | 110 | 90 | no | 0 |
+
+Descriptor: **1010**. Rotate the patch by 90° and the same tests give different answers: BRIEF is not rotation invariant.
+
+Hamming distance of two 8-bit descriptors: 10110010 XOR 10011010 = 00101000 → **2** bits differ.
+
+## 4. What ORB adds
+
+| Step | ORB's choice |
+| --- | --- |
+| Keypoints | FAST-9 (33.4) on an image pyramid (8 levels, each 1.2× smaller) |
+| Ranking | Harris score (33.2) to keep the best `nfeatures` |
+| Orientation | **intensity centroid**: the vector from the keypoint to the brightness-weighted centre of its circular patch |
+| Descriptor | **steered BRIEF**: the 256 test pairs are rotated by the keypoint's angle; the pairs were **learned** to be uncorrelated and high-variance (rBRIEF) |
+
+Steering matters. Our own simple BRIEF (seeded random pairs) on the poster, at a strong keypoint (75, 143) and its true position in view B:
+
+| Comparison | Bits that differ (of 256) |
+| --- | --- |
+| same point, pattern **not** turned | 57 |
+| same point, pattern turned 25° and scaled 0.75 (the true change) | **20** |
+| a different point | 127 |
+
+Without steering, a 25° rotation already costs half the margin to "unrelated" (≈ 128). With steering (as ORB does using the keypoint's angle), the same point is clearly recognised.
+
+<DescLab mode="brief" caption="A generic BRIEF on the poster (31 × 31 patch, seeded random tests; ORB uses a learned pattern). Each line is one test. Move through keypoints and switch steering on and off: the Hamming distance to the same point in the rotated view falls when the pattern is turned with the image."/>
+
+## 5. On the poster pair
+
+`cv2.ORB_create(nfeatures=1000)` finds 713 keypoints in A and 759 in B, spread over 7 pyramid levels (217 at full size, down to 16 at the smallest level used). Each descriptor is 32 bytes. With the ratio test, **145 of 149** matches are correct (97 %), better than SIFT's 100 of 114 on this pair.
+
+On one machine (2-core Xeon at 2.1 GHz), detecting and describing the 320 × 240 poster took **2.4 ms** with ORB and **22.0 ms** with SIFT.
+
+## 6. Industrial use
+
+- **Embedded and real-time**: robots, drones, AGVs, phones, where SIFT is too slow.
+- **Visual SLAM**: ORB-SLAM builds maps and localises with ORB features.
+- **Fast alignment** of a part to a reference image before inspection (34.5).
+- **Video stabilisation and stitching** at frame rate.
+
+## What you should remember from 34.2
+
+<Takeaways>
+<Takeaway n={1} title="BRIEF">256 tests "I(p) < I(q)" on a smoothed patch → 32 bytes.</Takeaway>
+<Takeaway n={2} title="Hamming">Distance = number of differing bits; unrelated ≈ 128 of 256.</Takeaway>
+<Takeaway n={3} title="ORB">FAST on a pyramid + Harris ranking + intensity-centroid angle + steered, learned BRIEF.</Takeaway>
+<Takeaway n={4} title="Trade-off">About 10× faster than SIFT here; very good under rotation; less robust to large scale or viewpoint change.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Two ORB descriptors differ in 30 bits. Same point or not?
+
+<Solution>
+
+Very likely the **same** point: unrelated descriptors differ in about 128 bits; a common rule of thumb accepts ORB matches below about 50–64.
+
+</Solution>
+
+**Q2.** A patch has its bright centre of mass straight to the right of the keypoint. What orientation does ORB assign?
+
+<Solution>
+
+**0°** (the vector to the intensity centroid points along +x). If the centroid were straight below (image y down), the angle would be 90°.
+
+</Solution>
+
+### Next: 34.3 AKAZE
+
+## Code
+
+### 1. BRIEF from scratch (with and without steering)
+
+```python
+import numpy as np
+import cv2
+
+a = cv2.imread("sample-poster.png", cv2.IMREAD_GRAYSCALE)
+b = cv2.imread("sample-poster-b.png", cv2.IMREAD_GRAYSCALE)
+c, s = 0.75 * np.cos(np.radians(25)), 0.75 * np.sin(np.radians(25))
+H = np.array([[c, -s, 95], [s, c, -10], [0.0004, -0.0003, 1.0]])
+rng = np.random.default_rng(0)
+pairs = np.clip(rng.normal(0, 31 / 5, (256, 4)), -15, 15)        # (x1, y1, x2, y2) per test, around the keypoint
+
+def brief(img, x, y, angle_deg=0.0, scale=1.0):
+    sm = cv2.boxFilter(img.astype(np.float32), -1, (5, 5))      # smooth so single noisy pixels do not flip bits
+    t = np.radians(angle_deg)
+    R = scale * np.array([[np.cos(t), -np.sin(t)], [np.sin(t), np.cos(t)]])
+    p1 = pairs[:, :2] @ R.T + (x, y)
+    p2 = pairs[:, 2:] @ R.T + (x, y)
+    v1 = sm[np.rint(p1[:, 1]).astype(int), np.rint(p1[:, 0]).astype(int)]
+    v2 = sm[np.rint(p2[:, 1]).astype(int), np.rint(p2[:, 0]).astype(int)]
+    return (v1 < v2).astype(np.uint8)                            # 256 bits
+
+xa, ya = 75.0, 143.0                                           # a strong ORB keypoint in view A
+xb, yb = cv2.perspectiveTransform(np.array([[[xa, ya]]]), H).ravel()
+d_a = brief(a, xa, ya)
+print("same point, pattern not turned :", int((d_a != brief(b, xb, yb)).sum()), "of 256 bits differ")
+print("same point, pattern turned 25 deg, scaled 0.75:", int((d_a != brief(b, xb, yb, 25, 0.75)).sum()))
+print("a different point (60, 60)     :", int((d_a != brief(a, 60, 60)).sum()))
+```
+
+Output:
+
+```text
+same point, pattern not turned : 57 of 256 bits differ
+same point, pattern turned 25 deg, scaled 0.75: 20
+a different point (60, 60)     : 127
+```
+
+### 2. cv2.ORB_create
+
+```python
+orb = cv2.ORB_create(nfeatures=1000)
+ka, da = orb.detectAndCompute(a, None)
+kb, db = orb.detectAndCompute(b, None)
+print("keypoints:", len(ka), len(kb), " descriptors:", da.shape, da.dtype)
+levels = np.bincount([k.octave for k in ka])
+print("keypoints per pyramid level:", levels.tolist())
+k0 = ka[0]
+print(f"first: pt=({k0.pt[0]:.1f}, {k0.pt[1]:.1f}) size={k0.size:.1f} angle={k0.angle:.1f} level={k0.octave}")
+print("descriptor bytes:", da[0][:8].tolist(), " bits:", np.unpackbits(da[0][:2]).tolist())
+print("Hamming distance between descriptors 0 and 1:", int(cv2.norm(da[0], da[1], cv2.NORM_HAMMING)))
+```
+
+Output:
+
+```text
+keypoints: 713 759  descriptors: (713, 32) uint8
+keypoints per pyramid level: [217, 181, 139, 76, 55, 29, 16]
+first: pt=(55.0, 208.0) size=31.0 angle=160.8 level=0
+descriptor bytes: [227, 131, 228, 92, 205, 241, 252, 103]  bits: [1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1]
+Hamming distance between descriptors 0 and 1: 98
+```
+
+Keypoint positions on smaller levels are given in full-image coordinates, and `size` is the patch size (31) times the level's scale.
+
+### 3. Speed (needs a timer, not compared)
+
+```python
+# Needs a timing run: numbers depend on the machine
+import time
+for name, det in [("ORB", cv2.ORB_create(1000)), ("SIFT", cv2.SIFT_create())]:
+    det.detectAndCompute(a, None)
+    t0 = time.perf_counter()
+    for _ in range(20):
+        det.detectAndCompute(a, None)
+    print(name, round((time.perf_counter() - t0) / 20 * 1000, 2), "ms")
+```
+
+Typical output (one machine: 2-core Xeon at 2.1 GHz):
+
+```text
+ORB 2.39 ms
+SIFT 21.99 ms
+```
+
+## OpenCV API notes
+
+- **`cv2.ORB_create(nfeatures=500, scaleFactor=1.2, nlevels=8, edgeThreshold=31, firstLevel=0, WTA_K=2, scoreType=cv2.ORB_HARRIS_SCORE, patchSize=31, fastThreshold=20)`**.
+  - `nfeatures`: maximum kept (best by score). The default 500 is often too few for stitching or SLAM.
+  - `scaleFactor`, `nlevels`: the pyramid. `edgeThreshold` ≈ `patchSize`: border where no keypoints are detected.
+  - `WTA_K=2`: plain bit tests. 3 or 4 compare 3 or 4 points per test (2 bits each); then match with `NORM_HAMMING2`.
+  - `scoreType`: `ORB_HARRIS_SCORE` (default) or `ORB_FAST_SCORE` (slightly faster, less stable).
+- **Descriptors**: uint8, N × 32. Match with **`cv2.NORM_HAMMING`** (34.4).
+- **`cv2.norm(d1, d2, cv2.NORM_HAMMING)`**: Hamming distance of two descriptors.
+- **Plain BRIEF** (`cv2.xfeatures2d.BriefDescriptorExtractor_create`) is in opencv-contrib; ORB is in the main module.
+
+## Where it fails
+
+- **Large scale changes** beyond the pyramid's range (1.2⁷ ≈ 3.6×).
+- **Strong blur** or **low texture**: few FAST points.
+- **Viewpoint changes** beyond about 30–40°: BRIEF tests compare pixels that no longer correspond.
+- **Clustered keypoints**: ORB tends to concentrate points on high-contrast areas; split the image into cells if you need coverage.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Matching ORB with `NORM_L2`**: it treats bytes as numbers; use `NORM_HAMMING` (or `NORM_HAMMING2` for WTA_K 3 or 4).
+- **Keeping the default nfeatures = 500** for stitching or mapping: too few, too concentrated.
+- **Small images**: with edgeThreshold 31, nothing is detected within 31 px of the border; a 100 × 100 crop has little room left.
+- **Comparing ORB `size` with SIFT `size`**: different meanings.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The intensity centroid
+
+Rosin's moments [3]: m_pq = Σ x^p y^q I(x, y) over a circle of radius r around the keypoint. The centroid is (m10/m00, m01/m00), and the orientation is θ = atan2(m01, m10). It is cheap and, compared in the ORB paper with gradient-histogram orientations, more robust in their tests [2].
+
+### Learning the test pairs (rBRIEF)
+
+Steered BRIEF loses some of BRIEF's variance: once tests are aligned with the keypoint's orientation, many give similar answers. Rublee et al. [2] searched among all pairs inside the 31 × 31 patch (with 5 × 5 sub-window means) for 256 tests with mean near 0.5 and low mutual correlation, using about 300 000 keypoints from a training set; OpenCV stores the resulting pattern as a table.
+
+### Other binary descriptors
+
+BRISK (Leutenegger et al., 2011) uses a concentric sampling pattern and long-distance pairs for orientation; FREAK (Alahi et al., 2012) uses a retina-inspired pattern; AKAZE's M-LDB (34.3) compares cell means and gradients rather than single pixels.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A BRIEF bit is 1 when…",
+      options: ["the gradient is positive", "the smoothed intensity at p is lower than at q", "the pixel is a corner", "the patch is bright"],
+      answer: 1,
+      explanation: "One comparison per bit, 256 bits.",
+    },
+    {
+      question: "Two unrelated 256-bit descriptors differ in about…",
+      options: ["0 bits", "32 bits", "128 bits", "256 bits"],
+      answer: 2,
+      explanation: "Half the bits, like two random strings (127 in the example).",
+    },
+    {
+      question: "Why does ORB rotate (steer) the BRIEF test pattern?",
+      options: ["To make it faster", "Because plain BRIEF is not rotation invariant", "To add more bits", "To handle colour"],
+      answer: 1,
+      explanation: "57 differing bits unsteered vs 20 steered in the example.",
+    },
+    {
+      question: "Which norm do you use to match ORB descriptors (WTA_K = 2)?",
+      options: ["NORM_L1", "NORM_L2", "NORM_HAMMING", "NORM_INF"],
+      answer: 2,
+      explanation: "Binary descriptors: XOR and count.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Patch (smoothed) [[10, 20], [30, 40]]. Tests: (0,0)–(1,1), (0,1)–(1,0), (1,1)–(0,0). Descriptor? And after rotating the patch by 180°, i.e. [[40, 30], [20, 10]]?
+
+<Solution>
+
+Original: 10 < 40 → 1; 20 < 30 → 1; 40 < 10 → 0: **110**. Rotated: 40 < 10 → 0; 30 < 20 → 0; 10 < 40 → 1: **001**. All three bits changed: Hamming distance 3 of 3.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Detect ORB with `nfeatures` 200, 500 and 2000 on the poster. How many keypoints does each return?
+
+<Solution>
+
+```python
+for n in (200, 500, 2000):
+    print(n, len(cv2.ORB_create(nfeatures=n).detect(a, None)))
+```
+
+Output:
+
+```text
+200 187
+500 434
+2000 831
+```
+
+ORB returns fewer than `nfeatures`: it splits the budget over the pyramid levels (more for the large levels), and a level that has fewer good corners than its share leaves the total short. (With 1000, it returned 713.)
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+You track a forklift camera's motion through a warehouse at 30 fps on an embedded CPU. SIFT or ORB, and why?
+
+<Solution>
+
+**ORB**: about 10× faster here, binary matching is cheap, and frame-to-frame changes in scale and viewpoint are small. SIFT's extra robustness is not needed between consecutive frames.
+
+</Solution>
+
+## References
+
+1. M. Calonder, V. Lepetit, C. Strecha, P. Fua, "BRIEF: Binary robust independent elementary features," *Proc. ECCV*, 2010, pp. 778–792.
+2. E. Rublee, V. Rabaud, K. Konolige, G. Bradski, "ORB: an efficient alternative to SIFT or SURF," *Proc. IEEE ICCV*, 2011, pp. 2564–2571.
+3. P. L. Rosin, "Measuring corner properties," *Computer Vision and Image Understanding* 73(2), 1999, pp. 291–307.
+4. R. Mur-Artal, J. M. M. Montiel, J. D. Tardós, "ORB-SLAM: a versatile and accurate monocular SLAM system," *IEEE Trans. Robotics* 31(5), 2015, pp. 1147–1163.
+5. OpenCV 4.13.0 documentation: `ORB`, `norm`, `NormTypes`; tutorial "ORB (Oriented FAST and Rotated BRIEF)". https://docs.opencv.org/4.13.0/

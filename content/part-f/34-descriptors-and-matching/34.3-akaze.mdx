@@ -1,0 +1,351 @@
+export const meta = {
+  number: "34.3",
+  title: "AKAZE",
+  minutes: 20,
+  objectives: [
+    "Explain why a nonlinear (edge-preserving) scale space can give better keypoints than a Gaussian one",
+    "Compute one step of Perona–Malik diffusion by hand",
+    "Use cv2.AKAZE_create and cv2.KAZE_create and read their output",
+    "Compare AKAZE with SIFT and ORB honestly on a test pair",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 34.3 (Part F, Module 34).
+  Lab: DescLab mode "keypoints" with AKAZE.
+  Reference tail: deterministic examples compared automatically; timing labelled typical output.
+*/}
+
+# 34.3 AKAZE
+
+<Definition term="KAZE and AKAZE">feature detectors and descriptors that build their scale space by **nonlinear diffusion**, a blur that smooths inside regions but stops at edges, instead of Gaussian blur. KAZE (2012) solves the diffusion accurately and slowly; Accelerated-KAZE (AKAZE, 2013) uses a fast solver and a binary descriptor (M-LDB, 486 bits), so it is free, reasonably fast and in OpenCV's main module.</Definition>
+
+SIFT's Gaussian scale space blurs everything equally: at coarse scales, object boundaries are smeared together with noise and texture, and keypoints there become less precise. Alcantarilla, Bartoli and Davison (KAZE, "wind" in Japanese) proposed keeping boundaries sharp while the scale grows.
+
+## 1. An analogy
+
+Ink dropped on paper spreads in every direction (Gaussian blur). Ink dropped on paper with a waxed line drawn across it spreads freely on each side but does not cross the line. Nonlinear diffusion is the second kind: the "wax" is wherever the image has a strong edge.
+
+## 2. Nonlinear diffusion and the AKAZE pipeline
+
+<Flow
+  steps={[
+    { label: "Grey image", tone: "data" },
+    { label: "Nonlinear scale space: diffuse, with conductance g small at strong edges", tone: "process" },
+    { label: "Keypoints: maxima of the scale-normalised Hessian determinant", tone: "process" },
+    { label: "Orientation (dominant gradient direction)", tone: "process" },
+    { label: "M-LDB binary descriptor: 486 bits from cell means and gradients", tone: "result" },
+  ]}
+/>
+
+Diffusion updates every pixel by the flow from its neighbours, each weighted by a **conductance**:
+
+```text
+L ← L + τ · Σ over the 4 neighbours  g(ΔL) · ΔL        g(d) = 1 / (1 + (d / k)²)
+```
+
+Small differences (noise, texture): g ≈ 1, they are smoothed away. Large differences (edges): g ≈ 0, almost no flow across. With g = 1 everywhere this is plain heat diffusion, which is Gaussian blur.
+
+Measured on the poster after 20 steps (k = 10, τ = 0.2), against a Gaussian of σ = 2:
+
+| Image | Noise std on a plain patch | Strongest edge gradient |
+| --- | --- | --- |
+| original | 2.66 | 690 |
+| Gaussian σ = 2 | 0.35 | 251 |
+| nonlinear diffusion | **0.24** | **662** |
+
+The nonlinear version removes as much noise as the Gaussian, but keeps the edges almost as sharp as in the original.
+
+**AKAZE's other parts**: keypoints are maxima of the determinant of the Hessian (second derivatives) over x, y and scale; the descriptor **M-LDB** (Modified Local Difference Binary) splits the patch into grids of 2 × 2, 3 × 3 and 4 × 4 cells and compares cell means and mean derivatives between pairs of cells, giving 486 bits (stored in 61 bytes). It is rotated with the keypoint and sampled at the keypoint's scale.
+
+## 3. A worked example by hand
+
+1-D signal 10, 10, **10**, 100, 100. Update the middle pixel (value 10) with k = 10, τ = 0.2:
+
+| Neighbour | Difference d | g(d) = 1 / (1 + (d/10)²) | g · d |
+| --- | --- | --- | --- |
+| left (10) | 0 | 1 | 0 |
+| right (100) | 90 | 1 / 82 = 0.0122 | 1.10 |
+
+New value: 10 + 0.2 × (0 + 1.10) = **10.22**. With linear diffusion (g = 1): 10 + 0.2 × 90 = **28**. The edge is barely touched by the nonlinear step, and the linear step starts to smear it.
+
+A noise wiggle instead: 10, 12, **10**: d = 2 on both sides, g = 1 / 1.04 = 0.96, so it is smoothed almost like with linear diffusion.
+
+## 4. On the poster pair
+
+| AKAZE threshold | Keypoints in A |
+| --- | --- |
+| 0.001 (default) | 149 |
+| 0.0005 | 207 |
+| 0.0002 | 277 |
+
+Matching with the ratio test (34.4), correct within 3 px of the true position:
+
+| Method | Ratio-test matches | Correct |
+| --- | --- | --- |
+| AKAZE, default threshold | 27 | 22 |
+| AKAZE, threshold 0.0002 | 53 | 45 |
+| ORB (1000 features) | 149 | 145 |
+| SIFT | 114 | 100 |
+
+On this small (320 × 240), synthetic, sharp pair AKAZE finds the fewest points and matches. Its strengths, precise keypoints at coarse scales and robustness to blur, show more on larger natural images; Alcantarilla et al. report results comparable to or better than SIFT on standard benchmark sequences [2]. The lesson is general: **measure on your own images** before choosing a feature.
+
+Time on one machine (2-core Xeon at 2.1 GHz): AKAZE 7.5 ms, KAZE 41.2 ms for the 320 × 240 poster (ORB 2.4 ms, SIFT 22.0 ms).
+
+<DescLab mode="keypoints" detector="AKAZE" caption="AKAZE keypoints on the poster and their 486-bit M-LDB descriptors (white = 1). Compare the keypoint positions and sizes with SIFT and ORB using the detector buttons."/>
+
+## 5. Industrial use
+
+- **Registration of images with blur or soft edges**: AKAZE's scale space keeps boundaries, useful for slightly defocused or motion-blurred shots.
+- **Free alternative to SIFT/SURF** with binary matching (SURF remains patented in some jurisdictions and is only in opencv-contrib's non-free build).
+- **Medical and microscopy alignment**, where Gaussian blur merges nearby structures.
+
+## What you should remember from 34.3
+
+<Takeaways>
+<Takeaway n={1} title="Nonlinear scale space">Diffusion that stops at edges: g(d) = 1 / (1 + (d/k)²).</Takeaway>
+<Takeaway n={2} title="AKAZE">Fast diffusion solver + Hessian keypoints + M-LDB binary descriptor (486 bits, Hamming).</Takeaway>
+<Takeaway n={3} title="KAZE">Same idea, float descriptor (64), about 5× slower here.</Takeaway>
+<Takeaway n={4} title="Measure">On our small poster, ORB and SIFT matched better; test on your own data.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** k = 10. What is g for a difference of 10? Of 30?
+
+<Solution>
+
+g(10) = 1 / (1 + 1) = **0.5**; g(30) = 1 / (1 + 9) = **0.1**.
+
+</Solution>
+
+**Q2.** Which norm matches AKAZE descriptors?
+
+<Solution>
+
+**NORM_HAMMING**: M-LDB is binary. (KAZE's descriptor is float: NORM_L2.)
+
+</Solution>
+
+### Next: 34.4 Matching and the ratio test
+
+## Code
+
+### 1. Nonlinear diffusion from scratch
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-poster.png", cv2.IMREAD_GRAYSCALE).astype(np.float64)
+
+def perona_malik(L, k=10.0, steps=20, tau=0.2):
+    """Explicit nonlinear diffusion: smooths where gradients are small, stops at strong edges."""
+    L = L.copy()
+    for _ in range(steps):
+        n = np.roll(L, -1, 0) - L; s = np.roll(L, 1, 0) - L        # differences to the 4 neighbours
+        e = np.roll(L, -1, 1) - L; w = np.roll(L, 1, 1) - L
+        g = lambda d: 1.0 / (1.0 + (d / k) ** 2)                  # conductance: ~1 on flat, ~0 on edges
+        L += tau * (g(n) * n + g(s) * s + g(e) * e + g(w) * w)
+    return L
+
+flat = (slice(150, 170), slice(205, 225))                       # a 20 × 20 patch of plain background
+pm = perona_malik(img)
+gauss = cv2.GaussianBlur(img, (0, 0), 2.0)                       # roughly the same smoothing on flat areas
+for name, im in [("original", img), ("Gaussian sigma 2", gauss), ("nonlinear diffusion", pm)]:
+    grad = np.hypot(cv2.Sobel(im, cv2.CV_64F, 1, 0), cv2.Sobel(im, cv2.CV_64F, 0, 1))
+    print(f"{name:20s} noise std on flat patch {im[flat].std():5.2f}   strongest edge gradient {grad.max():7.1f}")
+```
+
+Output:
+
+```text
+original             noise std on flat patch  2.66   strongest edge gradient   690.2
+Gaussian sigma 2     noise std on flat patch  0.35   strongest edge gradient   251.4
+nonlinear diffusion  noise std on flat patch  0.24   strongest edge gradient   661.7
+```
+
+`np.roll` wraps around at the image border; that is acceptable for this comparison (the measured patch is far from the border). τ ≤ 0.25 keeps the explicit scheme stable.
+
+### 2. cv2.AKAZE_create and cv2.KAZE_create
+
+```python
+a = cv2.imread("sample-poster.png", cv2.IMREAD_GRAYSCALE)
+for thr in (0.001, 0.0005, 0.0002):
+    ak = cv2.AKAZE_create(threshold=thr)
+    ka, da = ak.detectAndCompute(a, None)
+    print(f"threshold {thr}: {len(ka)} keypoints, descriptor {da.shape} {da.dtype}")
+ka, da = cv2.AKAZE_create().detectAndCompute(a, None)
+print("bits per descriptor:", da.shape[1] * 8, " first size/angle/octave:", round(ka[0].size, 1), round(ka[0].angle, 1), ka[0].octave)
+kz, dz = cv2.KAZE_create().detectAndCompute(a, None)
+print("KAZE:", len(kz), "keypoints, descriptor", dz.shape, dz.dtype)
+```
+
+Output:
+
+```text
+threshold 0.001: 149 keypoints, descriptor (149, 61) uint8
+threshold 0.0005: 207 keypoints, descriptor (207, 61) uint8
+threshold 0.0002: 277 keypoints, descriptor (277, 61) uint8
+bits per descriptor: 488  first size/angle/octave: 4.8 74.2 0
+KAZE: 272 keypoints, descriptor (272, 64) float32
+```
+
+The full M-LDB descriptor has 486 comparisons; OpenCV stores it in 61 bytes (488 bits).
+
+### 3. Matching quality against the true homography
+
+```python
+b = cv2.imread("sample-poster-b.png", cv2.IMREAD_GRAYSCALE)
+c, s = 0.75 * np.cos(np.radians(25)), 0.75 * np.sin(np.radians(25))
+H = np.array([[c, -s, 95], [s, c, -10], [0.0004, -0.0003, 1.0]])
+
+def evaluate(det, norm):
+    ka, da = det.detectAndCompute(a, None)
+    kb, db = det.detectAndCompute(b, None)
+    good = [m for m, n in cv2.BFMatcher(norm).knnMatch(da, db, k=2) if m.distance < 0.75 * n.distance]
+    ok = sum(np.hypot(*(cv2.perspectiveTransform(np.array([[ka[m.queryIdx].pt]]), H).ravel() - kb[m.trainIdx].pt)) <= 3 for m in good)
+    return len(good), int(ok)
+
+for name, det, norm in [("AKAZE 0.001", cv2.AKAZE_create(), cv2.NORM_HAMMING),
+                        ("AKAZE 0.0002", cv2.AKAZE_create(threshold=0.0002), cv2.NORM_HAMMING),
+                        ("ORB 1000", cv2.ORB_create(1000), cv2.NORM_HAMMING),
+                        ("SIFT", cv2.SIFT_create(), cv2.NORM_L2)]:
+    print(f"{name:13s} ratio-test matches, correct: {evaluate(det, norm)}")
+```
+
+Output:
+
+```text
+AKAZE 0.001   ratio-test matches, correct: (27, 22)
+AKAZE 0.0002  ratio-test matches, correct: (53, 45)
+ORB 1000      ratio-test matches, correct: (149, 145)
+SIFT          ratio-test matches, correct: (114, 100)
+```
+
+## OpenCV API notes
+
+- **`cv2.AKAZE_create(descriptor_type=cv2.AKAZE_DESCRIPTOR_MLDB, descriptor_size=0, descriptor_channels=3, threshold=0.001, nOctaves=4, nOctaveLayers=4, diffusivity=cv2.KAZE_DIFF_PM_G2, max_points=-1)`**.
+  - `descriptor_size=0`: full size (486 bits); a smaller number of bits gives shorter descriptors.
+  - `descriptor_channels`: 1 (means only), 2 or 3 (means and both derivatives).
+  - `threshold`: detector response threshold; lower → more keypoints.
+  - `diffusivity`: conductance `KAZE_DIFF_PM_G1`, `PM_G2` (the 1 / (1 + (d/k)²) form above), `WEICKERT`, `CHARBONNIER`.
+  - `max_points`: keep at most this many (the strongest), negative = no limit.
+- **`cv2.KAZE_create(extended=False, upright=False, threshold=0.001, ...)`**: float descriptor of 64 (128 if `extended`); `upright=True` skips orientation (faster, not rotation invariant).
+- **Input**: 8-bit grey (colour is converted). Match AKAZE (MLDB) with `NORM_HAMMING`, KAZE with `NORM_L2`.
+
+## Where it fails
+
+- **Small or low-resolution images**: few octaves fit, few keypoints (as on our 320 × 240 poster).
+- **Strong perspective**: like SIFT, only rotation and scale are normalised.
+- **Speed-critical loops**: several times slower than ORB.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Matching AKAZE with NORM_L2**: it is binary.
+- **Lowering `threshold` blindly**: more points, but many weak ones; check the precision of the matches.
+- **Assuming "newer = better"**: on our pair ORB matched best; benchmark on representative images.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Perona–Malik and the FED solver
+
+Perona and Malik [3] introduced edge-stopping diffusion ∂L/∂t = div(g(|∇L|) ∇L). KAZE [1] solves it with an implicit (AOS) scheme, which is stable for large time steps but expensive. AKAZE [2] uses **Fast Explicit Diffusion** (FED): cycles of explicit steps with varying step sizes, some of which would be unstable on their own, chosen so that the whole cycle is stable and covers a large total time. This gives most of KAZE's quality at a fraction of the cost.
+
+### The contrast parameter k
+
+KAZE and AKAZE set k automatically as the 70 % percentile of the gradient magnitude histogram of a smoothed version of the image, so it adapts to the image's contrast.
+
+### M-LDB
+
+LDB (Yang and Cheng) compares the mean intensity and mean x and y derivatives between pairs of grid cells. AKAZE's modification samples the grid at the keypoint's scale and orientation; with 3 channels and grids of 2 × 2, 3 × 3 and 4 × 4 cells there are 3 × (6 + 36 + 120) = 486 binary comparisons.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What makes AKAZE's scale space different from SIFT's?",
+      options: ["It uses colour", "Nonlinear diffusion that preserves edges instead of Gaussian blur", "It has no octaves", "It uses FAST"],
+      answer: 1,
+      explanation: "Smoothing stops where the conductance is small, at strong edges.",
+    },
+    {
+      question: "With k = 10, the conductance for a difference of 90 is about…",
+      options: ["0.9", "0.5", "0.012", "1"],
+      answer: 2,
+      explanation: "1 / (1 + 81) ≈ 0.012: almost no flow across the edge.",
+    },
+    {
+      question: "AKAZE's M-LDB descriptor has…",
+      options: ["128 floats", "256 bits", "486 bits in 61 bytes", "64 floats"],
+      answer: 2,
+      explanation: "Matched with Hamming distance.",
+    },
+    {
+      question: "On the 320 × 240 poster pair, which method gave the most correct ratio-test matches?",
+      options: ["AKAZE", "KAZE", "ORB", "SIFT"],
+      answer: 2,
+      explanation: "ORB 145, SIFT 100, AKAZE 22 (45 with a lower threshold).",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Signal 50, **52**, 150 with k = 10, τ = 0.2. Update the middle value with nonlinear diffusion and with linear diffusion.
+
+<Solution>
+
+Left d = −2: g = 1/1.04 = 0.962, g·d = −1.92. Right d = 98: g = 1/(1 + 96.04) = 0.0103, g·d = 1.01. Nonlinear: 52 + 0.2 × (−1.92 + 1.01) = **51.82**. Linear: 52 + 0.2 × (−2 + 98) = **71.2**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Run AKAZE with `descriptor_size=256` (bits) and report the descriptor shape. How many ratio-test matches and how many correct ones do you get (use `evaluate` from Code example 3)?
+
+<Solution>
+
+```python
+ak = cv2.AKAZE_create(descriptor_size=256)
+print(ak.detectAndCompute(a, None)[1].shape, evaluate(ak, cv2.NORM_HAMMING))
+```
+
+Output:
+
+```text
+(149, 32) (28, 20)
+```
+
+32 bytes instead of 61: slightly more matches but 2 fewer correct ones (20 of 28 vs 22 of 27). Shorter descriptors are less distinctive.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Your images of turbine blades are slightly out of focus and the blades have smooth, rounded edges. SIFT gives poorly localised keypoints. Why might AKAZE help, and how would you decide?
+
+<Solution>
+
+AKAZE's nonlinear scale space keeps the blade boundaries sharper at coarse scales, which can localise keypoints better on blurred, smooth structures. Decide by measuring: register pairs with a known transformation (or with manual ground-truth points) and compare the precision and the residual error of each method.
+
+</Solution>
+
+## References
+
+1. P. F. Alcantarilla, A. Bartoli, A. J. Davison, "KAZE features," *Proc. ECCV*, 2012, pp. 214–227.
+2. P. F. Alcantarilla, J. Nuevo, A. Bartoli, "Fast explicit diffusion for accelerated features in nonlinear scale spaces," *Proc. BMVC*, 2013.
+3. P. Perona, J. Malik, "Scale-space and edge detection using anisotropic diffusion," *IEEE Trans. PAMI* 12(7), 1990, pp. 629–639.
+4. X. Yang, K.-T. Cheng, "LDB: An ultra-fast feature for scalable augmented reality on mobile devices," *Proc. IEEE ISMAR*, 2012, pp. 49–57.
+5. OpenCV 4.13.0 documentation: `AKAZE`, `KAZE`; tutorial "AKAZE local features matching". https://docs.opencv.org/4.13.0/

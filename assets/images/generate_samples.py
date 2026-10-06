@@ -633,6 +633,43 @@ ft_b = cv2.warpPerspective(images["sample-feat.png"].astype(np.float64), FEAT_H,
                            borderMode=cv2.BORDER_CONSTANT, borderValue=110)
 images["sample-feat-b.png"] = np.clip(np.rint(ft_b * 0.8 + 20 + np.random.default_rng(34).normal(0, 3, ft_b.shape)), 0, 255).astype(np.uint8)
 
+# Module 34: textured "poster" scene for descriptors and matching, a second view under a known homography
+# (rotation 25 deg, scale 0.75, perspective; gain 0.7, offset +30), and two overlapping views for stitching.
+def poster(w, h, seed):
+    rng = np.random.default_rng(seed)
+    img = np.full((h, w), 128.0)
+    for _ in range(int(w * h / 900)):
+        kind = rng.integers(0, 4); g = float(rng.integers(20, 236))
+        x, y = int(rng.integers(0, w)), int(rng.integers(0, h)); s = int(rng.integers(4, 22))
+        if kind == 0: cv2.circle(img, (x, y), s, g, -1, cv2.LINE_AA)
+        elif kind == 1: cv2.rectangle(img, (x, y), (x + s, y + int(rng.integers(4, 22))), g, -1)
+        elif kind == 2:
+            pts = np.c_[x + rng.integers(-s, s, 3), y + rng.integers(-s, s, 3)].astype(np.int32)
+            cv2.fillPoly(img, [pts], g, cv2.LINE_AA)
+        else: cv2.ellipse(img, (x, y), (s, max(2, s // 3)), float(rng.integers(0, 180)), 0, 360, g, -1, cv2.LINE_AA)
+    words = ["LOT 4471", "QC OK", "B-17", "ZX9", "PASS", "M8x20", "AUG", "7731"]
+    for i in range(int(w * h / 9000)):
+        cv2.putText(img, words[int(rng.integers(0, len(words)))], (int(rng.integers(0, w - 60)), int(rng.integers(15, h))),
+                    cv2.FONT_HERSHEY_SIMPLEX, float(rng.uniform(0.4, 0.8)), float(rng.choice([15, 240])), 1 + int(rng.integers(0, 2)), cv2.LINE_AA)
+    img = cv2.GaussianBlur(img, (0, 0), 0.7)
+    return img
+PO = poster(320, 240, 34)
+po_a = np.clip(np.rint(PO + np.random.default_rng(1).normal(0, 3, PO.shape)), 0, 255).astype(np.uint8)
+c, s = 0.75 * np.cos(np.radians(25)), 0.75 * np.sin(np.radians(25))
+POSTER_H = np.array([[c, -s, 95], [s, c, -10], [0.0004, -0.0003, 1.0]])
+po_b = cv2.warpPerspective(PO, POSTER_H, (320, 240), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=100)
+po_b = np.clip(np.rint(po_b * 0.7 + 30 + np.random.default_rng(2).normal(0, 3, po_b.shape)), 0, 255).astype(np.uint8)
+W = poster(440, 220, 35)
+left = W[:, :300]
+Hr = np.array([[0.98, 0.04, -140], [-0.03, 0.99, 6], [0.0, 0.00006, 1.0]])   # right view: maps pano coords -> right image
+right = cv2.warpPerspective(W, Hr, (300, 220), borderMode=cv2.BORDER_REFLECT)
+L = np.clip(np.rint(left + np.random.default_rng(3).normal(0, 3, left.shape)), 0, 255).astype(np.uint8)
+R = np.clip(np.rint(right * 0.9 + 18 + np.random.default_rng(4).normal(0, 3, right.shape)), 0, 255).astype(np.uint8)
+images["sample-poster.png"] = po_a
+images["sample-poster-b.png"] = po_b
+images["sample-pano-left.png"] = L
+images["sample-pano-right.png"] = R
+
 for name, img in images.items():
     ok = cv2.imwrite(str(OUT / name), img)
     assert ok, f"could not write {name}"

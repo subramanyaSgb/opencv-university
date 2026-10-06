@@ -138,3 +138,4 @@ export { FourierLab } from "./FourierLab";
 export { BasisLab } from "./BasisLab";
 export { MatchLab } from "./MatchLab";
 export { FeatureLab } from "./FeatureLab";
+export { DescLab } from "./DescLab";

@@ -1,0 +1,13 @@
+{
+  "number": 34,
+  "title": "Descriptors and matching",
+  "summary": "Describing keypoints so they can be matched between images: SIFT, ORB and BRIEF, AKAZE, nearest-neighbour matching with the ratio test, homographies with RANSAC, and image stitching.",
+  "chapters": [
+    { "number": "34.1", "slug": "34.1-sift", "title": "SIFT" },
+    { "number": "34.2", "slug": "34.2-orb-and-brief", "title": "ORB and BRIEF" },
+    { "number": "34.3", "slug": "34.3-akaze", "title": "AKAZE" },
+    { "number": "34.4", "slug": "34.4-matching-and-ratio-test", "title": "Matching and the ratio test" },
+    { "number": "34.5", "slug": "34.5-homography", "title": "Homography" },
+    { "number": "34.6", "slug": "34.6-stitching", "title": "Stitching" }
+  ]
+}

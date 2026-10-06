@@ -1,0 +1,336 @@
+export const meta = {
+  number: "34.6",
+  title: "Stitching",
+  minutes: 22,
+  objectives: [
+    "List the steps of image stitching: features, matching, homography, warping, compensation, blending",
+    "Stitch two images by hand with ORB, RANSAC and warpPerspective",
+    "Reduce visible seams with gain compensation and feathering, and measure the improvement",
+    "Use cv2.Stitcher and know its modes and failure codes",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 34.6 (Part F, Module 34).
+  Lab: DescLab mode "stitch" (ORB + RANSAC on sample-pano-left/right; overwrite, average, feather; gain compensation).
+  Reference tail: all examples are deterministic (cv2.setRNGSeed) and compared automatically.
+*/}
+
+# 34.6 Stitching
+
+<Definition term="Image stitching">combining overlapping images into one larger image (a panorama or mosaic): find matching features in the overlap, estimate the transformation between the images, warp them into a common frame, equalise their brightness and blend the overlap so no seam is visible.</Definition>
+
+Stitching puts everything of this module together. It is also an everyday industrial task: one camera cannot see a 2 m steel sheet at 0.1 mm per pixel, but six overlapping shots can, if they are joined precisely.
+
+## 1. An analogy
+
+Laying overlapping photographs of a long wall on a table: you slide and turn each new print until the shared part lines up, then tape it down. If one print is darker, the join shows; you would lighten it and soften the edge so the eye does not notice the transition.
+
+## 2. The pipeline
+
+<Flow
+  steps={[
+    { label: "Overlapping images", tone: "data" },
+    { label: "Features + ratio-test matching (34.1–34.4)", tone: "process" },
+    { label: "Homography with RANSAC (34.5)", tone: "process" },
+    { label: "Warp into a common canvas", tone: "process" },
+    { label: "Gain compensation, seam finding, blending", tone: "process" },
+    { label: "Panorama", tone: "result" },
+  ]}
+/>
+
+- **Model**: a homography is exact for a plane (a sheet, a wall, a floor) or for a camera that only rotates. For long scans, a camera moving along a flat object gives an **affine** model (OpenCV's SCANS mode).
+- **Canvas**: transform the corners of each image to find the panorama's size.
+- **Gain compensation**: the overlap is the same scene, so its brightness should match; scale each image by a gain that equalises the overlap means.
+- **Blending**: overwrite (hard seam), average (ghosting if alignment is imperfect), **feathering** (weights that fall towards each image's border), or multi-band blending (20.3) for the best results.
+
+## 3. A worked example by hand: canvas and feather weights
+
+The right image (300 px wide) maps into the left image's frame with its corners at x = 144, 446, 442 and 132. The left image covers x = 0 … 299. The panorama must be **446 px** wide, and the overlap is about x = 132 … 299.
+
+At a pixel in the overlap at x = 250 (row in the middle), the distances to the borders are:
+
+| Image | Distance to its nearest border | Weight |
+| --- | --- | --- |
+| left (border at x = 299) | 49 | 49 / (49 + 106) = 0.32 |
+| right (border at x ≈ 144) | 106 | 106 / 155 = 0.68 |
+
+With left = 120 and right (after gain) = 128: blended = 0.32 × 120 + 0.68 × 128 = **125.4**. Moving right, the left weight falls to 0 at x = 299, so there is no jump at the left image's edge.
+
+## 4. Two views of a poster
+
+The left view and a right view that is shifted by about 140 px, slightly rotated and in perspective, darker (gain 0.9, +18) and with its own noise:
+
+- ORB with ratio test: **25** matches, **24** RANSAC inliers. The mean corner error against the true transformation is **2.2 px**: usable, but a few more matches spread over the overlap would make it tighter.
+- In the overlap, the mean grey levels are 125.2 (left) and 130.8 (right). **Gain compensation** (0.958) cuts the mean difference from 6.47 to 4.49 grey levels.
+- At the left image's edge (x = 300) a **hard paste** jumps by 7.01 grey levels on average; **feathering** reduces it to 2.58.
+- `cv2.Stitcher` with all of this built in returns a 470 × 224 panorama (PANORAMA mode) or 428 × 223 (SCANS mode).
+
+<DescLab mode="stitch" caption="Stitching the two views with ORB, ratio test and RANSAC, all computed live. Compare the blends: right image on top shows a seam at the left image's edge; averaging hides it but blurs wherever the alignment is off by a pixel or two; feathering hides the seam smoothly. Switch gain compensation off to see the brightness step."/>
+
+## 5. Industrial use
+
+- **Large parts at high resolution**: sheets, coils, PCBs, castings imaged in tiles by a moving camera or stage, stitched for inspection.
+- **Road, rail and tunnel inspection**: continuous mosaics from vehicle-mounted cameras (often with line-scan cameras, 59.7, and encoder-based positioning instead of features).
+- **Microscopy and wafer inspection**: tile stitching with stage positions as a first guess and feature/phase correlation (21.2) to refine.
+- **Panoramic site monitoring** from a rotating camera.
+
+When the stage position is known precisely (encoder, motion controller), use it; features then only correct small errors. Feature-based stitching is for when the geometry is not known.
+
+## What you should remember from 34.6
+
+<Takeaways>
+<Takeaway n={1} title="Pipeline">Features → matches → robust H → warp → gain → blend.</Takeaway>
+<Takeaway n={2} title="Model">Homography for planes or pure rotation; affine for scans along a flat object.</Takeaway>
+<Takeaway n={3} title="Seams">Gain compensation and feathering: seam jump 7.0 → 2.6 grey levels here.</Takeaway>
+<Takeaway n={4} title="Stitcher">cv2.Stitcher does it all (PANORAMA / SCANS); check its status code.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Ten images are stitched in a row, each homography with 0.5 px error at the far edge. What can happen at the end of the row?
+
+<Solution>
+
+Errors **accumulate**: the 10th image can be several pixels off, and a closed loop (360° panorama) will not close. Real stitchers solve all homographies jointly (bundle adjustment) instead of chaining them.
+
+</Solution>
+
+**Q2.** Why does averaging cause "ghosting" while feathering mostly does not?
+
+<Solution>
+
+Averaging gives both images equal weight everywhere in the overlap, so any misalignment shows as a double image across the whole overlap. Feathering gives one image most of the weight near its centre, so double edges appear only in a narrow transition zone.
+
+</Solution>
+
+### Next: 35.1 LBP
+
+## Code
+
+### 1. Stitching by hand: matches and homography
+
+```python
+import numpy as np
+import cv2
+
+left = cv2.imread("sample-pano-left.png", cv2.IMREAD_GRAYSCALE)
+right = cv2.imread("sample-pano-right.png", cv2.IMREAD_GRAYSCALE)
+orb = cv2.ORB_create(1500)
+kl, dl = orb.detectAndCompute(left, None)
+kr, dr = orb.detectAndCompute(right, None)
+good = [m for m, n in cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(dr, dl, k=2) if m.distance < 0.75 * n.distance]
+src = np.float32([kr[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+dst = np.float32([kl[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+cv2.setRNGSeed(1)
+H, mask = cv2.findHomography(src, dst, cv2.RANSAC, 3.0)             # right image -> left image's frame
+print(len(good), "matches,", int(mask.sum()), "inliers")
+Hr = np.array([[0.98, 0.04, -140], [-0.03, 0.99, 6], [0.0, 0.00006, 1.0]])   # how the right view was made
+H_true = np.linalg.inv(Hr)
+corners = np.float32([[0, 0], [300, 0], [300, 220], [0, 220]]).reshape(-1, 1, 2)
+print("mean corner error:", round(float(np.linalg.norm(cv2.perspectiveTransform(corners, H) - cv2.perspectiveTransform(corners, H_true), axis=2).mean()), 2), "px")
+right_corners = cv2.perspectiveTransform(corners, H).reshape(-1, 2)
+width = int(np.ceil(right_corners[:, 0].max()))
+print("panorama width:", width, " right image's corners in the left frame:", np.round(right_corners).astype(int).tolist())
+```
+
+Output:
+
+```text
+25 matches, 24 inliers
+mean corner error: 2.22 px
+panorama width: 446  right image's corners in the left frame: [[144, -2], [446, 9], [442, 231], [132, 224]]
+```
+
+The right image's top-left corner lands at y = −2: a real stitcher would also extend the canvas upward (or translate everything down); here the 2 px are simply cut.
+
+### 2. Warp, gain compensation and feathering
+
+```python
+width = 446
+canvas_r = cv2.warpPerspective(right.astype(np.float32), H, (width, 220))
+mask_r = cv2.warpPerspective(np.ones_like(right, np.float32), H, (width, 220)) > 0.999
+canvas_l = np.zeros((220, width), np.float32)
+canvas_l[:, :300] = left
+mask_l = np.zeros((220, width), bool)
+mask_l[:, :300] = True
+overlap = mask_l & mask_r
+gain = canvas_l[overlap].mean() / canvas_r[overlap].mean()
+print("overlap", int(overlap.sum()), "px; mean left", round(float(canvas_l[overlap].mean()), 1), " mean right", round(float(canvas_r[overlap].mean()), 1), " gain", round(float(gain), 3))
+for g, name in [(1.0, "no gain compensation"), (gain, "with gain compensation")]:
+    print(f"{name}: mean |left - right| in the overlap = {np.abs(canvas_l - canvas_r * g)[overlap].mean():.2f}")
+wl = cv2.distanceTransform(mask_l.astype(np.uint8), cv2.DIST_L2, 3)     # feather weights: distance to the border
+wr = cv2.distanceTransform(mask_r.astype(np.uint8), cv2.DIST_L2, 3)
+pano = (canvas_l * wl + canvas_r * gain * wr) / np.maximum(wl + wr, 1e-6)
+pano = np.clip(np.rint(pano), 0, 255).astype(np.uint8)
+hard = np.where(mask_l, canvas_l, canvas_r).astype(np.float32)          # left image wins, right fills the rest
+rows = mask_r[:, 300]                                                    # rows where both sides of x = 300 exist
+for name, im in [("hard paste", hard), ("feathered", pano.astype(np.float32))]:
+    print(f"{name:10s}: mean jump across x = 300 (edge of the left image): {np.abs(im[rows, 300] - im[rows, 299]).mean():.2f}")
+```
+
+Output:
+
+```text
+overlap 35255 px; mean left 125.2  mean right 130.8  gain 0.958
+no gain compensation: mean |left - right| in the overlap = 6.47
+with gain compensation: mean |left - right| in the overlap = 4.49
+hard paste: mean jump across x = 300 (edge of the left image): 7.01
+feathered : mean jump across x = 300 (edge of the left image): 2.58
+```
+
+The remaining 4.49 grey levels in the overlap come from noise (σ 3 in each image), the right image's interpolation and the 2 px alignment error.
+
+### 3. cv2.Stitcher
+
+```python
+left_c = cv2.imread("sample-pano-left.png")                        # Stitcher expects colour (BGR) images
+right_c = cv2.imread("sample-pano-right.png")
+for name, mode in [("PANORAMA", cv2.Stitcher_PANORAMA), ("SCANS", cv2.Stitcher_SCANS)]:
+    cv2.setRNGSeed(1)                                             # the Stitcher's RANSAC uses OpenCV's random generator
+    st = cv2.Stitcher_create(mode)
+    status, pano = st.stitch([left_c, right_c])
+    print(name, "status", status, "(0 = OK)", None if pano is None else pano.shape)
+```
+
+Output:
+
+```text
+PANORAMA status 0 (0 = OK) (224, 470, 3)
+SCANS status 0 (0 = OK) (223, 428, 3)
+```
+
+PANORAMA assumes a rotating camera and projects onto a sphere (the result is wider and slightly curved); SCANS uses an affine model on a plane, which fits a flat poster better.
+
+## OpenCV API notes
+
+- **`cv2.Stitcher_create(mode=cv2.Stitcher_PANORAMA)`**: `PANORAMA` (rotating camera, spherical warper, homographies, bundle adjustment of rotations, exposure compensation, graph-cut seams, multi-band blending) or `SCANS` (affine model, plane warper; for flat documents and scanned surfaces).
+- **`status, pano = stitcher.stitch(images[, masks])`**: `status` 0 = `Stitcher_OK`, 1 = `ERR_NEED_MORE_IMGS` (not enough confident matches between images), 2 = `ERR_HOMOGRAPHY_EST_FAIL`, 3 = `ERR_CAMERA_PARAMS_ADJUST_FAIL`. `pano` is `None` unless status is 0.
+- **Settings**: `setPanoConfidenceThresh` (lower to accept weaker image links, default 1.0), `setRegistrationResol`, `setCompositingResol`, `setWaveCorrection`.
+- **Building blocks** in `cv2.detail` (warpers, exposure compensators, seam finders, blenders) for custom pipelines.
+- **Manual pipeline**: `findHomography` + `warpPerspective` + your own blending, as in the code above; `cv2.distanceTransform` gives feather weights.
+
+## Where it fails
+
+- **Parallax**: a moving (not only rotating) camera in front of a 3D scene; objects at different depths cannot all align, causing ghosts or breaks.
+- **Small or featureless overlaps**: too few matches (as when this pair had only 100 px of overlap: 18 matches and a 17 px error).
+- **Moving objects** in the overlap: ghosts; seam finding routes the seam around them.
+- **Accumulated drift** in long sequences without global optimisation.
+- **Lens distortion**: undistort first (41.3), or the images bend against each other.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Too little overlap**: plan 30–50 % overlap between neighbouring shots.
+- **Not checking `status`**: `pano` is `None` on failure.
+- **Chaining pairwise homographies over long sequences** without global adjustment.
+- **Hard pasting** images with different exposure: always compensate gain and blend.
+- **Using PANORAMA mode for flat scans** taken by a translating camera; use SCANS (affine).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Automatic panoramas
+
+Brown and Lowe [1] built a fully automatic pipeline: SIFT matches between all image pairs, a probabilistic check of which pairs really overlap, bundle adjustment of all camera rotations and focal lengths together, gain compensation by least squares over all overlaps, and multi-band blending. OpenCV's Stitcher follows this design.
+
+### Seam finding
+
+Instead of blending a wide overlap, a seam can be cut where the two images agree best, found by dynamic programming or graph cuts (Kwatra et al. [3]); objects that moved between the shots are then kept from one image only. OpenCV offers `GraphCutSeamFinder` and `DpSeamFinder`.
+
+### Multi-band blending
+
+Burt and Adelson's Laplacian-pyramid blending (20.3) blends low frequencies over a wide region and high frequencies over a narrow one, avoiding both visible seams and blurred detail [2].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which transformation model fits two photos taken from a camera that only rotates on a tripod?",
+      options: ["Translation only", "Homography", "Fundamental matrix", "None"],
+      answer: 1,
+      explanation: "Pure rotation gives a homography for any scene.",
+    },
+    {
+      question: "Gain compensation in the example reduced the overlap difference from…",
+      options: ["6.47 to 4.49 grey levels", "7.01 to 2.58", "125 to 130", "25 to 24"],
+      answer: 0,
+      explanation: "Scaling the right image by 0.958.",
+    },
+    {
+      question: "What does feathering do?",
+      options: ["Sharpens the overlap", "Weights each image by its distance to its own border, so the transition is gradual", "Removes moving objects", "Finds the homography"],
+      answer: 1,
+      explanation: "The seam jump fell from 7.01 to 2.58.",
+    },
+    {
+      question: "stitcher.stitch returns status 1. What does it mean?",
+      options: ["Success", "Not enough images could be matched confidently (ERR_NEED_MORE_IMGS)", "Out of memory", "Wrong colour format"],
+      answer: 1,
+      explanation: "Usually too little overlap or texture.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Shots of a 1 200 mm long part, each covering 300 mm, with 30 % overlap between neighbours. How many shots are needed?
+
+<Solution>
+
+Each new shot adds 300 × 0.7 = 210 mm. After the first 300 mm, 900 mm remain: 900 / 210 = 4.3 → 5 more shots: **6 shots** in total.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Repeat Code example 1 with ratio 0.85 instead of 0.75. How many matches and inliers, and what corner error?
+
+<Solution>
+
+```python
+good = [m for m, n in cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(dr, dl, k=2) if m.distance < 0.85 * n.distance]
+src = np.float32([kr[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+dst = np.float32([kl[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+cv2.setRNGSeed(1)
+H2, mask2 = cv2.findHomography(src, dst, cv2.RANSAC, 3.0)
+err = np.linalg.norm(cv2.perspectiveTransform(corners, H2) - cv2.perspectiveTransform(corners, H_true), axis=2).mean()
+print(len(good), "matches,", int(mask2.sum()), "inliers, corner error", round(float(err), 2), "px")
+```
+
+Output:
+
+```text
+69 matches, 34 inliers, corner error 3.54 px
+```
+
+Worse, not better: the looser ratio added 44 matches but only 10 more inliers, and with half the matches wrong RANSAC settled on a less accurate H (3.54 px instead of 2.22). More matches only help when most of them are right.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A robot camera on a linear axis photographs a flat 2 m steel plate in 8 tiles. The axis encoder gives the position to ±0.05 mm. Should you stitch with features?
+
+<Solution>
+
+Use the encoder positions as the primary geometry (they are more reliable than features on a low-texture plate) and refine only small residual offsets, for example with phase correlation in the overlaps (21.2). Pure feature-based stitching risks failing on bare metal and drifting over 8 tiles.
+
+</Solution>
+
+## References
+
+1. M. Brown, D. G. Lowe, "Automatic panoramic image stitching using invariant features," *International Journal of Computer Vision* 74(1), 2007, pp. 59–73.
+2. P. J. Burt, E. H. Adelson, "A multiresolution spline with application to image mosaics," *ACM Trans. Graphics* 2(4), 1983, pp. 217–236.
+3. V. Kwatra, A. Schödl, I. Essa, G. Turk, A. Bobick, "Graphcut textures: image and video synthesis using graph cuts," *ACM Trans. Graphics* 22(3), 2003, pp. 277–286.
+4. R. Szeliski, "Image alignment and stitching: a tutorial," *Foundations and Trends in Computer Graphics and Vision* 2(1), 2006, pp. 1–104.
+5. OpenCV 4.13.0 documentation: `Stitcher`, `findHomography`, `warpPerspective`, `distanceTransform`, module `stitching` ("detail" namespace); tutorial "High level stitching API". https://docs.opencv.org/4.13.0/

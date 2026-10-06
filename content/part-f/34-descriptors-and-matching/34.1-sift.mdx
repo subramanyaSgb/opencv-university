@@ -1,0 +1,324 @@
+export const meta = {
+  number: "34.1",
+  title: "SIFT",
+  minutes: 25,
+  objectives: [
+    "Explain the four stages of SIFT: scale-space extrema, keypoint refinement, orientation, descriptor",
+    "Read a cv2.KeyPoint: position, size, angle, response, octave",
+    "Describe how the 128-number descriptor is built from gradient histograms",
+    "Show on real data that SIFT keypoints follow scale and rotation changes",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 34.1 (Part F, Module 34).
+  New lab: DescLab (lib/desc-ops.ts; data from scripts/gen_desc_data.py in public/data/desc-data.json).
+  New samples: sample-poster.png, sample-poster-b.png (POSTER_H), sample-pano-left/right.png.
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 34.1 SIFT
+
+<Definition term="SIFT (Scale-Invariant Feature Transform)">a method by David Lowe (1999, 2004) that finds keypoints as extrema of a difference-of-Gaussian scale space, gives each one a position, a scale and an orientation, and describes the patch around it with 128 numbers (histograms of gradient directions) that stay nearly the same when the image is rotated, scaled or re-lit.</Definition>
+
+The corner detectors of Module 33 tell you **where** a good point is, at one fixed scale. To find the same point in another photo, taken closer or at an angle, you need two more things: the point's **own scale and orientation**, so the comparison can be done in the point's own frame, and a **descriptor**, a fingerprint of its neighbourhood. SIFT provides all three. Its patent expired in March 2020, and since OpenCV 4.4 it is in the main module as `cv2.SIFT_create`.
+
+## 1. An analogy
+
+Two photos of the same poster, one taken from far away and tilted. To recognise a small sticker on it, you first zoom each photo so the sticker has the same size, then turn it so its "up" points the same way, and only then compare. SIFT does exactly this for every keypoint, automatically: it measures each point's size and direction and compares neighbourhoods in that normalised frame.
+
+## 2. The four stages
+
+<Flow
+  steps={[
+    { label: "Grey image", tone: "data" },
+    { label: "1. Scale space: blur more and more, subtract neighbours (DoG); find extrema in x, y and scale", tone: "process" },
+    { label: "2. Refine position and scale to sub-pixel; drop low-contrast and edge points", tone: "process" },
+    { label: "3. Orientation: dominant gradient direction around the point", tone: "process" },
+    { label: "4. Descriptor: 4 × 4 cells × 8 directions = 128 numbers, in the point's own frame", tone: "result" },
+  ]}
+/>
+
+**1. Scale space.** The image is blurred with Gaussians of increasing σ (1.6, 1.6·2^(1/3), …). Subtracting neighbouring blur levels gives the **difference of Gaussians** (DoG, 20.4), a band-pass that responds to blobs of a particular size. After every doubling of σ the image is halved (an **octave**). A keypoint is a pixel larger (or smaller) than all 26 neighbours: 8 in its own layer, 9 above, 9 below. Its σ is its **scale**.
+
+**2. Refinement.** A quadratic fit around the extremum gives sub-pixel position and scale. Points with weak DoG response (contrast threshold) are dropped, and so are points on edges (the ratio of the principal curvatures, the same idea as Harris, 33.2).
+
+**3. Orientation.** Gradient directions in a window around the point (scaled with σ) are collected in a 36-bin histogram weighted by magnitude. The peak is the keypoint's angle; any other peak above 80 % of it creates a second keypoint with that angle.
+
+**4. Descriptor.** A 16 × 16 grid (in units of the keypoint's scale, rotated to its angle) is split into 4 × 4 cells. Each cell gets an 8-bin histogram of gradient directions: 4 × 4 × 8 = **128 numbers**. The vector is normalised, values above 0.2 are clipped and it is normalised again, which reduces the effect of lighting.
+
+Because everything is measured relative to the keypoint's own scale and angle, the descriptor is the same (nearly) whether the poster is near or far, upright or turned.
+
+## 3. A worked example by hand: the orientation
+
+Six gradients around a keypoint (direction, magnitude), with a simplified 8-bin histogram (bins of 45°, centred on 0°, 45°, 90°, …):
+
+| Direction | Magnitude | Bin |
+| --- | --- | --- |
+| 10° | 4 | 0° |
+| 40° | 9 | 45° |
+| 50° | 7 | 45° |
+| 95° | 3 | 90° |
+| 200° | 2 | 180° |
+| 48° | 5 | 45° |
+
+Histogram: 0° → 4, 45° → 9 + 7 + 5 = **21**, 90° → 3, 180° → 2. The keypoint's orientation is **45°**: rotate the descriptor grid by 45° before building it. (Real SIFT uses 36 bins of 10°, Gaussian weights, smooths the histogram and interpolates the peak.)
+
+Descriptor size: 4 × 4 cells × 8 directions = **128**, each stored as a value 0 … 255 in OpenCV.
+
+## 4. On the poster pair
+
+The poster and the same poster seen again, rotated by 25°, scaled to 0.75, in perspective and darker:
+
+- SIFT finds **386** keypoints in view A and **214** in view B (B is smaller, so it has less detail).
+- Keypoint sizes range from 1.8 to 26.6 px (median 2.7): many small blobs, a few large ones.
+- Matching with the ratio test (34.4) gives 114 matches, of which **100** are correct.
+- For these 100 correct pairs, the median size ratio B / A is **0.72** (true scale 0.75) and the median angle change is **21.8°** (true rotation 25°; the perspective part shifts it a little).
+
+The keypoints have "followed" the scale and rotation: that is scale and rotation invariance in practice.
+
+<DescLab mode="keypoints" detector="SIFT" caption="SIFT keypoints on the poster (circle = size, line = orientation). Click a keypoint: its 128-number descriptor is drawn as 16 small direction histograms, and the readout says whether its nearest descriptor in the other view is the same physical point. Switch to ORB and AKAZE to compare their binary descriptors (34.2, 34.3)."/>
+
+## 5. Industrial use
+
+- **Object recognition from one example**: recognising a product, a part or a document type from a reference image (34.4, 34.5).
+- **Panoramas and mosaics** of large parts, walls, roads (34.6).
+- **3D reconstruction** and camera pose (Modules 43 and 44): SIFT is still a standard front end of structure-from-motion tools such as COLMAP.
+- **Where speed matters** (video, embedded), ORB or AKAZE usually replace it (34.2, 34.3).
+
+## What you should remember from 34.1
+
+<Takeaways>
+<Takeaway n={1} title="Scale space">Keypoints = extrema of difference-of-Gaussians over x, y and scale.</Takeaway>
+<Takeaway n={2} title="Own frame">Each keypoint has a scale (size) and an orientation (angle).</Takeaway>
+<Takeaway n={3} title="Descriptor">4 × 4 cells × 8 gradient directions = 128 values, normalised and clipped.</Takeaway>
+<Takeaway n={4} title="Invariance">Measured: size ratio 0.72 for a 0.75 zoom, angle change ≈ 22° for a 25° turn.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A keypoint has σ = 3.2 in an octave where the image was halved once. How large is the corresponding structure in the original image?
+
+<Solution>
+
+σ in the original image = 3.2 × 2 = **6.4** px. (OpenCV's `size` is the diameter of the described region, a few times σ.)
+
+</Solution>
+
+**Q2.** Why is the SIFT descriptor insensitive to adding a constant to every pixel, and to multiplying every pixel by a gain?
+
+<Solution>
+
+It uses only **gradients**, which do not change when a constant is added. A gain change scales all gradients equally and is removed by the normalisation of the 128-vector.
+
+</Solution>
+
+### Next: 34.2 ORB and BRIEF
+
+## Code
+
+### 1. A difference-of-Gaussian octave from scratch
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-poster.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+sigma0, k = 1.6, 2 ** (1 / 3)
+blurred = [cv2.GaussianBlur(img, (0, 0), sigma0 * k ** i) for i in range(5)]     # one octave, 5 scales
+dog = np.stack([blurred[i + 1] - blurred[i] for i in range(4)])                   # 4 difference-of-Gaussian layers
+print("DoG stack:", dog.shape, " value range", round(float(dog.min()), 1), "to", round(float(dog.max()), 1))
+count = 0
+for s in (1, 2):                                                                  # inner layers only
+    for y in range(1, dog.shape[1] - 1):
+        for x in range(1, dog.shape[2] - 1):
+            v = dog[s, y, x]
+            cube = dog[s - 1:s + 2, y - 1:y + 2, x - 1:x + 2]
+            if abs(v) > 3 and (v == cube.max() or v == cube.min()):
+                count += 1
+print("scale-space extrema with |DoG| > 3 in the first octave:", count)
+```
+
+Output:
+
+```text
+DoG stack: (4, 240, 320)  value range -17.2 to 19.0
+scale-space extrema with |DoG| > 3 in the first octave: 104
+```
+
+Real SIFT adds the doubled first octave, further octaves, sub-pixel refinement, the edge test and the descriptor; the idea is the same.
+
+### 2. cv2.SIFT_create
+
+```python
+a = cv2.imread("sample-poster.png", cv2.IMREAD_GRAYSCALE)
+b = cv2.imread("sample-poster-b.png", cv2.IMREAD_GRAYSCALE)
+sift = cv2.SIFT_create()
+ka, da = sift.detectAndCompute(a, None)
+kb, db = sift.detectAndCompute(b, None)
+print("keypoints:", len(ka), len(kb), " descriptors:", da.shape, da.dtype)
+k0 = max(ka, key=lambda k: k.response)
+print(f"strongest: pt=({k0.pt[0]:.1f}, {k0.pt[1]:.1f}) size={k0.size:.1f} angle={k0.angle:.1f} octave={k0.octave & 255}")
+sizes = np.array([k.size for k in ka])
+print("sizes: min", round(float(sizes.min()), 1), " median", round(float(np.median(sizes)), 1), " max", round(float(sizes.max()), 1))
+```
+
+Output:
+
+```text
+keypoints: 386 214  descriptors: (386, 128) float32
+strongest: pt=(89.7, 229.6) size=1.9 angle=71.7 octave=255
+sizes: min 1.8  median 2.7  max 26.6
+```
+
+`octave & 255` = 255 means octave −1: by default SIFT first doubles the image, and its smallest keypoints come from that enlarged copy.
+
+### 3. Do keypoints follow scale and rotation?
+
+```python
+c, s = 0.75 * np.cos(np.radians(25)), 0.75 * np.sin(np.radians(25))
+H = np.array([[c, -s, 95], [s, c, -10], [0.0004, -0.0003, 1.0]])         # true mapping A -> B
+pairs = []
+for m, n in cv2.BFMatcher(cv2.NORM_L2).knnMatch(da, db, k=2):
+    if m.distance < 0.75 * n.distance:
+        p = cv2.perspectiveTransform(np.array([[ka[m.queryIdx].pt]]), H).ravel()
+        if np.hypot(*(p - kb[m.trainIdx].pt)) <= 3:
+            pairs.append((ka[m.queryIdx], kb[m.trainIdx]))
+scale = np.median([q.size / p.size for p, q in pairs])
+turn = np.median([((q.angle - p.angle + 180) % 360) - 180 for p, q in pairs])
+print(len(pairs), "correct matches; median size ratio B/A", round(float(scale), 2), "; median angle change", round(float(turn), 1), "deg")
+```
+
+Output:
+
+```text
+100 correct matches; median size ratio B/A 0.72 ; median angle change 21.8 deg
+```
+
+## OpenCV API notes
+
+- **`cv2.SIFT_create(nfeatures=0, nOctaveLayers=3, contrastThreshold=0.04, edgeThreshold=10, sigma=1.6)`**: `nfeatures` 0 = keep all, otherwise the best N by response. Lower `contrastThreshold` for more (weaker) points; higher `edgeThreshold` keeps more edge-like points.
+- **`detect`, `compute`, `detectAndCompute(image, mask)`**: 8-bit grey input; descriptors float32 N × 128 (values 0–255). An optional `descriptorType=cv2.CV_8U` gives uint8 descriptors.
+- **`cv2.KeyPoint`**: `pt` (x, y), `size` (diameter of the meaningful neighbourhood), `angle` (degrees, 0–360, measured in image coordinates), `response`, `octave` (packed: low byte octave, next byte layer), `class_id`.
+- **`cv2.drawKeypoints(img, kp, None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)`** draws size and orientation.
+- **Speed**: tens of milliseconds for a VGA image on one CPU core; much slower than ORB.
+
+## Where it fails
+
+- **Strong viewpoint changes** (beyond about 40–50° out-of-plane): the patch is deformed, not just rotated and scaled. Use affine-adapted detectors (ASIFT) or learned features.
+- **Repetitive patterns**: many identical descriptors; matching becomes ambiguous (34.4).
+- **Textureless or specular surfaces**: few keypoints.
+- **Real-time on small hardware**: too slow; use ORB (34.2).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using `cv2.xfeatures2d.SIFT_create`**: since OpenCV 4.4 SIFT is in the main module as `cv2.SIFT_create`.
+- **Matching SIFT with Hamming distance**: SIFT descriptors are float vectors: use `NORM_L2`.
+- **Reading `octave` directly**: it is packed; mask with `& 255` and interpret 255 as −1.
+- **Expecting the same number of keypoints in both images**: different content, size and contrast give different counts.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why difference of Gaussians
+
+The scale-normalised Laplacian σ²∇²G is the operator whose extrema over scale select a characteristic size (Lindeberg [3]). The DoG G(kσ) − G(σ) ≈ (k − 1)σ²∇²G, so the DoG pyramid approximates it almost for free, from blurred images that are needed anyway.
+
+### Keypoint refinement
+
+Lowe [2] fits a 3-D quadratic to the DoG values around the extremum (Taylor expansion in x, y, σ) and moves the keypoint to its peak; points with |D| at the peak below 0.03 (with values in 0–1) are rejected, and so are points where the ratio of principal curvatures of D (from the 2 × 2 Hessian) exceeds 10, which removes edge responses.
+
+### RootSIFT
+
+Arandjelović and Zisserman [4] showed that comparing SIFT descriptors with the Hellinger kernel works better than Euclidean distance: L1-normalise each descriptor, take the element-wise square root, then use L2 as usual. It is a two-line change that improves retrieval and matching.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "SIFT keypoints are extrema of…",
+      options: ["the gradient magnitude", "the difference-of-Gaussian scale space (x, y and scale)", "the Harris response", "the image histogram"],
+      answer: 1,
+      explanation: "Compared with 26 neighbours in space and scale.",
+    },
+    {
+      question: "How many numbers are in a SIFT descriptor, and why?",
+      options: ["64: 8 × 8 pixels", "128: 4 × 4 cells × 8 directions", "256 bits", "36: one per orientation bin"],
+      answer: 1,
+      explanation: "16 cells, each with an 8-bin gradient-direction histogram.",
+    },
+    {
+      question: "The poster was scaled by 0.75. The median size ratio of correctly matched SIFT keypoints was…",
+      options: ["1.00", "0.72", "0.25", "1.33"],
+      answer: 1,
+      explanation: "The detected scales follow the image scale.",
+    },
+    {
+      question: "Which distance do you use to compare SIFT descriptors?",
+      options: ["Hamming", "L2 (Euclidean)", "Jaccard", "Correlation of pixel values"],
+      answer: 1,
+      explanation: "Float vectors: NORM_L2.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+SIFT uses 3 layers per octave (k = 2^(1/3)) and σ0 = 1.6. What are the σ values of the 5 blurred images of one octave? Which two DoG layers can contain keypoints?
+
+<Solution>
+
+1.6, 2.02, 2.54, 3.2, 4.03 (each × 1.26). Four DoG layers result; extrema need a layer above and below, so only the **2 inner** DoG layers (Lowe uses s + 3 = 6 blurred images to get 3 usable layers; with 5 images there are 2).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Detect SIFT keypoints with `nfeatures=50` and with `contrastThreshold=0.08`. How many keypoints does each give?
+
+<Solution>
+
+```python
+for kw in ({"nfeatures": 50}, {"contrastThreshold": 0.08}):
+    print(kw, len(cv2.SIFT_create(**kw).detect(a, None)))
+```
+
+Output:
+
+```text
+{'nfeatures': 50} 50
+{'contrastThreshold': 0.08} 157
+```
+
+`nfeatures` keeps the strongest N; a higher contrast threshold drops weak points everywhere.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A robot must recognise boxes in a warehouse from one reference photo each; the boxes appear at different distances and turned on the shelf. Why is SIFT a better start than template matching?
+
+<Solution>
+
+Template matching needs the same scale and orientation (32.4). SIFT keypoints carry their own scale and angle, so descriptors compare in a normalised frame; a geometric check (34.5) then confirms the box. Plain template matching would need a search over many scales and angles.
+
+</Solution>
+
+## References
+
+1. D. G. Lowe, "Object recognition from local scale-invariant features," *Proc. IEEE ICCV*, 1999, pp. 1150–1157.
+2. D. G. Lowe, "Distinctive image features from scale-invariant keypoints," *International Journal of Computer Vision* 60(2), 2004, pp. 91–110.
+3. T. Lindeberg, "Feature detection with automatic scale selection," *International Journal of Computer Vision* 30(2), 1998, pp. 79–116.
+4. R. Arandjelović, A. Zisserman, "Three things everyone should know to improve object retrieval," *Proc. IEEE CVPR*, 2012, pp. 2911–2918.
+5. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022, Sections 7.1.2–7.1.3.
+6. OpenCV 4.13.0 documentation: `SIFT`, `KeyPoint`, `drawKeypoints`; tutorial "Introduction to SIFT". https://docs.opencv.org/4.13.0/

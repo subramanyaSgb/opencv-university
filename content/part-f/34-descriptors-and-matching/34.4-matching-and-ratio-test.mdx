@@ -1,0 +1,363 @@
+export const meta = {
+  number: "34.4",
+  title: "Matching and the ratio test",
+  minutes: 22,
+  objectives: [
+    "Match descriptors by brute force and read a distance matrix",
+    "Apply Lowe's ratio test and cross-checking, and explain why they work",
+    "Measure precision of matches against a known transformation and choose the ratio",
+    "Use cv2.BFMatcher and cv2.FlannBasedMatcher with the right norm and index",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 34.4 (Part F, Module 34).
+  Lab: DescLab mode "match" (BFMatcher-equal knn, ratio test, cross-check; correctness from POSTER_H).
+  Reference tail: all examples are deterministic and compared automatically (FLANN with its fixed seed).
+*/}
+
+# 34.4 Matching and the ratio test
+
+<Definition term="Descriptor matching">pairing each keypoint of one image with the keypoint of another image whose descriptor is most similar (smallest distance), and then discarding pairs that are probably wrong, for example with Lowe's ratio test: keep a match only if the best distance is clearly smaller than the second-best.</Definition>
+
+Detectors and descriptors (34.1–34.3) give two lists of fingerprints. Matching connects them. The nearest neighbour is always "a" match, even for a keypoint that has no partner in the other image at all, so the real work is deciding which matches to trust.
+
+## 1. An analogy
+
+You look for your friend in a crowd using a description. If one person fits far better than anyone else, you are confident. If two people fit almost equally well (twins, or two people in the same uniform), you should not guess. The ratio test is exactly this: compare the best candidate with the runner-up.
+
+## 2. From descriptors to trusted matches
+
+<Flow
+  steps={[
+    { label: "Descriptors A (N) and B (M)", tone: "data" },
+    { label: "Distance from every A to every B (N × M); Hamming or L2", tone: "process" },
+    { label: "For each A: nearest and second-nearest in B", tone: "process" },
+    { label: "Filter: ratio test (d1 < r · d2) and/or cross-check", tone: "process" },
+    { label: "Matches → geometric check with RANSAC (34.5)", tone: "result" },
+  ]}
+/>
+
+- **Brute force**: compute all N × M distances. For 713 × 759 ORB descriptors that is 541 167 Hamming distances: trivial for a CPU.
+- **Ratio test** (Lowe 2004): keep the match if d1 / d2 < r (typically 0.7–0.8). A correct match has one clearly closest partner; a wrong one (no true partner, or a repeated pattern) has several similar ones.
+- **Cross-check**: keep A→B only if B's nearest neighbour in A is that same A. Symmetric, no parameter, but weaker than the ratio test.
+- **Distance threshold**: keep d1 < t. Simple, but t depends on the descriptor type and the images.
+
+## 3. A worked example by hand
+
+Hamming distances from three keypoints of A to four of B:
+
+| | B0 | B1 | B2 | B3 | d1 | d2 | d1 / d2 | Ratio 0.75 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| A0 | **20** | 45 | 47 | 90 | 20 | 45 | 0.44 | keep A0→B0 |
+| A1 | 30 | 31 | 33 | 70 | 30 | 31 | 0.97 | reject (ambiguous) |
+| A2 | 60 | 80 | 22 | **18** | 18 | 22 | 0.82 | reject |
+
+Cross-check for A0→B0: B0's distances to A are 20, 30, 60: nearest is A0, so the pair passes. A1's nearest is B0, but B0's nearest is A0, not A1: A1 fails the cross-check.
+
+## 4. Measured on the poster pair
+
+The true homography tells us which matches are correct (within 3 px). ORB (1000 features) and SIFT:
+
+| Ratio r | ORB matches | ORB correct | SIFT matches | SIFT correct |
+| --- | --- | --- | --- | --- |
+| 1.0 (no test) | 713 | 348 (49 %) | 386 | 131 (34 %) |
+| 0.9 | 327 | 263 (80 %) | 185 | 118 (64 %) |
+| 0.8 | 185 | 171 (92 %) | 136 | 110 (81 %) |
+| 0.7 | 114 | 112 (98 %) | 101 | 95 (94 %) |
+| 0.6 | 58 | 57 (98 %) | 87 | 83 (95 %) |
+| 0.5 | 23 | 23 (100 %) | 68 | 66 (97 %) |
+| cross-check | 252 | 193 (77 %) | 134 | 109 (81 %) |
+
+Without a filter, half or more of the nearest neighbours are wrong: most keypoints of A have no partner in B (different content near the borders, keypoints that were not detected again). Lowering r trades the number of matches for precision. Around **0.7–0.8** keeps most correct matches while removing most wrong ones; RANSAC (34.5) removes the rest.
+
+A plain distance threshold on ORB worked comparably here (distance < 40: 182 matches, 174 correct), but the right value differs for SIFT, AKAZE or other images; the ratio is scale-free and transfers better.
+
+<DescLab mode="match" detector="ORB" caption="All matches between the poster and its rotated, scaled, darker copy. Green = lands within 3 px of the true position, red = wrong. Switch between every nearest neighbour, the ratio test and cross-checking; move the ratio and watch precision and count. Show only the wrong ones to see what slips through."/>
+
+## 5. Faster search: FLANN
+
+For thousands of descriptors per image, or matching against a database, brute force becomes slow. **FLANN** (Fast Library for Approximate Nearest Neighbors) builds an index:
+
+- **k-d trees** (randomised, several in parallel) for float descriptors such as SIFT.
+- **LSH** (locality-sensitive hashing) for binary descriptors such as ORB and AKAZE.
+
+The answers are approximate. On the poster, FLANN's k-d trees (5 trees, 50 checks) gave the same nearest neighbour as brute force for 368 of 386 SIFT descriptors, and 115 ratio-test matches instead of 114.
+
+## 6. Industrial use
+
+- **Part recognition and pose**: match the camera image to a reference image of each part type (with a geometric check, 34.5).
+- **Image retrieval**: find which stored image (product, document, scene) a new photo shows (35.6).
+- **Stitching and mosaicking** (34.6), **visual odometry** (Module 43).
+
+## What you should remember from 34.4
+
+<Takeaways>
+<Takeaway n={1} title="Nearest is not right">Without filtering, about half the nearest neighbours were wrong.</Takeaway>
+<Takeaway n={2} title="Ratio test">Keep d1 < r · d2, r ≈ 0.7–0.8; rejects ambiguous and partnerless points.</Takeaway>
+<Takeaway n={3} title="Norms">Float descriptors (SIFT, KAZE): NORM_L2. Binary (ORB, AKAZE, BRISK): NORM_HAMMING.</Takeaway>
+<Takeaway n={4} title="Scale up">FLANN: k-d trees for floats, LSH for binary; approximate but fast.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Best distance 0.42, second 0.48 (SIFT, normalised). Ratio 0.8: keep or reject?
+
+<Solution>
+
+0.42 / 0.48 = 0.875 > 0.8: **reject**.
+
+</Solution>
+
+**Q2.** Why can a keypoint pass the cross-check but fail the ratio test?
+
+<Solution>
+
+It can be the mutual nearest neighbour while a second candidate is almost as close (repeated pattern): mutual, but ambiguous.
+
+</Solution>
+
+### Next: 34.5 Homography
+
+## Code
+
+### 1. Brute-force matching from scratch (ORB, Hamming)
+
+```python
+import numpy as np
+import cv2
+
+a = cv2.imread("sample-poster.png", cv2.IMREAD_GRAYSCALE)
+b = cv2.imread("sample-poster-b.png", cv2.IMREAD_GRAYSCALE)
+orb = cv2.ORB_create(1000)
+ka, da = orb.detectAndCompute(a, None)
+kb, db = orb.detectAndCompute(b, None)
+
+bits_a, bits_b = np.unpackbits(da, axis=1), np.unpackbits(db, axis=1)   # (N, 256) of 0/1
+D = (bits_a[:, None, :] != bits_b[None, :, :]).sum(axis=2)             # all Hamming distances, (713, 759)
+order = np.argsort(D, axis=1, kind="stable")
+nearest, second = D[np.arange(len(D)), order[:, 0]], D[np.arange(len(D)), order[:, 1]]
+print("distance matrix:", D.shape, " nearest distances: min", nearest.min(), "median", int(np.median(nearest)))
+keep = nearest < 0.75 * second
+print("ratio test keeps", int(keep.sum()), "of", len(D))
+cv_knn = cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(da, db, k=2)
+print("same as BFMatcher:", int(sum(m.distance < 0.75 * n.distance for m, n in cv_knn)))
+```
+
+Output:
+
+```text
+distance matrix: (713, 759)  nearest distances: min 12 median 52
+ratio test keeps 149 of 713
+same as BFMatcher: 149
+```
+
+### 2. Precision against the true homography
+
+```python
+c, s = 0.75 * np.cos(np.radians(25)), 0.75 * np.sin(np.radians(25))
+H = np.array([[c, -s, 95], [s, c, -10], [0.0004, -0.0003, 1.0]])
+
+def is_correct(m, ka, kb):
+    p = cv2.perspectiveTransform(np.array([[ka[m.queryIdx].pt]]), H).ravel()
+    return np.hypot(*(p - kb[m.trainIdx].pt)) <= 3
+
+for name, det, norm in [("ORB", cv2.ORB_create(1000), cv2.NORM_HAMMING), ("SIFT", cv2.SIFT_create(), cv2.NORM_L2)]:
+    ka, da = det.detectAndCompute(a, None)
+    kb, db = det.detectAndCompute(b, None)
+    knn = cv2.BFMatcher(norm).knnMatch(da, db, k=2)
+    for r in (1.0, 0.9, 0.8, 0.7, 0.6, 0.5):
+        good = [m for m, n in knn if m.distance < r * n.distance] if r < 1 else [m for m, n in knn]
+        ok = sum(is_correct(m, ka, kb) for m in good)
+        print(f"{name} ratio {r:.1f}: {len(good):3d} matches, {ok:3d} correct ({100 * ok / max(1, len(good)):.0f} %)")
+    cc = cv2.BFMatcher(norm, crossCheck=True).match(da, db)
+    print(f"{name} cross-check: {len(cc)} matches, {sum(is_correct(m, ka, kb) for m in cc)} correct")
+```
+
+Output:
+
+```text
+ORB ratio 1.0: 713 matches, 348 correct (49 %)
+ORB ratio 0.9: 327 matches, 263 correct (80 %)
+ORB ratio 0.8: 185 matches, 171 correct (92 %)
+ORB ratio 0.7: 114 matches, 112 correct (98 %)
+ORB ratio 0.6:  58 matches,  57 correct (98 %)
+ORB ratio 0.5:  23 matches,  23 correct (100 %)
+ORB cross-check: 252 matches, 193 correct
+SIFT ratio 1.0: 386 matches, 131 correct (34 %)
+SIFT ratio 0.9: 185 matches, 118 correct (64 %)
+SIFT ratio 0.8: 136 matches, 110 correct (81 %)
+SIFT ratio 0.7: 101 matches,  95 correct (94 %)
+SIFT ratio 0.6:  87 matches,  83 correct (95 %)
+SIFT ratio 0.5:  68 matches,  66 correct (97 %)
+SIFT cross-check: 134 matches, 109 correct
+```
+
+### 3. FLANN: k-d trees for SIFT, LSH for ORB
+
+```python
+sift = cv2.SIFT_create()
+ka, da = sift.detectAndCompute(a, None)
+kb, db = sift.detectAndCompute(b, None)
+flann = cv2.FlannBasedMatcher(dict(algorithm=1, trees=5), dict(checks=50))      # 1 = FLANN_INDEX_KDTREE
+fk = flann.knnMatch(da, db, k=2)
+bk = cv2.BFMatcher(cv2.NORM_L2).knnMatch(da, db, k=2)
+same = sum(f[0].trainIdx == g[0].trainIdx for f, g in zip(fk, bk))
+print("SIFT, FLANN k-d tree: same nearest neighbour as brute force for", same, "of", len(bk))
+print("ratio-test matches FLANN / BF:", sum(m.distance < 0.75 * n.distance for m, n in fk), "/", sum(m.distance < 0.75 * n.distance for m, n in bk))
+orb = cv2.ORB_create(1000)
+ka, da = orb.detectAndCompute(a, None)
+kb, db = orb.detectAndCompute(b, None)
+lsh = cv2.FlannBasedMatcher(dict(algorithm=6, table_number=6, key_size=12, multi_probe_level=1), dict(checks=50))  # 6 = LSH
+lk = [m for m in lsh.knnMatch(da, db, k=2) if len(m) == 2]
+print("ORB, FLANN LSH ratio-test matches:", sum(m.distance < 0.75 * n.distance for m, n in lk), "of", len(lk), "queries with 2 neighbours")
+```
+
+Output:
+
+```text
+SIFT, FLANN k-d tree: same nearest neighbour as brute force for 368 of 386
+ratio-test matches FLANN / BF: 115 / 114
+ORB, FLANN LSH ratio-test matches: 152 of 713 queries with 2 neighbours
+```
+
+LSH can return fewer than k neighbours for some queries, so check `len(m) == 2` before unpacking.
+
+## OpenCV API notes
+
+- **`cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=False)`**: `.match(q, t)` → best `DMatch` per query; `.knnMatch(q, t, k)` → list of k `DMatch` per query; `.radiusMatch(q, t, maxDistance)`.
+- **`cv2.DMatch`**: `queryIdx` (index in the first set), `trainIdx` (second set), `distance`, `imgIdx`.
+- **Norms**: `NORM_L2` (SIFT, KAZE), `NORM_HAMMING` (ORB WTA_K = 2, BRISK, AKAZE), `NORM_HAMMING2` (ORB WTA_K = 3, 4).
+- **`crossCheck=True`** works with `match` (and `knnMatch` with k = 1), not with the ratio test (k = 2).
+- **`cv2.FlannBasedMatcher(indexParams, searchParams)`**: `algorithm=1` k-d tree (float32 descriptors only), `algorithm=6` LSH (uint8). More `checks` = more accurate, slower. The index is built at the first match call; use `.add()` and `.train()` for a database.
+- **`cv2.drawMatches(img1, kp1, img2, kp2, matches, None, flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)`** and `drawMatchesKnn` for visual checks.
+
+## Where it fails
+
+- **Repetitive structures** (windows, bolts, grids): the ratio test rejects them, often leaving too few matches; use geometric constraints or a larger context.
+- **Large appearance change** (day/night, different sensors): descriptors no longer agree; learned features help (SuperPoint with LightGlue, Module 56).
+- **Many-to-one**: several A keypoints may match the same B keypoint; cross-check or a one-to-one assignment prevents it.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Wrong norm** for the descriptor type: Hamming for binary, L2 for float.
+- **Unpacking knnMatch results blindly**: `for m, n in knn` crashes when a query has fewer than 2 neighbours (LSH, tiny train sets).
+- **Mixing up queryIdx and trainIdx** (first argument = query).
+- **FLANN k-d tree with uint8 descriptors**: convert to float32 or use LSH.
+- **Trusting matches without a geometric check**: even at 98 % precision, a few outliers ruin a least-squares homography (34.5).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why the ratio works
+
+Lowe [1] matched SIFT descriptors against a large database and plotted the probability density of d1 / d2 for correct and incorrect matches. Correct matches cluster at low ratios; incorrect ones, whose nearest neighbour is just one of many similar-looking random descriptors, have ratios near 1. Rejecting ratios above 0.8 removed 90 % of false matches while discarding less than 5 % of correct ones in his experiments.
+
+### Approximate nearest neighbours
+
+Muja and Lowe [2] showed that randomised k-d trees and hierarchical k-means trees give large speed-ups for high-dimensional descriptors with small loss in accuracy, and built FLANN to choose the algorithm and parameters automatically. For binary descriptors, LSH hashes subsets of bits into tables so that similar descriptors fall into the same buckets [3].
+
+### Beyond nearest neighbours
+
+Modern matchers (SuperGlue, LightGlue) treat matching as a learned assignment problem with attention between the two keypoint sets, using geometry and context; they work where descriptor distances alone are ambiguous.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Without any filter, what fraction of ORB nearest-neighbour matches were correct on the poster pair?",
+      options: ["98 %", "80 %", "49 %", "10 %"],
+      answer: 2,
+      explanation: "348 of 713: many keypoints have no partner at all.",
+    },
+    {
+      question: "d1 = 30, d2 = 31. The ratio test with r = 0.75…",
+      options: ["keeps it (small distance)", "rejects it (ambiguous)", "cannot decide", "keeps it only with cross-check"],
+      answer: 1,
+      explanation: "30/31 = 0.97 ≥ 0.75.",
+    },
+    {
+      question: "Lowering the ratio from 0.8 to 0.5 for SIFT changed matches/correct from 136/110 to…",
+      options: ["200/190", "68/66", "136/136", "10/2"],
+      answer: 1,
+      explanation: "Fewer matches, higher precision (97 %).",
+    },
+    {
+      question: "Which FLANN index do you use for ORB descriptors?",
+      options: ["k-d tree", "LSH", "linear", "k-means on floats"],
+      answer: 1,
+      explanation: "LSH (algorithm 6) for binary descriptors.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Distances from A3 to B0…B3: 55, 25, 26, 80. From B1 to A0…A3: 45, 40, 38, 25. Ratio test at 0.75? Cross-check for A3→B1?
+
+<Solution>
+
+d1 = 25 (B1), d2 = 26 → 0.96: **rejected** by the ratio test. B1's nearest in A is A3 (25): **passes** the cross-check. Mutual but ambiguous.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the ORB knn results, find the ratio that keeps the most correct matches while staying at or above 95 % precision. Try 0.70 to 0.80 in steps of 0.02.
+
+<Solution>
+
+```python
+orb = cv2.ORB_create(1000)
+ka, da = orb.detectAndCompute(a, None)
+kb, db = orb.detectAndCompute(b, None)
+knn = cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(da, db, k=2)
+for r in np.arange(0.70, 0.81, 0.02):
+    good = [m for m, n in knn if m.distance < r * n.distance]
+    ok = sum(is_correct(m, ka, kb) for m in good)
+    print(f"ratio {r:.2f}: {len(good)} matches, {ok} correct ({100 * ok / len(good):.1f} %)")
+```
+
+Output:
+
+```text
+ratio 0.70: 114 matches, 112 correct (98.2 %)
+ratio 0.72: 126 matches, 123 correct (97.6 %)
+ratio 0.74: 147 matches, 143 correct (97.3 %)
+ratio 0.76: 158 matches, 151 correct (95.6 %)
+ratio 0.78: 169 matches, 161 correct (95.3 %)
+ratio 0.80: 185 matches, 171 correct (92.4 %)
+```
+
+On this pair, **0.78** gives the most correct matches (161) at ≥ 95 % precision; at 0.80 precision drops to 92.4 %.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A stitching system for a facade with many identical windows finds very few matches after the ratio test. Why, and what can you do?
+
+<Solution>
+
+Each window corner has several near-identical partners, so d1 / d2 ≈ 1 and the ratio test rejects them. Use features on non-repeating structure (edges of the building, signs), restrict matching to a predicted region (from the camera motion), or match with a looser ratio and rely on RANSAC to keep the geometrically consistent ones.
+
+</Solution>
+
+## References
+
+1. D. G. Lowe, "Distinctive image features from scale-invariant keypoints," *International Journal of Computer Vision* 60(2), 2004, pp. 91–110.
+2. M. Muja, D. G. Lowe, "Fast approximate nearest neighbors with automatic algorithm configuration," *Proc. VISAPP*, 2009, pp. 331–340.
+3. A. Gionis, P. Indyk, R. Motwani, "Similarity search in high dimensions via hashing," *Proc. VLDB*, 1999, pp. 518–529.
+4. P. Lindenberger, P.-E. Sarlin, M. Pollefeys, "LightGlue: Local feature matching at light speed," *Proc. IEEE ICCV*, 2023.
+5. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022, Section 7.1.3.
+6. OpenCV 4.13.0 documentation: `BFMatcher`, `FlannBasedMatcher`, `DMatch`, `drawMatches`; tutorial "Feature Matching with FLANN". https://docs.opencv.org/4.13.0/
