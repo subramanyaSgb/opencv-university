@@ -643,6 +643,28 @@ def face_schematic(size=24):
     cv2.rectangle(img, (6, 18), (17, 20), 90, -1)         # mouth (dark)
     return np.clip(img, 0, 255).astype(np.uint8)
 images["sample-haar-face.png"] = face_schematic()
+
+# Module 37.2: a synthetic (not a photograph) but photographically-shaded face, large and soft enough to
+# actually trigger OpenCV's real pretrained frontal-face Haar cascade -- unlike 35.4's flat schematic.
+def synth_face(size=200, seed=7):
+    rng = np.random.default_rng(seed)
+    img = np.full((size, size), 180.0)
+    cx, cy = size // 2, int(size * 0.525)
+    cv2.ellipse(img, (cx, cy), (int(size * 0.35), int(size * 0.45)), 0, 0, 360, 200, -1)
+    xs = np.arange(size)
+    img += 10 * np.sin(xs / 40)[None, :]                        # a soft horizontal shading gradient
+    ex_off, ey = int(size * 0.15), int(size * 0.425)
+    for ex in (cx - ex_off, cx + ex_off):
+        cv2.ellipse(img, (ex, ey), (14, 8), 0, 0, 360, 60, -1)   # eye socket (darker)
+        cv2.circle(img, (ex, ey), 5, 20, -1)                     # pupil
+        cv2.ellipse(img, (ex, ey - int(size * 0.075)), (16, 4), 0, 180, 360, 40, 2)   # eyebrow
+    cv2.line(img, (cx, cy - int(size * 0.075)), (cx - int(size * 0.025), cy + int(size * 0.15)), 150, 3)  # nose bridge
+    cv2.ellipse(img, (cx, cy + int(size * 0.175)), (10, 5), 0, 0, 360, 140, 2)        # nostril shading
+    cv2.ellipse(img, (cx, cy + int(size * 0.3)), (22, 8), 0, 0, 180, 90, 3)           # mouth
+    img = cv2.GaussianBlur(img, (0, 0), size / 167)
+    img += rng.normal(0, 4, img.shape)
+    return np.clip(img, 0, 255).astype(np.uint8)
+images["sample-synth-face.png"] = synth_face()
 ft_b = cv2.warpPerspective(images["sample-feat.png"].astype(np.float64), FEAT_H, (320, 200), flags=cv2.INTER_LINEAR,
                            borderMode=cv2.BORDER_CONSTANT, borderValue=110)
 images["sample-feat-b.png"] = np.clip(np.rint(ft_b * 0.8 + 20 + np.random.default_rng(34).normal(0, 3, ft_b.shape)), 0, 255).astype(np.uint8)

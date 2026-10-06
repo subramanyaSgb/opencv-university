@@ -1,0 +1,273 @@
+export const meta = {
+  number: "37.2",
+  title: "Haar cascades",
+  minutes: 24,
+  objectives: [
+    "Explain why a cascade of simple stages, each rejecting non-objects early, is much faster than one complex classifier",
+    "Describe the real Viola-Jones cascade's structure: stage count and feature counts",
+    "Run cv2.CascadeClassifier.detectMultiScale and tune minNeighbors",
+    "Know that minNeighbors is built-in rectangle grouping, not the general non-max suppression of 37.4",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 37.2 (Part F, Module 37).
+  Builds on 35.4 (Haar features), 36.6 (AdaBoost) and 37.1 (sliding-window search): this chapter is the
+  cascade architecture that ties them together into a real, fast detector.
+  New asset: sample-synth-face.png (200x200 synthetic but photographically-shaded face) -- unlike 35.4's
+  flat schematic, this one actually triggers the real pretrained haarcascade_frontalface_default.xml.
+  Lab: CascadeLab (apps/web/components/visuals/CascadeLab.tsx) — precomputed (scripts/gen_cascade_data.py)
+  real detectMultiScale output at several minNeighbors settings.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 37.2 Haar cascades
+
+<Definition term="Cascade classifier">a sequence of increasingly strict classifier stages, each built from a handful of Haar-like features (35.4) selected by AdaBoost (36.6), arranged so that a window must pass *every* stage to be called a detection — but can be rejected, cheaply, after failing any single early stage.</Definition>
+
+37.1 showed that a sliding-window search visits hundreds to thousands of windows. The overwhelming majority of them don't contain the object at all. A cascade's entire design is built around that one fact: spend almost no time on the easy "definitely not" windows, and save the more expensive checks for the rare windows that look promising.
+
+## 1. An analogy
+
+A building's security checkpoints: the first is a quick glance that waves through almost everyone except the obviously wrong people (wrong uniform colour, say) — fast, and it clears most of the crowd immediately. Only those who pass it reach a second, slightly more careful check, and so on. By the time someone reaches the fifth or sixth checkpoint, they have already passed several quick filters, so the remaining, more thorough checks are only being spent on people worth the extra scrutiny.
+
+## 2. The cascade structure
+
+<Flow
+  steps={[
+    { label: "Window", tone: "data" },
+    { label: "Stage 1: a few cheap Haar features (35.4)", tone: "process" },
+    { label: "Reject? -> stop here. Pass? -> Stage 2 (more features)", tone: "process" },
+    { label: "... through all stages -> Detection", tone: "result" },
+  ]}
+/>
+
+- **Each stage** is itself a small boosted classifier (36.6): a handful of Haar-like features, each a weak learner, combined by AdaBoost into one stage decision.
+- **Stages get stricter and more expensive** as they go: earlier stages use very few features and are tuned to reject obviously-wrong windows while almost never rejecting a real object; later stages use more features and make finer distinctions, but only run on the windows that already passed everything before them.
+- **The real detector** (Viola and Jones' trained frontal-face cascade [1]) has **38 stages**, with the first five stages using **1, 10, 25, 25 and 50 features** respectively, and around **6,000 features in total** across all 38 stages. Because most windows are rejected in the first few (cheap) stages, the *average* number of features actually evaluated per window, over a whole image, is far smaller than 6,000 — the exact rejection rate reported for the very first stage is `TODO: verify` against the original paper directly, but the design intent (reject most non-objects almost immediately, spend the full 6,000-feature budget only on the rare promising window) is exactly what Section 4 demonstrates.
+- **One trained cascade = one fixed base window size**: `haarcascade_frontalface_default.xml`'s own training window is 24×24 pixels; `detectMultiScale` handles the scale search (37.1) by resizing, not by the cascade itself changing shape.
+
+## 3. A worked example by hand
+
+Suppose, for simplicity, each of a cascade's first 3 stages independently rejects 50% of the non-object windows it sees, while passing every real object through: out of 1,000 non-object windows entering stage 1, about 500 are rejected (500 remain); of those 500 entering stage 2, about 250 are rejected (250 remain); of those 250 entering stage 3, about 125 remain. After 3 stages, only **125 of the original 1,000 non-object windows** (12.5%) have cost the full 3 stages' worth of computation — the other 875 were rejected after 1 or 2 stages, at a fraction of the cost. A real object, assumed to pass every stage, costs the full stage count regardless — but there are vastly fewer real objects than non-object windows in a typical image (37.1's 950-window search found at most a handful of real objects), so this trade-off saves enormous amounts of computation overall.
+
+## 4. A real detection, and OpenCV's built-in grouping
+
+<CascadeLab caption="The real haarcascade_frontalface_default.xml on a synthetic (but photographically-shaded) face, large and soft enough to actually trigger it. minNeighbors=0 shows every raw surviving window; higher values show OpenCV's rectangle grouping collapsing the cluster into one detection."/>
+
+Running the real pretrained frontal-face cascade on a 200×200 synthetic face (not a photograph, but shaded and blurred enough to carry real image structure, unlike 35.4's flat schematic):
+
+| minNeighbors | Detections |
+| --- | --- |
+| 0 | **9** (every raw window surviving all 38 stages, no grouping) |
+| 1 | 1 |
+| 3 | 1 |
+| 5 | 1 |
+| 10 | 0 (too strict — even the real face's cluster doesn't have 10 overlapping neighbours) |
+
+At `minNeighbors=0`, 9 separate windows all pass the full cascade — the same "many raw detections near one real object" pattern 37.1 already found with simple template matching, now from a real 38-stage classifier. `minNeighbors` (and the related `cv2.groupRectangles`) is OpenCV's **built-in, simplified grouping**: it merges mutually overlapping rectangles and only keeps groups with at least that many members — useful and often enough in practice, but a coarser tool than the general non-max suppression (ranking by score, discarding the rest, 37.4) used when overlapping detections carry different confidence scores that should be compared properly.
+
+## 5. Industrial use
+
+- **Still the fastest classical option for a well-defined, front-on, fixed-aspect object**: when speed and CPU-only operation matter more than squeezing out the last bit of accuracy, a cascade (face, eye, and various other pretrained cascades ship with OpenCV) remains genuinely useful.
+- **Training a custom cascade** (`opencv_traincascade`, a command-line tool, not part of the Python API) lets a cascade be built for a specific object, given enough positive and negative training images.
+- **The architecture pattern — reject cheaply and early, spend more only where it's warranted — recurs well beyond Haar cascades**, including in modern detector pipelines that use a cheap first pass to discard most of an image before a more expensive model examines what's left.
+
+## What you should remember from 37.2
+
+<Takeaways>
+<Takeaway n={1} title="Cascade, not one classifier">A sequence of stages; failing any one stage rejects the window immediately.</Takeaway>
+<Takeaway n={2} title="Cheap first, expensive later">Early stages use few features and reject most non-objects almost immediately.</Takeaway>
+<Takeaway n={3} title="38 stages, ~6000 features">The real trained frontal-face detector's actual scale, most of which most windows never reach.</Takeaway>
+<Takeaway n={4} title="minNeighbors ≠ true NMS">OpenCV's built-in grouping is simpler than 37.4's general non-max suppression.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A cascade's first stage rejects 60% of non-object windows (keeps 40%); its second stage rejects a further 60% of what remains. Starting from 1,000 non-object windows, how many remain after both stages?
+
+<Solution>
+
+After stage 1: 1,000 × 0.4 = 400. After stage 2: 400 × 0.4 = **160**.
+
+</Solution>
+
+**Q2.** Why does a real object need to pass *every* stage to be reported as a detection, while a non-object only needs to fail *one*?
+
+<Solution>
+
+This asymmetry is exactly what makes the cascade fast: the overwhelming majority of windows are non-objects, so rejecting them as early as possible (after failing just one cheap stage) saves the most computation. Real objects are rare, so the extra cost of checking them against every stage barely affects the total runtime, even though each one is individually more expensive to confirm.
+
+</Solution>
+
+### Next: 37.3 HOG + SVM
+
+## Code
+
+### 1. The worked example (stage rejection), with NumPy
+
+```python
+import numpy as np
+import cv2
+
+remaining = 1000
+for stage in range(1, 4):
+    remaining = remaining * 0.5
+    print(f"after stage {stage}: {remaining:.0f} non-object windows remain")
+```
+
+Output:
+
+```text
+after stage 1: 500 non-object windows remain
+after stage 2: 250 non-object windows remain
+after stage 3: 125 non-object windows remain
+```
+
+### 2. The real cascade on a real (synthetic) face
+
+```python
+img = cv2.imread("sample-synth-face.png", cv2.IMREAD_GRAYSCALE)
+cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+print("cascade's own training window size:", cascade.getOriginalWindowSize())
+
+for min_neighbors in (0, 1, 3, 5, 10):
+    dets = cascade.detectMultiScale(img, scaleFactor=1.05, minNeighbors=min_neighbors, minSize=(60, 60))
+    print(f"minNeighbors={min_neighbors}: {len(dets)} detection(s)")
+```
+
+Output:
+
+```text
+cascade's own training window size: (24, 24)
+minNeighbors=0: 9 detection(s)
+minNeighbors=1: 1 detection(s)
+minNeighbors=3: 1 detection(s)
+minNeighbors=5: 1 detection(s)
+minNeighbors=10: 0 detection(s)
+```
+
+## OpenCV API notes
+
+- **`cv2.CascadeClassifier(filename)`**: loads a trained cascade from an XML file; `cv2.data.haarcascades` is the directory where OpenCV ships several pretrained ones (frontal/profile face, eye, and others).
+- **`.detectMultiScale(image, scaleFactor=1.1, minNeighbors=3, flags=0, minSize=(), maxSize=())`**: `scaleFactor` is the per-level scale increase (37.1's scale step); `minNeighbors` is the built-in grouping threshold (Section 4); `minSize`/`maxSize` bound the object sizes searched, directly limiting how many scales are tried (and therefore the cost, 37.1).
+- **`.getOriginalWindowSize()`**: the fixed window size the cascade was trained at (24×24 for the default frontal-face cascade) — `detectMultiScale` resizes the *image*, not the window, to search other scales.
+- **`cv2.groupRectangles(rectList, groupThreshold, eps)`**: the standalone function behind `minNeighbors`-style grouping, usable on any list of rectangles, not just cascade output.
+- **`detectMultiScale` returns a tuple, not an array, when there are zero detections** — code that calls `.tolist()` or indexes the result unconditionally will raise an error on an empty result; always check length first (seen directly in this chapter's own data-generation script).
+
+## Where it fails
+
+- **A cascade only detects what it was trained for, at roughly the orientation and viewing angle it was trained on**: the frontal-face cascade used throughout this chapter looks for front-on faces; a profile view needs a different cascade (OpenCV ships one), and an upside-down or heavily tilted face is often missed entirely.
+- **`minNeighbors` grouping is coarser than full non-max suppression**: it has no notion of per-detection confidence score to rank by, only a count of overlapping neighbours — 37.4 covers the more general, score-aware version.
+- **Still inherits every limitation of sliding-window search** (37.1): fixed aspect ratio, cost that grows with image size and scale range.
+- **Needs a reasonably large, clear view of the object**: 35.4's small, flat 24×24 schematic triggered no detections at all; this chapter's larger, shaded 200×200 synthetic face did — real faces that are very small, heavily shadowed, or occluded can fail the same way.
+- Largely superseded in accuracy (though not always in raw speed on constrained hardware) by CNN-based detectors (Part J) for most modern applications.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Calling `.tolist()` or indexing `detectMultiScale`'s result without checking for zero detections first** (OpenCV API notes above) — a real, reproducible bug, not a hypothetical one.
+- **Setting `minNeighbors` too high "to be safe"**: Section 4 showed `minNeighbors=10` rejecting the one real face entirely, because its own raw cluster never reached 10 overlapping windows.
+- **Using the wrong cascade for the viewing angle** (a frontal-face cascade on profile faces, for instance) and concluding the method doesn't work, rather than that the wrong trained cascade was used.
+- **Forgetting `minSize`/`maxSize`**: an unconstrained scale search costs more (37.1) than one properly bounded to the range of object sizes actually expected in the image.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why AdaBoost fits a cascade so naturally
+
+Each stage is itself exactly 36.6's AdaBoost output: a weighted combination of weak classifiers (individual Haar features here) trained to minimise error on the current training set. Viola and Jones' innovation was arranging *several* boosted stages in sequence, each trained on the false positives that survived the previous stages — so later stages specialise in exactly the hard cases the earlier, cheaper stages couldn't rule out.
+
+### Training a cascade
+
+`opencv_traincascade` (a command-line tool bundled with OpenCV's build tools, not exposed through `cv2`'s Python API) trains a new cascade from labelled positive and negative images, choosing how many stages, the target false-positive/detection rate per stage, and the feature types to use — a substantial undertaking in data collection and training time, which is exactly why most users rely on the pretrained cascades `cv2.data.haarcascades` already ships.
+
+### LBP cascades
+
+OpenCV also ships cascades trained on LBP features (35.1) instead of Haar features — generally faster to evaluate (LBP codes are simpler than rectangle-sum differences) at some cost in accuracy, a direct real-world instance of the feature-choice trade-offs this course has repeatedly surfaced.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why is a cascade faster than running one large classifier on every window?",
+      options: ["It isn't actually faster", "Most windows are rejected after just one or two cheap early stages, so the full (expensive) classifier only runs on the rare promising windows", "Cascades skip most of the image randomly", "It uses a smaller image"],
+      answer: 1,
+      explanation: "Section 1-3: the vast majority of windows are non-objects, rejected cheaply and early.",
+    },
+    {
+      question: "How many stages does the real trained Viola-Jones frontal-face cascade have, and roughly how many total features?",
+      options: ["3 stages, 10 features", "38 stages, around 6,000 features", "100 stages, 50 features", "1 stage, 6,000 features"],
+      answer: 1,
+      explanation: "Section 2, citing Viola and Jones [1] directly.",
+    },
+    {
+      question: "In Section 4, what did minNeighbors=0 reveal?",
+      options: ["The cascade found no faces", "9 separate windows all independently passed the full 38-stage cascade around the one real face -- the same multi-detection pattern as 37.1", "The image had 9 real faces", "minNeighbors=0 disables the cascade entirely"],
+      answer: 1,
+      explanation: "minNeighbors=1 or more then grouped these 9 raw windows into the single final detection.",
+    },
+    {
+      question: "Why is minNeighbors described as coarser than 37.4's general non-max suppression?",
+      options: ["They are identical", "minNeighbors only counts overlapping neighbours; it has no per-detection confidence score to rank and choose among overlapping boxes by", "minNeighbors is always better", "Non-max suppression cannot be applied to cascade output"],
+      answer: 1,
+      explanation: "Where it fails: a score-aware method (37.4) is more general than a simple overlap-count threshold.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A cascade's first 4 stages each independently reject 70% of the non-object windows reaching them. Starting from 10,000 non-object windows, how many remain after all 4 stages?
+
+<Solution>
+
+Each stage keeps 30%: 10,000 × 0.3⁴ = 10,000 × 0.0081 = **81** (rounded).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the Code section's `cascade`, try `scaleFactor=1.2` instead of `1.05` (a coarser, cheaper scale search, 37.1) with `minNeighbors=3`, and check whether the real face is still detected.
+
+<Solution>
+
+```python
+dets = cascade.detectMultiScale(img, scaleFactor=1.2, minNeighbors=3, minSize=(60, 60))
+print("scaleFactor=1.2:", len(dets), "detection(s)", dets.tolist() if len(dets) else [])
+```
+
+Output:
+
+```text
+scaleFactor=1.2: 1 detection(s) [[17, 20, 170, 170]]
+```
+
+Still found, at a slightly different box than the `scaleFactor=1.05` result ([17, 18, 174, 174]) — a coarser scale step is cheaper (37.1) and still succeeded here, though a coarser step is generally more likely to miss a real object whose best-matching scale falls between two tested levels.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A factory wants to detect a specific connector part, always photographed from directly above at a fixed distance, using a Haar cascade. Based on this chapter, what training data property matters most for getting a cascade that works well and stays fast?
+
+<Solution>
+
+Since the viewing angle and distance are fixed here (unlike general face detection, which must handle varied lighting, expression, and some pose variation), the training images can be far more consistent — which should make training easier and the resulting cascade's early stages especially effective at quickly rejecting non-matching windows, since the "non-object" category barely varies in appearance either (the background/other objects, always from the same fixed viewpoint). The main property that matters is still what it always is for any trained classifier: enough representative positive and negative examples covering the real range of lighting and part variation actually seen on the line, not an idealised single example repeated many times.
+
+</Solution>
+
+## References
+
+1. P. Viola, M. Jones, "Robust real-time face detection," *International Journal of Computer Vision* 57(2), 2004, pp. 137–154.
+2. R. Lienhart, J. Maydt, "An extended set of Haar-like features for rapid object detection," *ICIP*, 2002, pp. I-900–I-903.
+3. OpenCV 4.13.0 documentation: `cv2.CascadeClassifier`, `cv2.groupRectangles`. https://docs.opencv.org/4.13.0/
