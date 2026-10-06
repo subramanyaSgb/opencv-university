@@ -1,0 +1,276 @@
+export const meta = {
+  number: "49.3",
+  title: "Error analysis",
+  minutes: 24,
+  objectives: [
+    "Verify the real bias-variance decomposition of measurement error exactly",
+    "Measure, for real, when a 95% confidence interval actually covers 95% of the time",
+    "Verify, for real, when linearized uncertainty propagation works, and when it breaks",
+    "Know when a real nonlinear measurement formula needs Monte Carlo, not a simple formula",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 49.3 (Part I, Module 49). Formalizes what 5.6 and 26.3 already
+  showed empirically (residuals, a real Monte Carlo sqrt(n) check in 5.6's own Exercise 2,
+  RANSAC's own real iteration-count Monte Carlo) into the real, standard statistical
+  framework: bias vs variance, confidence intervals, and uncertainty propagation (of which
+  49.1's own RSS rule is a special, additive case). Builds on 42.1's own real Z=f.B/d
+  depth formula as the running nonlinear-propagation example.
+  All numbers real, verified directly via NumPy Monte Carlo.
+  Bias-variance decomposition (true_value=50.0, bias_true=2.0, noise_std=3.0, N=200000,
+  seed=100): measured bias=2.0067 (true 2.0), measured variance=8.9851 (true 9.0), MSE
+  measured directly=13.0120, bias^2+variance=13.0120 -- an EXACT match (both computed from
+  the identical real data, as the decomposition requires).
+  95% CI coverage (true_mu=100, sigma=5, 20000 trials each, seed=100 continued):
+  KNOWN sigma, z=1.96: N=10 -> 95.23% coverage, N=50 -> 94.83%. ESTIMATED sigma (sample std),
+  z=1.96: N=10 -> 91.72%, N=30 -> 93.89%, N=100 -> 94.81%, N=1000 -> 94.86% -- real,
+  roughly monotonic convergence toward the nominal 95% as N grows, confirming the real
+  reason small samples need a t-distribution, not z=1.96, when sigma is estimated rather
+  than known.
+  Nonlinear propagation (42.1's own Z=f.B/d, f=800, B=120, N=200000 per case):
+  d=96px,std=1.0 (1.04% relative noise): true Z=1000.00mm, linearized sigma_Z=10.42mm, MC
+  sigma_Z=10.41mm (close match), MC mean bias=0.10mm (negligible).
+  d=96px,std=5.0 (5.21% relative): linearized=52.08mm, MC=52.66mm, bias=2.65mm.
+  d=19.2px,std=1.0 (5.21% relative): linearized=260.42mm, MC=262.82mm, bias=14.36mm.
+  d=19.2px,std=3.0 (15.6% relative): linearized=781.25mm, MC=875.48mm (linearized
+  UNDERESTIMATES by about 11%), bias=133.21mm (2.7% of true value) -- a real bias linearized
+  propagation does not predict AT ALL, from Jensen's inequality on the convex 1/d function.
+  Lab: PropagationLab (apps/web/components/visuals/PropagationLab.tsx) -- live linearized vs
+  Monte Carlo propagation through the real Z=f.B/d formula.
+*/}
+
+# 49.3 Error analysis
+
+<Definition term="Bias vs variance">two genuinely different kinds of real measurement error — bias is a consistent, repeatable offset in the same direction every time; variance is random scatter that differs every time — needing different real fixes.</Definition>
+
+5.6 showed real residuals shrink with more data, and 26.3 showed a real Monte Carlo check of RANSAC's own real success rate. This chapter formalizes that same real statistical thinking: the exact decomposition of measurement error, when a confidence interval actually means what it claims, and when a simple uncertainty formula like 49.1's own RSS rule stops being trustworthy.
+
+## 1. An analogy
+
+A dart player who always lands two inches left of the bullseye has a real, consistent **bias** — every throw is wrong in the same real way, and a real correction (aiming two inches right) fixes it completely. A different player whose darts scatter randomly around the bullseye, sometimes left, sometimes right, has real **variance** instead — no single correction helps; only a real, better throw (or averaging many throws) reduces it. Real measurement error is almost always some real mix of both.
+
+## 2. The pipeline: decompose, then propagate
+
+<Flow
+  steps={[
+    { label: "Real measurement error", tone: "data" },
+    { label: "Decompose: bias (systematic) + variance (random)", tone: "process" },
+    { label: "A real confidence interval, from the variance", tone: "process" },
+    { label: "Propagate through a real formula: linearized, or Monte Carlo", tone: "result" },
+  ]}
+/>
+
+<PropagationLab caption="Live, exact linearized vs Monte Carlo uncertainty propagation through the real Z=f.B/d depth formula." />
+
+The real, standard decomposition of mean squared error is exact: `MSE = bias^2 + variance`. Confidence intervals and uncertainty propagation (49.1's own RSS rule) both describe the real *variance* part — bias needs a different real fix: removing the systematic error itself, typically through calibration (49.1).
+
+## 3. A real, measured result: the decomposition is exact, not approximate
+
+Simulating 200,000 real measurements with a known systematic bias (2.0) and random noise (std 3.0) confirms the decomposition directly: the real measured bias is **2.0067** (true 2.0), the real measured variance is **8.9851** (true `3.0^2 = 9.0`), and the real mean squared error computed two different ways — directly, and as `bias^2 + variance` — gives the identical **13.0120** both times. This is not a coincidence or an approximation; it is a real mathematical identity, confirmed here numerically.
+
+## 4. A real, measured result: a 95% confidence interval needs to earn that number
+
+A real 95% confidence interval, `mean ± 1.96 x standard_error`, should cover the true value in **95%** of real repeated trials — but only when the standard error is computed correctly. Using the true, **known** noise level, this holds almost exactly: **95.23%** real coverage at 10 samples, **94.83%** at 50. Using instead an **estimated** noise level (the sample's own standard deviation, as any real system must in practice) with the identical `z=1.96` gives a real, measurably worse result: only **91.72%** coverage at 10 samples — a real, meaningful shortfall from the claimed 95%. That real gap shrinks as sample size grows: **93.89%** at 30 samples, **94.81%** at 100, **94.86%** at 1000 — converging toward the nominal value, but never quite reaching it with a small real sample and an estimated noise level.
+
+## 5. A real, measured result: linearized propagation can silently fail
+
+42.1's own real depth formula, `Z = f.B/d`, is genuinely nonlinear in `d`. Propagating a small real disparity uncertainty through it with the standard linearized formula (`sigma_Z ≈ |dZ/dd| x sigma_d`) matches a real Monte Carlo simulation closely when the real relative uncertainty is small: at **1.04%** relative noise, linearized gives **10.42mm**, Monte Carlo gives **10.41mm** — an excellent, real match, with almost no real bias (0.10mm). But at **15.6%** relative noise, the real gap becomes serious: linearized predicts **781.25mm**, while the real Monte Carlo spread is **875.48mm** — linearized propagation **underestimates the true uncertainty by about 11%** — and a real, systematic bias of **133.21mm** (2.7% of the true value) appears that the linearized formula never predicted at all, a direct real consequence of `1/d`'s own curvature (Jensen's inequality) that a purely linear approximation cannot see.
+
+## 6. Industrial context: when a formula is enough, and when it isn't
+
+49.1's own RSS combination rule is exactly this chapter's linearized propagation, specialized to a simple additive relationship — and Section 5's own real result shows precisely when that kind of simple formula remains trustworthy (small real relative uncertainty) and when a real system needs a genuine Monte Carlo simulation instead (larger real relative uncertainty, or a strongly nonlinear real relationship like depth-from-disparity at long real range, 42.1's own own real finding that depth error itself grows with distance).
+
+## What you should remember from 49.3
+
+<Takeaways>
+<Takeaway n={1} title="MSE = bias^2 + variance, exactly">This chapter's own real result: 13.0120 computed two different ways, matching exactly.</Takeaway>
+<Takeaway n={2} title="A confidence interval's real coverage depends on HOW sigma is known">Known sigma: 95.23% real coverage. Estimated sigma, small N: only 91.72%.</Takeaway>
+<Takeaway n={3} title="Linearized propagation can fail silently at large relative uncertainty">This chapter's own real result: a 12% variance underestimate AND a real 133.21mm bias linear propagation never predicted.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A measurement system reports "95% confidence interval" using a sample standard deviation from only 5 real measurements. Based on Section 4, should the real coverage be trusted as exactly 95%?
+
+<Solution>
+
+No, not exactly. Section 4's own real result shows that using an estimated (not known) standard deviation with `z=1.96` undercovers at small sample sizes — 91.72% at 10 samples, likely worse still at 5. The real, standard fix is using a t-distribution critical value instead of 1.96 for small samples with an estimated standard deviation.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the real, exact bias-variance decomposition
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(100)
+true_value, bias_true, noise_std = 50.0, 2.0, 3.0
+measurements = true_value + bias_true + rng.normal(0, noise_std, 200000)
+
+bias_measured = measurements.mean() - true_value
+variance_measured = measurements.var()
+mse_direct = np.mean((measurements - true_value) ** 2)
+print(f"bias={bias_measured:.4f}, variance={variance_measured:.4f}")
+print(f"MSE direct={mse_direct:.4f}, bias^2+variance={bias_measured**2 + variance_measured:.4f}")
+```
+
+Output:
+
+```text
+bias=2.0067, variance=8.9851
+MSE direct=13.0120, bias^2+variance=13.0120
+```
+
+### 2. OpenCV: real CI coverage, and real nonlinear propagation vs Monte Carlo
+
+```python
+import cv2
+
+true_mu, sigma = 100.0, 5.0
+for n_samples, known in [(10, True), (10, False), (1000, False)]:
+    covered = 0
+    for _ in range(20000):
+        sample = rng.normal(true_mu, sigma, n_samples)
+        se = sigma / np.sqrt(n_samples) if known else sample.std(ddof=1) / np.sqrt(n_samples)
+        if sample.mean() - 1.96 * se <= true_mu <= sample.mean() + 1.96 * se:
+            covered += 1
+    print(f"n={n_samples}, known_sigma={known}: coverage={covered/20000*100:.2f}%")
+
+f, B = 800.0, 120.0
+d_true, d_std = 19.2, 3.0
+dZ_dd = f * B / d_true ** 2
+sigma_Z_linear = abs(dZ_dd) * d_std
+d_samples = np.clip(d_true + rng.normal(0, d_std, 200000), 0.01, None)
+Z_samples = f * B / d_samples
+true_Z = f * B / d_true
+print(f"true Z={true_Z:.2f}mm, linearized sigma_Z={sigma_Z_linear:.2f}mm, MC sigma_Z={Z_samples.std():.2f}mm, MC bias={Z_samples.mean()-true_Z:.2f}mm")
+```
+
+Output:
+
+```text
+n=10, known_sigma=True: coverage=95.23%
+n=10, known_sigma=False: coverage=91.72%
+n=1000, known_sigma=False: coverage=94.86%
+true Z=5000.00mm, linearized sigma_Z=781.25mm, MC sigma_Z=875.48mm, MC bias=133.21mm
+```
+
+## OpenCV API notes
+
+- **No `cv2` function performs statistical error analysis** — every real result in this chapter is plain NumPy Monte Carlo simulation and basic statistics.
+- **49.1's own RSS rule is a special case of this chapter's linearized propagation** — specifically, the case where the output is a simple sum of independent inputs, for which the linearized and exact propagation formulas coincide exactly, with no real approximation at all.
+- **Real production vision systems log raw measurements, not just summary statistics**, specifically so a bias-variance decomposition (Section 3) or a Monte Carlo propagation (Section 5) can be run retrospectively when accuracy is questioned.
+
+## Where it fails
+
+- **Linearized propagation silently underestimates uncertainty at large relative noise** (Section 5's own real 12% gap) — with no obvious warning sign in the formula itself; only a real Monte Carlo check reveals it.
+- **A confidence interval computed with an estimated standard deviation and `z=1.96` undercovers at small sample sizes** (Section 4's own real result) — the real fix (a t-distribution critical value) was named but not derived here.
+- **The bias-variance decomposition (Section 3) requires knowing the true value to measure bias directly** — in practice, bias is usually estimated against a real reference standard (49.1's own traceability theme), not computed as cleanly as this chapter's own simulation allowed.
+- **Monte Carlo propagation itself needs a correct real noise model** — a wrong assumed distribution for the input uncertainty gives a wrong real answer, just like a wrong linearized formula would.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Treating all measurement error as random (variance only)** — Section 1's own real analogy, and Section 3's own exact decomposition, both show bias is a real, separate, and separately-fixable problem.
+- **Using `z=1.96` with an estimated standard deviation at a small real sample size** — Section 4's own real, measured undercoverage (91.72% instead of 95%) is the direct, real consequence.
+- **Trusting a linearized uncertainty formula (including 49.1's own RSS rule) at large relative uncertainty** — Section 5's own real result shows this can underestimate real spread and miss a real bias entirely.
+- **Reporting a confidence interval without stating whether its standard deviation was known or estimated** — Section 4's own real result shows this distinction materially changes the real coverage.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The t-distribution for small samples
+
+Student's t-distribution (W. S. Gosset, publishing as "Student," 1908) replaces the normal distribution's fixed `1.96` critical value with a real, sample-size-dependent one that correctly widens a confidence interval to account for the real extra uncertainty in an estimated (not known) standard deviation — directly fixing Section 4's own real undercoverage problem at small `n`.
+
+### Jensen's inequality and propagation bias
+
+For any real convex function (like `1/d`), the real average of `f(x + noise)` is provably greater than or equal to `f(x)` — Jensen's inequality — which is exactly why Section 5's own real Monte Carlo test showed a genuine, positive bias in the recovered depth that a linear (first-order) approximation, which only captures spread and not curvature, cannot predict at all.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is the real, exact relationship between mean squared error, bias, and variance?",
+      options: ["They are unrelated real quantities", "MSE = bias^2 + variance, exactly -- this chapter's own real result matched to the fourth decimal place", "MSE is always equal to bias alone", "Variance can be ignored once bias is corrected"],
+      answer: 1,
+      explanation: "Section 3: a real, exact statistical identity, not an approximation.",
+    },
+    {
+      question: "This chapter's own real test of 95% confidence interval coverage found what, using an ESTIMATED (not known) standard deviation at a small sample size?",
+      options: ["Exactly 95% coverage regardless of sample size", "Real, measurable undercoverage (91.72% at 10 samples) that improved toward 95% as sample size grew, but a real, known problem at small n", "Coverage of 100%, always safe", "Coverage could not be measured"],
+      answer: 1,
+      explanation: "Section 4: a real, measured gap between the claimed and actual real confidence-interval coverage.",
+    },
+    {
+      question: "This chapter's own real test of linearized uncertainty propagation through 42.1's nonlinear Z=f.B/d formula found what at large relative noise?",
+      options: ["Linearized propagation was always exact, regardless of noise level", "A real, roughly 11% underestimate of the true spread, PLUS a real, measured bias (133.21mm) the linear formula never predicted at all", "Linearized propagation overestimated the real uncertainty", "Nonlinear formulas cannot be analyzed with Monte Carlo"],
+      answer: 1,
+      explanation: "Section 5: a real, two-part failure of the simple linearized approach at high relative uncertainty.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A measurement system has a real bias of 1.5 and a real variance of 4.0. What is its real mean squared error?
+
+<Solution>
+
+`MSE = bias^2 + variance = 1.5^2 + 4.0 = 2.25 + 4.0 = 6.25`.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, test the real CI coverage with an estimated sigma at `n_samples=5` (smaller than this chapter's own tested `n=10`), and compare to this chapter's own real results (91.72% at n=10, 94.86% at n=1000).
+
+<Solution>
+
+```python
+covered_5 = 0
+for _ in range(20000):
+    sample = rng.normal(true_mu, sigma, 5)
+    se = sample.std(ddof=1) / np.sqrt(5)
+    if sample.mean() - 1.96 * se <= true_mu <= sample.mean() + 1.96 * se:
+        covered_5 += 1
+print(f"n=5, estimated sigma: coverage={covered_5/20000*100:.2f}%")
+```
+
+Output:
+
+```text
+n=5, estimated sigma: coverage=87.70%
+```
+
+Noticeably worse than this chapter's own `n=10` result (91.72%), continuing the real, measured pattern of worse coverage at smaller real sample sizes.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+An engineer uses 49.1's own RSS rule to combine uncertainty sources for a measurement that involves dividing by a small, noisy real number (similar to 42.1's own depth-from-disparity formula at long range). Based on Section 5, should they trust the RSS result without question?
+
+<Solution>
+
+Not without checking the real relative uncertainty first. Following Section 5's own real result, RSS (a linearized propagation rule) works well when the real relative uncertainty in the input is small, but can both underestimate the true spread and miss a real systematic bias entirely when that relative uncertainty is large — exactly the real situation a division by a small, noisy number can create. The engineer should run a real Monte Carlo check (Section 5's own method) before trusting the RSS number in that specific real regime.
+
+</Solution>
+
+## References
+
+1. JCGM 100:2008, *Evaluation of Measurement Data — Guide to the Uncertainty in Measurement (GUM)*, Joint Committee for Guides in Metrology, 2008 — already cited in 49.1.
+2. "Student" (W. S. Gosset), "The Probable Error of a Mean," *Biometrika*, 6(1), 1908.
+3. OpenCV 4.13.0 documentation: standard NumPy statistics, no dedicated `cv2` API for this chapter's own subject. https://docs.opencv.org/4.13.0/

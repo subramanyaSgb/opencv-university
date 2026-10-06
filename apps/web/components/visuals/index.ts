@@ -214,3 +214,4 @@ export { DehazeLab } from "./DehazeLab";
 export { ShotNoiseLab } from "./ShotNoiseLab";
 export { UncertaintyLab } from "./UncertaintyLab";
 export { CrbLab } from "./CrbLab";
+export { PropagationLab } from "./PropagationLab";
