@@ -1,0 +1,311 @@
+export const meta = {
+  number: "36.4",
+  title: "SVM",
+  minutes: 24,
+  objectives: [
+    "Find the maximum-margin separating line for a simple linearly separable dataset by hand",
+    "Explain what a support vector is and why only a few points determine the boundary",
+    "Explain what the kernel trick buys over a plain linear boundary, and its overfitting risk",
+    "Train and compare linear and RBF cv2.ml.SVM classifiers",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 36.4 (Part F, Module 36).
+  Lab: SvmLab (apps/web/components/visuals/SvmLab.tsx) — linear vs RBF decision regions on the same texture
+  tile feature space as 36.1-36.3, with support vectors marked.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 36.4 SVM
+
+<Definition term="Support vector machine (SVM)">a classifier that finds the single boundary separating two classes with the largest possible margin — the widest "street" with no training points inside it — determined by only the closest few points (the support vectors), not by every training example.</Definition>
+
+Every classifier so far in this module used *all* the training data, every time (centroids averaged over everyone; Bayes fit from everyone's statistics; kNN votes among nearby everyone). An SVM makes a striking simplification: once trained, its boundary is decided entirely by a small handful of the closest, most "contested" points. Everything else could be deleted without changing the boundary at all.
+
+## 1. An analogy
+
+Drawing the widest possible straight road between two neighbourhoods on a map, with no houses allowed inside the road. Only the houses right at the road's edges — the ones closest to the other neighbourhood — actually constrain how wide the road can be; a house five streets back from the edge could be moved, or removed, and the widest road would stay exactly the same. Those edge houses are the support vectors.
+
+## 2. Maximum margin and the kernel trick
+
+<Flow
+  steps={[
+    { label: "Training points, two classes", tone: "data" },
+    { label: "Find the boundary with the largest margin to both classes", tone: "process" },
+    { label: "Only the closest points (support vectors) matter", tone: "result" },
+  ]}
+/>
+
+- **Margin**: the (perpendicular) distance from the boundary to the nearest training point of either class. A larger margin generally means a boundary less sensitive to small shifts in the data — a hoped-for proxy for generalising well to new points.
+- **Support vectors**: the training points that lie exactly on the margin's edges. They alone determine the boundary; every other point could move (as long as it stays outside the margin) without changing anything.
+- **Soft margin (parameter C)**: real data is rarely perfectly separable. `C` controls how much a point *inside* the margin, or on the wrong side entirely, is penalised — small `C` allows more such violations for a wider, more tolerant margin; large `C` punishes them heavily, hugging the training data more tightly.
+- **The kernel trick**: a straight-line (linear) boundary cannot separate classes that are tangled together in a curved way. Instead of explicitly computing complicated new features, a **kernel** function (e.g. RBF, Gaussian) lets the same maximum-margin machinery find a *curved* boundary, by implicitly measuring similarity in a much richer space without ever constructing it directly.
+
+## 3. A worked example by hand
+
+Class A: (0, 0) and (0, 1). Class B: (2, 0) and (2, 1) — two classes, each a vertical pair of points, 2 units apart horizontally.
+
+By symmetry, the widest possible separating line is the vertical line **x = 1**, exactly halfway between the two classes. The nearest point of either class to this line is at a (perpendicular) distance of **1** (e.g. (0,0) to the line x=1 is 1 unit) — so the **margin is 1 on each side, total width 2**. All four points are equally close to the boundary here, so all four are support vectors — an unusually symmetric case; normally only the closest point or points on each side qualify.
+
+## 4. The real feature space: where a straight line fails
+
+<SvmLab caption="The same three-texture feature space as 36.1-36.3. Compare the linear kernel's straight boundaries with the RBF kernel's curved ones; support vectors are marked with a ring. Try different C and gamma values."/>
+
+Training a linear and an RBF-kernel SVM on the same 243 tiles (81 each of Woven, Smooth, Blotchy, from 35.1):
+
+| Kernel | Training accuracy | Support vectors |
+| --- | --- | --- |
+| Linear (C = 1) | **46.5%** | 3 of 243 |
+| RBF (auto-tuned C, γ) | **100%** | 150 of 243 |
+
+The linear SVM gets fewer than half the training points right — "Blotchy" spreads across and around both "Woven" and "Smooth" in this feature space, so no single straight line (or pair of lines, for 3 classes) can separate them well. The RBF kernel, which can bend its boundary, fits the training data perfectly — but needed 150 of the 243 points as support vectors (62%) to do it. That is a warning sign, not a triumph: a boundary that needs most of the data to support it, rather than a handful of genuinely contested points, is often **overfitting** — closely tracing the specific training points rather than finding a generally good boundary (Module 58 covers checking this properly, on held-out data the model never saw).
+
+## 5. Industrial use
+
+- **A strong, well-understood baseline classifier**, especially with moderate amounts of training data and features that are reasonably informative (as in Module 35).
+- **Combined with HOG features** for classical object detection (37.3's "HOG + SVM" pedestrian/part detectors) — a historically very important combination.
+- **One-class SVM**: a variant (`cv2.ml.SVM_ONE_CLASS`) trained on only "normal" examples, used for anomaly/novelty detection (55.6) when examples of the abnormal class are rare or unavailable.
+
+## What you should remember from 36.4
+
+<Takeaways>
+<Takeaway n={1} title="Maximum margin">The widest possible "street" with no points inside it, between two classes.</Takeaway>
+<Takeaway n={2} title="Support vectors">Only the closest points on the margin's edge determine the boundary; the rest don't matter.</Takeaway>
+<Takeaway n={3} title="Kernel trick">Lets the same machinery find a curved boundary (RBF) instead of only a straight one (linear).</Takeaway>
+<Takeaway n={4} title="Flexibility has a cost">A kernel that fits training data perfectly, using most of it as support vectors, is a real overfitting warning sign.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Class A: (0, 0). Class B: (4, 0). Where is the maximum-margin boundary, and what is the margin width (total, both sides)?
+
+<Solution>
+
+By symmetry, the boundary is the vertical line **x = 2** (halfway between). Distance from each point to the line = 2, so the margin is **4** total (2 on each side).
+
+</Solution>
+
+**Q2.** If a third point, Class A at (3, 0), is added to the Section 3 setup (so Class A now has a point *closer* to Class B than any Class B point is to Class A), what happens to the maximum-margin boundary?
+
+<Solution>
+
+It must move — the boundary can no longer sit at x=1, because the new point (3, 0) is on the *wrong side* of x=1 for Class A. With a hard margin, no separating line exists at all between x=0ish and x=2ish without misclassifying this point (the classes are no longer linearly separable); a soft margin (parameter C, Section 2) would instead allow this one point to violate the margin (or be misclassified) in exchange for a sensible boundary for the rest.
+
+</Solution>
+
+### Next: 36.5 Decision trees and random forests
+
+## Code
+
+### 1. The worked example, and training linear/RBF SVMs with NumPy and cv2.ml.SVM
+
+```python
+import numpy as np
+import cv2
+
+# Section 3: by hand, the boundary is x = 1; check a linear SVM agrees.
+X_toy = np.array([[0, 0], [0, 1], [2, 0], [2, 1]], dtype=np.float32)
+y_toy = np.array([0, 0, 1, 1], dtype=np.int32)
+svm_toy = cv2.ml.SVM_create()
+svm_toy.setType(cv2.ml.SVM_C_SVC)
+svm_toy.setKernel(cv2.ml.SVM_LINEAR)
+svm_toy.setC(1.0)
+svm_toy.train(X_toy, cv2.ml.ROW_SAMPLE, y_toy)
+test = np.array([[0.5, 0.5], [1.5, 0.5]], dtype=np.float32)   # either side of x = 1
+_, pred = svm_toy.predict(test)
+print("predictions either side of x=1:", pred.ravel())        # expect [0, 1]: A, then B
+
+TILE = 8
+def tile_features(img):
+    h, w = img.shape
+    feats = []
+    for ty in range(h // TILE):
+        for tx in range(w // TILE):
+            patch = img[ty * TILE:(ty + 1) * TILE, tx * TILE:(tx + 1) * TILE].astype(np.float64)
+            feats.append((patch.mean(), patch.std()))
+    return np.array(feats)
+
+names = ["woven", "smooth", "blotchy"]
+classes = {n: tile_features(cv2.imread(f"sample-texture-{n}.png", cv2.IMREAD_GRAYSCALE)) for n in names}
+X = np.vstack([classes[n] for n in names]).astype(np.float32)
+y = np.array(sum(([i] * len(classes[n]) for i, n in enumerate(names)), []), dtype=np.int32)
+
+svm_lin = cv2.ml.SVM_create()
+svm_lin.setType(cv2.ml.SVM_C_SVC)
+svm_lin.setKernel(cv2.ml.SVM_LINEAR)
+svm_lin.setC(1.0)
+svm_lin.train(X, cv2.ml.ROW_SAMPLE, y)
+
+svm_rbf = cv2.ml.SVM_create()
+svm_rbf.setType(cv2.ml.SVM_C_SVC)
+svm_rbf.setKernel(cv2.ml.SVM_RBF)
+svm_rbf.trainAuto(X, cv2.ml.ROW_SAMPLE, y)                     # grid-searches C and gamma internally
+
+for name, svm in [("linear", svm_lin), ("RBF", svm_rbf)]:
+    _, pred_train = svm.predict(X)
+    acc = (pred_train.ravel() == y).mean()
+    n_sv = svm.getSupportVectors().shape[0]
+    print(f"{name}: training accuracy {acc:.3f}, support vectors {n_sv} of {len(X)}")
+```
+
+Output:
+
+```text
+predictions either side of x=1: [0. 1.]
+linear: training accuracy 0.465, support vectors 3 of 243
+RBF: training accuracy 1.000, support vectors 150 of 243
+```
+
+### 2. Classifying the same contested points as 36.1-36.3
+
+```python
+test_points = np.array([[142.77, 4.93], [155.0, 40.0], [130.0, 20.0]], dtype=np.float32)
+_, pred_lin = svm_lin.predict(test_points)
+_, pred_rbf = svm_rbf.predict(test_points)
+print("linear:", [names[int(p)] for p in pred_lin.ravel()])
+print("RBF:   ", [names[int(p)] for p in pred_rbf.ravel()])
+```
+
+Output:
+
+```text
+linear: ['smooth', 'blotchy', 'woven']
+RBF:    ['smooth', 'blotchy', 'blotchy']
+```
+
+Both kernels agree on the first two points (matching 36.1–36.3's earlier answers for them); they disagree on the third, (130, 20) — another point sitting in genuinely contested territory, this time between the straight-line and curved-boundary views of the same data.
+
+## OpenCV API notes
+
+- **`cv2.ml.SVM_create()`**: `.setType(cv2.ml.SVM_C_SVC)` (standard classification with a soft margin via `C`); other types include `NU_SVC`, `ONE_CLASS` (anomaly detection), `EPS_SVR`/`NU_SVR` (regression).
+- **`.setKernel(...)`**: `SVM_LINEAR`, `SVM_RBF` (needs `.setGamma`), `SVM_POLY` (needs `.setDegree`), `SVM_SIGMOID`, `SVM_CHI2`, `SVM_INTER`.
+- **`.setC(C)`**: the soft-margin penalty (Section 2); `.setGamma(gamma)` for RBF/POLY/SIGMOID controls how far a single point's influence reaches (large gamma = short reach = more wiggly boundary, more overfitting risk).
+- **`.trainAuto(samples, layout, responses)`**: grid-searches `C` (and `gamma`/other kernel parameters, for non-linear kernels) by cross-validation and trains the best combination found — a convenient way to avoid hand-tuning, used for the RBF model above.
+- **`.getSupportVectors()`**: the support vectors themselves, shape `(n_support_vectors, n_features)`. **`.getDecisionFunction(i)`**: returns `(alpha, supportVectorIndices, rho)` for the i-th binary decision function (OpenCV's multi-class SVM internally trains one-vs-one binary SVMs and combines their votes).
+- **Multi-class**: `cv2.ml.SVM` handles more than 2 classes automatically (one-vs-one internally); the three-class results above needed no special handling.
+
+## Where it fails
+
+- **Needs a reasonably good kernel and parameters for the data's actual shape** — Section 4 showed a linear kernel failing outright (46.5% accuracy) on data that genuinely isn't linearly separable; the "right" kernel is a real, data-dependent choice.
+- **A kernel that is too flexible for the amount of data overfits** — Section 4's RBF model, with 62% of all training points as support vectors, is a real warning sign, not a feature to be proud of; checking performance on held-out data (not shown here, properly covered in Module 58) is essential before trusting a flexible kernel.
+- **Choosing `C` and `gamma` well usually needs search** (`trainAuto`, or manual cross-validation) — poor choices give either an overly rigid or an overly wiggly boundary.
+- **Scales less gracefully to very large datasets** than some alternatives (training cost grows faster than linearly with the number of examples for most SVM solvers), and, like every distance/kernel-based method here, is sensitive to feature scaling.
+- Superseded for many large-scale, high-dimensional problems today by deep learning (Part J), though SVMs remain strong on small-to-moderate, well-featured datasets.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Judging a model only by training accuracy**: Section 4's RBF model scored 100% on the data it was trained on, which says little about new data — always check accuracy on separate, held-out examples (Module 58).
+- **Using a linear kernel on data that clearly isn't linearly separable** and concluding "SVMs don't work for this" — try a kernel (RBF, polynomial) before concluding that.
+- **Not scaling features before training**: an SVM's margin and kernel distances are affected by each feature's scale, same as kNN and the other distance-based methods in this module.
+- **Treating a high support-vector count as purely good** ("more support vectors supports the boundary better!") — a very high proportion of support vectors (as in Section 4's RBF model) more often signals overfitting than a well-generalising boundary.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The maximum-margin optimisation problem
+
+Formally, an SVM solves a constrained optimisation: minimise ‖w‖² (equivalent to maximising the margin, 2/‖w‖) subject to every training point being correctly classified with margin at least 1 (hard margin), or with a penalised slack variable per violating point (soft margin, controlled by `C`). This is a convex quadratic program with a unique solution, which is part of why SVMs (unlike, say, some neural network training) don't depend on random initialisation.
+
+### Why only support vectors matter
+
+The optimisation's solution (via its dual formulation) expresses the decision boundary as a weighted sum over training points, where the weight (`alpha`, 36.4's Code section) is exactly zero for any point that is not on the margin's edge or violating it. Zero weight means zero influence on the boundary — which is the formal reason non-support-vector points could be deleted without changing anything.
+
+### The kernel trick, briefly
+
+A kernel function `K(x, y)` computes what the dot product of `x` and `y` *would be* in some (possibly much higher-dimensional, even infinite-dimensional for RBF) transformed feature space, without ever computing that transformed representation directly. Because the SVM's optimisation and decision function only ever need dot products between points, swapping in a kernel function is enough to get a boundary that is linear in the transformed space — and therefore curved in the original one — for the same computational cost as the linear case.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is a support vector?",
+      options: ["Any training point", "A training point lying exactly on the margin's edge, which determines the boundary", "The class centroid", "A test point"],
+      answer: 1,
+      explanation: "Section 1-2: only these points constrain the maximum-margin boundary; the rest could be removed without changing it.",
+    },
+    {
+      question: "In Section 4, why did the linear SVM only reach 46.5% training accuracy?",
+      options: ["A bug in cv2.ml.SVM", "The 'Blotchy' class spreads across and around the other two classes in this feature space, so no straight-line boundary separates them well", "C was set too high", "Linear kernels cannot handle 3 classes"],
+      answer: 1,
+      explanation: "The RBF kernel, which can curve, reached 100% training accuracy on the same data.",
+    },
+    {
+      question: "Why is the RBF model's 100% training accuracy, using 150 of 243 points as support vectors, described as a warning sign rather than a success?",
+      options: ["100% accuracy is always bad", "Needing most of the data as support vectors (rather than a handful of genuinely contested points) suggests the boundary is tightly tracing the training data -- overfitting -- rather than finding a generally good rule", "Support vectors should always be exactly 2", "RBF kernels cannot be evaluated this way"],
+      answer: 1,
+      explanation: "Checking performance on held-out data (Module 58) is the real test of whether this generalises.",
+    },
+    {
+      question: "What does the kernel trick let an SVM do?",
+      options: ["Train faster on any dataset", "Find a boundary that is curved in the original feature space, without explicitly constructing a higher-dimensional representation", "Avoid needing any training data", "Guarantee 100% accuracy"],
+      answer: 1,
+      explanation: "Go deeper: a kernel computes the dot product a transformation would give, without computing the transformation itself.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Class A: (0, 0) and (1, 0). Class B: (0, 5) and (1, 5). Where is the maximum-margin boundary, and what is the total margin width?
+
+<Solution>
+
+By symmetry (both classes are horizontal pairs, 5 units apart vertically), the boundary is the horizontal line **y = 2.5**. Distance from each point to this line is 2.5, so the total margin width is **5**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the Code section's trained `svm_lin` and `svm_rbf`, find a point of the form (145, s) — varying only the standard-deviation feature, mean fixed at 145 — where the two kernels disagree. Try s = 0, 10, 20, 30, 40, 50.
+
+<Solution>
+
+```python
+for s in (0, 10, 20, 30, 40, 50):
+    pt = np.array([[145.0, float(s)]], dtype=np.float32)
+    _, pl = svm_lin.predict(pt)
+    _, pr = svm_rbf.predict(pt)
+    print(f"s={s}: linear={names[int(pl[0,0])]}  rbf={names[int(pr[0,0])]}")
+```
+
+Output:
+
+```text
+s=0: linear=smooth  rbf=blotchy
+s=10: linear=woven  rbf=blotchy
+s=20: linear=woven  rbf=blotchy
+s=30: linear=woven  rbf=blotchy
+s=40: linear=blotchy  rbf=blotchy
+s=50: linear=blotchy  rbf=blotchy
+```
+
+They agree only at the two highest values (s=40, 50); for s=0 to 30 they disagree. The straight-line (linear) boundary changes its answer twice as s rises (smooth, then woven, then blotchy) — three straight bands stacked by std. dev. The curved (RBF) boundary calls the whole column "blotchy" from s=0 up, which at first looks surprising, since mean=145 is close to Woven's own centroid (145.49) — a reminder that an RBF model's behaviour away from the exact training points it was fitted to is shaped by the kernel and parameters, not always by the simple intuition a straight line gives.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague wants to use an RBF SVM but has only 15 labelled examples total, 5 per class. What should you warn them about, based on this chapter?
+
+<Solution>
+
+With so little data, a flexible RBF kernel (especially with `gamma` tuned to fit the training data as tightly as possible) can very easily end up using most or all 15 points as support vectors and achieving perfect training accuracy — while generalising poorly to new examples, exactly Section 4's warning sign, made worse by having barely any data to begin with. With this little data, a simpler model (linear SVM, or even nearest-centroid/kNN, 36.1/36.3) or a carefully restricted `gamma`, checked against held-out examples if at all possible, is a safer starting point than a flexible kernel fit to a handful of points.
+
+</Solution>
+
+## References
+
+1. C. Cortes, V. Vapnik, "Support-vector networks," *Machine Learning* 20(3), 1995, pp. 273–297.
+2. C. J. C. Burges, "A tutorial on support vector machines for pattern recognition," *Data Mining and Knowledge Discovery* 2(2), 1998, pp. 121–167.
+3. OpenCV 4.13.0 documentation: `cv2.ml.SVM`. https://docs.opencv.org/4.13.0/

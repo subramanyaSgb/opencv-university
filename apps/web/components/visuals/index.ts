@@ -148,3 +148,4 @@ export { BowLab } from "./BowLab";
 export { FeatureSpaceLab } from "./FeatureSpaceLab";
 export { GaussNbLab } from "./GaussNbLab";
 export { KnnLab } from "./KnnLab";
+export { SvmLab } from "./SvmLab";
