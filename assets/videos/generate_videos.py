@@ -48,3 +48,14 @@ subprocess.run(
 )
 raw_path.unlink()
 print(f"wrote {final_path.name}: {N_FRAMES} frames at {FPS} fps")
+
+# --- sample-ball-25fps-bf2.mp4: the same clip, re-encoded with 2 B-frames per GOP -------
+# Used in 39.5: a real B-frame reorder delay (ffprobe DTS vs PTS), and to show cv2.VideoCapture
+# only ever reports presentation-order timing (CAP_PROP_POS_MSEC), never decode-order DTS.
+bf2_path = OUT / "sample-ball-25fps-bf2.mp4"
+subprocess.run(
+    [FFMPEG, "-y", "-loglevel", "error", "-i", str(final_path),
+     "-c:v", "libx264", "-bf", "2", "-g", "50", "-pix_fmt", "yuv420p", str(bf2_path)],
+    check=True,
+)
+print(f"wrote {bf2_path.name}: same clip, 2 B-frames per GOP")

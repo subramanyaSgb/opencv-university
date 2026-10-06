@@ -167,3 +167,4 @@ export { FpsLab } from "./FpsLab";
 export { RtspLab } from "./RtspLab";
 export { BackendLab } from "./BackendLab";
 export { HwDecodeLab } from "./HwDecodeLab";
+export { LatencyBudgetLab } from "./LatencyBudgetLab";

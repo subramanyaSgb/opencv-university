@@ -1,0 +1,283 @@
+export const meta = {
+  number: "39.5",
+  title: "Latency and buffering",
+  minutes: 24,
+  objectives: [
+    "Break total end-to-end latency into its separate, additive stages",
+    "Measure a real encoder reorder delay from B-frames with ffprobe, not just describe it",
+    "Combine this chapter's real numbers with 39.4's real decode numbers into one latency budget",
+    "Know the difference between a buffer's size (frames) and the delay it adds (milliseconds)",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 39.5 (Part G, Module 39).
+  7.4 (Video and camera capture) already covers the capture-loop side of this topic in depth:
+  buffering in a plain read() loop, the newest-frame reader thread, and a CaptureLab simulation.
+  This chapter does NOT repeat that -- it links to it once, and instead covers the rest of the
+  pipeline's latency, which 7.4 does not: encoder reorder delay, and assembling a full budget.
+  Real, local measurement for this chapter (ffprobe on real libx264 encodes of the 39.1 clip,
+  25 fps, with -bf 0/1/2 and -g 50):
+  - bf=0: first packet pts_time=0.000000, dts_time=0.000000 -- no reorder delay.
+  - bf=1: first packet pts_time=0.000000, dts_time=-0.040000 -- 40 ms reorder delay.
+  - bf=2: first packet pts_time=0.000000, dts_time=-0.080000 -- 80 ms reorder delay.
+  Exactly matching reorder_delay_ms = bf * (1000 / fps) = bf * 40 ms in every case -- a real,
+  precisely verified relationship, not assumed.
+  cv2.VideoCapture does not expose per-packet DTS at all (only presentation-order decoded
+  frames and CAP_PROP_POS_MSEC, itself PTS-derived, 39.1) -- measuring reorder delay required
+  ffprobe at the packet level, confirmed by testing.
+  Decode throughput numbers reused from 39.4's own real measurement on the same machine
+  (software 210.7 fps, hardware/D3D11 77.3 fps on a 1080p clip) -- not re-measured here.
+  Lab: LatencyBudgetLab (apps/web/components/visuals/LatencyBudgetLab.tsx) -- stacks this
+  chapter's real reorder-delay numbers and 39.4's real decode numbers with two illustrative
+  sliders (network, processing) into one total, against a target budget.
+*/}
+
+# 39.5 Latency and buffering
+
+<Definition term="End-to-end latency">the real time between something happening in front of the camera and your program finding out about it — the sum of every stage's own delay, not just the last one you happen to be looking at.</Definition>
+
+7.4 already covered one important source of latency in depth: a slow processing loop falling behind a camera, and fixing it with a thread that always reads the newest frame. This chapter looks at everything *else* that adds latency along the way — most of it well before your own code ever sees a frame — and measures one of those sources for real.
+
+## 1. An analogy
+
+A letter mailed across the country does not travel at one speed; it waits at a local sorting office, rides a truck, waits at a regional hub, rides a plane, waits at the destination office, then finally reaches you. Total delivery time is the *sum* of every stop's holding time, and the slowest single stop is not necessarily where most of the delay comes from — sometimes it is several merely-moderate stops added together.
+
+## 2. A frame's whole journey
+
+<Flow
+  steps={[
+    { label: "Exposure and sensor readout (2.6, 2.9)", tone: "world" },
+    { label: "Encode, incl. B-frame reorder buffer (this chapter)", tone: "process" },
+    { label: "Network transport + jitter buffer (39.2)", tone: "data" },
+    { label: "Decode (39.1, 39.4)", tone: "process" },
+    { label: "Your processing + its own buffer (7.4)", tone: "process" },
+    { label: "A decision, seconds (or milliseconds) late", tone: "result" },
+  ]}
+/>
+
+Every one of these stages can add delay on its own, and they add up in series. 7.4 covered the last one in detail (a slow processing loop, fixed with a newest-frame reader thread) — this chapter measures one of the earlier, usually-overlooked ones for real: the delay a B-frame-based encoder structure forces onto every single frame, no matter how fast your own code is.
+
+## 3. A real, measured reorder delay
+
+<LatencyBudgetLab caption="This chapter's own real reorder-delay and 39.4's own real decode numbers, stacked with two illustrative sliders into one total latency against a target budget."/>
+
+4.5 already stated that live inspection streams avoid B-frames because they add delay — this chapter measures exactly how much. Encoding this course's own 39.1 clip (25 fps) with `libx264` at three different B-frame settings, then reading the real packet timestamps with `ffprobe`:
+
+| B-frames per GOP (`-bf`) | First packet's PTS | First packet's DTS | Reorder delay |
+| --- | --- | --- | --- |
+| 0 | 0.000000 s | 0.000000 s | **0 ms** |
+| 1 | 0.000000 s | −0.040000 s | **40 ms** |
+| 2 | 0.000000 s | −0.080000 s | **80 ms** |
+
+**PTS** (presentation timestamp) says *when* a frame should be shown; **DTS** (decode timestamp) says *when* it must be decoded — which, for a frame sitting behind B-frames, is *earlier* than its own presentation time, because the decoder needs it ready in advance to predict the B-frames that come before it in display order. A negative first DTS is exactly this: the decoder must do real work *before* "time zero" of playback, which means a real receiver must buffer that much data before it can even start displaying frame 0. The pattern is exact: reorder delay = (B-frames per GOP) × (frame period) = `bf` × 40 ms at this clip's 25 fps — 0, 40 and 80 ms, precisely matching the three real measurements.
+
+## 4. A worked example by hand: one real latency budget
+
+Assembling a real budget for one specific, concrete pipeline: `bf=1` encoding (40 ms reorder delay, Section 3), software decode on this course's own test machine (39.4's real 210.7 fps → 1000/210.7 ≈ 4.75 ms per frame), a network/jitter buffer of 60 ms, and 50 ms of application processing:
+
+40 + 4.75 + 60 + 50 = **154.75 ms** total, end to end.
+
+Against a 500 ms alarm-response requirement (a plausible real monitoring target), this leaves 500 − 154.75 = **345.25 ms** of margin — comfortably within budget. Switching to hardware decode (39.4's real 77.3 fps → 1000/77.3 ≈ 12.9 ms) changes the total only to 40 + 12.9 + 60 + 50 = 162.9 ms — on this machine, decode mode barely moves the total, because it was never the dominant term; the encoder's reorder delay and the illustrative network/processing figures matter far more here.
+
+## 5. Industrial context: choosing settings with the real number in hand
+
+4.5's advice ("live inspection streams avoid B-frames") now has a concrete number behind it: every B-frame between anchors on this test clip cost exactly 40 ms, real and measured, not a vague "some delay." A line that must alarm within, say, 200 ms simply cannot afford `bf=2`'s 80 ms before a single other stage is even counted; a recording-only archive stream, where nobody is waiting on the result in real time, can use B-frames freely for the bitrate savings (4.5, Section 7) with no practical cost at all.
+
+## What you should remember from 39.5
+
+<Takeaways>
+<Takeaway n={1} title="Latency is a sum">Every stage from exposure to display adds its own delay; add them all, not just the one you're looking at.</Takeaway>
+<Takeaway n={2} title="B-frames cost real, measured milliseconds">This chapter's own test: exactly `bf` x 40 ms reorder delay at 25 fps, not a vague "some delay."</Takeaway>
+<Takeaway n={3} title="Buffer size (frames) vs delay (ms)">You need the frame rate to convert one into the other — they are not interchangeable.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 30 fps encode uses `bf=2`. What is the reorder delay in milliseconds?
+
+<Solution>
+
+Frame period = 1000 / 30 ≈ 33.3 ms. Reorder delay = 2 × 33.3 ≈ **66.7 ms**.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the reorder-delay formula, generalised
+
+```python
+import numpy as np
+
+fps = 25
+bf_values = np.array([0, 1, 2])
+frame_period_ms = 1000 / fps
+reorder_delay_ms = bf_values * frame_period_ms
+print("reorder delay (ms) for bf = 0, 1, 2:", reorder_delay_ms)
+```
+
+Output:
+
+```text
+reorder delay (ms) for bf = 0, 1, 2: [ 0. 40. 80.]
+```
+
+### 2. The real ffmpeg encode and ffprobe measurement
+
+```bash
+ffmpeg -i sample-ball-25fps.mp4 -c:v libx264 -bf 2 -g 50 -pix_fmt yuv420p sample-ball-25fps-bf2.mp4
+ffprobe -select_streams v:0 -show_entries packet=pts_time,dts_time,flags -of csv=p=0 sample-ball-25fps-bf2.mp4
+```
+
+The real first three lines of output (unedited):
+
+```text
+0.000000,-0.080000,K__
+0.120000,-0.040000,___
+0.040000,0.000000,___
+```
+
+`K` marks a keyframe. The first packet's PTS (0.000000) and DTS (−0.080000) differ by exactly 80 ms — Section 3's `bf=2` row, confirmed directly from the real container.
+
+### 3. What cv2.VideoCapture reports instead
+
+```python
+import cv2
+
+cap = cv2.VideoCapture("sample-ball-25fps-bf2.mp4")
+for i in range(3):
+    ok, frame = cap.read()
+    print(f"frame {i}: CAP_PROP_POS_MSEC = {cap.get(cv2.CAP_PROP_POS_MSEC):.1f}")
+cap.release()
+```
+
+Output:
+
+```text
+frame 0: CAP_PROP_POS_MSEC = 0.0
+frame 1: CAP_PROP_POS_MSEC = 40.0
+frame 2: CAP_PROP_POS_MSEC = 80.0
+```
+
+These are the real **PTS** times, in presentation order (0, 40, 80 ms — the same values that appear, out of order, scattered through Section 3's own `ffprobe` packet listing: 0.000000, 0.120000, 0.040000, 0.080000, …). `cv2.read()` always hands back frames already sorted into this presentation order — it never exposes the negative decode-order DTS, or the raw decode-order sequence, that revealed the reorder delay in Section 3.
+
+## OpenCV API notes
+
+- **`cv2.VideoCapture` never exposes per-packet DTS** — it only hands you fully decoded frames in presentation order, plus `CAP_PROP_POS_MSEC` (itself derived from PTS, 39.1). Measuring reorder delay (Section 3) genuinely required a packet-level tool (`ffprobe`), not `cv2` itself — a real, confirmed API limitation, not an oversight in this chapter's method.
+- **`CAP_PROP_BUFFERSIZE`**: where a backend supports it, requests a shallower internal buffer — fewer frames held means less potential latency from that one stage, at the cost of being less tolerant of brief stalls (7.4).
+- **No single property reports "total end-to-end latency"** — Section 4's budget has to be assembled by hand (or measured per-stage) exactly as this chapter did; no API gives you that one number directly.
+
+## Where it fails
+
+- **Network jitter is variable, not fixed** — a real jitter buffer must be sized for the *worst* reasonably-expected delay, not the average, or it will itself drop frames when the network is briefly slower than usual (39.2).
+- **A buffer's frame count and its millisecond delay are not the same thing** — a 10-frame buffer is 400 ms of delay at 25 fps but only 167 ms at 60 fps; always convert using the actual frame rate (Mini exercise).
+- **Processing-time variance, not just its average, grows latency** — 7.4's buffer-growth problem is driven by the worst sustained stretch of slow frames, not the mean processing time.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Treating "latency" as one single number to optimise** — Section 2's pipeline has several independent stages; fixing the slowest one (often the application loop, 7.4) may still leave a real, measured cost sitting in the encoder settings (Section 3) that nobody looked at.
+- **Choosing encoder settings for bitrate alone** on a stream that will be watched or acted on live — this chapter's own measured 40–80 ms per B-frame is a real, avoidable cost for exactly that use case (Section 5).
+- **Confusing a buffer's size in frames with its added delay in milliseconds** — always multiply (or divide) by the frame period to compare the two honestly.
+- **Assuming `cv2.VideoCapture` can report encoder-level reorder delay** — it cannot (OpenCV API notes); that measurement needs a different tool.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Jitter buffers
+
+A real network jitter buffer does not just add a fixed delay — it holds incoming packets briefly so that small, random variations in arrival time (jitter) can be smoothed out before frames are handed to the decoder in a steady stream; sizing it too small lets jitter cause visible stutters or drops, sizing it too large adds latency for no further benefit. Real-world RTP receivers (39.2) typically make this buffer adaptive, growing and shrinking with measured network conditions rather than using one fixed size. `TODO: verify` exact adaptive-sizing algorithms vary by implementation and were not tested directly in this course.
+
+### Low-latency encoder presets
+
+Beyond simply setting `bf=0`, encoders offer dedicated "low-latency" or "zero-latency" presets (for example x264's `-tune zerolatency`) that also disable frame-threading lookahead and other buffering the encoder itself would otherwise use internally, trading some compression efficiency for a more predictable, lower end-to-end delay — relevant for exactly the kind of live-alarm system Section 5 describes.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "This chapter measured the real reorder delay for bf=1 at 25 fps. What was it?",
+      options: ["0 ms", "20 ms", "40 ms", "80 ms"],
+      answer: 2,
+      explanation: "Section 3: bf x frame period = 1 x 40 ms = 40 ms, confirmed by the real DTS of -0.040000.",
+    },
+    {
+      question: "Why can't cv2.VideoCapture measure encoder reorder delay directly?",
+      options: ["It's a bug in OpenCV", "VideoCapture only exposes decoded frames in presentation order and PTS-derived timestamps, never per-packet DTS", "Reorder delay doesn't exist in H.264", "You need a GPU to measure it"],
+      answer: 1,
+      explanation: "OpenCV API notes: this is a real, confirmed limitation -- ffprobe at the packet level was needed instead.",
+    },
+    {
+      question: "A 10-frame buffer at 25 fps adds how much latency, in milliseconds?",
+      options: ["10 ms", "25 ms", "400 ms", "It depends only on processing time, not frame count"],
+      answer: 2,
+      explanation: "Where it fails: 10 frames x (1000/25) ms = 400 ms -- buffer size and delay need the frame rate to convert between them.",
+    },
+    {
+      question: "In Section 4's worked example, switching from software to hardware decode changed the total latency only slightly. Why?",
+      options: ["Hardware decode doesn't actually work", "Decode time was never the dominant term in that particular budget -- the reorder delay and the illustrative network/processing figures mattered more", "The numbers were made up", "39.4's numbers are wrong"],
+      answer: 1,
+      explanation: "Section 4: 4.75 ms vs 12.9 ms decode time is a small difference next to 40+60+50 ms from the other stages.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A pipeline has: 60 ms reorder delay, 8 ms decode time, 90 ms network/jitter buffer, and 70 ms processing. Is it within a 200 ms target budget, and by how much?
+
+<Solution>
+
+Total = 60 + 8 + 90 + 70 = **228 ms**. This is **over** the 200 ms budget by 228 − 200 = **28 ms**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, compute the reorder delay in milliseconds for `bf` values 0 through 4 at 30 fps instead of 25.
+
+<Solution>
+
+```python
+import numpy as np
+
+fps = 30
+bf_values = np.arange(5)
+frame_period_ms = 1000 / fps
+reorder_delay_ms = bf_values * frame_period_ms
+print("reorder delay (ms) at 30 fps, bf = 0..4:", np.round(reorder_delay_ms, 1))
+```
+
+Output:
+
+```text
+reorder delay (ms) at 30 fps, bf = 0..4: [  0.   33.3  66.7 100.  133.3]
+```
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A line needs an alarm within 150 ms of a defect appearing. The current pipeline uses `bf=2` at 25 fps (80 ms reorder delay alone, Section 3), plus 50 ms of processing. Using this chapter's real numbers, what is the single cheapest change to make, and why?
+
+<Solution>
+
+The reorder delay alone (80 ms) plus processing (50 ms) is already 130 ms, leaving only 20 ms for everything else (network, decode) — far too tight. The cheapest fix, following Section 5's own argument, is dropping to **`bf=0`**, which this chapter measured as exactly **0 ms** reorder delay (Section 3's own table) — a pure latency win with no code changes needed, only an encoder setting, unlike reducing processing time which would require actual algorithmic work.
+
+</Solution>
+
+## References
+
+1. ITU-T Recommendation H.264 / ISO/IEC 14496-10 (B-frame prediction structure, decode vs presentation order) — already cited in 4.5.
+2. H. Schulzrinne et al., RFC 3550, *RTP: A Transport Protocol for Real-Time Applications* (jitter, timestamps) — already cited in 39.2.
+3. FFmpeg documentation: `-bf`, `ffprobe` packet-level fields (`pts_time`, `dts_time`). https://ffmpeg.org/ffmpeg.html, https://ffmpeg.org/ffprobe.html
+4. x264 encoder documentation: `-tune zerolatency` and related low-latency options.
