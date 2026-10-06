@@ -155,3 +155,4 @@ export { PcaReduceLab } from "./PcaReduceLab";
 export { ClusterLab } from "./ClusterLab";
 export { WindowLab } from "./WindowLab";
 export { CascadeLab } from "./CascadeLab";
+export { HogSvmLab } from "./HogSvmLab";

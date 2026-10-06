@@ -1,0 +1,291 @@
+export const meta = {
+  number: "37.3",
+  title: "HOG + SVM",
+  minutes: 22,
+  objectives: [
+    "Compute a linear SVM's decision score from a descriptor, by hand",
+    "Explain the full HOG+SVM pipeline: descriptor in, one dot product, one threshold",
+    "Read a real HOG+SVM decision score and know why it can stay negative on a shape with no real texture",
+    "Use cv2.HOGDescriptor with a pretrained SVM detector and its detectMultiScale parameters",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 37.3 (Part F, Module 37).
+  Combines 35.3 (HOG) and 36.4 (SVM) into the classic Dalal-Triggs pedestrian detector.
+  New asset: sample-synth-pedestrian.png (160x320 synthetic silhouette, shape only, no clothing texture).
+  Lab: HogSvmLab (apps/web/components/visuals/HogSvmLab.tsx) — real HOG+SVM score scanned over the
+  silhouette, precomputed by scripts/gen_hogsvm_data.py (HOG's exact descriptor is impractical to
+  reimplement faithfully in the browser, same reasoning as SvmLab/TreeLab/BoostLab).
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 37.3 HOG + SVM
+
+<Definition term="HOG + SVM detector">a sliding-window classifier (37.1) that computes a HOG descriptor (35.3) for each window and feeds it to a linear SVM (36.4): one dot product between the descriptor and a learned weight vector, plus a bias, gives a single score — above a threshold means "object," below means "not."</Definition>
+
+37.2's Haar cascade makes its decision through many small, cheap stages. HOG+SVM makes it in one step, but a much bigger one: compute the *entire* descriptor first (35.3's 1764–3780 numbers, depending on window size), then one linear combination of all of them decides everything at once. Dalal and Triggs [1] combined these two ideas — a strong descriptor and a simple linear classifier on top of it — into what became, for years, the standard pedestrian detector.
+
+## 1. An analogy
+
+A loan application scored by adding up weighted factors — income counts this much, debt counts that much against it, each factor multiplied by how much it matters, all summed into one number, compared against a cutoff. Nothing fancy happens after the descriptor (HOG) has done the work of turning the image into numbers; the classifier itself is just a weighted sum and a threshold.
+
+## 2. The pipeline
+
+<Flow
+  steps={[
+    { label: "Window (64x128 classic)", tone: "data" },
+    { label: "HOG descriptor (35.3): one vector, ~3780 numbers", tone: "process" },
+    { label: "score = w . descriptor + b (one dot product)", tone: "process" },
+    { label: "score > threshold? -> detection", tone: "result" },
+  ]}
+/>
+
+- **The descriptor**: exactly 35.3's HOG — cell histograms, block normalisation, concatenated into one long vector.
+- **The classifier**: a linear SVM (36.4) — during training, it found the weight vector `w` and bias `b` that best separate "person" descriptors from "not person" descriptors by the widest margin. At detection time, training is long done; only the one dot product remains.
+- **The score** is exactly the signed distance (up to scaling) from the SVM's decision boundary: strongly positive means confidently inside the "person" side of the margin, strongly negative means confidently outside, and values near zero are genuinely uncertain.
+- **Still a sliding-window search** (37.1): this one dot-product classifier is what gets evaluated at every window position and scale.
+
+## 3. A worked example by hand
+
+A toy 3-number "descriptor" (3, 1, instead of HOG's thousands, to make the arithmetic simple): descriptor = (2, 1, 3). Learned weights `w` = (1, −2, 0.5), bias `b` = −1.
+
+score = w·descriptor + b = (1×2) + (−2×1) + (0.5×3) + (−1) = 2 − 2 + 1.5 − 1 = **0.5**.
+
+Since 0.5 > 0, this window is classified as the target class. If the bias had been −2 instead, the same descriptor would score 2 − 2 + 1.5 − 2 = **−0.5**, flipping the decision — the same linear combination of the same features, right on the other side of a differently-placed threshold.
+
+## 4. A real score, and why it stays negative
+
+<HogSvmLab caption="The real HOG+SVM people detector's decision score, scanned across every 64x128 window of a synthetic (shape-only) pedestrian silhouette. Click any cell to read its exact score -- none cross the real detection threshold of 0."/>
+
+Running the real, pretrained `cv2.HOGDescriptor_getDefaultPeopleDetector()` on a 160×320 synthetic pedestrian-shaped silhouette (head, torso, arms, legs as soft-edged ellipses — shape only, no real clothing folds or texture):
+
+| Measurement | Score |
+| --- | --- |
+| Whole image resized to 64×128, scored directly | **−0.70** |
+| Best single window in a full positional scan (325 windows, stride 8) | **−0.90** (at x=88, y=88 — roughly the head/shoulder region) |
+| Worst window in the same scan | −4.51 |
+
+Every single score is **negative** — `detectMultiScale` at its default threshold (0) finds nothing here, correctly reporting "not a person" everywhere. The *shape* is roughly right, but a real pedestrian detector's weight vector was trained on real photographs, and real clothing produces a distinctive, consistent pattern of gradient orientations (vertical gradients down trouser legs and jacket seams, specific head-and-shoulder silhouette gradients, texture from fabric folds) that a flat-shaded geometric silhouette simply does not reproduce. The *least negative* score (−0.90) still lands in a plausible head-and-shoulder area rather than the flat background — a hint that the descriptor is picking up *something* shape-related, even though it falls well short of the real threshold.
+
+## 5. Industrial use
+
+- **The historical standard for pedestrian/person detection** before CNN-based detectors (Part J) became practical — still used where CPU-only, interpretable, fast detection matters more than top accuracy.
+- **Any fixed-pose object with distinctive, consistent surface texture** (not just people): the same HOG+SVM recipe has been applied to many classical detection tasks with a well-defined silhouette and texture.
+- **A clean illustration of discriminative vs generative classification** (36.1's Go deeper): the SVM only ever learns a boundary between classes, never a full model of what a "person" looks like — which is also why a reasonable-looking shape with the wrong *texture statistics* fails just as completely as an obviously wrong shape would.
+
+## What you should remember from 37.3
+
+<Takeaways>
+<Takeaway n={1} title="One dot product">After the HOG descriptor is computed, the classifier itself is one weighted sum plus a threshold.</Takeaway>
+<Takeaway n={2} title="Score = signed margin distance">Strongly positive = confident yes; strongly negative = confident no; near zero = genuinely uncertain.</Takeaway>
+<Takeaway n={3} title="Shape isn't enough">A geometrically correct silhouette with no real texture statistics still scores negative on a real pretrained detector.</Takeaway>
+<Takeaway n={4} title="Still a sliding-window search">37.1's cost and multi-detection concerns apply exactly as before; HOG+SVM is the classifier plugged into that search.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Descriptor = (1, 4), weights = (3, −1), bias = 0.5. What is the score, and is it classified positive?
+
+<Solution>
+
+score = (3×1) + (−1×4) + 0.5 = 3 − 4 + 0.5 = **−0.5**. Negative, so classified **not** the target class.
+
+</Solution>
+
+**Q2.** Why does a score very close to zero (say, −0.05) deserve less confidence than a score of −3, even though both are "negative" (not detected)?
+
+<Solution>
+
+The score is the (scaled) distance from the SVM's decision boundary (Section 2) — a small-magnitude score means the point sits very close to that boundary, where a tiny change in the input (a slightly different crop, a bit more noise) could easily flip the sign. A large-magnitude negative score means the point is confidently, robustly on the "not detected" side, far from the boundary.
+
+</Solution>
+
+### Next: 37.4 Non-max suppression
+
+## Code
+
+### 1. The worked example, with NumPy
+
+```python
+import numpy as np
+import cv2
+
+descriptor = np.array([2, 1, 3], dtype=np.float64)
+w = np.array([1, -2, 0.5], dtype=np.float64)
+for b in (-1, -2):
+    score = float(np.dot(w, descriptor) + b)
+    print(f"bias={b}: score={score:.2f} -> {'positive' if score > 0 else 'negative'}")
+```
+
+Output:
+
+```text
+bias=-1: score=0.50 -> positive
+bias=-2: score=-0.50 -> negative
+```
+
+### 2. The real detector's score on a real (synthetic) silhouette
+
+```python
+img = cv2.imread("sample-synth-pedestrian.png", cv2.IMREAD_GRAYSCALE)
+hog = cv2.HOGDescriptor()
+svm = cv2.HOGDescriptor_getDefaultPeopleDetector()
+hog.setSVMDetector(svm)
+w_vec, b = svm[:-1], float(svm[-1])                              # the 3780 weights + bias, unpacked
+
+whole = cv2.resize(img, (64, 128))
+score_whole = float(np.dot(hog.compute(whole).ravel(), w_vec) + b)
+print(f"whole image resized to 64x128: score {score_whole:.4f}")
+
+best, worst = None, None
+H, W = img.shape
+for y in range(0, H - 128 + 1, 8):
+    for x in range(0, W - 64 + 1, 8):
+        s = float(np.dot(hog.compute(img[y:y + 128, x:x + 64]).ravel(), w_vec) + b)
+        if best is None or s > best[2]:
+            best = (x, y, s)
+        if worst is None or s < worst[2]:
+            worst = (x, y, s)
+print(f"best window: {best}")
+print(f"worst window: {worst}")
+
+
+rects, weights = hog.detectMultiScale(img, winStride=(4, 4), scale=1.05)
+print(f"detections at default threshold: {len(rects)}")
+```
+
+Output:
+
+```text
+whole image resized to 64x128: score -0.7031
+best window: (88, 88, -0.8984017372131348)
+worst window: (24, 80, -4.5131635665893555)
+detections at default threshold: 0
+```
+
+## OpenCV API notes
+
+- **`cv2.HOGDescriptor()` + `.setSVMDetector(vector)`**: `vector` is `float32`, length = descriptor length + 1 (the last entry is the bias, 35.3's API notes); `cv2.HOGDescriptor_getDefaultPeopleDetector()` returns exactly such a vector (3781 numbers) for the default 64×128 window.
+- **`.detectMultiScale(img, hitThreshold=0, winStride=(), padding=(), scale=1.05, groupThreshold=2, useMeanshiftGrouping=False)`**: `hitThreshold` is the score cutoff (normally 0, since the bias is already baked into the detector vector); `winStride` must be a multiple of the HOG block stride (8 px for the default configuration); `scale` is 37.1's per-level scale increase; `groupThreshold` is the same kind of built-in grouping `cv2.CascadeClassifier` uses via `minNeighbors` (37.2).
+- **`foundWeights`** (the second return value of `detectMultiScale`): the actual decision score for each kept detection — directly comparable to the scores computed by hand in Section 4's code, and a genuine confidence measure, unlike `minNeighbors`' plain overlap count.
+- **Also ships `cv2.HOGDescriptor_getDaimlerPeopleDetector()`**: a different pretrained pedestrian detector, trained on a different dataset, usable as a drop-in alternative `setSVMDetector` argument.
+
+## Where it fails
+
+- **Needs real photographic texture statistics to work**, as Section 4 demonstrates directly: a correctly-shaped but texture-less silhouette still scores negative throughout.
+- **A fixed descriptor window and aspect ratio** (37.1): the classic default is tuned for roughly upright, front/side-on pedestrians at a particular scale range relative to the window.
+- **Linear separability limits**: like any linear SVM (36.4), it can only draw a straight-line boundary in HOG-descriptor space; a class that genuinely needs a curved boundary there would need a kernel (36.4), at extra computational cost per window.
+- **Same sliding-window costs and multi-detection issues as 37.1 and 37.2**: `detectMultiScale`'s `groupThreshold` is a convenience, not full non-max suppression (37.4).
+- Largely superseded in accuracy by CNN-based pedestrian/person detectors (Part J) today, though still a fast, well-understood, CPU-friendly option.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Treating "score below threshold" as "definitely not the object," full stop** — a score close to zero (Mini exercise Q2) is genuinely uncertain, not a confident negative, and some applications benefit from treating a near-threshold score specially (e.g. flagging for human review) rather than a hard binary cutoff.
+- **Expecting a geometrically plausible synthetic or rendered shape to trigger a real pretrained detector** — Section 4's whole point: real detectors trained on real photographs need real photographic statistics, not just the right outline.
+- **Forgetting that `winStride` must be a multiple of the block stride**: an invalid stride raises an error or silently misbehaves depending on the OpenCV build.
+- **Ignoring `foundWeights`**: discarding the actual confidence scores and treating every kept detection as equally certain throws away information `minNeighbors`-style grouping (37.2) cannot give you.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why Dalal and Triggs chose a linear SVM
+
+A linear SVM over HOG features was deliberately simple: Dalal and Triggs [1] found it gave strong accuracy for pedestrian detection while being far cheaper to evaluate per window than a kernel SVM (36.4) would be — important given how many windows a sliding-window search (37.1) must check. The heavy lifting is done by the descriptor (HOG's careful construction, 35.3), not by classifier complexity.
+
+### Hard negative mining
+
+Real HOG+SVM training doesn't just use a fixed set of negative (non-object) examples once — it typically trains an initial SVM, runs it over a large pool of negative images, collects the false positives ("hard negatives" — windows the classifier wrongly thought were the object), adds them to the training set, and retrains. This specifically targets the SVM's weak spots rather than spreading training effort evenly over easy negatives.
+
+### Calibrating scores into probabilities
+
+The raw SVM score (Section 2) is a signed distance, not a probability. Platt scaling (fitting a logistic function to map scores to calibrated probabilities on a validation set) is a common way to turn these scores into genuine probability estimates when that is needed downstream, rather than just a yes/no decision.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "After HOG computes a window's descriptor, what does the SVM classifier do?",
+      options: ["Runs another full feature extraction", "One dot product between the descriptor and a learned weight vector, plus a bias, compared to a threshold", "Searches the image again", "Trains a new model for every window"],
+      answer: 1,
+      explanation: "Section 2: all the classifier's work at detection time is this one linear combination.",
+    },
+    {
+      question: "In the worked example (Section 3), why did changing the bias from -1 to -2 flip the classification?",
+      options: ["It didn't actually flip", "The dot product (1.5) stayed the same, but the threshold it's compared against moved, so the same descriptor landed on the other side", "The descriptor changed", "Bias has no effect on classification"],
+      answer: 1,
+      explanation: "score = w.descriptor + b; changing b alone shifts every score by the same amount.",
+    },
+    {
+      question: "In Section 4, why did every window score negative on the synthetic pedestrian silhouette?",
+      options: ["A bug in cv2.HOGDescriptor", "The silhouette has roughly the right shape but none of the real clothing-texture gradient statistics the detector's weight vector was trained on", "The image was the wrong size", "hitThreshold was set too high"],
+      answer: 1,
+      explanation: "The least-negative score still landed near the head/shoulders, suggesting partial shape sensitivity -- but not enough to cross the real threshold.",
+    },
+    {
+      question: "What does detectMultiScale's groupThreshold do?",
+      options: ["Sets the HOG cell size", "A built-in overlap-count grouping, similar to cv2.CascadeClassifier's minNeighbors (37.2) -- simpler than full non-max suppression (37.4)", "Changes the SVM's weights", "Filters by image colour"],
+      answer: 1,
+      explanation: "OpenCV API notes: foundWeights gives the real per-detection score that true NMS would rank by.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Descriptor = (0, 2, −1), weights = (2, 0.5, 1), bias = −2. Compute the score and classify it.
+
+<Solution>
+
+score = (2×0) + (0.5×2) + (1×−1) + (−2) = 0 + 1 − 1 − 2 = **−2**. Negative — not the target class.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the Code section's `hog`, `w_vec` and `b`, score the whole synthetic pedestrian image resized to 64×128 after flipping it upside down (`cv2.flip(img, 0)`). Is the score better, worse, or about the same as the upright version (−0.7031)?
+
+<Solution>
+
+```python
+flipped = cv2.flip(img, 0)
+whole_flipped = cv2.resize(flipped, (64, 128))
+score_flipped = float(np.dot(hog.compute(whole_flipped).ravel(), w_vec) + b)
+print(f"upside-down, resized: score {score_flipped:.4f}")
+```
+
+Output:
+
+```text
+upside-down, resized: score -2.6491
+```
+
+Much worse (−2.65 vs −0.70). The default people detector was trained on upright pedestrians; an upside-down silhouette's gradient directions are all flipped relative to what the weight vector expects, so the already-weak match gets substantially weaker still — a direct illustration of 37.1's point that this kind of search assumes a consistent orientation.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague proposes testing a new HOG+SVM pedestrian detector purely by checking its score on a handful of hand-drawn stick-figure sketches, reasoning that "if it can't even recognise an obvious stick figure, it's broken." Based on this chapter, is that a fair test?
+
+<Solution>
+
+No — Section 4 showed directly that a *real*, correctly-trained, genuinely working pretrained detector scores negative on a much more carefully shaded silhouette than a stick figure, precisely because it was trained on real photographic texture statistics that no hand-drawn sketch reproduces. A fair test needs real (or at least texture-realistic) images of the target class; failing on a sketch says nothing about whether the detector works on what it was actually built for.
+
+</Solution>
+
+## References
+
+1. N. Dalal, B. Triggs, "Histograms of oriented gradients for human detection," *CVPR*, 2005, pp. 886–893.
+2. J. Platt, "Probabilistic outputs for support vector machines and comparisons to regularized likelihood methods," in *Advances in Large Margin Classifiers*, MIT Press, 1999.
+3. OpenCV 4.13.0 documentation: `cv2.HOGDescriptor`, `cv2.HOGDescriptor_getDefaultPeopleDetector`, `cv2.HOGDescriptor_getDaimlerPeopleDetector`. https://docs.opencv.org/4.13.0/

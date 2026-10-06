@@ -665,6 +665,23 @@ def synth_face(size=200, seed=7):
     img += rng.normal(0, 4, img.shape)
     return np.clip(img, 0, 255).astype(np.uint8)
 images["sample-synth-face.png"] = synth_face()
+
+# Module 37.3: a synthetic (not a photograph) pedestrian-like silhouette, for the real
+# cv2.HOGDescriptor_getDefaultPeopleDetector() decision score -- shape only, no real clothing texture.
+def synth_pedestrian(w=160, h=320, seed=3):
+    rng = np.random.default_rng(seed)
+    img = np.full((h, w), 170.0)
+    cx = w // 2
+    cv2.circle(img, (cx, 40), 22, 90, -1)                                  # head
+    cv2.ellipse(img, (cx, 140), (38, 85), 0, 0, 360, 70, -1)                # torso
+    cv2.ellipse(img, (cx - 45, 140), (12, 70), 15, 0, 360, 75, -1)         # left arm
+    cv2.ellipse(img, (cx + 45, 140), (12, 70), -15, 0, 360, 75, -1)        # right arm
+    cv2.ellipse(img, (cx - 18, 260), (16, 90), 0, 0, 360, 65, -1)          # left leg
+    cv2.ellipse(img, (cx + 18, 260), (16, 90), 0, 0, 360, 65, -1)          # right leg
+    img = cv2.GaussianBlur(img, (0, 0), 2.0)
+    img += rng.normal(0, 5, img.shape)
+    return np.clip(img, 0, 255).astype(np.uint8)
+images["sample-synth-pedestrian.png"] = synth_pedestrian()
 ft_b = cv2.warpPerspective(images["sample-feat.png"].astype(np.float64), FEAT_H, (320, 200), flags=cv2.INTER_LINEAR,
                            borderMode=cv2.BORDER_CONSTANT, borderValue=110)
 images["sample-feat-b.png"] = np.clip(np.rint(ft_b * 0.8 + 20 + np.random.default_rng(34).normal(0, 3, ft_b.shape)), 0, 255).astype(np.uint8)
