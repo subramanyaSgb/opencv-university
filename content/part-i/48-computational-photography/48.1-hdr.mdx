@@ -1,0 +1,284 @@
+export const meta = {
+  number: "48.1",
+  title: "HDR",
+  minutes: 24,
+  objectives: [
+    "Know why a single exposure cannot capture a scene with a wide real dynamic range",
+    "Measure, for real, how much of a scene's true radiance a single exposure actually recovers",
+    "Verify a real, weighted multi-exposure merge recovers that same scene almost exactly",
+    "Use the real cv2 HDR merge and tone-mapping functions directly",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 48.1 (Part I, Module 48; opens the module). Builds directly on
+  2.5 (sensor dynamic range) and 2.6's own real clipping problem ("a HDR mode that combines
+  short and long exposures"), now covered in full. The real HDR merge method (Debevec &
+  Malik, 1997) exactly matches cv2's own createMergeDebevec.
+  All numbers real, verified directly. True scene radiance (arbitrary linear units):
+  {1, 10, 100, 1000, 10000} across 5 real tone regions (deep shadow, shadow, midtone,
+  bright, window/sky). 5 bracketed exposures at t={0.0001, 0.001, 0.01, 0.1, 1.0}s,
+  GAIN=128, sensor noise std=1.5 counts, MAX_COUNT=255, seed=20.
+  Raw 8-bit counts per exposure (rounded): t=0.0001s: [0, 0.6, 2.5, 13.6, 126.6].
+  t=0.001s: [0, 0, 13.7, 129.1, 255]. t=0.01s: [2.2, 16, 129.4, 255, 255].
+  t=0.1s: [14.5, 126.1, 255, 255, 255]. t=1.0s: [128.8, 255, 255, 255, 255].
+  Single exposure (t=0.01s, "well exposed for midtones") usability: deep shadow weight=0.017
+  (unusable), shadow weight=0.126 (usable), midtone weight=0.985 (usable), bright weight=
+  0.000 (fully clipped, unusable), window/sky weight=0.000 (fully clipped, unusable) -- only
+  2 of 5 real tone regions usable from one exposure.
+  Weighted multi-exposure merge (triangular weight, discounting near-0 and near-255 counts)
+  across all 5 exposures: deep shadow recovered=1.03 (3.03% error), shadow=10.15 (1.53%),
+  midtone=103.26 (3.26%), bright=1014.09 (1.41%), window/sky=9887.34 (1.13%) -- all 5 real
+  tone regions recovered to within ~3% of true radiance.
+  Real cv2.createMergeDebevec + cv2.createTonemap test (varied gradient images, 3 exposures
+  at t={1/30, 1/4, 2.0}s): HDR radiance range [49.999992, 4649.9976]; tonemap(gamma=2.2)
+  output range [5.7327543e-05, 1.0], confirming real [0,1] tonemap convention.
+  Lab: HdrLab (apps/web/components/visuals/HdrLab.tsx) -- live single-exposure vs merged
+  recovery across the same 5 real tone regions.
+*/}
+
+# 48.1 HDR
+
+<Definition term="High dynamic range (HDR) imaging">recovering a scene's true brightness range by merging several exposures taken at different exposure times — because no single exposure can capture both a scene's darkest and brightest real detail at once.</Definition>
+
+2.6 named the real problem directly: "a glowing slab next to a dark floor can exceed the sensor's dynamic range," and named HDR as one real fix without covering it. This chapter does: the real method behind merging several bracketed exposures into one image that captures far more of a scene's true dynamic range than any single shot can.
+
+## 1. An analogy
+
+A photographer with only one shutter speed to choose, facing a sunlit window and a dark room in the same frame, must pick: expose for the window and the room goes to pure black, or expose for the room and the window burns out to pure white. Taking several real shots at different shutter speeds and keeping only each one's well-exposed parts avoids that real trade-off entirely — exactly what this chapter's merge does, automatically, pixel by pixel.
+
+## 2. The pipeline: several exposures, one real radiance map
+
+<Flow
+  steps={[
+    { label: "Several bracketed exposures, known exposure times", tone: "data" },
+    { label: "Each pixel: trust whichever exposures aren't clipped or buried in noise", tone: "process" },
+    { label: "Weighted merge -> one real radiance map, far wider range", tone: "process" },
+    { label: "Tone-map for an ordinary display (a picture, not the data -- 46.3)", tone: "result" },
+  ]}
+/>
+
+<HdrLab caption="Live, exact single-exposure vs weighted multi-exposure HDR recovery, across 5 real tone regions." />
+
+Merging works because each exposure's raw count estimates the same real scene radiance differently: `radiance ≈ count / (gain . exposure_time)`. A pixel clipped at the sensor's maximum, or buried near the noise floor, gives an unreliable real estimate; a pixel safely in the mid-range gives a trustworthy one. Weighting every exposure's own estimate by how trustworthy it is, and averaging, is the real, standard Debevec and Malik (1997) method — exactly `cv2.createMergeDebevec`'s own real algorithm.
+
+## 3. A real, measured result: a single exposure loses most of a wide-range scene
+
+A synthetic scene spans five real tone regions from deep shadow to a bright window, a real four-decade range of true radiance (1 to 10,000). Picking one "well exposed for midtones" exposure recovers only **2 of 5** real regions usably: shadow (a real, reliable reading) and midtone (even more reliable), while deep shadow is barely above noise (a real, unreliable weight of 0.017) and both bright and window/sky are **completely clipped** — their raw count pinned at 255, carrying a real weight of exactly **0.000**. That single exposure genuinely cannot say anything about either bright region at all.
+
+## 4. A real, measured result: the weighted merge recovers all five regions
+
+Merging five real bracketed exposures (spanning the same four decades the scene does, each weighted by how far its own count sits from the sensor's extremes) recovers every single region to within a few real percent of the truth: deep shadow (**1.03**, a real **3.03%** error), shadow (**10.15**, **1.53%**), midtone (**103.26**, **3.26%**), bright (**1014.09**, **1.41%**), and window/sky (**9887.34**, **1.13%**). The real information was always there, spread across the different exposures — the merge simply combines whichever exposure actually captured each real region well.
+
+## 5. Industrial context: where a wide real dynamic range actually matters
+
+A real machine-vision inspection station lighting a metal part can face exactly 2.6's own real problem: a bright, directly-lit reflective surface and a dark recess in the same frame, where a single exposure clips one or the other. Automotive and surveillance cameras facing both direct sunlight and deep shadow in the same scene have the identical real problem. Section 3-4's own real merge is exactly how these systems recover a usable image of both regions at once, rather than choosing which one to sacrifice.
+
+## What you should remember from 48.1
+
+<Takeaways>
+<Takeaway n={1} title="One exposure cannot capture a wide real range">This chapter's own real result: a single exposure left 2 of 5 real tone regions fully clipped and unusable.</Takeaway>
+<Takeaway n={2} title="A weighted multi-exposure merge recovers it">All 5 real regions recovered to within ~3% error, from exactly the real information already present across the brackets.</Takeaway>
+<Takeaway n={3} title="The HDR map is real data; a tone-mapped image is a picture">46.3's own "data vs picture" lesson, applied here: the radiance map is the real measurement, the displayed image is a lossy, perceptual compression of it.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A single exposure's raw count for a pixel is exactly 255 (the sensor's maximum). Based on Section 3, what does this tell you about that pixel's true real radiance?
+
+<Solution>
+
+Very little, on its own. Section 3's own real result shows a clipped count (255) carries a real weight of exactly 0.000 in the merge — the true radiance could be only slightly above the exposure's capacity, or thousands of times higher; a single clipped reading cannot distinguish between these, which is exactly why a different, shorter exposure is needed to pin down the real value.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: real exposure simulation and the weighted merge
+
+```python
+import numpy as np
+
+true_radiance = np.array([1.0, 10.0, 100.0, 1000.0, 10000.0])
+exposure_times = [0.0001, 0.001, 0.01, 0.1, 1.0]
+GAIN, NOISE_STD, MAX_COUNT = 128.0, 1.5, 255
+
+def simulate_exposure(radiance, t, seed):
+    raw = radiance * GAIN * t + np.random.default_rng(seed).normal(0, NOISE_STD, len(radiance))
+    return np.clip(raw, 0, MAX_COUNT)
+
+counts = {t: simulate_exposure(true_radiance, t, seed=100 + i) for i, t in enumerate(exposure_times)}
+
+def weight(c):
+    return np.clip(np.minimum(c, MAX_COUNT - c) / (MAX_COUNT / 2), 0, 1)
+
+num, den = np.zeros(5), np.zeros(5)
+for t in exposure_times:
+    c = counts[t]
+    w = np.where(c < 1.0, 0, weight(c))
+    num += w * (c / (GAIN * t))
+    den += w
+recovered = num / den
+
+for tr, rec in zip(true_radiance, recovered):
+    print(f"true={tr:7.1f}, recovered={rec:9.2f}, error={abs(rec-tr)/tr*100:.2f}%")
+```
+
+Output:
+
+```text
+true=    1.0, recovered=     1.03, error=3.03%
+true=   10.0, recovered=    10.15, error=1.53%
+true=  100.0, recovered=   103.26, error=3.26%
+true= 1000.0, recovered=  1014.09, error=1.41%
+true=10000.0, recovered=  9887.34, error=1.13%
+```
+
+### 2. OpenCV: the real cv2 HDR pipeline
+
+```python
+import cv2
+
+grad = np.linspace(0, 255, 8).astype(np.uint8)
+img_dark = cv2.cvtColor(np.tile(np.clip(grad.astype(np.int32) - 100, 0, 255).astype(np.uint8), (8, 1)), cv2.COLOR_GRAY2BGR)
+img_mid = cv2.cvtColor(np.tile(grad, (8, 1)), cv2.COLOR_GRAY2BGR)
+img_bright = cv2.cvtColor(np.tile(np.clip(grad.astype(np.int32) + 100, 0, 255).astype(np.uint8), (8, 1)), cv2.COLOR_GRAY2BGR)
+times = np.array([1 / 30, 1 / 4, 2.0], dtype=np.float32)
+
+merger = cv2.createMergeDebevec()
+hdr = merger.process([img_dark, img_mid, img_bright], times=times)
+print(f"HDR radiance range: {hdr.min():.4f} to {hdr.max():.4f}")
+
+tonemap = cv2.createTonemap(gamma=2.2)
+ldr = tonemap.process(hdr)
+print(f"tonemapped (display-ready) range: {ldr.min():.6f} to {ldr.max():.4f}")
+```
+
+Output:
+
+```text
+HDR radiance range: 50.0000 to 4649.9976
+tonemapped (display-ready) range: 0.000057 to 1.0000
+```
+
+## OpenCV API notes
+
+- **`cv2.createMergeDebevec().process(images, times)`** (Code section 2) is the real, direct `cv2` implementation of this chapter's own weighted-merge idea, using the camera's real, known (or separately calibrated, via `cv2.createCalibrateDebevec`) response curve.
+- **`cv2.createTonemap(gamma)` / `createTonemapDrago` / `createTonemapReinhard`** compress the real, wide-range HDR output down to a real `[0, 1]` float range (Code section 2's own verified result) suitable for an ordinary 8-bit display — a real, separate, lossy step from the merge itself.
+- **The HDR radiance map and the tone-mapped display image are genuinely different real things** — exactly 46.3's own point: `hdr` (Code section 2) is the real recovered data; `ldr` is a picture derived from it for a human to look at.
+
+## Where it fails
+
+- **This chapter's merge assumed a perfectly static scene across all exposures** — any real motion between brackets (a moving object, camera shake) causes real ghosting artifacts in the merged result, a well-known real HDR pitfall `cv2`'s own HDR module does not automatically fix.
+- **A scene with a dynamic range wider than the full bracket set still clips somewhere** — Section 3-4's own real 4-decade example needed exposures spanning that same real range; a scene exceeding it would still lose some real detail.
+- **Tone-mapping is itself lossy and perceptual** — Code section 2's own real `[0,1]` compressed output cannot show the full real dynamic range at once either; it is a deliberate, real approximation for display, not a complete recovery.
+- **This chapter assumed a known, linear sensor response** — a real camera's own response curve is often nonlinear (gamma-corrected JPEGs, in particular), which `cv2.createCalibrateDebevec` exists specifically to estimate from the bracketed images themselves.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming a single "good enough" exposure captures a wide-range scene** — Section 3's own real result (2 of 5 regions usable, 2 fully clipped) shows exactly how much real information a single exposure can lose.
+- **Treating a clipped pixel's value as a real measurement** — Section 2's own real weighting (zero weight at the extremes) is exactly why a merge must discount, not trust, a saturated or near-zero count.
+- **Capturing HDR brackets of a moving scene without accounting for it** — Where it fails's own real ghosting problem is a direct, common consequence.
+- **Confusing the real HDR radiance map with the final, tone-mapped picture** — 46.3's own real "data vs picture" distinction, directly relevant here: only the radiance map preserves the real, wide dynamic range.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The original Debevec and Malik method
+
+P. E. Debevec, J. Malik, "Recovering High Dynamic Range Radiance Maps from Photographs" (SIGGRAPH 1997) is the real, foundational paper behind this chapter's own weighted-merge formula and `cv2.createMergeDebevec`'s own real implementation, including how to estimate an unknown camera response curve directly from the bracketed exposures themselves.
+
+### Real single-shot HDR sensors
+
+Some real industrial and automotive cameras capture HDR in a single exposure using per-pixel dual-gain or interleaved short/long exposure rows on the sensor itself, avoiding Where it fails's own real motion-ghosting problem entirely — a real hardware alternative to this chapter's own multi-shot software merge.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why can't a single exposure capture a scene with a very wide real dynamic range?",
+      options: ["It always can, with the right settings", "A sensor's own usable count range is limited; parts of the scene either clip to the maximum or vanish into noise, exactly this chapter's own real result (2 of 5 regions unusable from one exposure)", "This is a software limitation only", "Wide dynamic range scenes don't exist in practice"],
+      answer: 1,
+      explanation: "Section 3: a real, measured, hard sensor limitation -- not a settings or software issue.",
+    },
+    {
+      question: "This chapter's own real weighted-merge result found what accuracy across 5 tone regions spanning 4 decades of radiance?",
+      options: ["Total failure for all regions", "Every region recovered to within about 1-3% of its true value, including two regions that were completely clipped in a single exposure", "Only the midtone region could be recovered", "The merge made things worse than a single exposure"],
+      answer: 1,
+      explanation: "Section 4: a real, accurate recovery across the full range, from information spread across the different exposures.",
+    },
+    {
+      question: "What is the real, important difference between an HDR radiance map and a tone-mapped image, per this chapter's own real result?",
+      options: ["They are identical", "The radiance map is the real, wide-range recovered data; the tone-mapped image is a separate, lossy [0,1]-range picture derived from it for ordinary display -- 46.3's own 'data vs picture' point", "Tone-mapping recovers MORE information than the radiance map", "Tone-mapping is just a colour palette choice"],
+      answer: 1,
+      explanation: "Code section 2's own real, verified output ranges confirm this is a genuine, separate step, not a cosmetic one.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A pixel's raw count in one exposure is 250 (near the sensor's 255 maximum). Using this chapter's own triangular weight formula (`min(c, 255-c)/127.5`), roughly how much should this reading be trusted in a merge?
+
+<Solution>
+
+`min(250, 5)/127.5 = 5/127.5 ≈ 0.039` — a real, very low weight, correctly reflecting that this reading is close to clipping and should barely influence the merged result.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, test the merge with only the 3 MIDDLE exposures (`t=0.001, 0.01, 0.1`) instead of all 5, and compare the recovered deep-shadow and window/sky values to this chapter's own full 5-exposure result (1.03 and 9887.34).
+
+<Solution>
+
+```python
+exposure_times_3 = [0.001, 0.01, 0.1]
+counts_3 = {t: simulate_exposure(true_radiance, t, seed=100 + exposure_times.index(t)) for t in exposure_times_3}
+num3, den3 = np.zeros(5), np.zeros(5)
+for t in exposure_times_3:
+    c = counts_3[t]
+    w = np.where(c < 1.0, 0, weight(c))
+    num3 += w * (c / (GAIN * t))
+    den3 += w
+recovered_3 = num3 / np.where(den3 > 1e-6, den3, np.nan)
+print(f"deep shadow: recovered={recovered_3[0]:.2f} (5-exposure: 1.03)")
+print(f"window/sky: recovered={recovered_3[4]:.2f} (5-exposure: 9887.34)")
+```
+
+Output:
+
+```text
+deep shadow: recovered=1.21 (5-exposure: 1.03)
+window/sky: recovered=nan (5-exposure: 9887.34)
+```
+
+Window/sky comes back as a real, total failure (`nan`, no usable exposure among the 3 middle brackets at all), while deep shadow is still barely recoverable but noticeably worse (1.21 vs 1.03, a real ~21% error vs 3%) — confirming that recovering this chapter's own full 4-decade range genuinely needed exposures reaching both real extremes, not just the middle of the range.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A security camera team wants HDR for a scene with both bright headlights and a dark parking lot, but their camera can only capture 2 bracketed exposures per frame, not 5. Based on Section 3-4, what real trade-off should they expect?
+
+<Solution>
+
+Following Section 3-4's own real pattern, fewer exposures cover less of the real dynamic range accurately — with only 2 brackets, some real tone regions (likely the most extreme highlights or shadows) would be expected to fall outside both exposures' well-exposed ranges, similar to this chapter's own 3-exposure test where the extremes failed entirely. The team should choose their 2 exposure times to bracket the most operationally important real regions (likely headlights and nearby pavement) at the cost of accepting worse recovery elsewhere in the scene.
+
+</Solution>
+
+## References
+
+1. P. E. Debevec, J. Malik, "Recovering High Dynamic Range Radiance Maps from Photographs," *ACM SIGGRAPH*, 1997.
+2. E. Reinhard, G. Ward, S. Pattanaik, P. Debevec, *High Dynamic Range Imaging: Acquisition, Display, and Image-Based Lighting*, 2nd ed., Morgan Kaufmann, 2010.
+3. OpenCV 4.13.0 documentation: `cv2.createMergeDebevec`, `cv2.createCalibrateDebevec`, `cv2.createTonemap`. https://docs.opencv.org/4.13.0/
