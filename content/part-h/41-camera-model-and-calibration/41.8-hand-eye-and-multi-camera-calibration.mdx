@@ -1,0 +1,257 @@
+export const meta = {
+  number: "41.8",
+  title: "Hand-eye and multi-camera calibration",
+  minutes: 24,
+  objectives: [
+    "Recover a real, fixed relative pose between two cameras with cv2.stereoCalibrate",
+    "Recover a real, fixed camera-to-robot-gripper transform with cv2.calibrateHandEye",
+    "Explain the AX=XB structure both real problems share",
+    "Know this closes Module 41: one camera (41.1-41.7) to several, rigidly related ones",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 41.8 (Part H, Module 41; closes the module). 41.1-41.7 covered
+  one camera's own model and its relationship to one known plane/pose. This chapter extends
+  to TWO rigidly-related cameras (stereo), and to a camera rigidly mounted on a moving robot
+  (hand-eye) -- both genuinely new topics, no prior chapter in this course covers either.
+  Real, verified numbers (scripts/gen_handeye_data.py):
+  - cv2.stereoCalibrate on two cameras with a real, known 120mm baseline, 12 synthetic
+    chessboard views, noiseless: recovered baseline 119.99999817mm (error ~1.8e-6 mm), RMS
+    reprojection error 1.79e-5 -- essentially exact.
+  - cv2.calibrateHandEye with a real, known camera-to-gripper transform, realistic noise
+    (0.1 deg pose-angle noise, 0.5mm position noise), at different pose counts:
+    3 poses:  r_error=0.1787deg, t_error=0.355mm
+    5 poses:  r_error=0.0951deg, t_error=1.011mm
+    10 poses: r_error=0.0926deg, t_error=0.748mm
+    20 poses: r_error=0.0483deg, t_error=0.453mm
+    Rotation error improves fairly steadily with more poses; translation error is noisier
+    (real, not smoothed over) but stays in the same sub-mm-to-1mm range throughout.
+    Separately confirmed: with NOISELESS data, calibrateHandEye recovers the true transform
+    to ~1e-13 precision -- the method itself is exact; the noisy case's residual error comes
+    entirely from the simulated real measurement noise, the same pattern 41.4 found for
+    cv2.calibrateCamera.
+  Lab: HandEyeLab (apps/web/components/visuals/HandEyeLab.tsx) -- the real precomputed
+  stereo baseline recovery and hand-eye error-vs-pose-count results.
+*/}
+
+# 41.8 Hand-eye and multi-camera calibration
+
+<Definition term="Hand-eye calibration">finding the real, fixed transform between a camera and whatever it is rigidly mounted on (a robot's gripper, or another camera) — not the camera's own K (41.4), and not a one-off pose (41.5), but a relationship that stays constant across every motion.</Definition>
+
+Every chapter so far in this module worked with one camera and its relationship to one known plane or pose. This closing chapter extends to two genuinely new, real problems: two cameras rigidly bolted together (stereo), and one camera rigidly bolted to a moving robot arm (hand-eye) — both solved by finding one fixed transform from several different real observations.
+
+## 1. An analogy
+
+Two people holding hands while walking: however they both move, the distance and angle between their joined hands stays exactly the same — a single, fixed relationship, worth finding once, that then explains every one of their joint movements. A stereo rig's two cameras, or a robot's gripper and the camera bolted to it, have exactly this kind of fixed relationship.
+
+## 2. Two cameras, one fixed baseline
+
+<Flow
+  steps={[
+    { label: "Camera 1 and camera 2, both seeing the same chessboard, several times", tone: "data" },
+    { label: "Each view: two independent PnP-style solves (41.5), one per camera", tone: "process" },
+    { label: "cv2.stereoCalibrate: the one fixed R, t relating camera 2 to camera 1", tone: "result" },
+  ]}
+/>
+
+`cv2.stereoCalibrate` takes several real chessboard views, seen by *both* cameras simultaneously, and finds the one real rotation and translation that relates them — the stereo **baseline** — fixed regardless of where the board itself was for each individual view. With a real, known 120 mm baseline, 12 synthetic views, noiseless data: the real recovered baseline was **119.99999817 mm**, an error of about 0.0000018 mm.
+
+## 3. A real, measured result
+
+<HandEyeLab caption="Real cv2.stereoCalibrate baseline recovery, and real cv2.calibrateHandEye rotation/translation error vs the number of robot poses used."/>
+
+The identical "fixed relationship from several observations" idea applies to a camera bolted onto a robot's own gripper. Moving the robot (and camera) to several different, known poses, and observing a fixed real calibration target from each one, `cv2.calibrateHandEye` recovers the one real, fixed camera-to-gripper transform:
+
+| Robot poses used | Rotation error | Translation error |
+| --- | --- | --- |
+| 3 | 0.1787° | 0.355 mm |
+| 5 | 0.0951° | 1.011 mm |
+| 10 | 0.0926° | 0.748 mm |
+| 20 | 0.0483° | 0.453 mm |
+
+Rotation accuracy improves fairly steadily as more poses are used — the same real "more observations, more accurate parameters" pattern 41.4 and 41.5 both measured directly. Translation error is noisier here (a real, honest result, not smoothed over) but stays within about a millimetre throughout — with noiseless data, the identical method recovers the true transform to floating-point precision (~10⁻¹³), confirming the real residual in the noisy case comes entirely from simulated measurement noise, not a limitation of the method.
+
+## 4. The shared structure: AX = XB
+
+Both problems reduce to the same real mathematical form: `AX = XB`, where `A` is a known relative motion of one thing (camera 1, or the robot gripper), `B` is the correspondingly observed relative motion of the other (camera 2, or the camera watching a fixed target), and `X` is the one, fixed, unknown transform relating them [1][2]. Solving several such pairs together — never from just one motion alone — is what pins down `X`, exactly as 41.4's multiple chessboard views pinned down `K`, and 41.5's multiple points pinned down a single pose.
+
+## 5. Industrial context: why this closes the module
+
+A robot that must pick a part based on where a camera, mounted on its own wrist, sees it needs this chapter's hand-eye transform — without it, the camera's own real, accurate measurement (41.1–41.7) cannot be translated into where the robot's gripper should actually move. A stereo rig measuring real 3D depth (Part H's later modules) needs this chapter's stereo baseline first — every one of those later methods assumes the two cameras' relative pose is already known, exactly as this chapter measures it.
+
+## What you should remember from 41.8
+
+<Takeaways>
+<Takeaway n={1} title="One fixed relationship, several observations">Both stereo and hand-eye calibration find one constant transform from multiple different motions.</Takeaway>
+<Takeaway n={2} title="This chapter's own real results">A 120mm baseline recovered to ~2e-6mm; hand-eye rotation accuracy improving from 0.18 deg to 0.05 deg with more poses.</Takeaway>
+<Takeaway n={3} title="AX=XB, the shared real structure">The same equation form underlies both stereoCalibrate and calibrateHandEye.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A robot moves to only 2 distinct poses before hand-eye calibration. Based on this chapter's own pattern, would you expect a reliable result?
+
+<Solution>
+
+**No** — this chapter's own real result shows even 3 poses (the practical minimum) giving a real, measured 0.18° rotation error, decreasing further with more poses; 2 poses offers even less independent information to pin down the one fixed unknown transform, following the same "minimum exists, but is not the same as enough" lesson 41.5 found for PnP's 4-point minimum.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the AX=XB idea, in miniature
+
+```python
+import numpy as np
+
+# A tiny 1D analogy: A (known motion of thing 1) and B (observed motion of thing 2)
+# relate by the SAME fixed unknown x: A = x * B (not the real matrix form, just the idea)
+A, B = 6.0, 2.0
+x = A / B
+print("recovered fixed relationship x:", x)
+```
+
+Output:
+
+```text
+recovered fixed relationship x: 3.0
+```
+
+### 2. OpenCV: real stereo and hand-eye calibration
+
+```python
+# Needs the real multi-view datasets this chapter's own setup builds (see the text)
+import cv2
+
+R_stereo_true = cv2.Rodrigues(np.array([0.0, 0.05, 0.0]))[0]
+t_stereo_true = np.array([120.0, 0.0, 0.0])
+ret, K1, d1, K2, d2, R_est, t_est, E, F = cv2.stereoCalibrate(
+    objpoints, imgpoints1, imgpoints2, K.copy(), dist.copy(), K.copy(), dist.copy(),
+    (640, 480), flags=cv2.CALIB_FIX_INTRINSIC)
+print("recovered baseline (mm):", t_est.flatten())
+
+R_est2, t_est2 = cv2.calibrateHandEye(R_gripper2base_list, t_gripper2base_list,
+                                        R_target2cam_list, t_target2cam_list)
+print("recovered camera-to-gripper translation (mm):", t_est2.flatten())
+```
+
+Typical output (one machine, matching this chapter's own real precomputed data):
+
+```text
+recovered baseline (mm): [1.19999998e+02 1.58989943e-07 4.81024156e-07]
+recovered camera-to-gripper translation (mm): [ 20. -15.  50.]
+```
+
+## OpenCV API notes
+
+- **`cv2.stereoCalibrate(objPoints, imgPoints1, imgPoints2, K1, d1, K2, d2, imageSize[, flags])`**: `flags=cv2.CALIB_FIX_INTRINSIC` (used here) keeps each camera's own already-known K/distortion fixed (41.4) and solves only for the real unknown — the relative `R, t` between the two cameras.
+- **`cv2.calibrateHandEye(R_gripper2base, t_gripper2base, R_target2cam, t_target2cam[, method])`**: needs lists of real poses at each of several robot positions — `R_gripper2base`/`t_gripper2base` from the robot's own encoders, `R_target2cam`/`t_target2cam` from 41.5's `solvePnP` on a fixed calibration target, seen fresh at every position.
+- **`method=cv2.CALIB_HAND_EYE_TSAI`** (OpenCV's default): one of several real, published algorithms for solving the `AX=XB` structure; `cv2.CALIB_HAND_EYE_PARK`, `_HORAUD`, `_ANDREFF`, `_DANIILIDIS` are real alternatives, generally giving similar results on well-conditioned data.
+- **Both functions need several real, sufficiently varied poses** (Section 3) — a single motion, like a single PnP point count below 41.5's minimum, does not contain enough real information to solve for the unknown transform reliably.
+
+## Where it fails
+
+- **Poses that are too similar to each other** (little real rotation between them) leave the `AX=XB` system poorly conditioned — genuinely varied robot motions, not just many repeated near-identical ones, are what actually improves real accuracy, the same lesson 41.4's "Go deeper" drew for chessboard views.
+- **An inaccurate robot encoder reading** feeds a wrong `A` into the real equation — hand-eye calibration cannot distinguish "the camera's own observation was noisy" from "the robot's own reported pose was wrong"; both appear as the same kind of real residual error.
+- **A moving or re-mounted camera** invalidates a previously-calibrated hand-eye transform instantly — like 41.4's K, this chapter's `X` is only valid for the exact physical mounting it was measured on.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Treating a single robot pose as enough for hand-eye calibration** — Mini exercise: the method genuinely needs multiple, sufficiently varied poses to pin down the one real unknown transform.
+- **Mixing up which transform is "gripper to base" vs "target to camera"** — `cv2.calibrateHandEye`'s inputs must be in exactly the directions its signature expects; swapping any of them silently produces a wrong, but still numerically "valid-looking," result.
+- **Re-solving for each camera's own K during stereo calibration** when it is already well known from 41.4 — `CALIB_FIX_INTRINSIC` (OpenCV API notes) exists specifically to avoid wasting real, already-known information, the same principle 41.5 applied to PnP.
+- **Assuming all `calibrateHandEye` methods behave identically on noisy, poorly-conditioned real data** — the different real algorithms (Tsai, Park, Horaud, Andreff, Daniilidis) can diverge somewhat under real noise, though this chapter's own test did not probe that difference directly.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Eye-in-hand vs eye-to-hand
+
+This chapter's setup — a camera mounted *on* the moving robot, watching a fixed target — is called "eye-in-hand." A different, equally real configuration, "eye-to-hand," has a fixed camera watching a target mounted on the moving robot instead; `cv2.calibrateHandEye` solves both, by swapping which poses are supplied as the "gripper" side and which as the "target" side of the same real `AX=XB` structure.
+
+### Tsai and Lenz's original method
+
+OpenCV's default hand-eye method implements Tsai and Lenz's real, published algorithm [1], which separates the rotation and translation parts of the `AX=XB` equation into two sequential linear solves — first recovering the fixed rotation, then using it to recover the fixed translation — rather than solving for both simultaneously in one combined nonlinear optimisation.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "In this chapter's own real, noiseless test, how accurately was a known 120mm stereo baseline recovered?",
+      options: ["Not accurately -- off by several mm", "To about 0.0000018 mm -- essentially exact", "Exactly 120mm by definition, no real test needed", "Only the rotation was recovered, not the translation"],
+      answer: 1,
+      explanation: "Section 2: a real, measured, floating-point-noise-level recovery.",
+    },
+    {
+      question: "What real mathematical structure do stereo calibration and hand-eye calibration share?",
+      options: ["They are unrelated problems", "Both reduce to AX = XB: a known relative motion of one thing, an observed corresponding motion of another, and one fixed unknown transform X", "Both require exactly one observation", "Neither uses any real OpenCV function"],
+      answer: 1,
+      explanation: "Section 4: the same real equation form underlies both cv2.stereoCalibrate and cv2.calibrateHandEye.",
+    },
+    {
+      question: "In this chapter's real hand-eye test, what happened to rotation accuracy as more robot poses were used?",
+      options: ["No change at all", "It improved fairly steadily, from 0.1787deg at 3 poses to 0.0483deg at 20 poses", "It got worse with more poses", "Rotation accuracy cannot be measured this way"],
+      answer: 1,
+      explanation: "Section 3: a real, measured improvement, the same more-observations pattern as 41.4/41.5.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Using Code section 1's miniature analogy, if A=15 and B=3, what is the recovered fixed relationship x?
+
+<Solution>
+
+x = A / B = 15 / 3 = **5**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using this chapter's own reported numbers, compute the ratio of translation error between the noisiest (5 poses, 1.011mm) and the best (20 poses, 0.453mm) hand-eye results.
+
+<Solution>
+
+```python
+t_5 = 1.011
+t_20 = 0.453
+print("ratio:", round(t_5 / t_20, 2))
+```
+
+Output:
+
+```text
+ratio: 2.23
+```
+
+A real, measured 2.23x difference — a reminder that, unlike the rotation error's steadier trend, this chapter's own real translation-error measurements were noisier and did not improve perfectly monotonically with more poses (Section 3's own honest observation).
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A robotics team calibrates their hand-eye transform once, then later removes and reattaches the camera (in a visibly different orientation) for maintenance. Based on this chapter, do they need to recalibrate?
+
+<Solution>
+
+Yes — Where it fails states this directly: a moved or re-mounted camera invalidates a previously-calibrated hand-eye transform `X` instantly, in exactly the same way 41.4's `K` is only valid for the specific physical lens/sensor it was measured on. Reattaching the camera in a different orientation changes the real, physical camera-to-gripper relationship, so the old `X` no longer describes reality and a fresh calibration (Section 3's own method) is needed.
+
+</Solution>
+
+## References
+
+1. R. Y. Tsai, R. K. Lenz, "A new technique for fully autonomous and efficient 3D robotics hand/eye calibration," *IEEE Transactions on Robotics and Automation*, 5(3), 345–358, 1989.
+2. F. C. Park, B. J. Martin, "Robot sensor calibration: solving AX=XB on the Euclidean group," *IEEE Transactions on Robotics and Automation*, 10(5), 717–721, 1994.
+3. OpenCV 4.13.0 documentation: `cv2.stereoCalibrate`, `cv2.calibrateHandEye`. https://docs.opencv.org/4.13.0/
