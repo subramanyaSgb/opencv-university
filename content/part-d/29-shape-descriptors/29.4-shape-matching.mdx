@@ -1,0 +1,339 @@
+export const meta = {
+  number: "29.4",
+  title: "Shape matching",
+  minutes: 25,
+  objectives: [
+    "Compare a shape with references using cv2.matchShapes (I1, I2, I3)",
+    "Compare matchShapes with simple shape features and Fourier descriptors on the same task",
+    "Accept or reject a match with a distance threshold and a ratio test",
+    "Choose a shape-matching method for an inspection task",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 29.4 (Module 29).
+  Lab: ShapeLab mode "match" (matchShapes exact to OpenCV; Fourier descriptors as in 29.3).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 29.4 Shape matching
+
+<Definition term="Shape matching">deciding which known shape an outline is, or whether it is none of them, by computing a distance between invariant descriptions of the outline and of reference shapes, and choosing the nearest reference if it is near enough.</Definition>
+
+Modules 24 to 29 built the pieces: segment the object, extract its contour, describe it with numbers that ignore position, size and rotation. Matching puts them together. The question in production is rarely "which of six shapes is closest?" but "is this the right part, the wrong part, or something unknown?". This chapter compares four distances on the same task and adds a reject rule.
+
+## 1. An analogy
+
+Recognising a friend's handwriting. You do not compare letter positions on the page; you compare features that stay the same wherever and however large they write. And when a note's writing matches nobody you know well enough, you say "unknown" instead of naming the closest person.
+
+## 2. Distances
+
+<Flow
+  steps={[
+    { label: "Query contour", tone: "data" },
+    { label: "Invariant description (Hu, Fourier, simple features)", tone: "process" },
+    { label: "Distance to every reference", tone: "process" },
+    { label: "Nearest reference; check distance and ratio to the second best", tone: "process" },
+    { label: "Match, or reject as unknown", tone: "result" },
+  ]}
+/>
+
+`cv2.matchShapes(a, b, method, 0)` compares Hu moments (29.2) on a log scale, with m = sign(h)·log₁₀|h|, summing over the 7 invariants (skipping any with |h| < 10⁻⁵):
+
+| Method | Distance |
+| --- | --- |
+| `CONTOURS_MATCH_I1` | Σ \|1/m_a − 1/m_b\| |
+| `CONTOURS_MATCH_I2` | Σ \|m_a − m_b\| |
+| `CONTOURS_MATCH_I3` | max \|m_a − m_b\| / \|m_a\| |
+
+Two alternatives from this module: **simple features** (circularity 4πA/P², solidity A/A_hull, aspect ratio of the minimum-area rectangle, 24.3–24.5) and **Fourier descriptors** (29.3).
+
+## 3. A worked example by hand
+
+Two shapes with three log-Hu values each (the rest equal):
+
+| | m1 | m2 | m3 |
+| --- | --- | --- | --- |
+| a | 0.5 | 2.0 | −4.0 |
+| b | 0.4 | 2.5 | 4.0 |
+
+- I2 = |0.5 − 0.4| + |2.0 − 2.5| + |−4 − 4| = 0.1 + 0.5 + **8** = 8.6
+- I1 = |2 − 2.5| + |0.5 − 0.4| + |−0.25 − 0.25| = 0.5 + 0.1 + 0.5 = **1.1**
+- I3 = max(0.1/0.5, 0.5/2, 8/4) = **2**
+
+A sign flip in a high-order invariant (mirroring, or noise around zero) dominates I2 and I3. I1 uses reciprocals, which shrink large log values, so it is less sensitive to them.
+
+## 4. Four methods on the shape image
+
+Each rotated and scaled copy (bottom row) is matched against the six upright references:
+
+| Query | I1 | I2 | I3 | Simple features | Fourier |
+| --- | --- | --- | --- | --- | --- |
+| small star | cross ✗ | cross ✗ | cross ✗ | star | star |
+| gear | gear | gear | gear | gear | gear |
+| mirrored bracket | bracket | star ✗ | star ✗ | bracket | bracket |
+| small cross | cross | cross | cross | bracket ✗ | cross |
+| oval | oval | oval | oval | oval | oval |
+| arrow | arrow | star ✗ | arrow | arrow | arrow |
+| **correct** | **5 / 6** | **3 / 6** | **4 / 6** | **5 / 6** | **6 / 6** |
+
+- matchShapes fails on the small star (its higher Hu moments are noise, 29.2) and, with I2 and I3, on the mirrored bracket (h7 changes sign).
+- The three simple features confuse the small cross with the bracket: both are fairly compact, non-convex and square-ish.
+- Fourier descriptors get all six, each with a clear margin (29.3).
+
+No method is best everywhere; the right one depends on the shapes. On real parts, test the candidates on recorded examples, as here.
+
+<ShapeLab mode="match" caption="Choose a query from the bottom row. The table shows its distance to each reference with matchShapes I1, I2, I3 and the Fourier descriptor; the smallest per column is green if correct, red if wrong. Try the star, the bracket (mirrored) and the arrow."/>
+
+## 5. Accept or reject
+
+Choosing the nearest reference always gives an answer, even for a shape that is none of them. Two common checks:
+
+- **Distance threshold**: accept only if the best distance is below t, learned from good examples.
+- **Ratio test**: accept only if the best distance is clearly smaller than the second best (for example less than half). This rejects ambiguous cases.
+
+With Fourier descriptors, all six copies pass a threshold of 0.05 (best distances 0.011 to 0.026) and a ratio of 0.5 (0.03 to 0.12). A triangle, which is not among the references, has its best distance 0.215 with a ratio of 0.81: it fails both checks and is reported as **unknown**.
+
+## 6. Industrial use
+
+- **Part verification**: is the part on the conveyor the one the recipe expects? Reject anything else.
+- **Sorting** mixed parts into bins by shape class.
+- **Mirror detection**: left vs right parts, using h7's sign or contour orientation.
+- **When shapes are not enough**: same outline, different holes or print: add inner contours, colour or template matching (Module 32).
+
+## What you should remember from 29.4
+
+<Takeaways>
+<Takeaway n={1} title="matchShapes">Hu moments on a log scale; I1 is the most forgiving; mirroring hurts I2 and I3.</Takeaway>
+<Takeaway n={2} title="Compare methods">Fourier descriptors were best here; simple features are cheap and readable.</Takeaway>
+<Takeaway n={3} title="Reject">Use a distance threshold and a ratio to the second best.</Takeaway>
+<Takeaway n={4} title="Test">Pick the method on recorded examples of your own parts.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Best distance 0.02, second best 0.03. Accept with a ratio threshold of 0.5?
+
+<Solution>
+
+0.02 / 0.03 = 0.67 > 0.5: **reject** as ambiguous.
+
+</Solution>
+
+**Q2.** Left- and right-hand brackets must be told apart. Which method?
+
+<Solution>
+
+One that is **not** mirror-invariant: compare the sign of Hu's h7 (or matchShapes I2/I3, which are sensitive to it), or compare contour orientation after aligning the shapes.
+
+</Solution>
+
+### Next: 30.1 Images as waves
+
+Part E: the frequency domain. Every image is a sum of waves; Fourier tells us which.
+
+## Code
+
+Three examples: matchShapes on all pairs, simple features and Fourier descriptors, and accept / reject.
+
+### 1. matchShapes
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-shapes.png", cv2.IMREAD_GRAYSCALE)
+contours = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0]
+contours = sorted(contours, key=lambda c: (int(cv2.boundingRect(c)[1] > 90), cv2.boundingRect(c)[0]))
+names = ["star", "gear", "bracket", "cross", "oval", "arrow"]
+refs, queries = contours[:6], contours[6:]
+
+for method, label in [(cv2.CONTOURS_MATCH_I1, "I1"), (cv2.CONTOURS_MATCH_I2, "I2"), (cv2.CONTOURS_MATCH_I3, "I3")]:
+    best = [int(np.argmin([cv2.matchShapes(q, r, method, 0) for r in refs])) for q in queries]
+    print(label, [names[b] for b in best], "correct:", sum(b == i for i, b in enumerate(best)))
+```
+
+Output:
+
+```text
+I1 ['cross', 'gear', 'bracket', 'cross', 'oval', 'arrow'] correct: 5
+I2 ['cross', 'gear', 'star', 'cross', 'oval', 'star'] correct: 3
+I3 ['cross', 'gear', 'star', 'cross', 'oval', 'arrow'] correct: 4
+```
+
+### 2. Simple features and Fourier descriptors
+
+```python
+def simple(c):
+    a, p = cv2.contourArea(c), cv2.arcLength(c, True)
+    w, h = cv2.minAreaRect(c)[1]
+    return np.array([4 * np.pi * a / p ** 2, a / cv2.contourArea(cv2.convexHull(c)), min(w, h) / max(w, h)])
+
+def resample(c, n=64):
+    p = c.reshape(-1, 2).astype(float)
+    z = np.r_[p[:, 0] + 1j * p[:, 1], p[0, 0] + 1j * p[0, 1]]
+    s = np.r_[0, np.cumsum(np.abs(np.diff(z)))]
+    t = np.linspace(0, s[-1], n, endpoint=False)
+    return np.interp(t, s, z.real) + 1j * np.interp(t, s, z.imag)
+
+def fourier(c, n=64, K=10):
+    m = np.abs(np.fft.fft(resample(c, n)))
+    return np.r_[m[2:K + 1], m[n - K:n - 1]] / max(m[1], m[n - 1])
+
+for label, f in [("simple", simple), ("Fourier", fourier)]:
+    R = [f(r) for r in refs]
+    best = [int(np.argmin([np.linalg.norm(f(q) - x) for x in R])) for q in queries]
+    print(label, [names[b] for b in best], "correct:", sum(b == i for i, b in enumerate(best)))
+```
+
+Output:
+
+```text
+simple ['star', 'gear', 'bracket', 'bracket', 'oval', 'arrow'] correct: 5
+Fourier ['star', 'gear', 'bracket', 'cross', 'oval', 'arrow'] correct: 6
+```
+
+### 3. Accept or reject
+
+```python
+R = [fourier(r) for r in refs]
+
+def classify(c, t=0.05, ratio=0.5):
+    d = np.array([np.linalg.norm(fourier(c) - x) for x in R])
+    i = np.argsort(d)
+    ok = d[i[0]] < t and d[i[0]] < ratio * d[i[1]]
+    return (names[i[0]] if ok else "unknown"), round(float(d[i[0]]), 3), round(float(d[i[0]] / d[i[1]]), 2)
+
+for i, q in enumerate(queries):
+    print("copy of", names[i], "->", classify(q))
+
+tri = np.zeros((120, 120), np.uint8)
+cv2.fillPoly(tri, [np.array([[60, 10], [110, 100], [10, 100]], np.int32)], 255)   # a shape not in the references
+print("triangle ->", classify(cv2.findContours(tri, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0][0]))
+```
+
+Output:
+
+```text
+copy of star -> ('star', 0.019, 0.08)
+copy of gear -> ('gear', 0.012, 0.1)
+copy of bracket -> ('bracket', 0.011, 0.03)
+copy of cross -> ('cross', 0.018, 0.08)
+copy of oval -> ('oval', 0.011, 0.09)
+copy of arrow -> ('arrow', 0.026, 0.12)
+triangle -> ('unknown', 0.215, 0.81)
+```
+
+## OpenCV API notes
+
+- **`cv2.matchShapes(contour1, contour2, method, parameter)`** → float. Accepts contours or grey images (then image moments are used). `method`: `cv2.CONTOURS_MATCH_I1`, `I2`, `I3`; `parameter` is unused (0).
+- **Shape module** (in opencv-contrib builds): `cv2.createShapeContextDistanceExtractor()` (shape context, Belongie et al. [2]) and `cv2.createHausdorffDistanceExtractor()`. The Hausdorff distance between raw point sets is **not** translation-invariant: centre and scale the contours first.
+- **`cv2.ximgproc.ContourFitting`** (contrib) estimates rotation and scale between two contours from Fourier descriptors.
+
+## Where it fails
+
+- **Partial shapes** (occlusion, touching parts): global descriptors change; use local features (Module 34) or contour fragments.
+- **Very small shapes**: moments and descriptors become noisy (the small star).
+- **Shapes that differ only inside**: holes and markings are not in the outer contour.
+- **Perspective views**: similarity-invariant descriptors do not cover affine or projective distortion; rectify first (16.3) or use affine invariants.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **No reject rule**: the nearest reference is always returned, even for unknown objects.
+- **Thresholds from one example**: learn them from many good and bad parts.
+- **matchShapes on images with noise speckles**: image moments include every speck; pass the clean contour.
+- **Ignoring mirroring**: decide whether mirrored parts are the same class before choosing the method.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Beyond global descriptors
+
+Shape context (Belongie, Malik and Puzicha [2]) describes each contour point by a log-polar histogram of where the other points lie, then finds the best point correspondence; it tolerates small deformations and partial changes better than global moments. Inner-distance shape contexts handle articulated shapes; curvature scale space (Mokhtarian and Mackworth [3]) describes a contour by the positions of curvature zero-crossings across smoothing scales.
+
+### Learning the distance
+
+With enough examples, a classifier on several descriptors (36.x), or a neural network on the image, usually beats any single hand-chosen distance; the descriptors of this module remain useful when examples are few and decisions must be explainable.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "matchShapes compares…",
+      options: ["Pixels", "Hu moments on a log scale", "Fourier descriptors", "Chain codes"],
+      answer: 1,
+      explanation: "With three formulas I1, I2, I3.",
+    },
+    {
+      question: "Why did I2 and I3 match the mirrored bracket to the star?",
+      options: ["Wrong contour", "h7 changes sign under mirroring and dominates the distance", "The bracket is small", "Noise"],
+      answer: 1,
+      explanation: "I1's reciprocals reduce the effect.",
+    },
+    {
+      question: "What does the ratio test reject?",
+      options: ["Large shapes", "Ambiguous matches where the second best is almost as close", "Mirrored shapes", "Noisy images"],
+      answer: 1,
+      explanation: "best / second best must be small.",
+    },
+    {
+      question: "Which method matched all six copies here?",
+      options: ["matchShapes I1", "matchShapes I2", "Simple features", "Fourier descriptors"],
+      answer: 3,
+      explanation: "6 / 6 with clear margins.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Log-Hu vectors a = (0.7, 3.0, −6.0) and b = (0.7, 3.0, 6.0). Compute I1 and I2.
+
+<Solution>
+
+I2 = 0 + 0 + 12 = **12**. I1 = |1/0.7 − 1/0.7| + |1/3 − 1/3| + |−1/6 − 1/6| = **0.33**. Only the sign differs, and I1 penalises it much less.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Make a mirror-insensitive Hu distance: use |m| for every log-Hu value and sum the absolute differences. Does it match all six copies?
+
+<Solution>
+
+```python
+def log_hu(c):
+    h = cv2.HuMoments(cv2.moments(c)).ravel()
+    return np.abs(np.log10(np.abs(h)))                               # magnitude only: mirror-insensitive
+
+R = [log_hu(r) for r in refs]
+best = [int(np.argmin([np.abs(log_hu(q) - x).sum() for x in R])) for q in queries]
+print([names[b] for b in best], "correct:", sum(b == i for i, b in enumerate(best)))
+```
+
+Output:
+
+```text
+['oval', 'star', 'bracket', 'star', 'oval', 'arrow'] correct: 3
+```
+
+It now matches the mirrored bracket, but loses the star (→ oval) and the cross (→ star): with absolute log values, the noisy higher invariants of symmetric shapes count fully. Removing the sign helps only where the sign was the problem.
+
+</Solution>
+
+## References
+
+1. M.-K. Hu, "Visual pattern recognition by moment invariants", *IRE Trans. Information Theory* 8(2), 179–187, 1962.
+2. S. Belongie, J. Malik, J. Puzicha, "Shape matching and object recognition using shape contexts", *IEEE Trans. Pattern Analysis and Machine Intelligence* 24(4), 509–522, 2002.
+3. F. Mokhtarian, A. K. Mackworth, "A theory of multiscale, curvature-based shape representation for planar curves", *IEEE Trans. Pattern Analysis and Machine Intelligence* 14(8), 789–805, 1992.
+4. OpenCV 4.13.0 documentation: `matchShapes`, `ShapeMatchModes`, shape module (`ShapeContextDistanceExtractor`). https://docs.opencv.org/4.13.0/

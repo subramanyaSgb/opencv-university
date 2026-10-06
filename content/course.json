@@ -23,7 +23,7 @@
       "id": "part-d",
       "letter": "D",
       "title": "Edges, shapes and segmentation",
-      "modules": ["22-edge-detection", "23-morphology", "24-contours-and-shape-analysis", "25-connected-components-and-blobs", "26-hough-and-model-fitting", "27-segmentation", "28-active-contours"]
+      "modules": ["22-edge-detection", "23-morphology", "24-contours-and-shape-analysis", "25-connected-components-and-blobs", "26-hough-and-model-fitting", "27-segmentation", "28-active-contours", "29-shape-descriptors"]
     }
   ]
 }

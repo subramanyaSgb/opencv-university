@@ -1,0 +1,11 @@
+{
+  "number": 29,
+  "title": "Shape descriptors",
+  "summary": "Describing segmented shapes with numbers that ignore position, size and rotation: chain codes, Hu moments, Fourier descriptors, and matching shapes.",
+  "chapters": [
+    { "number": "29.1", "slug": "29.1-chain-codes", "title": "Chain codes" },
+    { "number": "29.2", "slug": "29.2-hu-moments", "title": "Hu moments" },
+    { "number": "29.3", "slug": "29.3-fourier-descriptors", "title": "Fourier descriptors" },
+    { "number": "29.4", "slug": "29.4-shape-matching", "title": "Shape matching" }
+  ]
+}

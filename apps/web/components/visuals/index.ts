@@ -133,3 +133,4 @@ export { LabelLab } from "./LabelLab";
 export { HoughLab } from "./HoughLab";
 export { SegmentLab } from "./SegmentLab";
 export { ActiveContourLab } from "./ActiveContourLab";
+export { ShapeLab } from "./ShapeLab";

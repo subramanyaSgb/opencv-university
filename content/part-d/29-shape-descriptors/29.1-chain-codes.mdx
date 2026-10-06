@@ -1,0 +1,303 @@
+export const meta = {
+  number: "29.1",
+  title: "Chain codes",
+  minutes: 20,
+  objectives: [
+    "Write a contour as a Freeman chain code of 8 directions",
+    "Make the code invariant to rotation (first difference) and to the starting point (shape number)",
+    "Compute the perimeter from the chain code and compare it with cv2.arcLength",
+    "Know where chain codes are useful and where they fail",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 29.1 (Module 29).
+  New lab: ShapeLab (lib/shape-ops.ts; moments, Hu moments and matchShapes equal OpenCV).
+  New sample: sample-shapes.png (six shapes and their rotated / scaled / mirrored copies).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 29.1 Chain codes
+
+<Definition term="Chain code">a description of a contour as a sequence of small steps, each step one of 8 directions (Freeman 1961 [1]). Starting from one boundary pixel, the code lists the direction to the next boundary pixel, all the way round.</Definition>
+
+Segmentation gives a region; Module 29 turns its shape into numbers that can be compared, stored and classified. The chain code is the oldest and simplest: a contour of 200 pixels becomes 200 digits between 0 and 7, three bits each instead of two coordinates. From the code you can compute the perimeter, rebuild the contour exactly, and compare shapes after making the code independent of where you started and how the shape is rotated.
+
+## 1. An analogy
+
+Directions for walking round a building: "two steps south, two east, one north, one north-east, three west". Anyone can retrace the walk from the start. Rotate the building and every compass direction changes, but the **turns** ("straight, left, straight, right…") stay the same.
+
+## 2. The code
+
+<Flow
+  steps={[
+    { label: "Ordered boundary pixels (findContours, CHAIN_APPROX_NONE)", tone: "data" },
+    { label: "Each step → one of 8 directions (0 = right, 2 = up, 4 = left, 6 = down)", tone: "process" },
+    { label: "First difference: turns between steps (rotation invariant)", tone: "process" },
+    { label: "Smallest cyclic rotation: shape number (start invariant)", tone: "result" },
+  ]}
+/>
+
+Directions, counter-clockwise on screen (image y points down):
+
+| Code | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Step (dx, dy) | (1, 0) | (1, −1) | (0, −1) | (−1, −1) | (−1, 0) | (−1, 1) | (0, 1) | (1, 1) |
+| Direction | → | ↗ | ↑ | ↖ | ← | ↙ | ↓ | ↘ |
+
+- **First difference**: (code[i] − code[i − 1]) mod 8, the turn at each step. A rotation by a multiple of 45° adds the same number to every code, so the differences do not change.
+- **Shape number**: the code (or its difference) is cyclic; choosing the rotation of the sequence that forms the smallest number removes the dependence on the starting pixel.
+- **Perimeter**: even codes are steps of length 1, odd codes steps of length √2.
+
+## 3. A worked example by hand
+
+A 3 × 3 square of pixels with one extra pixel on its top right (x, y = column, row):
+
+<PixelMatrix size="sm" numbers={false} values={[[0, 0, 0, 0, 0, 0], [0, 255, 255, 255, 255, 0], [0, 255, 255, 255, 0, 0], [0, 255, 255, 255, 0, 0], [0, 0, 0, 0, 0, 0]]} />
+
+`cv2.findContours` lists the boundary pixels (1, 1), (1, 2), (1, 3), (2, 3), (3, 3), (3, 2), (4, 1), (3, 1), (2, 1). The steps:
+
+| From → to | (1,1)→(1,2) | →(1,3) | →(2,3) | →(3,3) | →(3,2) | →(4,1) | →(3,1) | →(2,1) | →(1,1) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Step | (0, 1) | (0, 1) | (1, 0) | (1, 0) | (0, −1) | (1, −1) | (−1, 0) | (−1, 0) | (−1, 0) |
+| Code | 6 | 6 | 0 | 0 | 2 | 1 | 4 | 4 | 4 |
+
+Chain code **6 6 0 0 2 1 4 4 4**. Perimeter: 8 straight steps + 1 diagonal = 8 + 1.414 = **9.41** pixels. First difference (each code minus the one before, mod 8; the first uses the last code 4): **2 0 2 0 2 7 3 0 0**. A 7 is a 45° turn clockwise, a 2 is a 90° turn counter-clockwise.
+
+## 4. On real contours
+
+From the shape image, the bracket's 203 boundary pixels have 50, 1, 50, 0, 51, 0, 51, 0 steps in directions 0 to 7: almost only horizontal and vertical steps, as expected for an axis-aligned bracket. The oval's 136 pixels use all eight directions (35, 12, 9, 12, 35, 12, 9, 12). Summing 1 for even and √2 for odd codes gives 203.4 and 155.9 pixels, **exactly** `cv2.arcLength` of the same contours, because arcLength sums the same pixel-to-pixel steps.
+
+<ShapeLab mode="chain" caption="Pick a shape: its boundary pixels (blue), the start pixel (red), the histogram of the 8 directions, and the first 48 digits of the chain code, its first difference and the shape number. Compare a top-row shape with its rotated copy (2): rotated by angles that are not multiples of 45°, the whole code and its histogram change."/>
+
+Rotations that are not multiples of 45° change the pixel staircase itself, so the first difference of a rotated, re-rasterised shape is similar but not identical. Chain codes are exact descriptions, not robust ones.
+
+## 5. Industrial use
+
+- **Compact storage** of outlines (3 bits per step), e.g. in older document and fax standards and in contour databases.
+- **Perimeter and corners**: perimeter from step counts; corners where the first difference shows sharp turns.
+- **Character and symbol recognition** on clean, binary prints.
+- **Exact contour round trips**: `cv2.findContours` with `CHAIN_APPROX_SIMPLE` stores only the end points of straight runs, a related compression.
+
+## What you should remember from 29.1
+
+<Takeaways>
+<Takeaway n={1} title="8 directions">Each boundary step is a digit 0–7.</Takeaway>
+<Takeaway n={2} title="Invariance">First difference: rotation by 45° steps. Shape number: start point.</Takeaway>
+<Takeaway n={3} title="Perimeter">Even codes 1, odd codes √2: equals arcLength.</Takeaway>
+<Takeaway n={4} title="Fragile">Noise and arbitrary rotations change many digits.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Chain code 0 0 6 6 4 4 2 2. What shape is it, and its perimeter?
+
+<Solution>
+
+Right 2, down 2, left 2, up 2: a **square** with 3 pixels per side (boundary of 8 pixels); perimeter **8**.
+
+</Solution>
+
+**Q2.** Rotate a shape by 90° counter-clockwise. What happens to its chain code?
+
+<Solution>
+
+Every code increases by 2 (mod 8), e.g. 0 → 2, 6 → 0. The first difference stays the same (up to the starting point).
+
+</Solution>
+
+### Next: 29.2 Hu moments
+
+Seven numbers from the moments of a shape that do not change with position, scale or rotation.
+
+## Code
+
+Three examples: the worked example, invariances, and perimeters on the shape image.
+
+### 1. Chain code of a contour
+
+```python
+import numpy as np
+import cv2
+
+DIRS = {(1, 0): 0, (1, -1): 1, (0, -1): 2, (-1, -1): 3, (-1, 0): 4, (-1, 1): 5, (0, 1): 6, (1, 1): 7}
+
+def chain_code(pts):
+    return [DIRS[(int(pts[(i + 1) % len(pts)][0] - pts[i][0]), int(pts[(i + 1) % len(pts)][1] - pts[i][1]))] for i in range(len(pts))]
+
+mask = np.zeros((5, 6), np.uint8)
+mask[1:4, 1:4] = 255
+mask[1, 4] = 255                                                    # the extra pixel
+contour = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0][0].reshape(-1, 2)
+code = chain_code(contour)
+print("pixels:", contour.tolist())
+print("code:", code)
+print("perimeter:", round(sum(1 if c % 2 == 0 else np.sqrt(2) for c in code), 2), "| arcLength:", round(cv2.arcLength(contour.reshape(-1, 1, 2), True), 2))
+```
+
+Output:
+
+```text
+pixels: [[1, 1], [1, 2], [1, 3], [2, 3], [3, 3], [3, 2], [4, 1], [3, 1], [2, 1]]
+code: [6, 6, 0, 0, 2, 1, 4, 4, 4]
+perimeter: 9.41 | arcLength: 9.41
+```
+
+### 2. First difference and shape number
+
+```python
+def first_difference(code):
+    return [(code[i] - code[i - 1]) % 8 for i in range(len(code))]   # code[-1] wraps to the last element
+
+def shape_number(seq):
+    rotations = [seq[i:] + seq[:i] for i in range(len(seq))]
+    return min(rotations)                                            # smallest as a sequence of digits
+
+rotated = np.rot90(mask).copy()                                      # 90 degrees counter-clockwise
+code_r = chain_code(cv2.findContours(rotated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0][0].reshape(-1, 2))
+print("code:", code, "| rotated:", code_r)
+print("difference:", first_difference(code), "| rotated:", first_difference(code_r))
+print("shape numbers equal:", shape_number(first_difference(code)) == shape_number(first_difference(code_r)))
+```
+
+Output:
+
+```text
+code: [6, 6, 0, 0, 2, 1, 4, 4, 4] | rotated: [6, 6, 6, 0, 0, 2, 2, 4, 3]
+difference: [2, 0, 2, 0, 2, 7, 3, 0, 0] | rotated: [3, 0, 0, 2, 0, 2, 0, 2, 7]
+shape numbers equal: True
+```
+
+- The rotated contour starts at a different pixel, so the differences are the same cycle shifted; the shape number removes the shift.
+
+### 3. Real contours
+
+```python
+img = cv2.imread("sample-shapes.png", cv2.IMREAD_GRAYSCALE)
+contours = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0]
+contours = sorted(contours, key=lambda c: (int(cv2.boundingRect(c)[1] > 90), cv2.boundingRect(c)[0]))
+for name, c in [("bracket", contours[2]), ("cross", contours[3]), ("oval", contours[4])]:
+    code = chain_code(c.reshape(-1, 2))
+    hist = np.bincount(code, minlength=8)
+    perim = hist[0::2].sum() + np.sqrt(2) * hist[1::2].sum()
+    print(f"{name}: {len(code)} steps, directions {hist.tolist()}, perimeter {perim:.1f}, arcLength {cv2.arcLength(c, True):.1f}")
+```
+
+Output:
+
+```text
+bracket: 203 steps, directions [50, 1, 50, 0, 51, 0, 51, 0], perimeter 203.4, arcLength 203.4
+cross: 199 steps, directions [49, 1, 49, 1, 48, 2, 48, 1], perimeter 201.1, arcLength 201.1
+oval: 136 steps, directions [35, 12, 9, 12, 35, 12, 9, 12], perimeter 155.9, arcLength 155.9
+```
+
+## OpenCV API notes
+
+- **No chain-code output in OpenCV 4.x's Python API**: the old `CV_CHAIN_CODE` mode belonged to the C API. Get the ordered pixels with `cv2.findContours(img, mode, cv2.CHAIN_APPROX_NONE)` and convert steps to codes as above.
+- **`cv2.CHAIN_APPROX_SIMPLE`** keeps only the end points of horizontal, vertical and diagonal runs; `CHAIN_APPROX_TC89_L1` / `TC89_KCOS` use the Teh–Chin dominant-point algorithm.
+- **`cv2.arcLength(contour, closed=True)`**: the same 1 / √2 step lengths for pixel contours.
+- **Contour order**: outer contours from `findContours` are listed counter-clockwise on screen (as in the example); holes the other way.
+
+## Where it fails
+
+- **Noise**: one bumpy pixel changes the code locally and can change the shape number completely.
+- **Rotation by non-multiples of 45°** and **scaling**: the pixel staircase changes; codes are not comparable.
+- **Perimeter bias**: 1 / √2 steps overestimate the length of smooth curves at most angles (a straight line at about 27°, one straight plus one diagonal step per (2, 1), comes out 8 % too long).
+- **Comparing shapes**: digit sequences of different lengths need alignment; moments (29.2) and Fourier descriptors (29.3) compare more easily.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using CHAIN_APPROX_SIMPLE points**: consecutive points are then not neighbours; codes need CHAIN_APPROX_NONE.
+- **Wrong y direction**: in images y grows downwards, so "up" is dy = −1.
+- **Forgetting the closing step** from the last point back to the first.
+- **Comparing raw codes** of shapes with different starting points.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Shape numbers and order
+
+Gonzalez and Woods [2] define the shape number with the 4-direction chain code on a grid chosen from the shape's major axis, which gives a canonical orientation, and its **order** (the number of digits) as a size class. Bribiesca and Guzman's shape numbers allow comparing shapes by the highest order at which their numbers agree.
+
+### Accurate length estimation
+
+Better perimeter estimates weight even and odd steps differently and count corners: Vossepoel and Smeulders proposed 0.980 n_e + 1.406 n_o − 0.091 n_c (n_c = number of corners), which removes most of the orientation bias of the plain 1 / √2 sum.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Code 1 means a step…",
+      options: ["Right", "Up-right (dx 1, dy −1)", "Down", "Left"],
+      answer: 1,
+      explanation: "Directions count counter-clockwise from right; up is −y in images.",
+    },
+    {
+      question: "Which is invariant to rotations by 90°?",
+      options: ["The chain code", "Its first difference", "The start pixel", "The x coordinates"],
+      answer: 1,
+      explanation: "Rotation adds a constant to every code.",
+    },
+    {
+      question: "Perimeter of code 0 1 2 3 4 5 6 7?",
+      options: ["8", "4 + 4√2 ≈ 9.66", "8√2", "16"],
+      answer: 1,
+      explanation: "Four even (1) and four odd (√2) steps.",
+    },
+    {
+      question: "The shape number removes the dependence on…",
+      options: ["Scale", "The starting point", "Noise", "Mirroring"],
+      answer: 1,
+      explanation: "It picks the smallest cyclic rotation of the sequence.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Draw the contour with chain code 0 0 0 6 4 4 4 2 from (0, 0). Which shape is it?
+
+<Solution>
+
+Right 3 to (3, 0), down 1 to (3, 1), left 3 to (0, 1), up 1 back to (0, 0): a **4 × 2 rectangle** of pixels (a bar 4 wide and 2 high).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Compare the direction histograms of the top-row cross and its rotated copy (bottom row). Which directions dominate in each, and why?
+
+<Solution>
+
+```python
+for name, c in [("cross", contours[3]), ("rotated cross", contours[9])]:
+    print(name, np.bincount(chain_code(c.reshape(-1, 2)), minlength=8).tolist())
+```
+
+Output:
+
+```text
+cross [49, 1, 49, 1, 48, 2, 48, 1]
+rotated cross [13, 17, 13, 17, 13, 17, 13, 17]
+```
+
+The upright cross uses almost only the four straight directions (0, 2, 4, 6). Rotated by 30°, its straight edges become staircases that alternate straight and diagonal steps, so all eight directions appear in similar numbers. The same shape gives a completely different code: chain codes are not rotation-invariant except for multiples of 45°.
+
+</Solution>
+
+## References
+
+1. H. Freeman, "On the encoding of arbitrary geometric configurations", *IRE Trans. Electronic Computers* EC-10(2), 260–268, 1961.
+2. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Section 11.2 (boundary preprocessing: chain codes, shape numbers).
+3. C.-H. Teh, R. T. Chin, "On the detection of dominant points on digital curves", *IEEE Trans. Pattern Analysis and Machine Intelligence* 11(8), 859–872, 1989.
+4. OpenCV 4.13.0 documentation: `findContours`, `ContourApproximationModes`, `arcLength`. https://docs.opencv.org/4.13.0/

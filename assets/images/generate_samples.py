@@ -524,6 +524,32 @@ ac = 60 + 110 * (cv2.resize(ac_big, (200, 150), interpolation=cv2.INTER_AREA) / 
 ac = cv2.GaussianBlur(ac, (0, 0), 1.0) + np.random.default_rng(28).normal(0, 10, ac.shape)
 images["sample-snake.png"] = np.clip(np.rint(ac), 0, 255).astype(np.uint8)
 
+# 29.x: binary shape set for shape descriptors: six shapes (top row) and the same shapes rotated, scaled and,
+# for the bracket, mirrored (bottom row); drawn 8x supersampled and thresholded
+def sh_star(n=5, r1=1.0, r2=0.45):
+    t = np.arange(2 * n) * np.pi / n - np.pi / 2; r = np.where(np.arange(2 * n) % 2 == 0, r1, r2); return np.c_[r * np.cos(t), r * np.sin(t)]
+def sh_gear(n=8, r1=1.0, r2=0.78):
+    pts = []
+    for k in range(n):
+        a = 2 * np.pi * k / n; w = np.pi / n * 0.5
+        for ang, r in ((a - w * 1.2, r2), (a - w * 0.6, r1), (a + w * 0.6, r1), (a + w * 1.2, r2)): pts.append((r * np.cos(ang), r * np.sin(ang)))
+    return np.array(pts)
+sh_t = np.linspace(0, 2 * np.pi, 80, endpoint=False)
+SH = {"star": sh_star(), "gear": sh_gear(),
+      "bracket": np.array([[-1, -1], [1, -1], [1, -0.5], [-0.4, -0.5], [-0.4, 1], [-1, 1]], float),
+      "cross": np.array([[-.32, -1], [.32, -1], [.32, -.32], [1, -.32], [1, .32], [.32, .32], [.32, 1], [-.32, 1], [-.32, .32], [-1, .32], [-1, -.32], [-.32, -.32]]),
+      "oval": np.c_[np.cos(sh_t), 0.55 * np.sin(sh_t)],
+      "arrow": np.array([[-1, -0.25], [0.3, -0.25], [0.3, -0.6], [1, 0], [0.3, 0.6], [0.3, 0.25], [-1, 0.25]])}
+SH_PLACE = [("star", (40, 45), 28, 0, False), ("gear", (110, 45), 28, 0, False), ("bracket", (180, 45), 26, 0, False), ("cross", (250, 45), 26, 0, False),
+            ("oval", (320, 45), 30, 0, False), ("arrow", (390, 45), 30, 0, False), ("star", (40, 135), 18, 25, False), ("gear", (110, 135), 34, 10, False),
+            ("bracket", (180, 135), 22, 90, True), ("cross", (250, 135), 18, 30, False), ("oval", (320, 135), 22, 60, False), ("arrow", (390, 135), 22, 200, False)]
+sh_big = np.zeros((180 * 8, 430 * 8), np.uint8)
+for name, (cx, cy), sc, ang, mir in SH_PLACE:
+    p = SH[name] * (-1 if mir else 1, 1)
+    a = np.deg2rad(ang); R = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+    cv2.fillPoly(sh_big, [np.rint(((p @ R.T) * sc + (cx, cy)) * 8).astype(np.int32)], 255)
+images["sample-shapes.png"] = (cv2.resize(sh_big, (430, 180), interpolation=cv2.INTER_AREA) > 127).astype(np.uint8) * 255
+
 for name, img in images.items():
     ok = cv2.imwrite(str(OUT / name), img)
     assert ok, f"could not write {name}"

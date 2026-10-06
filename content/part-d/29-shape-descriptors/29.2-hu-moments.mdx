@@ -1,0 +1,308 @@
+export const meta = {
+  number: "29.2",
+  title: "Hu moments",
+  minutes: 25,
+  objectives: [
+    "Compute central and normalised moments of a small shape by hand",
+    "Explain why Hu's seven moments are invariant to position, scale and rotation",
+    "Use cv2.moments and cv2.HuMoments and read them on a log scale",
+    "Recognise when Hu moments are unreliable: symmetric and small shapes, mirroring",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 29.2 (Module 29).
+  Lab: ShapeLab mode "hu" (polygon moments, Hu moments and matchShapes equal OpenCV).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 29.2 Hu moments
+
+<Definition term="Hu moments">seven numbers computed from the moments of a shape that stay (almost) the same when the shape is moved, scaled or rotated (Hu 1962 [1]). The seventh changes sign when the shape is mirrored.</Definition>
+
+Moments (24.6) describe how a shape's area is distributed: its size (m00), centre (m10/m00, m01/m00), spread and orientation (second order), skew (third order). Each depends on position, size and rotation. Hu combined the normalised second- and third-order moments into seven expressions that do not, so two copies of the same part give the same seven numbers wherever and however they lie.
+
+## 1. An analogy
+
+Describing a person's build without a photo: height and weight change with age and units, but proportions such as "legs are half the height" stay. Hu moments are proportions of a shape: they ignore where it is, how big it is and which way it faces.
+
+## 2. From moments to invariants
+
+<Flow
+  steps={[
+    { label: "Shape (contour or binary region)", tone: "data" },
+    { label: "Raw moments m_pq = Σ xᵖ yᵠ", tone: "process" },
+    { label: "Central μ_pq: around the centroid → position-invariant", tone: "process" },
+    { label: "Normalised η_pq = μ_pq / m00^(1 + (p+q)/2) → scale-invariant", tone: "process" },
+    { label: "Hu h1 … h7: combinations of η → rotation-invariant", tone: "result" },
+  ]}
+/>
+
+The first two invariants show the idea:
+
+- **h1 = η20 + η02**: the total spread (like a moment of inertia), the same in every direction you measure it.
+- **h2 = (η20 − η02)² + 4 η11²**: how elongated the shape is, regardless of the direction of the elongation.
+- h3 … h6 use third-order moments (skew, asymmetry); **h7** is a "skew" invariant whose **sign flips under mirroring**, so it can tell a shape from its mirror image.
+
+The values span many orders of magnitude, so they are usually shown as −sign(h) · log₁₀|h|.
+
+## 3. A worked example by hand
+
+A region of 2 × 3 pixels: columns x = 2, 3 and rows y = 1, 2, 3 (6 pixels).
+
+- m00 = 6, m10 = Σx = 3 · 2 + 3 · 3 = 15, m01 = Σy = 2 · (1 + 2 + 3) = 12. Centroid (2.5, 2).
+- μ20 = Σ(x − 2.5)² = 6 · 0.25 = **1.5**; μ02 = Σ(y − 2)² = 2 · (1 + 0 + 1) = **4**; μ11 = Σ(x − 2.5)(y − 2) = 0.
+- η20 = 1.5 / 6² = 0.042, η02 = 4 / 36 = 0.111.
+- **h1** = 0.042 + 0.111 = **0.153**; **h2** = (0.042 − 0.111)² + 0 = **0.0048**.
+
+Rotate the region by 90° (3 wide, 2 high): μ20 and μ02 swap, and h1, h2 are unchanged. Move it anywhere: the central moments do not change. Double its size: η stays the same because of the division by m00.
+
+## 4. On the shape image
+
+Each shape appears twice: upright in the top row, rotated and scaled (and, for the bracket, mirrored) in the bottom row. Log-scaled Hu moments from `cv2.moments` on the contours:
+
+| Shape | h1 | h2 | h3 | h4 | h5 | h6 | h7 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| bracket | 0.44 | 1.43 | 1.50 | 2.50 | −4.65 | −3.27 | −4.67 |
+| bracket, rotated, smaller, **mirrored** | 0.43 | 1.39 | 1.44 | 2.45 | −4.49 | −3.18 | **4.62** |
+| arrow | 0.53 | 1.26 | 2.73 | 3.25 | 6.23 | 3.88 | 8.49 |
+| arrow, rotated 200°, smaller | 0.50 | 1.21 | 2.55 | 3.05 | 5.85 | 3.65 | −8.24 |
+| cross | 0.70 | **9.71** | 4.65 | 6.09 | −11.46 | −10.94 | −21.22 |
+| cross, rotated 30°, smaller | 0.70 | **6.84** | 6.32 | 8.38 | 15.77 | −13.04 | −16.17 |
+
+- For the bracket and the arrow, h1 to h6 agree to within 0.16 and 0.38 on the log scale (the higher orders differ most); h7 flips sign for the mirrored bracket, as it should. (The arrow's h7 also flips: for nearly symmetric shapes h7 is tiny, and its sign is decided by pixel effects.)
+- For the **cross**, h2 jumps from 9.71 to 6.84 (a factor of 740 in the raw value). A cross is symmetric, so η20 = η02 and η11 = 0 in theory and h2 is nearly zero. Small pixel errors then dominate the logarithm. The same happens with the star and the gear.
+
+Hu moments are robust for **asymmetric**, reasonably **large** shapes. For symmetric shapes, rely on h1 and on the non-zero invariants only, or use other descriptors (29.3).
+
+<ShapeLab mode="hu" caption="Choose a shape, then rotate, scale and mirror an exact copy of its outline. The table shows the log-scaled Hu moments; red cells differ by more than 0.01. With an exact polygon, h1–h6 never change; h7 flips sign with the mirror. Compare with the table above, where the copies were re-rasterised as pixels."/>
+
+## 5. Industrial use
+
+- **Part identification** on a conveyor: compare the Hu vector of each blob with stored references (29.4).
+- **Orientation-free sorting**: shapes in random orientation, as long as they are not too symmetric.
+- **Mirror check**: h7's sign tells a left-hand part from a right-hand part.
+- **Feature vectors** for classifiers (36.x), usually together with area, perimeter, circularity and convexity.
+
+## What you should remember from 29.2
+
+<Takeaways>
+<Takeaway n={1} title="Invariants">Central → position; normalised → scale; Hu combinations → rotation.</Takeaway>
+<Takeaway n={2} title="Log scale">Show −sign(h)·log₁₀|h|; values span many decades.</Takeaway>
+<Takeaway n={3} title="Mirror">h7 changes sign; the others do not.</Takeaway>
+<Takeaway n={4} title="Fragile cases">Symmetric or small shapes: near-zero moments dominated by pixel noise.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 4 × 1 bar of pixels (x = 0…3, y = 0). Compute μ20, μ02 and h1.
+
+<Solution>
+
+Centroid x = 1.5. μ20 = 2.25 + 0.25 + 0.25 + 2.25 = 5; μ02 = 0. η20 = 5 / 16 = 0.3125; **h1 = 0.3125**.
+
+</Solution>
+
+**Q2.** Two parts have identical h1–h6 but opposite h7. What are they?
+
+<Solution>
+
+Mirror images of each other (for example a left and a right bracket).
+
+</Solution>
+
+### Next: 29.3 Fourier descriptors
+
+Describing a contour by its frequencies: smooth outlines need few numbers.
+
+## Code
+
+Three examples: the worked example, Hu moments of the shapes, and contour versus image moments.
+
+### 1. The worked example
+
+```python
+import numpy as np
+import cv2
+
+region = np.zeros((5, 5), np.uint8)
+region[1:4, 2:4] = 1                                                # rows 1-3, columns 2-3
+m = cv2.moments(region, binaryImage=True)
+print({k: round(m[k], 3) for k in ("m00", "m10", "m01", "mu20", "mu02", "mu11", "nu20", "nu02")})
+h = cv2.HuMoments(m).ravel()
+print("h1:", round(float(h[0]), 4), "| h2:", round(float(h[1]), 4))
+h_rot = cv2.HuMoments(cv2.moments(np.rot90(region).copy(), binaryImage=True)).ravel()
+print("rotated h1:", round(float(h_rot[0]), 4), "| h2:", round(float(h_rot[1]), 4))
+```
+
+Output:
+
+```text
+{'m00': 6.0, 'm10': 15.0, 'm01': 12.0, 'mu20': 1.5, 'mu02': 4.0, 'mu11': 0.0, 'nu20': 0.042, 'nu02': 0.111}
+h1: 0.1528 | h2: 0.0048
+rotated h1: 0.1528 | h2: 0.0048
+```
+
+### 2. Hu moments of the shapes
+
+```python
+img = cv2.imread("sample-shapes.png", cv2.IMREAD_GRAYSCALE)
+contours = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0]
+contours = sorted(contours, key=lambda c: (int(cv2.boundingRect(c)[1] > 90), cv2.boundingRect(c)[0]))
+names = ["star", "gear", "bracket", "cross", "oval", "arrow"]
+
+def log_hu(c):
+    h = cv2.HuMoments(cv2.moments(c)).ravel()
+    return np.round(-np.sign(h) * np.log10(np.abs(h)), 2).tolist()
+
+for i in (2, 3, 5):
+    print(names[i], log_hu(contours[i]))
+    print(names[i], "copy", log_hu(contours[6 + i]))
+```
+
+Output:
+
+```text
+bracket [0.44, 1.43, 1.5, 2.5, -4.65, -3.27, -4.67]
+bracket copy [0.43, 1.39, 1.44, 2.45, -4.49, -3.18, 4.62]
+cross [0.7, 9.71, 4.65, 6.09, -11.46, -10.94, -21.22]
+cross copy [0.7, 6.84, 6.32, 8.38, 15.77, -13.04, -16.17]
+arrow [0.53, 1.26, 2.73, 3.25, 6.23, 3.88, 8.49]
+arrow copy [0.5, 1.21, 2.55, 3.05, 5.85, 3.65, -8.24]
+```
+
+### 3. Contour moments vs region moments
+
+```python
+c = contours[2]
+x, y, w, h = cv2.boundingRect(c)
+m_contour = cv2.moments(c)                                           # polygon through the boundary pixel centres
+m_region = cv2.moments(img[y:y + h, x:x + w], binaryImage=True)       # every pixel of the region
+print("area: contour", m_contour["m00"], "| pixels", m_region["m00"])
+print("h1: contour", round(float(cv2.HuMoments(m_contour)[0, 0]), 4), "| pixels", round(float(cv2.HuMoments(m_region)[0, 0]), 4))
+```
+
+Output:
+
+```text
+area: contour 1197.5 | pixels 1300.0
+h1: contour 0.3602 | pixels 0.3423
+```
+
+- A contour is a polygon through the centres of the boundary pixels, so its area misses half a pixel all round. For small shapes this changes the moments noticeably; compare shapes with one method only.
+
+## OpenCV API notes
+
+- **`cv2.moments(array, binaryImage=False)`** → dict with m00…m03, mu20…mu03, nu20…nu03. `array`: a contour (N × 1 × 2, int32 or float32) or a single-channel image (`binaryImage=True` treats every non-zero pixel as 1).
+- **`cv2.HuMoments(m)`** → (7, 1) float64.
+- **Contour moments** use Green's theorem on the polygon (exact for polygons, fast); image moments sum over pixels.
+- **Log scaling**: `-np.sign(h) * np.log10(np.abs(h))`; guard against h = 0.
+
+## Where it fails
+
+- **Symmetric shapes**: several invariants are theoretically zero; their logs are noise.
+- **Small shapes** (tens of pixels): discretisation changes the higher moments.
+- **Occlusion**: moments are global; a missing piece changes all seven.
+- **Discrimination**: different shapes can have similar low-order moments; seven numbers cannot separate many classes.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Comparing raw Hu values**: they differ by orders of magnitude; use the log scale (or matchShapes).
+- **Mixing contour and region moments** between references and test images.
+- **Expecting mirror invariance**: h7 flips sign; use |h7| if mirrored parts count as the same.
+- **Using Hu moments on near-circular or symmetric parts**: most invariants are near zero.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Where the invariants come from
+
+Hu [1] derived the seven invariants from the theory of algebraic invariants, using the second- and third-order normalised central moments. Flusser [3] showed that Hu's set is incomplete and dependent (h3 can be expressed by the others) and derived complete, independent rotation invariants of any order; Zernike moments, built on orthogonal polynomials on the unit disc, give rotation invariants with less redundancy and better noise behaviour.
+
+### Affine invariants
+
+Under a slanted view, shapes undergo affine, not similarity, transformations. Flusser and Suk's affine moment invariants handle that case.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which step makes moments independent of position?",
+      options: ["Normalising by m00", "Taking moments around the centroid (central moments)", "The log", "Hu's combinations"],
+      answer: 1,
+      explanation: "μ_pq uses x − x̄ and y − ȳ.",
+    },
+    {
+      question: "Which Hu moment changes sign under mirroring?",
+      options: ["h1", "h2", "h5", "h7"],
+      answer: 3,
+      explanation: "h7 is the skew invariant.",
+    },
+    {
+      question: "Why did the cross's h2 change by a factor of 740 after rotation?",
+      options: ["Wrong code", "For a symmetric shape h2 is theoretically zero; pixel errors dominate", "The cross was mirrored", "Too few points"],
+      answer: 1,
+      explanation: "Logs of near-zero values amplify tiny errors.",
+    },
+    {
+      question: "Why show −sign(h)·log₁₀|h|?",
+      options: ["It is required by OpenCV", "Hu values span many orders of magnitude", "To make them positive", "For speed"],
+      answer: 1,
+      explanation: "The log makes them comparable.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 2 × 2 square of pixels and a 4 × 4 square: compute η20 for both and show that h1 is the same.
+
+<Solution>
+
+2 × 2: centroid 0.5; μ20 = 4 · 0.25 = 1; m00 = 4; η20 = 1/16. By symmetry η02 = 1/16: h1 = **0.125**. 4 × 4: μ20 = 4 · (2.25 + 0.25 + 0.25 + 2.25) = 20; m00 = 16; η20 = 20/256 = 0.078; h1 = 0.156. Not equal: pixel moments of tiny squares are not exactly scale-invariant (the continuous square gives 1/6 ≈ 0.167 for both); the difference shrinks as the squares grow.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+For all six shapes, compute the largest difference of log-Hu values h1 to h6 between the top-row shape and its copy. Which shapes are reliable?
+
+<Solution>
+
+```python
+for i in range(6):
+    a, b = np.array(log_hu(contours[i])[:6]), np.array(log_hu(contours[6 + i])[:6])
+    print(f"{names[i]:8s} max |difference| h1-h6: {np.abs(a - b).max():.2f}")
+```
+
+Output:
+
+```text
+star     max |difference| h1-h6: 1.90
+gear     max |difference| h1-h6: 2.02
+bracket  max |difference| h1-h6: 0.16
+cross    max |difference| h1-h6: 27.23
+oval     max |difference| h1-h6: 1.10
+arrow    max |difference| h1-h6: 0.38
+```
+
+Only the two asymmetric shapes, the bracket and the arrow, stay within 0.4. The symmetric ones (star, gear, cross, oval) differ by 1 to 27 decades in some invariant: for the cross, h5 even changes sign (−11.46 vs 15.77) because its true value is zero.
+
+</Solution>
+
+## References
+
+1. M.-K. Hu, "Visual pattern recognition by moment invariants", *IRE Trans. Information Theory* 8(2), 179–187, 1962.
+2. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Section 11.4 (moment invariants).
+3. J. Flusser, "On the independence of rotation moment invariants", *Pattern Recognition* 33(9), 1405–1410, 2000.
+4. OpenCV 4.13.0 documentation: `moments`, `HuMoments`. https://docs.opencv.org/4.13.0/

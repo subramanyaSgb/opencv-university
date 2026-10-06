@@ -1,0 +1,318 @@
+export const meta = {
+  number: "29.3",
+  title: "Fourier descriptors",
+  minutes: 25,
+  objectives: [
+    "Treat a contour as a complex signal and compute its discrete Fourier transform",
+    "Rebuild a contour from a few harmonics and see what low and high frequencies carry",
+    "Make Fourier descriptors invariant to position, scale, rotation and starting point",
+    "Compare shapes with Fourier descriptors",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 29.3 (Module 29).
+  Lab: ShapeLab mode "fourier".
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 29.3 Fourier descriptors
+
+<Definition term="Fourier descriptors">the Fourier coefficients of a closed contour written as a sequence of complex numbers z = x + i·y. Low frequencies describe the overall shape, high frequencies the fine detail; after normalisation, their magnitudes describe the shape independent of position, size, rotation and starting point (Zahn and Roskies 1972 [1]; Granlund 1972 [2]).</Definition>
+
+A contour is a closed path: walking along it, x and y repeat after one lap. Any periodic signal can be written as a sum of sines and cosines (Module 30), so a contour is a sum of circles turning at 1, 2, 3 … laps per walk. The first circle is the rough size and shape, the next ones add bumps, corners and teeth. Keeping only the first few gives a smoothed outline; their magnitudes give a compact, comparable description.
+
+## 1. An analogy
+
+Drawing with a spirograph of linked wheels. One wheel traces a circle. Add a smaller wheel turning twice as fast on its rim, and the circle becomes an oval; a third wheel adds corners. Any closed outline can be drawn by enough wheels; the size of each wheel is a Fourier coefficient.
+
+## 2. From contour to descriptor
+
+<Flow
+  steps={[
+    { label: "Contour pixels, resampled to N equally spaced points", tone: "data" },
+    { label: "z(t) = x(t) + i·y(t), t = 0 … N − 1", tone: "process" },
+    { label: "DFT: F(k) = Σ z(t) · e^(−2πi·k·t/N)", tone: "process" },
+    { label: "Drop F(0); take |F(k)|; divide by |F(1)|", tone: "process" },
+    { label: "Invariant descriptor (here k = ±2 … ±10)", tone: "result" },
+  ]}
+/>
+
+Each change to the shape has a simple effect on F:
+
+| Change | Effect on F(k) | Made invariant by |
+| --- | --- | --- |
+| translation | only F(0) changes (it is N × the centroid) | dropping F(0) |
+| scaling by s | all F(k) multiplied by s | dividing by \|F(1)\| |
+| rotation by θ | all F(k) multiplied by e^(iθ) | using magnitudes \|F(k)\| |
+| other starting point | F(k) multiplied by e^(2πi·k·t0/N) | using magnitudes |
+
+**Resampling** to equally spaced points matters: the DFT assumes equal steps, and it makes the descriptor independent of the contour's pixel count.
+
+## 3. A worked example by hand
+
+A square with corners z = 0, 1, 1 + i, i (N = 4):
+
+- F(0) = 0 + 1 + (1 + i) + i = **2 + 2i**: four times the centre (0.5, 0.5).
+- F(1) = Σ z(t)·(−i)ᵗ = 0 + 1·(−i) + (1 + i)·(−1) + i·(i) = **−2 − 2i**.
+- F(2) = Σ z(t)·(−1)ᵗ = 0 − 1 + (1 + i) − i = **0**.
+- F(3) = Σ z(t)·(i)ᵗ = 0 + i − (1 + i) + 1 = **0**.
+
+Only F(0) and F(1) are non-zero: the centre plus one circle through the four corners. With only four samples, a square cannot be told from a circle; the corners appear only when the contour is sampled more densely, as higher harmonics.
+
+## 4. On the shapes
+
+Reconstruction keeping the harmonics |k| ≤ K of 128 samples (mean distance to the original points):
+
+| Shape | K = 1 | K = 2 | K = 4 | K = 8 | K = 16 |
+| --- | --- | --- | --- | --- | --- |
+| oval | 1.54 | 1.54 | 0.41 | 0.19 | 0.17 |
+| star | 4.29 | 4.29 | 1.87 | 0.50 | 0.23 |
+| gear | 2.47 | 2.47 | 2.47 | 1.53 | 0.49 |
+
+- A shape with n-fold symmetry has only the harmonics k = 1 + n·m (m = …, −1, 0, 1, …). The star (n = 5) gains nothing until k = −4 and 6 are included (K = 4 … 6); the gear (n = 8) nothing until k = −7 (K = 7, 8). K = 2 adds nothing for any of the three, because they are point-symmetric.
+- Even the oval needs K ≈ 4: sampled at **equal arc length**, an ellipse is not a pure first harmonic (that holds only for its natural angle parameter).
+- From K = 16 on, the remaining error (0.2 to 0.5 px) is mostly the pixel staircase.
+
+<ShapeLab mode="fourier" caption="Grey: the contour (128 samples); blue: the rebuilt contour from 2K + 1 coefficients. Start at K = 1 (always an ellipse), then raise K: the star changes only from K = 4, the gear only from K = 7 (their symmetry allows no other harmonics). The bars show the invariant descriptor |F(k)| / |F(±1)|."/>
+
+**Matching.** With the descriptor k = 2 … 10 and −10 … −2 (18 numbers), every rotated and scaled copy in the bottom row is closest to its own original. Hu moments (29.2) confused the small star with the cross and the mirrored bracket with the star.
+
+## 5. Industrial use
+
+- **Shape classification** of parts, leaves, cells, particles: a short vector per contour for a classifier (36.x).
+- **Smoothing contours** by dropping high harmonics before measuring.
+- **Detecting small defects** on smooth outlines: a nick or burr adds energy at high harmonics.
+- **Compact storage** of outlines with a chosen accuracy.
+
+## What you should remember from 29.3
+
+<Takeaways>
+<Takeaway n={1} title="Contour as signal">z = x + i·y, resampled evenly, then DFT.</Takeaway>
+<Takeaway n={2} title="Low vs high">K = 1 is an ellipse; corners and teeth need higher harmonics.</Takeaway>
+<Takeaway n={3} title="Invariance">Drop F(0), divide by |F(1)|, keep magnitudes.</Takeaway>
+<Takeaway n={4} title="Matching">Distances between descriptors compare shapes robustly.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** You move a contour 20 pixels to the right. Which coefficients change?
+
+<Solution>
+
+Only **F(0)**, by 20·N (it is N times the centroid). All others are unchanged.
+
+</Solution>
+
+**Q2.** A contour's |F(8)| is large compared with its neighbours. What does the shape probably have?
+
+<Solution>
+
+Eight-fold detail around the outline: **8 bumps, teeth or lobes**, like the gear.
+
+</Solution>
+
+### Next: 29.4 Shape matching
+
+Putting it together: comparing a shape with references using matchShapes, descriptors and contour distances.
+
+## Code
+
+Three examples: the square, reconstruction, and matching with descriptors.
+
+### 1. The square
+
+```python
+import numpy as np
+import cv2
+
+z = np.array([0, 1, 1 + 1j, 1j])
+F = np.fft.fft(z)
+print("F:", [complex(round(v.real, 6), round(v.imag, 6)) for v in F])
+print("centre F(0)/N:", F[0] / 4)
+```
+
+Output:
+
+```text
+F: [(2+2j), (-2-2j), 0j, 0j]
+centre F(0)/N: (0.5+0.5j)
+```
+
+- `np.fft.fft` uses e^(−2πi·k·t/N), the same convention as Section 2.
+
+### 2. Reconstruction from K harmonics
+
+```python
+img = cv2.imread("sample-shapes.png", cv2.IMREAD_GRAYSCALE)
+contours = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0]
+contours = sorted(contours, key=lambda c: (int(cv2.boundingRect(c)[1] > 90), cv2.boundingRect(c)[0]))
+names = ["star", "gear", "bracket", "cross", "oval", "arrow"]
+
+def resample(c, n=128):
+    p = c.reshape(-1, 2).astype(float)
+    z = np.r_[p[:, 0] + 1j * p[:, 1], p[0, 0] + 1j * p[0, 1]]          # close the loop
+    s = np.r_[0, np.cumsum(np.abs(np.diff(z)))]                           # arc length
+    t = np.linspace(0, s[-1], n, endpoint=False)
+    return np.interp(t, s, z.real) + 1j * np.interp(t, s, z.imag)
+
+def rebuild(z, K):
+    F = np.fft.fft(z)
+    k = np.fft.fftfreq(len(z), 1 / len(z))                               # 0, 1, …, −2, −1
+    F[np.abs(k) > K] = 0
+    return np.fft.ifft(F)
+
+for i in (4, 0, 1):
+    z = resample(contours[i])
+    errors = [np.abs(rebuild(z, K) - z).mean() for K in (1, 2, 4, 8, 16)]
+    print(f"{names[i]:5s}", " ".join(f"{e:.2f}" for e in errors))
+```
+
+Output:
+
+```text
+oval  1.54 1.54 0.41 0.19 0.17
+star  4.29 4.29 1.87 0.50 0.23
+gear  2.47 2.47 2.47 1.53 0.49
+```
+
+### 3. Matching with descriptors
+
+```python
+def descriptor(c, n=64, K=10):
+    m = np.abs(np.fft.fft(resample(c, n)))
+    return np.r_[m[2:K + 1], m[n - K:n - 1]] / max(m[1], m[n - 1])          # k = 2…K and −K…−2, scaled
+
+refs = [descriptor(c) for c in contours[:6]]
+for i in range(6):
+    d = [np.linalg.norm(descriptor(contours[6 + i]) - r) for r in refs]
+    print(f"copy of {names[i]:7s} -> {names[int(np.argmin(d))]:7s} (distance {min(d):.3f}, next {sorted(d)[1]:.3f})")
+```
+
+Output:
+
+```text
+copy of star    -> star    (distance 0.019, next 0.248)
+copy of gear    -> gear    (distance 0.012, next 0.121)
+copy of bracket -> bracket (distance 0.011, next 0.340)
+copy of cross   -> cross   (distance 0.018, next 0.234)
+copy of oval    -> oval    (distance 0.011, next 0.124)
+copy of arrow   -> arrow   (distance 0.026, next 0.214)
+```
+
+Every copy is at least 5 times closer to its own original than to any other reference.
+
+## OpenCV API notes
+
+- **No Fourier-descriptor function in OpenCV's main module.** Use `np.fft.fft` on the resampled contour (as above) or `cv2.dft` on an N × 1 two-channel float array (x, y as real and imaginary parts).
+- **opencv-contrib** has `cv2.ximgproc.fourierDescriptor(src, nbElt, nbFD)` and `cv2.ximgproc.ContourFitting`, which estimates the rotation, scale and shift between two contours from their descriptors.
+- **Contours**: from `cv2.findContours(..., cv2.CHAIN_APPROX_NONE)`; resample them, do not use the raw pixel list with its uneven diagonal steps.
+
+## Where it fails
+
+- **Occlusion**: global descriptors change completely when part of the contour is missing.
+- **Holes and several pieces**: one closed contour per shape only.
+- **Mirroring**: magnitudes are mirror-invariant only if you symmetrise (mirroring swaps k and −k); decide whether mirrored parts count as equal.
+- **Very noisy contours**: high harmonics carry noise; use only low K for comparison.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Not resampling**: the descriptor then depends on the pixel count and the staircase.
+- **Dividing by F(0)**: F(0) is the position, not the size; normalise by |F(1)|.
+- **Keeping phases** when comparing shapes in arbitrary orientation.
+- **Too many coefficients** for matching: the high ones are noise and dominate the distance.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Variants
+
+Zahn and Roskies [1] used the tangent angle as a function of arc length; Granlund [2] the complex coordinates used here; Kuhl and Giardina's elliptic Fourier descriptors expand x(t) and y(t) separately, so each harmonic is an ellipse with its own size, shape and orientation, which is popular in biology for leaf and shell shapes. Phases can be kept and aligned (normalising rotation and start by F(1)'s phase) when the full shape, not only magnitudes, must be compared.
+
+### Relation to smoothing
+
+Cutting off harmonics above K is a low-pass filter on the contour (Module 30): the rebuilt outline is the closest curve to the original that uses only those frequencies (in the least-squares sense).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which coefficient carries the position of the contour?",
+      options: ["F(1)", "F(0)", "F(−1)", "The largest one"],
+      answer: 1,
+      explanation: "F(0) = N × centroid.",
+    },
+    {
+      question: "Rebuilding from F(−1), F(0), F(1) only gives…",
+      options: ["A circle", "An ellipse", "A square", "The exact contour"],
+      answer: 1,
+      explanation: "Two counter-rotating circles add up to an ellipse.",
+    },
+    {
+      question: "Why use |F(k)| for matching?",
+      options: ["Faster", "Magnitudes ignore rotation and the starting point", "They are always smaller", "OpenCV requires it"],
+      answer: 1,
+      explanation: "Both only change the phases.",
+    },
+    {
+      question: "Why resample the contour first?",
+      options: ["To add noise", "The DFT assumes equal steps; it also removes the dependence on pixel count", "To close it", "To remove holes"],
+      answer: 1,
+      explanation: "Pixel steps are 1 or √2 long.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Scale the square of Section 3 by 2 and move it by (3, 1). What are F(0) and F(1) now?
+
+<Solution>
+
+z = 3 + i, 5 + i, 5 + 3i, 3 + 3i. F(0) = Σz = 16 + 8i (4 × centre (4, 2)). F(1) = 2 × (−2 − 2i) = **−4 − 4i** (translation does not affect it; scaling doubles it).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Add Gaussian noise (σ = 1 pixel, seed 0) to the gear's contour points. Compare the descriptor distance between the clean and noisy gear using K = 4, 10 and 30.
+
+<Solution>
+
+```python
+rng = np.random.default_rng(0)
+gear = contours[1].reshape(-1, 2).astype(float)
+noisy = gear + rng.normal(0, 1, gear.shape)
+for K in (4, 10, 30):
+    d = np.linalg.norm(descriptor(gear.reshape(-1, 1, 2), 64, K) - descriptor(noisy.reshape(-1, 1, 2), 64, K))
+    print("K", K, "distance", round(float(d), 3))
+```
+
+Output:
+
+```text
+K 4 distance 0.053
+K 10 distance 0.082
+K 30 distance 0.093
+```
+
+More coefficients add more noise to the distance (0.053 → 0.093), while the shape information of the gear sits in the first ten harmonics. For matching, use few coefficients; compare with the gap to the nearest other shape (0.121 in Code 3) to see how much noise is tolerable.
+
+</Solution>
+
+## References
+
+1. C. T. Zahn, R. Z. Roskies, "Fourier descriptors for plane closed curves", *IEEE Trans. Computers* C-21(3), 269–281, 1972.
+2. G. H. Granlund, "Fourier preprocessing for hand print character recognition", *IEEE Trans. Computers* C-21(2), 195–201, 1972.
+3. F. P. Kuhl, C. R. Giardina, "Elliptic Fourier features of a closed contour", *Computer Graphics and Image Processing* 18(3), 236–258, 1982.
+4. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Section 11.3 (Fourier descriptors).
