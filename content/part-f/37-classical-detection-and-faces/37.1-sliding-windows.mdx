@@ -1,0 +1,302 @@
+export const meta = {
+  number: "37.1",
+  title: "Sliding windows",
+  minutes: 20,
+  objectives: [
+    "Count how many window positions a sliding-window search visits, by hand",
+    "Explain why a multi-scale search is needed to find objects of unknown size",
+    "Explain why one real object typically produces many overlapping raw detections",
+    "Know where sliding-window search fits between Module 32's template matching and a real detector (37.2-37.3)",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 37.1 (Part F, Module 37; opens the module).
+  Builds directly on 32.1-32.4 (sliding comparison / template matching is already a sliding-window search
+  against one fixed template); this chapter generalises it to a learned classifier and multiple scales,
+  and sets up 37.4 (non-max suppression) with a real multi-detection example.
+  Lab: WindowLab (apps/web/components/visuals/WindowLab.tsx) — "grid" mode shows every window position a
+  search would visit on sample-board.png; "raw" mode runs the 32.1 chip template as a live NCC classifier
+  and shows every match above a threshold, before any NMS.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 37.1 Sliding windows
+
+<Definition term="Sliding-window detection">finding objects of a certain kind anywhere in an image by moving a fixed-size window to every position (and, for objects of unknown size, every scale), asking a classifier "is the target centred in this window?" at each one, and keeping every position the classifier says yes to.</Definition>
+
+Module 32 already did this, in miniature: sliding one specific template across an image and scoring every position by SSD or NCC *is* a sliding-window search — just with the simplest possible "classifier" (compare against one fixed reference patch). This chapter generalises that idea: instead of matching one exact template, a learned classifier (36.2–36.6, built on Haar features or HOG, 35.3–35.4) decides whether each window looks like *any* example of a whole class of object — and does it at every plausible scale, which is why the search explodes in cost and why one real object ends up found many times over.
+
+## 1. An analogy
+
+Searching a long shelf of boxes for anything shaped roughly like a shoebox, by holding up a shoebox-shaped frame and checking every position on the shelf — but also at several different frame sizes, since a real shoebox a bit further away looks smaller. Most frame positions clearly don't match; a few, right around an actual shoebox, all look like reasonably good matches at once, because the frame doesn't have to be in the exact right spot to mostly overlap the object.
+
+## 2. The search
+
+<Flow
+  steps={[
+    { label: "Image", tone: "data" },
+    { label: "For each scale: resize image (or window)", tone: "process" },
+    { label: "Slide the window by a fixed stride; classify each position", tone: "process" },
+    { label: "Collect every position classified positive", tone: "result" },
+  ]}
+/>
+
+- **Window size**: fixed by the classifier (e.g. HOG's default 64×128, 35.3) or chosen for the task. The classifier was trained to answer "is the target here, filling this exact window?" — nothing else.
+- **Stride**: how far the window moves between checks. A smaller stride checks more positions (more chances to land exactly on the object, more cost); a larger stride is cheaper but can step over a good position entirely.
+- **Scale**: since objects appear at different sizes depending on distance, the search repeats at a range of scales — either resizing the image and keeping the window fixed, or (equivalently) scaling the window, by some factor (e.g. ×1.1) between steps, stopping once the window would no longer fit in the image.
+- **Many raw positives per real object**: a window a few pixels off from the object's true position, or at a slightly different scale, usually still overlaps it enough to also score positively — so one real object is typically found several or many times over, at slightly different positions and scales, before anything is done to clean that up (37.4).
+
+## 3. A worked example by hand
+
+A 100×60 image, a 20×20 window, stride 20 (so windows don't overlap, for simplicity): how many positions does the search visit?
+
+Positions along x: floor((100 − 20) / 20) + 1 = floor(80/20) + 1 = 4 + 1 = **5**. Positions along y: floor((60 − 20) / 20) + 1 = floor(40/20) + 1 = 2 + 1 = **3**. Total positions = 5 × 3 = **15**.
+
+Now add a second, larger scale: a 30×30 window (scale ×1.5), same stride 20: x positions = floor((100−30)/20)+1 = floor(70/20)+1 = 3+1 = **4**; y positions = floor((60−30)/20)+1 = floor(30/20)+1 = 1+1 = **2**. That scale adds 4×2 = **8** more positions, for **23** total across both scales.
+
+## 4. Real costs, and real overlapping detections
+
+<WindowLab caption="Window grid: every position a search visits at one scale/stride, on the Module 32 circuit board. Raw matches: the chip template run as a live NCC classifier, every match above a threshold shown as a red box -- notice the cluster around each real chip."/>
+
+**Search cost**: on a 320×200 image with a 64×128 window, stride 8 px, and 5 scales (×1.0 to ×1.464 in steps of ×1.1, stopping once the window would exceed the image): **950 window positions** in total, just to check this one window size family at this one stride. A real detector with a smaller stride, more scales, or a bigger image checks far more — which is exactly why cheap-to-evaluate features (Haar + integral images, 35.4; HOG's fixed cell/block structure, 35.3) matter so much for making this affordable.
+
+**Multiple detections per object**: running the 32.1 reference chip as an NCC "classifier" (threshold 0.7) across the whole circuit board finds **53 total matching window positions**, of which **8 are clustered within a few pixels of the one real identical chip** at (90, 35) — scores from 0.995 (almost exactly centred) down to 0.714 (several pixels off), all still above threshold. One real object, found eight times over, at slightly different positions. This is the problem 37.4's non-max suppression exists to solve: turning a cluster of overlapping positive windows into one final detection.
+
+## 5. Industrial use
+
+- **Every classical detector in this module** (37.2's Haar cascades, 37.3's HOG+SVM) is this exact search strategy, with a specific classifier plugged in.
+- **Any fixed-size, known-orientation inspection task**: searching an image for a specific part or marking at an unknown position (but known rough size) on a production line.
+- **The direct ancestor of modern detectors' anchor-based search** (Module 54): even CNN-based object detectors evaluate many candidate windows ("anchors") across positions and scales, conceptually the same search, now with a learned feature extractor and classifier evaluated far more efficiently in one network pass.
+
+## What you should remember from 37.1
+
+<Takeaways>
+<Takeaway n={1} title="A generalised template match">Sliding-window detection is Module 32's search, with a learned class classifier instead of one fixed template.</Takeaway>
+<Takeaway n={2} title="Multi-scale is essential">Objects appear at unknown sizes; the search must repeat across scales to find them.</Takeaway>
+<Takeaway n={3} title="Cost multiplies fast">Positions × scales, each needing a classifier evaluation — cheap features matter enormously.</Takeaway>
+<Takeaway n={4} title="Many hits per object">One real object typically produces a cluster of overlapping positive windows, not just one.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 200×100 image, a 40×40 window, stride 40 (non-overlapping). How many window positions at this one scale?
+
+<Solution>
+
+x: floor((200−40)/40)+1 = floor(160/40)+1 = 4+1 = 5. y: floor((100−40)/40)+1 = floor(60/40)+1 = 1+1 = 2. Total = 5×2 = **10**.
+
+</Solution>
+
+**Q2.** Why does a smaller stride generally find an object more reliably, but cost more?
+
+<Solution>
+
+A smaller stride checks more positions, so it is less likely to step over the one position where the window lines up well with the object (more reliable) — but checking more positions means more classifier evaluations for the same image and scale range (more cost). This is a direct accuracy/speed trade-off, same in spirit to several others this course has met (e.g. 36.3's choice of k, 36.4's choice of C).
+
+</Solution>
+
+### Next: 37.2 Haar cascades
+
+## Code
+
+### 1. Counting window positions, with NumPy
+
+```python
+import numpy as np
+import cv2
+
+def count_positions(W, H, win_w, win_h, stride):
+    nx = max(0, (W - win_w) // stride + 1)
+    ny = max(0, (H - win_h) // stride + 1)
+    return nx * ny
+
+print("15x60 image check:", count_positions(100, 60, 20, 20, 20))      # Section 3, scale 1
+print("30x30 window:", count_positions(100, 60, 30, 30, 20))           # Section 3, scale 2
+
+W, H, stride, scale_step = 320, 200, 8, 1.1
+win_w, win_h = 64, 128
+total, scale = 0, 1.0
+while True:
+    w, h = int(win_w * scale), int(win_h * scale)
+    if w > W or h > H:
+        break
+    n = count_positions(W, H, w, h, stride)
+    print(f"scale {scale:.3f}: window {w}x{h}, {n} positions")
+    total += n
+    scale *= scale_step
+print("total positions across all scales:", total)
+```
+
+Output:
+
+```text
+15x60 image check: 15
+30x30 window: 8
+scale 1.000: window 64x128, 330 positions
+scale 1.100: window 70x140, 256 positions
+scale 1.210: window 77x154, 186 positions
+scale 1.331: window 85x170, 120 positions
+scale 1.464: window 93x187, 58 positions
+total positions across all scales: 950
+```
+
+### 2. Running a template as a classifier, and counting raw matches
+
+```python
+board = cv2.imread("sample-board.png", cv2.IMREAD_GRAYSCALE)
+tpl = board[22:49, 25:56].copy()                                        # the reference chip, 32.1
+h, w = tpl.shape
+result = cv2.matchTemplate(board, tpl, cv2.TM_CCOEFF_NORMED)
+thresh = 0.7
+ys, xs = np.where(result >= thresh)
+print("total positions with NCC >= 0.7:", len(xs))
+
+near_true_chip = [(x, y, result[y, x]) for x, y in zip(xs, ys) if 70 <= x + w // 2 <= 110 and 15 <= y + h // 2 <= 55]
+near_true_chip.sort(key=lambda t: -t[2])
+print("raw matches within a few pixels of the one real chip at (90, 35):", len(near_true_chip))
+for x, y, score in near_true_chip[:3]:
+    print(f"  centre ({x + w // 2}, {y + h // 2}), score {score:.3f}")
+```
+
+Output:
+
+```text
+total positions with NCC >= 0.7: 53
+raw matches within a few pixels of the one real chip at (90, 35): 8
+  centre (90, 35), score 0.995
+  centre (91, 35), score 0.839
+  centre (89, 35), score 0.836
+```
+
+## OpenCV API notes
+
+- **No single `cv2.slidingWindow(...)` function**: a sliding-window search is typically written as the double loop above (or, for a specific well-known classifier, hidden inside a convenience method — `cv2.HOGDescriptor.detectMultiScale` (35.3, 37.3) and `cv2.CascadeClassifier.detectMultiScale` (37.2, 37.5) both implement exactly this search internally, scale and stride parameters included).
+- **`cv2.matchTemplate`** (32.1–32.4) already *is* a full sliding-window search at one scale, for one fixed template — every result map cell in Section 4's code is one window's classification score.
+- **`cv2.pyrDown`** (20.1) or direct `cv2.resize` are the usual ways to build the scale pyramid a multi-scale search steps through, when not using a built-in `detectMultiScale`.
+- **Speed matters enormously here**: with hundreds to thousands of windows per image, the cost of evaluating *one* window (a single Haar feature lookup, 35.4, vs. a full HOG descriptor, 35.3, vs. a CNN forward pass, Part J) dominates the whole detector's running time.
+
+## Where it fails
+
+- **Fixed aspect ratio**: a sliding-window search with one window shape cannot efficiently find objects whose shape varies a lot (a sitting vs. standing person, for example) without training and running separate searches per shape.
+- **Cost grows with image size, stride fineness, and scale range** — Section 4's 950-position example is for a small image and modest stride; a high-resolution image with a fine stride and wide scale range can require evaluating many tens of thousands of windows.
+- **Produces redundant detections by design** (Section 4) — every sliding-window detector needs a merging step (37.4) before its output is usable.
+- **Still assumes a roughly front-on, upright, unoccluded view** of the object, matching how the underlying classifier (37.2, 37.3) was trained — no amount of search strategy fixes a classifier that doesn't generalise to the actual viewing conditions.
+- Largely superseded in modern systems by detectors that evaluate far fewer, more cleverly chosen candidate regions, or avoid explicit per-window classification entirely (Module 54), though the window-and-classify idea remains conceptually foundational.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Forgetting the scale dimension** and only searching at one size — this misses the same object whenever it appears larger or smaller in a different image.
+- **Choosing a stride larger than the tolerance of the classifier being used**: if the classifier needs the window centred fairly precisely to respond, too coarse a stride can step right over genuine objects.
+- **Not budgeting for the detection-merging step**: Section 4 showed 8 raw detections for one real chip; a pipeline that stops before non-max suppression (37.4) will report objects many times over.
+- **Assuming sliding-window cost is "free" because each window check is cheap**: cheap × a very large number of windows can still be slow; always estimate total cost (Section 4's Code example) before assuming a design will run fast enough.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Choosing stride and scale step in practice
+
+A common rule of thumb for the scale step is somewhere around ×1.05 to ×1.2 per level (finer steps find objects more precisely at some scale but cost more scales overall); stride is often chosen as a fraction of the window size (e.g. 1/8 to 1/4) or tied to the underlying feature's own grid (HOG's 8-pixel cells, 35.3) so the window naturally aligns with feature boundaries.
+
+### Cascades as a way to make the search cheaper, not just the classifier
+
+37.2's Haar cascade doesn't just use a cheap feature — it also structures the *search itself* so that almost every window is rejected after only one or two quick checks, and only the rare, promising windows pay the cost of the later, more expensive stages. This is a search-level optimisation on top of the per-window classifier, specifically because of how large the total window count (Section 4) can get.
+
+### Region proposals, as a different strategy entirely
+
+Some detection approaches (outside classical sliding windows, touched on again in Module 54) first generate a much smaller set of candidate regions likely to contain an object (by some cheap, class-agnostic heuristic), and only run the expensive classifier on those — trading the sliding window's exhaustive-but-simple search for a smarter-but-more-complex one.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "How does sliding-window detection relate to Module 32's template matching?",
+      options: ["They are unrelated techniques", "Template matching IS a sliding-window search, against one fixed template; this chapter generalises it to a learned class classifier and multiple scales", "Sliding windows replaced template matching entirely", "Template matching only works on one scale by definition"],
+      answer: 1,
+      explanation: "Section 1-2: cv2.matchTemplate's result map is literally one classification score per window position.",
+    },
+    {
+      question: "Why does a sliding-window search need to repeat at multiple scales?",
+      options: ["To make the search slower on purpose", "Objects appear at different sizes depending on distance from the camera, and the window size is fixed", "Scale has nothing to do with detection", "Only Haar cascades need multiple scales"],
+      answer: 1,
+      explanation: "Section 2: each scale checks for the object at one particular apparent size.",
+    },
+    {
+      question: "In Section 4, why did the one real chip produce 8 separate raw detections?",
+      options: ["There were 8 real chips", "Several nearby window positions all overlapped the chip well enough to score above the threshold", "A bug in cv2.matchTemplate", "The threshold was set to 8"],
+      answer: 1,
+      explanation: "Scores ranged from 0.995 (centred) down to 0.714 (several pixels off) -- all still passing the 0.7 threshold.",
+    },
+    {
+      question: "What problem does this multi-detection issue require (covered next, 37.4)?",
+      options: ["A different image format", "Non-max suppression, to merge a cluster of overlapping positive detections into one", "A higher threshold always fixes it completely", "Re-running the search at a different stride"],
+      answer: 1,
+      explanation: "Every sliding-window detector needs this merging step before its output is directly usable.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 160×120 image, a 40×40 window, stride 10. How many positions at this one scale?
+
+<Solution>
+
+x: floor((160−40)/10)+1 = floor(120/10)+1 = 12+1 = 13. y: floor((120−40)/10)+1 = floor(80/10)+1 = 8+1 = 9. Total = 13×9 = **117**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using `count_positions` from the Code section, compare the total window count (summed across the same 5 scales as Section 4) for stride 8 versus stride 16, on the same 320×200 image and 64×128 window.
+
+<Solution>
+
+```python
+for stride in (8, 16):
+    total, scale = 0, 1.0
+    while True:
+        w, h = int(win_w * scale), int(win_h * scale)
+        if w > W or h > H:
+            break
+        total += count_positions(W, H, w, h, stride)
+        scale *= scale_step
+    print(f"stride {stride}: {total} total positions")
+```
+
+Output:
+
+```text
+stride 8: 950
+stride 16: 242
+```
+
+Doubling the stride (8 → 16) cuts the total window count to roughly a quarter (950 → 242, since halving positions in *both* x and y roughly quarters the 2-D count) — a big speed-up, at the cost of a coarser search that is more likely to step over a good position.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague wants to detect a part that can appear at any rotation (not just upright), using sliding-window search. What does this chapter's approach need, that it doesn't already provide?
+
+<Solution>
+
+Everything described so far searches positions and scales, but implicitly assumes a fixed orientation (the classifier was trained on upright examples, 35.3-35.4's features and classifiers don't rotate on their own). To handle arbitrary rotation with the same strategy, the search would need to add a *third* dimension: repeat the whole position-and-scale search at multiple rotation angles too, multiplying the already-large window count (Section 4) by however many angles are checked — a real, often prohibitive cost increase, which is part of why rotation-invariant features (SIFT's own orientation, 34.1) or rotation-tolerant classical detectors, where available, are often preferred over brute-force rotation search.
+
+</Solution>
+
+## References
+
+1. P. Viola, M. Jones, "Robust real-time face detection," *International Journal of Computer Vision* 57(2), 2004, pp. 137–154 (the sliding-window, multi-scale search this chapter describes, in its classic form).
+2. N. Dalal, B. Triggs, "Histograms of oriented gradients for human detection," *CVPR*, 2005, pp. 886–893.
+3. OpenCV 4.13.0 documentation: `cv2.matchTemplate`, `cv2.HOGDescriptor.detectMultiScale`, `cv2.CascadeClassifier.detectMultiScale`. https://docs.opencv.org/4.13.0/
