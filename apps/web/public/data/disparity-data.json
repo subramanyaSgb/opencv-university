@@ -1,0 +1,1 @@
+{"true_disparity":16,"results":[{"label":"BM default","valid_fraction":0.028450520833333333,"mean_disparity":16.78807258605957},{"label":"BM relaxed","valid_fraction":0.7793229166666666,"mean_disparity":16.187597274780273},{"label":"SGBM default","valid_fraction":0.6538671875,"mean_disparity":14.730942726135254}]}
