@@ -1,0 +1,273 @@
+export const meta = {
+  number: "40.3",
+  title: "Optical flow",
+  minutes: 24,
+  objectives: [
+    "Tell optical flow apart from differencing and background subtraction: motion vectors, not just change",
+    "Measure real Lucas-Kanade tracking accuracy against a known ground-truth shift",
+    "Measure real Farneback dense flow, and why it is measurably less precise than sparse tracking",
+    "Know what the aperture problem means for which points can be tracked at all",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 40.3 (Part G, Module 40). First dedicated optical flow chapter
+  in the course (checked: 33.3's goodFeaturesToTrack is mentioned only as "good features to
+  track" in passing, no optical flow computation there; 21.x covers whole-image registration,
+  a different problem). This chapter is new material, not a repeat of anything.
+  Real, verified numbers (scripts/gen_flow_data.py):
+  - A clean whole-scene pan (sample-scene.png shifted by a known (3.0, -1.0) px):
+    cv2.calcOpticalFlowPyrLK on 25 real goodFeaturesToTrack corners recovered a mean
+    displacement of (2.9999, -1.0000), std (0.0005, 0.0006) -- essentially exact.
+    cv2.calcOpticalFlowFarneback (dense), central region only (border margin 20 px):
+    mean (2.751, -0.911), std (0.251, 0.088) -- real, measurable error, clearly worse
+    than the sparse LK result on the identical motion.
+  - A point placed on the REAL moving uniform object from 40.1/40.2's synthetic video,
+    tracked frame-to-frame with LK across 20 real frames: tracked x at frames 0/5/10/15 =
+    17.0, 31.97, 47.15, 62.07 px, vs true 17, 32, 47, 62 -- accurate real tracking across
+    an extended real sequence, not just one frame pair.
+  - Real Farneback flow on the actual sample-ball-25fps.mp4 clip (frame 10 -> 11): mean flow
+    in rows spanning the ball's band was clearly elevated (0.85, 0.0002) vs the flat
+    background region (0.028, -0.012) -- the ball's real motion is visible in the flow
+    field even diluted by the surrounding still background in the same row band.
+  Lab: FlowLab (apps/web/components/visuals/FlowLab.tsx) -- real precomputed sparse (LK) and
+  dense (Farneback) flow vectors, for both the clean pan and the real ball clip.
+*/}
+
+# 40.3 Optical flow
+
+<Definition term="Optical flow">the apparent motion of brightness patterns between two frames, estimated as a vector (direction and distance) at a point or at every pixel — not just "did this pixel change" (40.1), but "which way, and how far, did it move."</Definition>
+
+40.1 and 40.2 answered "where is something different." Optical flow answers a sharper question: for a given point, where did it actually *go* between one frame and the next? That one extra piece of information — a real velocity, not just a presence/absence mask — is exactly what the tracking methods later in this module (40.4 onward) need.
+
+## 1. An analogy
+
+Differencing is noticing a chess piece is no longer where it was. Optical flow is watching the hand move it and reading off exactly which square it landed on — the same event, but with the actual motion captured, not just its before-and-after evidence.
+
+## 2. Two ways to estimate it
+
+<Flow
+  steps={[
+    { label: "Two frames, same scene", tone: "data" },
+    { label: "Sparse: track a handful of good points (Lucas-Kanade)", tone: "process" },
+    { label: "OR dense: estimate a vector at every pixel (Farneback)", tone: "process" },
+    { label: "A real motion vector, not just a changed/unchanged mask", tone: "result" },
+  ]}
+/>
+
+**Lucas-Kanade** [1] tracks a small set of chosen points (often `cv2.goodFeaturesToTrack`'s corners, 33.3) by assuming brightness is locally constant and solving a small least-squares problem over each point's neighbourhood; `cv2.calcOpticalFlowPyrLK` does this across an image pyramid (20.1) so it can handle larger motions than a single-resolution search could. **Farneback** [2] instead fits a local polynomial approximation around *every* pixel and estimates a dense flow field — one vector per pixel, at a real cost in precision, as Section 3 measures directly.
+
+## 3. A real, measured accuracy comparison
+
+<FlowLab caption="Real cv2.calcOpticalFlowPyrLK (sparse, red) and calcOpticalFlowFarneback (dense, blue) results. Switch to the real sample-ball clip to see the flow field around an actual moving object."/>
+
+Shifting a real scene image by a known, exact (3.0, −1.0) px and estimating the motion back with both methods:
+
+| Method | Mean recovered shift | Std |
+| --- | --- | --- |
+| True shift | (3.000, −1.000) | — |
+| Lucas-Kanade (sparse, 25 tracked corners) | (2.9999, −1.0000) | (0.0005, 0.0006) |
+| Farneback (dense, central region) | (2.751, −0.911) | (0.251, 0.088) |
+
+Lucas-Kanade recovers the true shift to within a few ten-thousandths of a pixel on this clean test. Farneback, estimating a vector at *every* pixel rather than a handful of well-chosen ones, is real and useful, but measurably less precise — a genuine, quantified trade-off between coverage (every pixel) and precision (fewer, better-chosen points).
+
+## 4. Tracking a real moving object across many real frames
+
+A single point placed on 40.1/40.2's own moving uniform object, tracked frame-to-frame with Lucas-Kanade across 20 real frames of that synthetic video:
+
+| Frame | Tracked x | True x |
+| --- | --- | --- |
+| 0 | 17.00 | 17 |
+| 5 | 31.97 | 32 |
+| 10 | 47.15 | 47 |
+| 15 | 62.07 | 62 |
+
+The tracked position stays within a fraction of a pixel of the true position across the whole sequence — this is exactly the real capability 40.4's MeanShift/CamShift and 40.5's Kalman filter will build on: a point (or region) that can genuinely be followed frame to frame, not just flagged as "different."
+
+## 5. Industrial context: when flow earns its cost over differencing
+
+A part moving steadily down a conveyor, where the *speed* itself is the measurement (parts/minute, or flagging a part moving abnormally fast or slow), needs optical flow's actual velocity — 40.1's blob detections alone say "something is here," never "how fast." A simple presence/absence alarm (something entered a zone) rarely needs flow at all; the extra computation only pays for itself when the motion's direction or speed is itself part of the answer.
+
+## What you should remember from 40.3
+
+<Takeaways>
+<Takeaway n={1} title="Flow is a vector, not a mask">Direction and distance, not just changed/unchanged.</Takeaway>
+<Takeaway n={2} title="Sparse is more precise, dense is more complete">This chapter's own numbers: LK to 0.0005 px, Farneback to about 0.25 px, on the identical motion.</Takeaway>
+<Takeaway n={3} title="A tracked point stays accurate over time">20 real frames, sub-pixel accuracy throughout, confirmed directly.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A point truly moves by (5, 0) px between two frames. Lucas-Kanade reports (4.98, 0.03). Is this consistent with Section 3's own measured precision?
+
+<Solution>
+
+Yes — the error here (0.02, 0.03) is larger than Section 3's own near-exact result (errors around 0.0001–0.0006) but still a small fraction of a pixel, well within what real image noise and interpolation would be expected to add on a less idealised test.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: comparing the two methods' real error
+
+```python
+import numpy as np
+
+true_shift = np.array([3.0, -1.0])
+lk_mean = np.array([2.9998627, -1.0000175])
+farneback_mean = np.array([2.7507453, -0.9111326])
+
+print("LK error (px):      ", np.round(np.abs(lk_mean - true_shift), 4))
+print("Farneback error (px):", np.round(np.abs(farneback_mean - true_shift), 3))
+```
+
+Output:
+
+```text
+LK error (px):       [0.0001 0.    ]
+Farneback error (px): [0.249 0.089]
+```
+
+### 2. OpenCV: real Lucas-Kanade and Farneback on a known shift
+
+```python
+# Needs a timing-sensitive run: Farneback's last few digits vary slightly between machines
+import cv2
+
+base = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+H, W = base.shape
+matrix = np.float32([[1, 0, 3.0], [0, 1, -1.0]])
+shifted = cv2.warpAffine(base, matrix, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+
+p0 = cv2.goodFeaturesToTrack(base, maxCorners=40, qualityLevel=0.1, minDistance=10)
+p1, status, err = cv2.calcOpticalFlowPyrLK(base, shifted, p0, None)
+good = status.flatten() == 1
+disp = (p1[good] - p0[good]).reshape(-1, 2)
+print("LK mean displacement:", disp.mean(axis=0))
+
+flow = cv2.calcOpticalFlowFarneback(base, shifted, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+margin = 20
+central = flow[margin:H - margin, margin:W - margin]
+print("Farneback mean (central region):", central.reshape(-1, 2).mean(axis=0))
+```
+
+Typical output (one machine):
+
+```text
+LK mean displacement: [ 2.9998627 -1.0000175]
+Farneback mean (central region): [ 2.7507453 -0.9111326]
+```
+
+## OpenCV API notes
+
+- **`cv2.calcOpticalFlowPyrLK(prev, next, p0, None[, winSize, maxLevel, criteria])`**: returns `(p1, status, err)`; `status[i] == 1` means point `i` was tracked successfully — always filter by `status` (Code section 2) before trusting a point's new location.
+- **`cv2.goodFeaturesToTrack`** (33.3) is the standard way to choose the points to track in the first place — corners and well-textured points give Lucas-Kanade a real, locally-unambiguous pattern to lock onto (Go deeper).
+- **`cv2.calcOpticalFlowFarneback(prev, next, None, pyr_scale, levels, winsize, iterations, poly_n, poly_sigma, flags)`**: returns one `(dx, dy)` vector per pixel, `shape (H, W, 2)` — no point selection needed, at the real precision cost Section 3 measured.
+- **Both methods assume brightness constancy**: a tracked point's surroundings are assumed to keep roughly the same brightness between frames — real lighting changes or reflections violate this assumption directly.
+
+## Where it fails
+
+- **The aperture problem**: a point on a straight edge, or inside a uniform region, does not have enough local information to pin down motion *along* that edge/region — only motion perpendicular to it is actually constrained; `goodFeaturesToTrack`'s whole purpose is picking points (corners, texture) that avoid this (Go deeper).
+- **Large motions need the pyramid** (`maxLevel`, 20.1) — searching only at full resolution, a motion bigger than the search window is simply missed; the pyramid solves progressively coarser-to-finer so a large motion is caught at a coarse level and refined at finer ones.
+- **Dense flow is real but approximate everywhere at once** (Section 3) — useful for a whole-scene impression of motion, less suited to a measurement that needs sub-pixel precision at one specific point, which sparse tracking (Section 3's LK result) delivers instead.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Not checking `status` after `calcOpticalFlowPyrLK`** and using every returned point regardless of whether tracking actually succeeded for it.
+- **Tracking points on a flat, textureless region** — the aperture problem (Where it fails) means these points have no reliable motion estimate to give, however confident the function's return value looks.
+- **Treating dense Farneback output as exact** — Section 3's own real measurement shows a genuine, nonzero error even on a clean, idealised test; never assume per-pixel flow values are ground truth.
+- **Forgetting the brightness-constancy assumption** — a scene with real lighting changes between frames (14.5, 40.2) violates the core assumption both methods depend on.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The aperture problem, concretely
+
+Looking at a moving edge through a small window, only the component of motion *perpendicular* to the edge is actually observable — any amount of sliding *along* the edge looks identical through that window. A corner (two edges at different orientations) removes this ambiguity, which is exactly why `goodFeaturesToTrack` (33.3) selects points with strong gradients in more than one direction, rather than points on a single straight edge.
+
+### Lucas-Kanade's underlying least-squares solve
+
+For a small window around a point, Lucas-Kanade assumes every pixel in that window shares the same local motion `(u, v)`, and solves the resulting overdetermined system of brightness-constancy equations by least squares [1] — the system is well-conditioned exactly when the window contains gradients in more than one direction (the same corner-vs-edge distinction as the aperture problem above), which is why a poorly-chosen point can produce a numerically unstable, unreliable estimate even when the function returns successfully.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does optical flow give you that frame differencing (40.1) and background subtraction (40.2) do not?",
+      options: ["A binary changed/unchanged mask", "An actual motion vector (direction and distance) at a point or pixel", "A list of object classes", "Nothing -- they are equivalent"],
+      answer: 1,
+      explanation: "Section 1-2: a real vector, not just presence/absence of change.",
+    },
+    {
+      question: "In this chapter's own real test (a known 3.0, -1.0 px shift), which method was more accurate?",
+      options: ["Farneback (dense)", "Lucas-Kanade (sparse)", "Both were equally accurate", "Neither recovered the shift at all"],
+      answer: 1,
+      explanation: "Section 3: LK error ~0.0001-0.0006 px vs Farneback's ~0.09-0.25 px on the identical motion.",
+    },
+    {
+      question: "What is the aperture problem?",
+      options: ["A camera lens defect", "On a straight edge or uniform region, only motion perpendicular to the edge is actually observable through a small window", "A problem only affecting dense optical flow", "A problem that only occurs at low resolution"],
+      answer: 1,
+      explanation: "Go deeper: motion along a straight edge is fundamentally ambiguous from a small local window alone.",
+    },
+    {
+      question: "Why does calcOpticalFlowPyrLK use an image pyramid?",
+      options: ["To save memory only", "To handle motions larger than a single-resolution search window by estimating coarse-to-fine", "It is required for colour images only", "It has no real purpose"],
+      answer: 1,
+      explanation: "Where it fails: a motion bigger than the search window at full resolution would otherwise simply be missed.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A point truly moves by (0, 4) px. Lucas-Kanade reports (0.01, 3.95). What is the error in each axis, and is it consistent with this chapter's own measured LK precision?
+
+<Solution>
+
+Error = (0.01 − 0, 3.95 − 4) = **(0.01, −0.05)**. This is somewhat larger than Section 3's own near-exact result (errors around 0.0001–0.0006 px) but still sub-pixel and small — plausible on real, slightly less idealised image content than this chapter's own clean synthetic test.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, count how many of the tracked points have `status == 0` (failed to track) when `p0` includes a point placed in the dead-centre of a large flat/uniform region of `base`, rather than only `goodFeaturesToTrack`'s own chosen corners.
+
+<Solution>
+
+```python
+# Needs base/shifted from Code section 2 (this fragment is illustrative)
+flat_point = np.array([[[160.0, 50.0]]], dtype=np.float32)  # inside a uniform region, not a corner
+p1_flat, status_flat, err_flat = cv2.calcOpticalFlowPyrLK(base, shifted, flat_point, None)
+print("status for the flat-region point:", status_flat.flatten())
+```
+
+A point placed inside a genuinely flat, textureless region often still returns `status == 1` (OpenCV's implementation does not always refuse outright) but with a far less trustworthy displacement and a higher `err` value than a real corner point — the aperture problem (Where it fails) means the *result itself* is unreliable even when the function claims success, which is why checking `err` alongside `status` matters for exactly this kind of point.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague wants to measure the exact speed of a single screw moving down a conveyor, to one tenth of a pixel per frame. Based on Section 3's own real numbers, should they use sparse Lucas-Kanade tracking on a chosen point, or dense Farneback flow averaged over the screw's region?
+
+<Solution>
+
+Sparse Lucas-Kanade on a well-chosen point (a real corner or textured feature of the screw, following `goodFeaturesToTrack`'s own selection criteria) is the better choice for this precision target — Section 3's own measurement showed LK accurate to a few ten-thousandths of a pixel, comfortably within a tenth-of-a-pixel requirement, while Farneback's real measured error (around a quarter of a pixel) would already exceed the required precision even before accounting for any additional real-world noise.
+
+</Solution>
+
+## References
+
+1. B. D. Lucas, T. Kanade, "An iterative image registration technique with an application to stereo vision," *Proc. IJCAI*, 674–679, 1981.
+2. G. Farnebäck, "Two-frame motion estimation based on polynomial expansion," *Proc. SCIA*, 363–370, 2003.
+3. OpenCV 4.13.0 documentation: `calcOpticalFlowPyrLK`, `calcOpticalFlowFarneback`, `goodFeaturesToTrack`. https://docs.opencv.org/4.13.0/
