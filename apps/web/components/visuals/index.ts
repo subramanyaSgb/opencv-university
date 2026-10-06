@@ -181,3 +181,4 @@ export { CameraMatrixLab } from "./CameraMatrixLab";
 export { DistortionLab } from "./DistortionLab";
 export { CalibLab } from "./CalibLab";
 export { PnPLab } from "./PnPLab";
+export { PixelToMMLab } from "./PixelToMMLab";

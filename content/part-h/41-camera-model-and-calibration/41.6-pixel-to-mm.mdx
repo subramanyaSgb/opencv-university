@@ -1,0 +1,266 @@
+export const meta = {
+  number: "41.6",
+  title: "Pixel to mm",
+  minutes: 22,
+  objectives: [
+    "Measure, for real, how large 2.4's height-trap error actually gets",
+    "Fix it with the full calibrated model: undistort, then intersect a ray with the real plane",
+    "Know that the calibrated method still needs the real height -- it is not magic",
+    "Know exactly which inputs the calibrated method needs that the naive one does not",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 41.6 (Part H, Module 41). 2.4 already names its own "height trap"
+  (a single mm/px scale is only valid on the plane it was measured on) and explicitly says
+  "For accurate measurement you calibrate the camera (Module 41) and correct the distortion."
+  This chapter delivers exactly that, using 41.1-41.5's real tools.
+  Real, verified numbers (scripts/gen_pixel2mm_data.py): K=[[800,0,320],[0,800,240],[0,0,1]],
+  a real, modest distortion [0.02,-0.01,0.0005,0.0002,0], camera at (0,0,800)mm above a
+  reference (z=0) plane. A true 100mm part (-50 to +50mm on x), scale calibrated once on the
+  z=0 plane:
+  height  naive reading   calibrated reading (undistort + ray-plane intersection at the real height)
+  -60mm   108.11mm        100.0000mm (exact)
+  -30mm   103.90mm        100.0000mm (exact)
+    0mm   100.00mm        100.0000mm (exact)
+  +30mm    96.39mm        100.0000mm (exact)
+  +60mm    93.02mm        100.0000mm (exact)
+  The naive method drifts by a real +-8% as height varies +-60mm; the calibrated method is
+  exact at every height tested, GIVEN the real height as input. Separately confirmed: feeding
+  the calibrated method the WRONG height (assuming 0 when the real height was -30mm) gives
+  the identical 103.90mm error the naive method gives -- the calibrated method's advantage is
+  not "height doesn't matter," it is "given the real height, the answer is exact."
+  Lab: PixelToMMLab (apps/web/components/visuals/PixelToMMLab.tsx) -- the real precomputed
+  naive vs calibrated reading at a chosen height.
+*/}
+
+# 41.6 Pixel to mm
+
+<Definition term="Calibrated pixel-to-mm conversion">converting a pixel measurement into a real-world length using the camera's actual K, distortion and pose (41.1-41.5) and a known plane — instead of one fixed scale factor measured once, which 2.4 already showed is only valid on the one plane it was measured on.</Definition>
+
+2.4 named this problem directly: "the scale is only valid on the plane where you measured it," and pointed straight at this module for the fix. This chapter measures exactly how large that error gets, and builds the real fix from 41.1-41.5's own tools.
+
+## 1. An analogy
+
+A tailor's tape measure calibrated to read correctly at arm's length reads subtly wrong held closer or farther away — not because the tape is broken, but because "how many tape-marks per real centimetre" was only ever true at the one distance it was checked at. 2.4's single mm/px scale has exactly this limitation; this chapter is the fix that works at any real distance, as long as that distance is actually known.
+
+## 2. From one fixed scale to a real ray
+
+<Flow
+  steps={[
+    { label: "A pixel measurement, somewhere in the frame", tone: "data" },
+    { label: "cv2.undistortPoints: correct for real lens distortion (41.3)", tone: "process" },
+    { label: "A real ray from the camera through that corrected pixel", tone: "process" },
+    { label: "Intersect the ray with the real, known plane at the part's actual height", tone: "result" },
+  ]}
+/>
+
+2.4's method multiplies a pixel measurement by one fixed number. This chapter's method instead undistorts the pixel (41.3), turns it into a real 3D ray from the camera, and finds exactly where that ray crosses the plane the real part is actually sitting on — using 41.1-41.2's own camera model, not an approximation of it.
+
+## 3. A real, measured height-trap error
+
+<PixelToMMLab caption="A real 100mm part, measured at different real heights off the calibration plane. The naive scale (2.4) drifts; the calibrated method, given the real height, stays exact."/>
+
+A real 100mm part, with the scale calibrated once at height 0, measured at several real heights:
+
+| Real height | Naive reading (2.4) | Calibrated reading |
+| --- | --- | --- |
+| −60 mm | 108.11 mm | 100.0000 mm |
+| −30 mm | 103.90 mm | 100.0000 mm |
+| 0 mm (the calibration plane) | 100.00 mm | 100.0000 mm |
+| +30 mm | 96.39 mm | 100.0000 mm |
+| +60 mm | 93.02 mm | 100.0000 mm |
+
+The naive reading drifts by a real, measured **±8%** across a realistic ±60 mm height range. The calibrated method is exact at every height tested — not approximately better, exactly correct, because it uses the real camera geometry instead of one fixed ratio.
+
+## 4. The calibrated method is not magic: it still needs the real height
+
+Feeding the calibrated method the *wrong* height — assuming the part sits at height 0 when it actually sits at −30 mm — gives exactly **103.90 mm**, the identical error the naive method gives. The calibrated method's real advantage is not "height no longer matters" — it is "given the real height, the answer is exact," correcting distortion along the way. Something still has to supply that real height: a known fixture, a second camera (stereo, Part H later), a laser/ToF sensor, or simply controlling the setup so parts always sit at one known height (2.4's own original advice).
+
+## 5. Industrial context: what this buys over 2.4's method
+
+A system that always measures parts at one fixed, controlled height never needs this chapter at all — 2.4's simple scale is already exact there, and the extra calibration effort buys nothing real. A system where part height genuinely varies (different product variants, parts that can tilt or sit unevenly) is exactly where Section 3's real ±8% error becomes a real, costly measurement problem, and where the full calibrated model — fed a real, known height for each measurement — earns its place.
+
+## What you should remember from 41.6
+
+<Takeaways>
+<Takeaway n={1} title="2.4's own named limit, now measured">A real +-8% error across a realistic +-60mm height range -- not hypothetical.</Takeaway>
+<Takeaway n={2} title="The fix: undistort, then ray-plane intersect">Real camera geometry (41.1-41.3), not an approximation of it.</Takeaway>
+<Takeaway n={3} title="Still needs the real height">The calibrated method is exact given the true height; wrong height gives the same error the naive method had.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A naive scale reads a part 5% too long when it sits 40mm closer to the camera than the calibration plane. Would reading the same part 40mm farther away (rather than closer) also read too long?
+
+<Solution>
+
+**No** — Section 3's own measured pattern shows the error direction depends on which side of the calibration plane the part is on: closer reads too long, farther reads too short (108.11mm at −60mm vs 93.02mm at +60mm) — the error does not just grow in magnitude, it flips sign.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: predicting the naive reading's error direction
+
+```python
+import numpy as np
+
+true_length = 100.0
+calibration_z = 800.0   # camera height above the calibration plane
+part_height_offset = -30.0   # negative = closer to the camera
+part_z = calibration_z + part_height_offset
+predicted_ratio = calibration_z / part_z   # closer -> ratio > 1 -> reads too long
+print("predicted naive reading:", round(true_length * predicted_ratio, 2), "mm")
+```
+
+Output:
+
+```text
+predicted naive reading: 103.9 mm
+```
+
+### 2. OpenCV: the real calibrated conversion
+
+```python
+import cv2
+
+K = np.array([[800.0, 0, 320], [0, 800.0, 240], [0, 0, 1]])
+dist = np.array([0.02, -0.01, 0.0005, 0.0002, 0.0])
+rvec, tvec = np.zeros(3), np.array([0.0, 0.0, 800.0])
+
+a1 = np.array([[-50.0, 0.0, -30.0]])
+b1 = np.array([[50.0, 0.0, -30.0]])
+ia1, _ = cv2.projectPoints(a1, rvec, tvec, K, dist)
+ib1, _ = cv2.projectPoints(b1, rvec, tvec, K, dist)
+
+pts = np.array([ia1.reshape(-1), ib1.reshape(-1)]).reshape(-1, 1, 2)
+undist = cv2.undistortPoints(pts, K, dist).reshape(-1, 2)
+s = -30.0 + 800.0   # real known height -> real distance along the camera axis
+Xw = undist[:, 0] * s
+print("calibrated reading:", round(float(Xw[1] - Xw[0]), 4), "mm")
+```
+
+Output:
+
+```text
+calibrated reading: 100.0 mm
+```
+
+## OpenCV API notes
+
+- **`cv2.undistortPoints(points, K, distCoeffs)`** with no `P` argument returns *normalised* camera-frame coordinates directly — exactly the `(x, y)` this chapter's ray-plane intersection needs, skipping the extra step of converting back to pixels and then back out again.
+- **The ray-plane intersection itself is plain arithmetic** (Code section 2's `s = height + 800.0`, then `Xw = undist[:, 0] * s`) — no dedicated `cv2` function performs this specific step; it follows directly from 41.2's own camera equations.
+- **`cv2.solvePnP`** (41.5) is how a real system would normally know the camera's exact height/pose over a given plane in the first place, rather than it being a hand-typed constant as in this chapter's worked example.
+
+## Where it fails
+
+- **The real height must come from somewhere real** (Section 4) — a wrong assumed height reproduces the exact naive-method error, with no warning that anything went wrong.
+- **A non-planar part surface** (curved, tilted unpredictably) has no single "height" at all — the ray-plane intersection needs an actual plane to intersect; a genuinely 3D surface needs stereo or structured-light depth (Part H, later modules), not this chapter's single-plane method.
+- **Distortion coefficients and K must be the real, calibrated values** (41.3, 41.4) for a specific physical camera — using someone else's or a nominal lens's values reintroduces real error this chapter's method is supposed to remove.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming the calibrated method works without knowing the real height** — Section 4's own real test shows it reproduces the identical naive-method error when the height is wrong.
+- **Reusing 2.4's single scale factor on parts at varying heights** without checking Section 3's real, measured error magnitude first — a real ±8% error over a realistic height range is not always negligible.
+- **Converting pixels to mm before undistorting** — Section 2's pipeline undistorts first; skipping that step leaves real lens distortion baked into the "corrected" reading.
+- **Forgetting that the naive method's error changes sign** (Mini exercise) — assuming "closer always reads longer, farther always reads about the same" misses that both directions carry real, different-signed error.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Where the real height actually comes from in practice
+
+A fixed mechanical stop or jig that always places parts at one known height is the simplest real solution, and is exactly 2.4's own original advice — avoiding the whole problem rather than correcting for it. Where height genuinely varies, a second camera (stereo triangulation), a time-of-flight or structured-light depth sensor, or even a simple mechanical height gauge integrated into the line can supply the real number this chapter's method needs; later Part H modules build several of these.
+
+### Generalising beyond a single flat plane
+
+This chapter's ray-plane intersection generalises directly to any known plane, not just a horizontal one at a given height — a tilted conveyor, a slanted chute, or an angled fixture is just a differently-oriented plane equation, solved with the same real undistort-then-intersect method, as long as that plane's own real position and orientation are known.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "In this chapter's own real measurement, how much did the naive reading drift across a +-60mm height range?",
+      options: ["No drift at all", "A real, measured +-8%, with the error changing sign on either side of the calibration plane", "Exactly +-1mm regardless of part size", "The naive reading always reads exactly correct"],
+      answer: 1,
+      explanation: "Section 3: 93.02 mm to 108.11 mm for a true 100mm part, a real +-8% range.",
+    },
+    {
+      question: "What does the calibrated pixel-to-mm method need that the naive single-scale method does not?",
+      options: ["Nothing extra", "The real, known height (or plane) the part actually sits on, plus the camera's real K and distortion", "A second camera is always required", "It needs less information than the naive method"],
+      answer: 1,
+      explanation: "Section 4: given the real height, the calibrated method is exact; without it, it reproduces the naive method's exact error.",
+    },
+    {
+      question: "This chapter's own real test fed the calibrated method the wrong height (0 instead of the true -30mm). What happened?",
+      options: ["It still gave the exact correct answer", "It reproduced the identical 103.90mm error the naive method gives at that same height", "It returned an error message", "It gave a completely different, unrelated wrong answer"],
+      answer: 1,
+      explanation: "Section 4: the calibrated method's accuracy depends entirely on being given the real height.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Using Code section 1's ratio formula, predict the naive reading for a true 200mm part at a real height of +50mm, with the camera at 800mm and scale calibrated at height 0.
+
+<Solution>
+
+part_z = 800 + 50 = 850. ratio = 800/850 = 0.9412. reading = 200 x 0.9412 = **188.24 mm**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, compute the calibrated reading for the same part (−50 to 50mm on x) at height +50mm, and confirm it still reads exactly 100mm.
+
+<Solution>
+
+```python
+a2 = np.array([[-50.0, 0.0, 50.0]])
+b2 = np.array([[50.0, 0.0, 50.0]])
+ia2, _ = cv2.projectPoints(a2, rvec, tvec, K, dist)
+ib2, _ = cv2.projectPoints(b2, rvec, tvec, K, dist)
+pts2 = np.array([ia2.reshape(-1), ib2.reshape(-1)]).reshape(-1, 1, 2)
+undist2 = cv2.undistortPoints(pts2, K, dist).reshape(-1, 2)
+s2 = 50.0 + 800.0
+Xw2 = undist2[:, 0] * s2
+print("calibrated reading at height +50mm:", round(float(Xw2[1] - Xw2[0]), 4), "mm")
+```
+
+Output:
+
+```text
+calibrated reading at height +50mm: 100.0 mm
+```
+
+Exact, confirming Section 3's result holds at a height not explicitly listed in the original table.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A line has three part variants, each a known, different, fixed height. A colleague suggests using one naive scale factor (2.4) for all three, "since it's simpler." Based on this chapter, what real option would you recommend instead, without needing a depth sensor?
+
+<Solution>
+
+Since each variant's height is already known and fixed (just different between variants, not varying within a single variant), the calibrated method (Section 2) can be applied with the correct, known height for whichever variant is currently being measured — no depth sensor needed, since the real height does not need to be measured live, only looked up per variant. This gives Section 3's real, exact accuracy for every variant, at the cost of knowing which variant is on the line (likely already needed for other reasons), rather than accepting 2.4's naive method's real, measured per-variant error from using one fixed scale for all three.
+
+</Solution>
+
+## References
+
+1. 2.4 Field of view and mm per pixel (this course) — names the height trap this chapter measures and fixes directly.
+2. 41.1-41.5 (this course) — the camera model and calibration this chapter's method is built from.
+3. OpenCV 4.13.0 documentation: `cv2.undistortPoints`. https://docs.opencv.org/4.13.0/
