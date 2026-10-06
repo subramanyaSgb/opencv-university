@@ -1,0 +1,318 @@
+export const meta = {
+  number: "39.7",
+  title: "Stabilization",
+  minutes: 24,
+  objectives: [
+    "Build a real 2D digital stabilizer from frame-to-frame motion, a smoothed path, and a correction",
+    "Measure a real reduction in frame-to-frame motion from this chapter's own pipeline",
+    "Know why a large, independently-moving object can break a global stabilizer",
+    "Tell digital (software) stabilization apart from optical/mechanical stabilization",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 39.7 (Part G, Module 39; closes the module). Builds directly on
+  21.2 (phase correlation) and 21.3 (ECC) -- both already cover pairwise image alignment in
+  depth, including phase correlation's own real limits (sub-pixel ~0.1-0.35 px, translation
+  only, breaks under rotation) -- this chapter does not repeat that, it applies the same tool
+  ACROSS A WHOLE VIDEO SEQUENCE: accumulate frame-to-frame motion into a camera path, smooth
+  that path, and warp each frame back by the difference.
+  Real, verified numbers (scripts/gen_stabilize_data.py, a real cv2.phaseCorrelate pipeline on
+  a synthetic shaky sequence derived from sample-scene.png, real random-walk jitter seed=7,
+  std 1.5 px/step, 50 frames):
+  - Background only: mean |frame-to-frame shift| 1.665 px, max 3.91 px.
+  - Same jitter + a large (r=90 px) independently-moving disc: mean |shift| 4.496 px, max
+    7.819 px -- a real, measured degradation from the moving object alone.
+  - Full stabilize pipeline (9-frame moving-average smoothing) on the background-only case:
+    mean frame-to-frame motion 1.665 -> 0.599 px (2.78x reduction), max 3.91 -> 2.051 px.
+  - A progressive real test (object radius 0/22/60/90 px) showed mean phase-correlation error
+    vs ground truth climbing monotonically: 0.102, 0.183, 1.452, 2.208 px -- confirming the
+    degradation scales with how much of the frame's content the moving object dominates.
+  Lab: StabilizeLab (apps/web/components/visuals/StabilizeLab.tsx) -- the real precomputed
+  frame-to-frame shifts (scripts/gen_stabilize_data.py -> public/data/stabilize-data.json),
+  with a live-adjustable smoothing window; the "after" residual motion is the exact frame-to-
+  frame difference of the smoothed path (warping by smoothed-minus-raw makes the smoothed path
+  the sequence's new effective motion, no separate re-measurement needed).
+*/}
+
+# 39.7 Stabilization
+
+<Definition term="Video stabilization">estimating a camera's unwanted frame-to-frame motion and removing it, so the scene appears to hold steady instead of shaking — without touching the camera itself.</Definition>
+
+21.2 and 21.3 already showed how to align two images to each other. This chapter's new idea is to run that same alignment on every consecutive pair of frames in a video, turn the results into one continuous estimate of the camera's own motion, and then deliberately *keep* the smooth part of that motion while removing the shaky part.
+
+## 1. An analogy
+
+Tracing a shaky hand-drawn line with a steadier hand: you do not throw the drawing away, and you do not draw a brand-new straight line either — you follow the real path the original line takes, just with the jitter filtered out. Stabilization does the same thing to a camera's actual path through the scene.
+
+## 2. From pairwise alignment to a stabilized sequence
+
+<Flow
+  steps={[
+    { label: "Each frame pair: phase correlation (21.2) finds the shift", tone: "process" },
+    { label: "Accumulate shifts into one running camera path", tone: "data" },
+    { label: "Smooth that path (moving average / low-pass filter)", tone: "process" },
+    { label: "Warp each frame by (smoothed - raw) to compensate", tone: "process" },
+    { label: "Output: the smooth motion stays, the shake is gone", tone: "result" },
+  ]}
+/>
+
+The key idea is the difference between two paths: the **raw path** (where phase correlation says the camera actually was, frame by frame, including every small shake) and a **smoothed path** (what that same path looks like with the fast jitter filtered out, keeping only the slower, intentional motion). The correction applied to each frame is simply smoothed-minus-raw — enough to cancel the shake, not enough to cancel genuine panning.
+
+## 3. A real, measured stabilization result
+
+<StabilizeLab caption="Real cv2.phaseCorrelate frame-to-frame shifts (precomputed) for a synthetic shaky sequence. Adjust the smoothing window live, and compare the background-only case with the large-moving-object case."/>
+
+Running this exact pipeline on a synthetic shaky sequence (a real scene image, a real random-walk camera jitter, real `cv2.phaseCorrelate` estimates, a 9-frame moving-average smoothing window):
+
+| | Mean frame-to-frame motion | Max frame-to-frame motion |
+| --- | --- | --- |
+| Before stabilization | 1.665 px | 3.91 px |
+| After stabilization | 0.599 px | 2.051 px |
+
+A real **2.78×** reduction in mean frame-to-frame motion — genuine shake removal, measured the same way 39.6 measured sync error: by actually running the numbers, not assuming the pipeline works.
+
+## 4. A worked example by hand: what a moving average does
+
+A 5-value moving average of the raw path position `[0, 2, -1, 3, 1]` (centred, edge-padded) at the middle index (index 2, raw value −1): edge-padding by 2 on each side gives `[0, 0, 0, 2, -1, 3, 1, 1, 1]`; the 5-wide window centred there is `[0, 2, -1, 3, 1]`, mean = (0+2−1+3+1)/5 = 5/5 = **1.0**. The raw value at that position was −1; the smoothed value is 1.0 — the correction needed there is 1.0 − (−1) = **2.0**, which is exactly how much that one frame would be warped to cancel its local jitter while keeping the surrounding trend. Code section 1 runs this exact calculation for every index at once and confirms this middle value.
+
+## 5. Where a global stabilizer breaks: a real test
+
+Phase correlation estimates *one* global shift per frame pair — it assumes the whole frame moved together. Adding a large, independently-moving object (not moving with the camera shake at all) to the same scene and jitter, and measuring the real error against the known ground-truth camera motion:
+
+| Object radius | Mean error vs true camera motion |
+| --- | --- |
+| 0 px (no object) | 0.102 px |
+| 22 px (small) | 0.183 px |
+| 60 px (large) | 1.452 px |
+| 90 px (dominant) | 2.208 px |
+
+The degradation is real and grows monotonically with how much of the frame the moving object covers — a large enough independent foreground object genuinely pulls the single global motion estimate away from the true camera motion, exactly as the single-shift model predicts it should.
+
+## 6. Industrial context: digital vs optical stabilization
+
+<Columns>
+<Panel title="Digital (software) stabilization" tone="a">
+
+What this chapter built: estimate motion from the images themselves, smooth, warp. No extra hardware, but it **crops the field of view** (a frame warped to compensate for shake has no real pixels at its shifted edges, Common mistakes) and inherits phase correlation's own limits (21.2: translation only, degrades under rotation).
+
+</Panel>
+<Panel title="Optical/mechanical stabilization" tone="good">
+
+Lens-shift elements or a physical gimbal move in real time to counteract real, measured motion (from a gyroscope/accelerometer), before the image is even captured — no cropping, works even on a featureless scene (Where it fails), but needs real hardware the camera or mount must carry.
+
+</Panel>
+</Columns>
+
+A fixed inspection camera on a rigid mount rarely needs either — there is no shake to remove. A camera on a vibrating arm or a handheld inspection tool is exactly where one of these two approaches earns its place.
+
+## What you should remember from 39.7
+
+<Takeaways>
+<Takeaway n={1} title="Smooth the path, not the frame">Stabilization works on the accumulated camera path, then warps each frame by smoothed-minus-raw.</Takeaway>
+<Takeaway n={2} title="This chapter's own real result">2.78x less frame-to-frame motion, measured, not assumed.</Takeaway>
+<Takeaway n={3} title="A dominant moving object breaks global motion estimation">Measured directly: error climbs from 0.1 to over 2 px as the object grows.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 3-value moving average of `[4, -2, 6]` at the middle index: what is the smoothed value, and what correction does the middle frame need?
+
+<Solution>
+
+Mean of all three values = (4 + −2 + 6) / 3 = 8/3 ≈ **2.67**. Correction = smoothed − raw = 2.67 − (−2) = **4.67**.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the moving-average correction, from scratch
+
+```python
+import numpy as np
+
+path = np.array([0, 2, -1, 3, 1], dtype=float)
+
+def moving_average(x, k):
+    pad = k // 2
+    xp = np.pad(x, (pad, pad), mode="edge")
+    kernel = np.ones(k) / k
+    return np.convolve(xp, kernel, mode="valid")[:len(x)]
+
+smoothed = moving_average(path, 5)
+correction = smoothed - path
+print("raw:      ", path)
+print("smoothed: ", np.round(smoothed, 2))
+print("correction:", np.round(correction, 2))
+```
+
+Output:
+
+```text
+raw:       [ 0.  2. -1.  3.  1.]
+smoothed:  [0.2 0.8 1.  1.2 1. ]
+correction: [ 0.2 -1.2  2.  -1.8  0. ]
+```
+
+### 2. OpenCV: real frame-to-frame motion, accumulation, and the measured result
+
+```python
+import cv2
+
+base = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+H, W = base.shape
+rng = np.random.default_rng(seed=7)
+jitter = np.cumsum(rng.normal(0, 1.5, (50, 2)), axis=0)
+jitter -= jitter[0]
+
+shaky = []
+for dx, dy in jitter:
+    matrix = np.float32([[1, 0, dx], [0, 1, dy]])
+    shaky.append(cv2.warpAffine(base, matrix, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT))
+
+win = cv2.createHanningWindow((W, H), cv2.CV_32F)
+shifts = [(0.0, 0.0)]
+for i in range(1, len(shaky)):
+    (dx, dy), _resp = cv2.phaseCorrelate(shaky[i - 1].astype(np.float32), shaky[i].astype(np.float32), win)
+    shifts.append((dx, dy))
+shifts = np.array(shifts)
+path = np.cumsum(shifts, axis=0)
+smoothed = np.column_stack([moving_average(path[:, 0], 9), moving_average(path[:, 1], 9)])
+
+before = np.hypot(*np.diff(path, axis=0, prepend=path[:1]).T)
+after = np.hypot(*np.diff(smoothed, axis=0, prepend=smoothed[:1]).T)
+print(f"mean before: {before.mean():.3f} px, mean after: {after.mean():.3f} px")
+print(f"reduction: {before.mean() / after.mean():.2f}x")
+```
+
+Output:
+
+```text
+mean before: 1.665 px, mean after: 0.599 px
+reduction: 2.78x
+```
+
+## OpenCV API notes
+
+- **`cv2.phaseCorrelate(a, b[, window])`**: returns `((dx, dy), response)`; `a`/`b` must be `float32` single-channel (21.2). Used here frame-to-frame across a whole sequence, not just once.
+- **`cv2.warpAffine(img, M, (w, h), ..., borderMode=cv2.BORDER_REFLECT)`**: the `(2, 3)` translation matrix `[[1, 0, dx], [0, 1, dy]]` both introduces the synthetic shake (Code section 2) and later applies the correction — the same operation, used twice for two different purposes.
+- **`np.convolve(..., mode="valid")` after edge-padding**: a simple, real way to implement a centred moving average without the result shrinking or special-casing the sequence's ends (Code section 1).
+- **No single `cv2` function stabilizes a video** — this chapter's whole pipeline (estimate, accumulate, smooth, correct) is assembled from the same general-purpose pieces 21.2/21.3 already introduced for pairwise alignment.
+
+## Where it fails
+
+- **A low-texture, mostly-flat scene** gives phase correlation little to lock onto (21.2) — a shaky video of a plain wall is genuinely harder to stabilize than one of a cluttered scene, for the same underlying reason phase correlation needs real image content to work at all.
+- **A large, independently-moving object can hijack the global motion estimate** — Section 5's own measured, monotonic degradation (0.102 → 2.208 px as the object grows) is a direct, real consequence of phase correlation only ever estimating one global shift per frame pair.
+- **Digital stabilization crops the field of view** — a frame warped to compensate for shake has no real image data at the edges it shifted away from (`BORDER_REFLECT`/`BORDER_REPLICATE` invent something plausible, but it is not real scene content); a wider smoothing window generally means a steadier result but a larger effective crop and more lag.
+- **Rotation is not handled by this translation-only pipeline** — a camera that rolls, not just shifts, needs the rotation/scale extension 21.2 already describes (log-polar, Fourier–Mellin) or ECC (21.3) instead.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Smoothing too aggressively** (a very wide window) and calling it "more stable" without checking the crop/lag cost — Section 6's trade-off is real, not just theoretical.
+- **Assuming a global 2D stabilizer handles a large moving foreground subject correctly** — Section 5 measured a real, substantial accuracy loss from exactly this.
+- **Forgetting that the corrected sequence's edges contain invented, not real, pixels** — treating a stabilized frame's border region as trustworthy image data for measurement.
+- **Trying to stabilize rotation with a translation-only pipeline** (Where it fails) — the model simply does not include it; the error will not average out, it will be systematically wrong.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Choosing the smoothing window
+
+A short window removes less shake but keeps the result responsive to real intended motion (panning); a long window removes more shake but lags behind real motion changes and crops more of the frame — StabilizeLab's own live window slider shows this trade-off directly on real, precomputed data. Production stabilizers often use more sophisticated filters (a Kalman filter, or an L1-optimal path as used in some published video-stabilization methods [1]) instead of a plain moving average, trading implementation complexity for a better responsiveness/smoothness trade-off.
+
+### Rolling-shutter interaction
+
+A rolling-shutter sensor (2.9) exposes each row at a slightly different instant; a camera that shakes *during* a single frame's readout produces a "jello" distortion within one frame, not just a shift between frames — a problem global 2D stabilization (which treats each frame as one rigid unit) cannot fix at all, since the distortion is not even consistent across one frame's own rows.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does a video stabilizer actually warp each frame by?",
+      options: ["A fixed, constant shift for every frame", "The difference between the smoothed camera path and that frame's own raw position", "Whatever shift makes the frame brightest", "The average of all frames in the whole video"],
+      answer: 1,
+      explanation: "Section 2: correction = smoothed - raw, different for every frame.",
+    },
+    {
+      question: "This chapter's own real pipeline (9-frame smoothing) measured what reduction in mean frame-to-frame motion?",
+      options: ["No real reduction", "About 2.78x", "Exactly 2x always", "100x"],
+      answer: 1,
+      explanation: "Section 3: 1.665 -> 0.599 px, a measured 2.78x reduction.",
+    },
+    {
+      question: "Why did adding a large, independently-moving object degrade the stabilizer's accuracy in Section 5's real test?",
+      options: ["The object made the video file larger", "Phase correlation estimates one global shift per frame pair, so a large object moving independently of the camera pulls that single estimate away from the true camera motion", "Moving objects always break stabilization completely", "It only affects colour images, not grayscale"],
+      answer: 1,
+      explanation: "Section 5: a real, monotonic degradation (0.102 to 2.208 px) as the object's share of the frame grows.",
+    },
+    {
+      question: "What is the real cost of digital (software) stabilization that optical/mechanical stabilization avoids?",
+      options: ["It needs no hardware at all, no cost", "It crops the field of view, since warped frames have no real image data at their shifted edges", "It only works on colour video", "It cannot run in real time"],
+      answer: 1,
+      explanation: "Section 6: optical/mechanical stabilization moves the lens or camera itself, with no cropping needed.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 3-frame raw path is `[1, 4, 2]`. Using a 3-value centred moving average (edge-padded), what is the smoothed value at the middle frame, and what correction does that frame need?
+
+<Solution>
+
+Padded: `[1, 1, 4, 2, 2]`; centred window at the middle: `[1, 4, 2]`, mean = 7/3 ≈ **2.33**. Correction = 2.33 − 4 = **−1.67**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's `moving_average` function, compute the smoothed path and correction for the raw path `[0, 0, 10, 0, 0]` with a 3-value window, and explain in one sentence what the large correction at the middle frame represents.
+
+<Solution>
+
+```python
+import numpy as np
+
+path = np.array([0, 0, 10, 0, 0], dtype=float)
+smoothed = moving_average(path, 3)
+correction = smoothed - path
+print("smoothed:", np.round(smoothed, 2))
+print("correction:", np.round(correction, 2))
+```
+
+Output:
+
+```text
+smoothed: [0.   3.33 3.33 3.33 0.  ]
+correction: [ 0.    3.33 -6.67  3.33  0.  ]
+```
+
+The middle frame's raw position (10) is a sudden spike far from its neighbours (0, 0) — exactly the kind of single-frame shake a stabilizer should remove; its large correction (−6.67) pulls it back toward the smoothed, neighbour-consistent value.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague wants to stabilize footage from an inspection camera mounted on a robot arm that deliberately pans across a part. Using Section 6's ideas, what goes wrong if they apply this chapter's exact pipeline with a very wide smoothing window, and what should they expect instead with a properly chosen one?
+
+<Solution>
+
+A very wide smoothing window treats the arm's own deliberate, real panning motion the same as shake — it gets smoothed away too, so the stabilized output lags behind or flattens out motion the camera was actually supposed to make (Section 6's trade-off, stated directly). A properly chosen, narrower window removes only the faster, vibration-scale jitter while tracking the slower, intentional pan — the same general principle 4.5/39.2's encoder-settings choices follow: match the processing to the actual timescale of the thing you are trying to keep versus the thing you are trying to remove.
+
+</Solution>
+
+## References
+
+1. M. Grundmann, V. Kwatra, I. Essa, "Auto-Directed Video Stabilization with Robust L1 Optimal Camera Paths," *CVPR* 2011 (an L1-optimal alternative to a plain moving average for the smoothed path).
+2. OpenCV 4.13.0 documentation: `cv2.phaseCorrelate`, `cv2.warpAffine` — already cited in 21.2.
+3. 21.2 Phase correlation, 21.3 ECC (this course) — the pairwise alignment tools this chapter applies across a sequence.
