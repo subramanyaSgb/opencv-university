@@ -1,0 +1,275 @@
+export const meta = {
+  number: "47.2",
+  title: "Polarization",
+  minutes: 24,
+  objectives: [
+    "Know what polarization is, and what real information an ordinary intensity image throws away",
+    "Verify Malus's law and recover a scene's real degree/angle of polarization exactly",
+    "Verify, for real, why a polarizing filter removes glare at one specific real angle",
+    "Know real industrial uses of polarization imaging this physics makes possible",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 47.2 (Part I, Module 47). Covers polarization imaging: light's
+  own real oscillation direction, invisible to an ordinary camera, but recoverable with
+  polarizing filters at several angles -- the real basis of glare removal, material
+  discrimination, and shape-from-polarization.
+  All numbers real, verified directly.
+  Malus's law I=I0.cos^2(theta): theta=0->100.00, 30->75.00, 45->50.00, 60->25.00, 90->0.00
+  (I0=100).
+  Stokes/DoLP/AoP round trip (true S0=200.0, DoLP=0.6, AoP=35.0deg): synthetic intensities
+  at polarizer angles 0/45/90/135deg = 120.52, 156.38, 79.48, 43.62. Recovered via
+  S0=(I0+I45+I90+I135)/2, S1=I0-I90, S2=I45-I135, DoLP=sqrt(S1^2+S2^2)/S0,
+  AoP=0.5*atan2(S2,S1): S0=200.0000, DoLP=0.600000, AoP=35.0000deg -- exact recovery.
+  Fresnel reflectance / Brewster's angle, air (n1=1.0) to water (n2=1.33):
+  Brewster's angle = atan(n2/n1) = 53.06deg. Rs (perpendicular) and Rp (parallel) reflectance:
+  theta=0deg: Rs=0.0201, Rp=0.020059 (equal at normal incidence). theta=30deg: Rs=0.0305,
+  Rp=0.011736. theta=53.06deg (Brewster): Rs=0.0771, Rp=0.000000 -- EXACTLY zero. theta=60deg:
+  Rs=0.1139, Rp=0.004353. theta=80deg: Rs=0.4552, Rp=0.238642.
+  Lab: PolarizationLab (apps/web/components/visuals/PolarizationLab.tsx) -- live Malus's law
+  and Fresnel/Brewster-angle demonstration.
+*/}
+
+# 47.2 Polarization
+
+<Definition term="Polarization imaging">capturing which direction light's own electric field oscillates, not just how bright it is — real information an ordinary camera discards completely, but a polarizing filter (or several, at different angles) can recover.</Definition>
+
+Every camera chapter so far measured only light's real intensity. Light also has a real, physical oscillation direction — its polarization — and this chapter covers how to capture it, and the real, often dramatic information it reveals that intensity alone cannot.
+
+## 1. An analogy
+
+Polarized sunglasses cut glare off a wet road or a lake's surface specifically, while leaving the rest of the scene largely unaffected — not a generic darkening, a real, *selective* removal of light that reflected off that surface in one particular real orientation. A machine-vision polarization filter does the exact same real physics, just placed in front of a camera instead of an eye, and this chapter makes that physics exact and quantitative.
+
+## 2. The pipeline: several filtered views become one real polarization map
+
+<Flow
+  steps={[
+    { label: "Light reflects/scatters off a surface -- becomes partly polarized (Fresnel)", tone: "world" },
+    { label: "Capture through a polarizer at several real angles", tone: "data" },
+    { label: "Compute the real Stokes parameters per pixel", tone: "process" },
+    { label: "Degree and angle of polarization: real new information", tone: "result" },
+  ]}
+/>
+
+<PolarizationLab caption="Live, exact Malus's law and Fresnel/Brewster-angle reflectance -- the two real physics facts this whole chapter builds on." />
+
+A polarizing filter transmits light according to the real, exact **Malus's law**: `I = I0 . cos^2(theta)`, where `theta` is the angle between the filter's own axis and the incoming light's real polarization direction. Capturing a scene through a filter at four real angles (0°, 45°, 90°, 135° — exactly what a real polarization camera's per-pixel micro-polarizer array does) gives enough real information to recover the scene's own **Stokes parameters**, and from them its real degree and angle of linear polarization, at every pixel.
+
+## 3. A real, measured result: the exact math every polarization camera runs
+
+Capturing a known synthetic polarization state (degree of polarization 0.6, angle 35°, total intensity 200) through filters at 0°/45°/90°/135° gives real intensities of **120.52, 156.38, 79.48, 43.62**. Running the real, standard recovery formulas — `S0 = (I0+I45+I90+I135)/2`, `S1 = I0-I90`, `S2 = I45-I135`, `DoLP = sqrt(S1^2+S2^2)/S0`, `AoP = 0.5 . atan2(S2, S1)` — recovers the exact original values: **S0=200.0000**, **DoLP=0.600000**, **AoP=35.0000°**. This is the real, exact computation inside every commercial polarization camera, from 46.3's own kind of raw data through to a usable, quantitative image.
+
+## 4. A real, measured, dramatic finding: why glare vanishes at one exact angle
+
+Light reflecting off a real dielectric surface (water, glass, wet pavement) becomes genuinely polarized according to the **Fresnel equations** — and at one specific real angle, the **Brewster angle**, the component polarized *parallel* to the surface (`Rp`) drops to **exactly zero**. For air reflecting off water (`n=1.33`), that angle is a real **53.06°**: at that exact angle, `Rp = 0.000000` while the perpendicular component `Rs` stays a real, nonzero **0.0771** — meaning the reflected glare at that angle is **completely, genuinely polarized**, and a filter blocking that one real polarization direction removes it entirely, while ordinary diffuse light (largely unpolarized) passes through mostly unaffected.
+
+## 5. Industrial context: real uses beyond glare removal
+
+A real polarization camera reveals genuine information no ordinary camera can: **shape from polarization** recovers real surface orientation from how reflected light's polarization angle (`AoP`) varies across a curved surface; **material discrimination** separates metals (which polarize reflected light differently from dielectrics) from plastics or coatings on an otherwise visually similar production line; **scratch and crack detection** on shiny metal parts exploits the fact that a scratch changes local surface orientation, and therefore local `AoP`, well before it is visible in ordinary intensity; and **through-glass or through-water inspection** uses Section 4's own exact Brewster-angle physics to remove surface reflections a plain camera cannot avoid.
+
+## What you should remember from 47.2
+
+<Takeaways>
+<Takeaway n={1} title="Polarization is real, extra information">An ordinary camera discards it completely; several filtered views recover it exactly.</Takeaway>
+<Takeaway n={2} title="The Stokes/DoLP/AoP math is exact">This chapter's own real round-trip recovered a known 0.6 DoLP and 35deg AoP to 4+ decimal places.</Takeaway>
+<Takeaway n={3} title="Glare vanishes at one exact real angle">Brewster's angle (53.06deg for water) makes reflected glare's Rp exactly zero -- the real reason polarizing filters work.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A machine-vision system needs to remove glare from a wet factory floor, viewed from directly overhead (near-normal incidence, close to 0°). Based on Section 4, will a polarizing filter help much here?
+
+<Solution>
+
+Not much. Section 4's own real result shows `Rs` and `Rp` are nearly equal at normal incidence (0.0201 vs 0.020059 at 0°) — the reflected glare is barely polarized at all near that angle, so a polarizing filter has little real glare to remove. The real effect is strongest specifically near Brewster's angle (53.06° for water), which needs a more oblique real viewing angle.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: Malus's law and the real Stokes/DoLP/AoP round trip
+
+```python
+import numpy as np
+
+I0 = 100.0
+for theta_deg in [0, 30, 45, 60, 90]:
+    I = I0 * np.cos(np.radians(theta_deg)) ** 2
+    print(f"theta={theta_deg}deg: I={I:.2f}")
+
+def synth_intensities(S0, DoLP, AoP_deg):
+    AoP = np.radians(AoP_deg)
+    S1, S2 = DoLP * S0 * np.cos(2 * AoP), DoLP * S0 * np.sin(2 * AoP)
+    I_at = lambda a: 0.5 * (S0 + S1 * np.cos(2 * np.radians(a)) + S2 * np.sin(2 * np.radians(a)))
+    return I_at(0), I_at(45), I_at(90), I_at(135)
+
+def recover_dolp_aop(I0_, I45, I90, I135):
+    S0 = (I0_ + I45 + I90 + I135) / 2
+    S1, S2 = I0_ - I90, I45 - I135
+    return S0, np.sqrt(S1**2 + S2**2) / S0, 0.5 * np.degrees(np.arctan2(S2, S1))
+
+I0_, I45, I90, I135 = synth_intensities(200.0, 0.6, 35.0)
+print(f"synthetic intensities: {I0_:.2f}, {I45:.2f}, {I90:.2f}, {I135:.2f}")
+S0_r, DoLP_r, AoP_r = recover_dolp_aop(I0_, I45, I90, I135)
+print(f"recovered: S0={S0_r:.4f}, DoLP={DoLP_r:.6f}, AoP={AoP_r:.4f}deg")
+```
+
+Output:
+
+```text
+theta=0deg: I=100.00
+theta=30deg: I=75.00
+theta=45deg: I=50.00
+theta=60deg: I=25.00
+theta=90deg: I=0.00
+synthetic intensities: 120.52, 156.38, 79.48, 43.62
+recovered: S0=200.0000, DoLP=0.600000, AoP=35.0000deg
+```
+
+### 2. OpenCV: the real Fresnel/Brewster-angle computation, visualized
+
+```python
+import cv2
+
+n1, n2 = 1.0, 1.33
+
+def fresnel_Rs_Rp(theta_i_deg, n1, n2):
+    ti = np.radians(theta_i_deg)
+    tt = np.arcsin(np.clip(n1 / n2 * np.sin(ti), -1, 1))
+    Rs = ((n1 * np.cos(ti) - n2 * np.cos(tt)) / (n1 * np.cos(ti) + n2 * np.cos(tt))) ** 2
+    Rp = ((n1 * np.cos(tt) - n2 * np.cos(ti)) / (n1 * np.cos(tt) + n2 * np.cos(ti))) ** 2
+    return Rs, Rp
+
+brewster_deg = np.degrees(np.arctan(n2 / n1))
+angles = np.linspace(0, 85, 256)
+Rs_curve, Rp_curve = fresnel_Rs_Rp(angles, n1, n2)
+curve_img = np.tile(((1 - Rp_curve) * 255).astype(np.uint8), (30, 1))
+heat = cv2.applyColorMap(curve_img, cv2.COLORMAP_BONE)
+print(f"Brewster's angle: {brewster_deg:.2f} deg")
+print(f"Rp at Brewster's angle: {fresnel_Rs_Rp(brewster_deg, n1, n2)[1]:.6f}")
+print("transmission-through-filter heatmap:", heat.shape, heat.dtype)
+```
+
+Output:
+
+```text
+Brewster's angle: 53.06 deg
+Rp at Brewster's angle: 0.000000
+transmission-through-filter heatmap: (30, 256, 3) uint8
+```
+
+## OpenCV API notes
+
+- **No `cv2` function computes Stokes parameters or Fresnel reflectance** — this chapter's real physics (Code section 1-2) is plain NumPy; `cv2` enters only for ordinary image display once a polarization map has been computed.
+- **A real polarization camera typically delivers four raw sub-images (one per micro-polarizer angle) in a single sensor read**, directly analogous to 2.7's own Bayer-filter spatial multiplexing — this chapter's `I0, I45, I90, I135` are exactly what such a sensor outputs per pixel, before Code section 1's own recovery formulas run.
+- **`cv2.applyColorMap`** (Code section 2, reusing 46.6's own real safety lesson) is a reasonable way to visualize a computed DoLP or AoP map for a human, with the identical real caveats about palette choice from 46.6.
+
+## Where it fails
+
+- **A per-pixel micro-polarizer array trades spatial resolution for polarization information** — exactly 2.7's own Bayer-filter trade-off, now applied to polarization angles instead of colour channels.
+- **Metals reflect light differently from dielectrics** — the real Fresnel equations this chapter used (Code section 2) assume a dielectric surface (like water or glass); a metal surface's own complex refractive index changes the real relationship, though metals vs dielectrics can still often be told apart by their different real polarization signatures.
+- **Glare removal is strongest only near Brewster's angle** — Mini exercise's own real point: a filter helps far less at near-normal viewing angles, where reflected light is barely polarized at all.
+- **This chapter assumed linear polarization only** — real circular/elliptical polarization (common in some scattering and biological-imaging contexts) needs additional real Stokes parameters (`S3`) beyond this chapter's own linear-only treatment.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Expecting a polarizing filter to remove all glare, at any viewing angle** — Section 4-5's own real result shows the effect is angle-dependent, strongest exactly at Brewster's angle.
+- **Treating a DoLP or AoP map as just another colourized intensity image** — it is real, independent information (Section 3), not a re-coloured version of the same brightness data.
+- **Forgetting the real resolution trade-off of a micro-polarizer sensor** — Where it fails's own real point, directly analogous to 2.7's Bayer-filter trade-off.
+- **Assuming the Stokes/DoLP math (Section 3) needs anything beyond four real filtered intensities** — the recovery formulas are exact and simple; no iterative fitting or calibration curve is required for the core computation itself.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Shape from polarization
+
+A curved dielectric surface's real angle of polarization at each pixel is a direct, computable function of the real local surface normal (Atkinson, Hancock, "Recovery of Surface Orientation from Diffuse Polarization," IEEE Transactions on Image Processing, 2006) — a real, independent route to 44.1-style surface shape that needs no stereo baseline or structured light at all, just a single polarization camera.
+
+### Mueller matrices
+
+A full, general treatment of how any real optical element transforms a beam's complete polarization state uses a real 4x4 Mueller matrix acting on the full Stokes vector `(S0, S1, S2, S3)`; this chapter's Malus's law and Fresnel equations are specific, simpler real cases of that same, more general real framework.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What real information does polarization imaging capture that an ordinary camera discards?",
+      options: ["Nothing real -- it's a cosmetic effect", "Light's own real oscillation direction, recoverable from several filtered views using Malus's law and the Stokes parameters", "Only colour information", "The camera's own frame rate"],
+      answer: 1,
+      explanation: "Section 1-3: a real, exactly-recoverable physical quantity, verified directly in this chapter's own round-trip test.",
+    },
+    {
+      question: "This chapter's own real Stokes/DoLP/AoP round-trip test found what?",
+      options: ["The recovery was only approximate", "A known 0.6 degree of polarization and 35deg angle were recovered EXACTLY (to 4+ decimal places) from four real filtered intensities", "The math requires machine learning", "DoLP cannot be computed from only 4 angles"],
+      answer: 1,
+      explanation: "Section 3: the real, exact, standard computation inside every polarization camera.",
+    },
+    {
+      question: "Why does glare specifically vanish at Brewster's angle, per this chapter's own real Fresnel computation?",
+      options: ["Glare vanishes at every angle equally", "At Brewster's angle, the parallel-polarized reflectance (Rp) drops to EXACTLY zero -- a real, exact physical fact, not an approximation -- while the perpendicular component stays nonzero", "Brewster's angle only applies to metals", "This effect doesn't actually exist"],
+      answer: 1,
+      explanation: "Section 4: a real, dramatic, exactly-verified physical fact (Rp=0.000000 at 53.06 degrees for water).",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Using Malus's law, what fraction of light passes through a polarizer oriented 60° from the incoming light's own polarization direction?
+
+<Solution>
+
+`cos^2(60°) = 0.5^2 = 0.25` — 25% of the original intensity, matching this chapter's own real `60deg: I=25.00` result (with I0=100).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, compute Brewster's angle and the real Rp value at that angle for air reflecting off glass (`n2=1.52`), and compare to this chapter's own water result (53.06°, Rp=0.000000).
+
+<Solution>
+
+```python
+n2_glass = 1.52
+brewster_glass = np.degrees(np.arctan(n2_glass / n1))
+Rp_at_brewster_glass = fresnel_Rs_Rp(brewster_glass, n1, n2_glass)[1]
+print(f"Brewster's angle (glass, n={n2_glass}): {brewster_glass:.2f} deg, Rp={Rp_at_brewster_glass:.6f}")
+```
+
+Output:
+
+```text
+Brewster's angle (glass, n=1.52): 56.66 deg, Rp=0.000000
+```
+
+A real, different Brewster angle (56.66° vs water's 53.06°), but the same real, exact result: `Rp` reaches exactly zero at that angle, confirming this is a general real property of the Fresnel equations at any dielectric interface, not specific to water.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+An autonomous-vehicle team wants to use a polarization camera to detect wet, potentially icy road patches by their glare characteristics, mounted with a fixed, forward-looking camera angle of about 20° below the horizon. Based on Section 4, what real limitation should they expect?
+
+<Solution>
+
+Following Section 4's own real result, the glare-removal and polarization effects are strongest specifically near Brewster's angle (53.06° for water, measured from the surface normal) — a shallow 20° viewing angle (closer to grazing or to normal incidence depending on convention) may fall well away from that real optimum, meaning the water patches' real polarization signature could be much weaker than Section 4's own dramatic Brewster-angle result suggests, requiring either a different camera mounting angle or acceptance of a real, reduced detection sensitivity at this fixed angle.
+
+</Solution>
+
+## References
+
+1. L. B. Wolff, "Polarization Vision: A New Sensory Approach to Image Understanding," *Image and Vision Computing*, 15(2), 1997.
+2. G. A. Atkinson, E. R. Hancock, "Recovery of Surface Orientation from Diffuse Polarization," *IEEE Transactions on Image Processing*, 15(6), 2006.
+3. E. Hecht, *Optics*, 5th ed., Pearson, 2017 (Fresnel equations, Brewster's angle, Malus's law).
+4. OpenCV 4.13.0 documentation: `cv2.applyColorMap`. https://docs.opencv.org/4.13.0/
