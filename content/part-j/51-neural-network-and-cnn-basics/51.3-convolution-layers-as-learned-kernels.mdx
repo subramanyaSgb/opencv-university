@@ -1,0 +1,516 @@
+export const meta = {
+  number: "51.3",
+  title: "Convolution layers as learned kernels",
+  minutes: 27,
+  objectives: [
+    "Know the one real difference between a convolution layer and 17.1's own hand-designed kernels: where the numbers come from",
+    "Train a real 3x3 convolution kernel from scratch by gradient descent, starting from random noise",
+    "Verify, for real, the conv-layer gradient (a correlation of the input with the output gradient) by a finite-difference check",
+    "Inspect, for real, what structure a kernel discovers purely from labelled data, with no hint of 'edge' ever given",
+    "Verify, for real, that the trained kernel is an ordinary filter cv2.filter2D can run exactly",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 51.3 (Part J, Module 51). 17.1 covered hand-designed convolution
+  kernels (Sobel, box blur, etc.) and 8.7 ran a tiny conv network with HAND-SET weights
+  (literally Sobel x/y, chosen by the chapter author). 51.1-51.2 covered dense-layer neurons
+  and training in general. This chapter is the first to actually TRAIN a convolution kernel:
+  starting from random noise, with no hint that "edges" or "Sobel" exist, and inspecting what
+  structure gradient descent discovers purely from labelled examples.
+  All numbers real, verified on this pinned OpenCV 4.13.0.92 / NumPy 2.5.3 build.
+  Task: classify 10x10 (NumPy: 12x12) patches as "vertical edge" (left dark/right bright) or
+  "horizontal edge" (top dark/bottom bright), noise std 0.15, 80 patches (rng seed 11 for data,
+  rng seed 3 for the random initial kernel/output weight). Architecture: one 3x3 conv (valid,
+  correlation) -> |.| -> global average pool -> 1 output neuron (sigmoid) -> binary
+  cross-entropy, lr=0.3, 300 epochs, full-batch gradient descent with a hand-derived conv
+  backward pass (dL/dkernel[a,b] = sum over output positions of input[i+a,j+b] * dL/dconv_out).
+  Training curve: epoch 0 loss=0.7878 acc=0.500 -> epoch 240 loss=0.4515 acc=0.988 -> final
+  accuracy 1.000.
+  Learned kernel:
+    [[ 1.017 -2.104  0.866]
+     [ 0.816 -1.799  0.975]
+     [ 0.513 -1.599  0.775]]
+  Gradient check at the INITIAL random kernel: analytic grad_k[0,0]=-0.070034, numeric
+  (central finite difference, eps=1e-5) = -0.070034, diff 3.32e-10. Also re-checked at the
+  FINAL trained kernel at grad_k[1,1]: analytic=0.018163, numeric=0.018163, diff=8.69e-12.
+  Kernel structure: column means [0.782, -1.834, 0.872] vs row means [-0.074, -0.003, -0.104]
+  -- i.e. the kernel varies strongly across columns (x-direction) and is nearly constant down
+  each row (y-direction): a genuine, discovered x-direction-sensitive ("vertical edge
+  detecting") structure, not a copy of textbook Sobel-x.
+  Held-out generalization: 40 FRESH patches (rng seed 999, same noise 0.15, never used in
+  training) -> 100% accuracy. At 4x the training noise (0.6 vs 0.15, rng seed 777, 40 fresh
+  patches) -> accuracy collapses to exactly 0.500 (chance) -- a real, honest robustness limit.
+  Cross-check: cv2.filter2D(img, -1, k, anchor=(1,1), borderType=BORDER_CONSTANT), cropped to
+  the same 'valid' region, matches the from-scratch conv2d_valid to 8.88e-16 (machine
+  precision) -- confirming both compute the same correlation (8.7's own note: "Conv" layers
+  compute correlation, without flipping the kernel).
+  Lab: ConvTrainLab (apps/web/components/visuals/ConvTrainLab.tsx) -- live training of a 3x3
+  kernel on the same task, from a random start, with the kernel shown as a shaded, labelled
+  grid; backed by lib/conv-train-ops.ts (unit-tested with its own finite-difference gradient
+  check).
+*/}
+
+# 51.3 Convolution layers as learned kernels
+
+<Definition term="Learned convolution kernel">the identical sliding-window operation as 17.1's own Sobel or box-blur kernels — the one thing that changes is that nobody chooses the 9 numbers inside it; gradient descent (51.2) does, from labelled examples, with no hint that "edges" exist.</Definition>
+
+17.1 designed kernels by hand, using known mathematics (a derivative approximation, an averaging rule). 8.7 ran a tiny network whose convolution weights were *literally* the author's own hand-chosen Sobel kernels. This chapter does neither: it starts a 3×3 kernel at random noise, shows it nothing but labelled patches, and watches gradient descent — the identical algorithm from 51.2 — turn that noise into a structure that solves the task, entirely on its own.
+
+## 1. An analogy
+
+A new quality inspector, on day one, has no idea what to look for — just a bin of "pass" parts and a bin of "fail" parts, no instructions. After sorting thousands of parts and being corrected each time, the inspector eventually develops their own personal eye for exactly the feature that separates the bins — nobody taught them a rule; repeated, corrected practice built it. A trained convolution kernel is built exactly the same way: no rule is written down, only labelled examples and a lot of small corrections.
+
+## 2. The pipeline: from random noise to a useful filter
+
+<Flow
+  steps={[
+    { label: "A 3×3 kernel starts as random noise (no hint of 'edge')", tone: "data" },
+    { label: "Conv (correlation) → |.| → global average → 1 output neuron (51.1)", tone: "process" },
+    { label: "Loss compares the output to the real label (51.2)", tone: "process" },
+    { label: "Gradient flows back into the 9 kernel numbers themselves", tone: "process" },
+    { label: "After training: a kernel shaped by the data, not by a human", tone: "result" },
+  ]}
+/>
+
+<ConvTrainLab caption="Live: train a 3x3 kernel, from a random start, to classify vertical- vs horizontal-edge patches." />
+
+## 3. A real worked result: training from nothing
+
+The task: look at a small patch and say whether it contains a vertical edge (dark on the left, bright on the right) or a horizontal edge (dark on top, bright below). The kernel starts as nine small random numbers. Training it by gradient descent — the identical loop as 51.2 — gives:
+
+```text
+epoch   0: loss=0.7878, accuracy=0.500
+epoch  60: loss=0.6639, accuracy=0.838
+epoch 120: loss=0.6199, accuracy=0.975
+epoch 180: loss=0.5450, accuracy=0.988
+epoch 240: loss=0.4515, accuracy=0.988
+final accuracy: 1.000
+```
+
+Nothing about "edges," "gradients," or Sobel was ever written into the code. The network reaches 100% accuracy purely by repeatedly being told which guesses were wrong.
+
+## 4. The step most tutorials skip, again: checking the conv gradient
+
+A convolution layer's gradient is less obvious than a dense layer's (51.2): the real, correct formula for how much the loss changes with kernel entry `k[a,b]` is a **correlation of the input with the output's own gradient** — summing, over every position the kernel slid to, the input pixel that lined up with `k[a,b]` times how wrong that position's output was. Checking this hand-derived formula against an independent finite-difference estimate, at the kernel's starting random values, gives analytic = numeric = **−0.070034**, agreeing to **3.32 × 10⁻¹⁰**. The same check at the *final*, trained kernel (a different entry, `k[1,1]`) gives **0.018163** both ways, agreeing to **8.69 × 10⁻¹²** — the backward pass is correct both before and after training, not just by luck at one point.
+
+## 5. A real, inspected result: what did it actually learn?
+
+The trained kernel is:
+
+```text
+[[ 1.017 -2.104  0.866]
+ [ 0.816 -1.799  0.975]
+ [ 0.513 -1.599  0.775]]
+```
+
+This is not a copy of any textbook kernel. But averaging it down each column gives **[0.782, −1.834, 0.872]**, while averaging it across each row gives **[−0.074, −0.003, −0.104]** — nearly zero. In other words: the kernel's value barely depends on which *row* you look at, but strongly depends on which *column* you look at. That is exactly the defining property of an x-direction-sensitive filter — strongly responsive to a left/right change (a vertical edge), nearly blind to a top/bottom change (a horizontal edge) — discovered purely from labelled examples, with the same *qualitative* role as 17.1's own hand-designed Sobel-x, arrived at without anyone writing "Sobel" anywhere.
+
+## 6. Does it generalize, and where does it break?
+
+Testing the trained kernel on 40 **completely fresh** patches (never used in training, same noise level) gives **100%** accuracy — real evidence it learned the underlying rule, not just these particular 80 training patches. Pushing the test patches to four times the training noise level, though, collapses accuracy to **exactly 50%** — chance level. A kernel trained at one noise level is not automatically robust to a much noisier real camera; this is a direct preview of 51.5's own subject, overfitting and generalization.
+
+## 7. Industrial context: this is still just a filter
+
+Once trained, the kernel is an ordinary 3×3 filter — running it through `cv2.filter2D` gives, pixel for pixel, the identical numbers as the from-scratch NumPy correlation (Code section 4), to machine precision. Nothing about *running* a trained kernel is special; 53's own architectures stack many such kernels, in many layers, each one shaped by data the same way this single kernel was — the real reason modern vision systems rarely need an engineer to hand-design a feature detector the way 17.1 once required.
+
+## What you should remember from 51.3
+
+<Takeaways>
+<Takeaway n={1} title="A learned kernel is the identical operation as 17.1's hand-designed kernels">only where the 9 numbers come from differs.</Takeaway>
+<Takeaway n={2} title="This chapter's own kernel discovered a direction-sensitive structure from data alone">verified via its column/row means, with no hint of 'edge' ever given.</Takeaway>
+<Takeaway n={3} title="The conv gradient is a correlation of the input with the output's gradient, verified twice">Section 4's own real check, before and after training.</Takeaway>
+<Takeaway n={4} title="A trained kernel generalizes to fresh data but can still fail outside its training conditions">100% on fresh same-noise data, chance level at 4x the noise.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Based on Section 5's own real result (column means ≈ [0.78, −1.83, 0.87], row means ≈ [−0.07, 0, −0.10]), would this particular trained kernel be expected to respond strongly to a *diagonal* edge (dark in one corner, bright in the opposite corner)?
+
+<Solution>
+
+Only partially, and less reliably than to a pure vertical edge. The kernel's strong structure is specifically along columns (x-direction); a diagonal edge has both an x-direction and a y-direction component, and this kernel is nearly blind to the y-direction component (row means near zero). It would likely respond to the x-component of a diagonal edge but would not be the kernel the network would have learned if diagonal edges had been the actual training task.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: training a 3x3 kernel from scratch, starting from random noise
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(11)
+
+def make_patch(kind, rng, size=12, noise=0.15):
+    p = np.zeros((size, size))
+    half = size // 2
+    if kind == "vertical":
+        p[:, half:] = 1.0
+    else:
+        p[half:, :] = 1.0
+    p += rng.normal(scale=noise, size=p.shape)
+    return p
+
+N = 80
+patches = []
+labels = []
+for i in range(N):
+    kind = "vertical" if i % 2 == 0 else "horizontal"
+    patches.append(make_patch(kind, rng))
+    labels.append(1.0 if kind == "vertical" else 0.0)
+patches = np.array(patches)
+labels = np.array(labels)
+
+def conv2d_valid(img, k):
+    kh, kw = k.shape
+    H, W = img.shape
+    out = np.zeros((H - kh + 1, W - kw + 1))
+    for i in range(out.shape[0]):
+        for j in range(out.shape[1]):
+            out[i, j] = np.sum(img[i:i + kh, j:j + kw] * k)
+    return out
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-z))
+
+def forward(img, k, b_conv, w_out, b_out):
+    conv_out = conv2d_valid(img, k) + b_conv
+    mag = np.abs(conv_out)
+    pooled = mag.mean()
+    z = w_out * pooled + b_out
+    p = sigmoid(z)
+    return conv_out, mag, pooled, z, p
+
+rng2 = np.random.default_rng(3)
+k = rng2.normal(scale=0.3, size=(3, 3))
+b_conv = 0.0
+w_out = rng2.normal(scale=0.3)
+b_out = 0.0
+
+lr = 0.3
+for epoch in range(300):
+    grad_k = np.zeros_like(k)
+    grad_b_conv = 0.0
+    grad_w_out = 0.0
+    grad_b_out = 0.0
+    total_loss = 0.0
+    for img, y in zip(patches, labels):
+        conv_out, mag, pooled, z, p = forward(img, k, b_conv, w_out, b_out)
+        eps = 1e-9
+        total_loss += -(y * np.log(p + eps) + (1 - y) * np.log(1 - p + eps))
+        dz = (p - y)
+        d_pooled = dz * w_out
+        grad_w_out += dz * pooled
+        grad_b_out += dz
+        d_mag = np.full_like(mag, d_pooled / mag.size)
+        d_conv_out = d_mag * np.sign(conv_out)
+        kh, kw = k.shape
+        for a in range(kh):
+            for b_ in range(kw):
+                grad_k[a, b_] += np.sum(img[a:a + d_conv_out.shape[0], b_:b_ + d_conv_out.shape[1]] * d_conv_out)
+        grad_b_conv += d_conv_out.sum()
+    n = len(patches)
+    k -= lr * grad_k / n
+    b_conv -= lr * grad_b_conv / n
+    w_out -= lr * grad_w_out / n
+    b_out -= lr * grad_b_out / n
+    if epoch % 60 == 0:
+        preds = [forward(img, k, b_conv, w_out, b_out)[-1] for img in patches]
+        acc = np.mean((np.array(preds) > 0.5) == labels)
+        print(f"epoch {epoch:3d}: loss={total_loss/n:.4f}, accuracy={acc:.3f}")
+
+preds = [forward(img, k, b_conv, w_out, b_out)[-1] for img in patches]
+acc = np.mean((np.array(preds) > 0.5) == labels)
+print(f"final accuracy: {acc:.3f}")
+print("learned kernel:")
+print(k.round(3))
+```
+
+Output:
+
+```text
+epoch   0: loss=0.7878, accuracy=0.500
+epoch  60: loss=0.6639, accuracy=0.838
+epoch 120: loss=0.6199, accuracy=0.975
+epoch 180: loss=0.5450, accuracy=0.988
+epoch 240: loss=0.4515, accuracy=0.988
+final accuracy: 1.000
+learned kernel:
+[[ 1.017 -2.104  0.866]
+ [ 0.816 -1.799  0.975]
+ [ 0.513 -1.599  0.775]]
+```
+
+### 2. NumPy: checking the conv gradient by finite differences
+
+```python
+rng2b = np.random.default_rng(3)
+k0 = rng2b.normal(scale=0.3, size=(3, 3))
+b_conv0 = 0.0
+w_out0 = rng2b.normal(scale=0.3)
+b_out0 = 0.0
+
+def total_loss_at(k_, b_conv_, w_out_, b_out_):
+    s = 0.0
+    eps = 1e-9
+    for img, y in zip(patches, labels):
+        *_, p = forward(img, k_, b_conv_, w_out_, b_out_)
+        s += -(y * np.log(p + eps) + (1 - y) * np.log(1 - p + eps))
+    return s / len(patches)
+
+grad_k0 = np.zeros_like(k0)
+for img, y in zip(patches, labels):
+    conv_out, mag, pooled, z, p = forward(img, k0, b_conv0, w_out0, b_out0)
+    dz = (p - y)
+    d_pooled = dz * w_out0
+    d_mag = np.full_like(mag, d_pooled / mag.size)
+    d_conv_out = d_mag * np.sign(conv_out)
+    for a in range(3):
+        for b_ in range(3):
+            grad_k0[a, b_] += np.sum(img[a:a + d_conv_out.shape[0], b_:b_ + d_conv_out.shape[1]] * d_conv_out)
+grad_k0 /= len(patches)
+
+eps_fd = 1e-5
+delta00 = np.zeros((3, 3)); delta00[0, 0] = eps_fd
+numeric_00 = (total_loss_at(k0 + delta00, b_conv0, w_out0, b_out0) - total_loss_at(k0 - delta00, b_conv0, w_out0, b_out0)) / (2 * eps_fd)
+print(f"analytic grad_k[0,0] = {grad_k0[0,0]:.6f}")
+print(f"numeric  grad_k[0,0] = {numeric_00:.6f}")
+print(f"abs difference: {abs(grad_k0[0,0]-numeric_00):.2e}")
+```
+
+Output:
+
+```text
+analytic grad_k[0,0] = -0.070034
+numeric  grad_k[0,0] = -0.070034
+abs difference: 3.32e-10
+```
+
+### 3. NumPy: inspecting the learned kernel and testing on fresh, unseen patches
+
+```python
+print("learned kernel, column means (average down each column):", k.mean(axis=0).round(3))
+print("learned kernel, row means (average across each row):", k.mean(axis=1).round(3))
+
+rng_test = np.random.default_rng(999)
+test_patches = []
+test_labels = []
+for i in range(40):
+    kind = "vertical" if i % 2 == 0 else "horizontal"
+    test_patches.append(make_patch(kind, rng_test))
+    test_labels.append(1.0 if kind == "vertical" else 0.0)
+test_patches = np.array(test_patches)
+test_labels = np.array(test_labels)
+test_preds = [forward(img, k, b_conv, w_out, b_out)[-1] for img in test_patches]
+test_acc = np.mean((np.array(test_preds) > 0.5) == test_labels)
+print(f"held-out test accuracy (40 fresh patches, never used in training): {test_acc:.3f}")
+```
+
+Output:
+
+```text
+learned kernel, column means (average down each column): [ 0.782 -1.834  0.872]
+learned kernel, row means (average across each row): [-0.074 -0.003 -0.104]
+held-out test accuracy (40 fresh patches, never used in training): 1.000
+```
+
+### 4. OpenCV: the trained kernel is an ordinary filter
+
+```python
+test_img = patches[0]
+mine = conv2d_valid(test_img, k) + b_conv
+cv_full = cv2.filter2D(test_img.astype(np.float64), -1, k, anchor=(1, 1), borderType=cv2.BORDER_CONSTANT)
+cv_valid = cv_full[1:-1, 1:-1] + b_conv
+print("max abs diff between our conv2d_valid and cv2.filter2D (cropped to 'valid'):", np.max(np.abs(mine - cv_valid)))
+```
+
+Output:
+
+```text
+max abs diff between our conv2d_valid and cv2.filter2D (cropped to 'valid'): 8.881784197001252e-16
+```
+
+## OpenCV API notes
+
+- **`cv2.filter2D(img, -1, kernel, anchor, borderType)`** (already introduced for hand-designed kernels in 17.1) runs any kernel, trained or hand-designed, identically — Code section 4's own real result shows it matching a from-scratch correlation to machine precision, once border handling is accounted for.
+- **`anchor=(1, 1)`** centers a 3×3 kernel on each pixel (OpenCV's default anchor is already the kernel centre for odd sizes, made explicit here); `borderType=cv2.BORDER_CONSTANT` was used only so the output could be cropped to match this chapter's own `'valid'`-mode NumPy convolution, which has no border handling at all.
+- **No `cv2` function trains a kernel** — `cv2.ml.ANN_MLP` (51.1, 51.2) is dense-only; training an actual convolutional network needs a real deep learning framework, which is outside OpenCV's own scope and outside this course's pinned dependencies.
+
+## Where it fails
+
+- **This chapter's from-scratch `conv2d_valid` uses explicit Python loops** — correct, and verified against `cv2.filter2D`, but far slower than any real framework's vectorized or GEMM-based convolution; it was written for clarity, not speed.
+- **A kernel trained at one noise level is not automatically robust to much noisier conditions** — Section 6's own real, dramatic result: 100% accuracy at the training noise level collapsing to exactly 50% at four times that noise.
+- **A single 3×3 kernel solving one simple, two-class task is a toy** — real CNNs (53) use many kernels per layer and many layers, trained on vastly more data; this chapter's experiment demonstrates the *mechanism*, not production-scale capability.
+- **The learned kernel's exact values depend on the random initialization and the specific training data** — a different random seed (Exercise content) would learn a different-looking kernel with the same qualitative column-vs-row structure, not identical numbers.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Expecting a trained kernel to look like a textbook kernel (Sobel, etc.)** — Section 5's own real result: it only needs to be *useful* for the task, and the actual learned numbers here are not a copy of any named kernel, despite solving the task perfectly.
+- **Forgetting that the conv gradient is a correlation between the input and the output's gradient, not a simple elementwise product** — Section 4's own real, hand-derived and verified formula.
+- **Assuming cv2.filter2D "convolves" in the strict mathematical sense (with a flipped kernel)** — like 8.7's own `cv2.dnn` note, `cv2.filter2D` computes correlation by default, matching deep learning's own convention, not textbook signal-processing convolution.
+- **Trusting high training and even held-out accuracy as proof of real-world robustness** — Section 6's own real, honest counterexample at 4x noise.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The historical first trained conv kernel
+
+LeCun et al.'s 1989 "Backpropagation Applied to Handwritten Zip Code Recognition" is the real, historical paper that first trained convolution kernels by backpropagation for a practical recognition task — the direct ancestor of this chapter's own tiny experiment, at a scale that was state-of-the-art for its time and is now reproducible on a laptop in seconds.
+
+### How real frameworks compute convolution fast
+
+Section 1's own triple-nested Python loop is correct but slow; real frameworks instead reshape the sliding windows into a matrix and use one large, highly optimized matrix multiply (the "im2col" trick), or for some kernel sizes use the Winograd algorithm or FFT-based convolution — different *implementations* of the identical mathematical operation this chapter verified from first principles.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is the one real difference between this chapter's trained kernel and 17.1's own hand-designed Sobel kernel?",
+      options: [
+        "They compute a completely different operation",
+        "Only where the 9 numbers inside the kernel come from -- hand-chosen mathematics (17.1) versus gradient descent from labelled data (this chapter)",
+        "Trained kernels cannot be run with cv2.filter2D",
+        "Hand-designed kernels must always be 3x3",
+      ],
+      answer: 1,
+      explanation: "Section 7 and the chapter Definition: the sliding-window operation itself is identical.",
+    },
+    {
+      question: "This chapter's own real inspection in Section 5 found what about the trained kernel's structure?",
+      options: [
+        "It was identical to the textbook Sobel-x kernel",
+        "Its value varied strongly across columns but was nearly constant down each row (row means close to 0) -- a genuinely discovered x-direction-sensitive structure, not a copy of any named kernel",
+        "It had no discoverable structure at all",
+        "It was identical in every row and every column",
+      ],
+      answer: 1,
+      explanation: "Section 5: verified directly from the trained kernel's own column and row means.",
+    },
+    {
+      question: "This chapter's own real result in Section 6 found what about generalization?",
+      options: [
+        "The kernel failed even on fresh data at the training noise level",
+        "100% accuracy on 40 fresh patches at the training noise level, but accuracy collapsed to exactly 50% (chance) at four times that noise level",
+        "Noise level made no difference at all",
+        "The kernel only worked on the exact 80 training patches",
+      ],
+      answer: 1,
+      explanation: "Section 6: a real, measured generalization success and a real, measured robustness limit.",
+    },
+    {
+      question: "What did Code section 4's real cross-check against cv2.filter2D confirm?",
+      options: [
+        "That cv2.filter2D cannot run a trained kernel",
+        "That the from-scratch 'valid' correlation and cv2.filter2D's own output (cropped to the same region) match to machine precision (8.88e-16)",
+        "That cv2.filter2D is slower than the NumPy loop",
+        "That the trained kernel needs to be flipped before use",
+      ],
+      answer: 1,
+      explanation: "Section 7 and Code section 4: a trained kernel is an ordinary filter, verified directly.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Section 4's own gradient check used the formula `grad_k[a,b] = sum over output positions of input[i+a, j+b] * d_conv_out[i,j]`. In plain words, what real quantity does this compute?
+
+<Solution>
+
+It computes how much the total loss would change if `k[a,b]` increased slightly, by adding up, over every position the kernel slid to during the convolution, the input pixel that was multiplied by `k[a,b]` at that position times how much the loss cared about that position's output (`d_conv_out`). It is exactly a correlation between the original input image and the map of "how wrong was each output position," which is why it is described as the real conv-layer gradient rule in Section 4.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's gradient-check machinery, verify the gradient at the kernel's entry `k[1,1]` (the centre) instead of `k[0,0]`, at the FINAL trained kernel `k` (not the initial `k0`).
+
+<Solution>
+
+```python
+grad_k_final = np.zeros_like(k)
+for img, y in zip(patches, labels):
+    conv_out, mag, pooled, z, p = forward(img, k, b_conv, w_out, b_out)
+    dz = (p - y)
+    d_pooled = dz * w_out
+    d_mag = np.full_like(mag, d_pooled / mag.size)
+    d_conv_out = d_mag * np.sign(conv_out)
+    for a in range(3):
+        for b_ in range(3):
+            grad_k_final[a, b_] += np.sum(img[a:a + d_conv_out.shape[0], b_:b_ + d_conv_out.shape[1]] * d_conv_out)
+grad_k_final /= len(patches)
+
+eps_fd = 1e-5
+delta11 = np.zeros((3, 3)); delta11[1, 1] = eps_fd
+numeric_11 = (total_loss_at(k + delta11, b_conv, w_out, b_out) - total_loss_at(k - delta11, b_conv, w_out, b_out)) / (2 * eps_fd)
+print(f"at the FINAL trained kernel: analytic grad_k[1,1]={grad_k_final[1,1]:.6f}, numeric={numeric_11:.6f}, diff={abs(grad_k_final[1,1]-numeric_11):.2e}")
+```
+
+Output:
+
+```text
+at the FINAL trained kernel: analytic grad_k[1,1]=0.018163, numeric=0.018163, diff=8.69e-12
+```
+
+Confirms Section 4's own gradient formula is correct not only at the random starting point but also at the final, trained kernel values.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Based on Section 6's own real result (100% accuracy at the training noise level, exactly 50% at four times that noise), what would you recommend to an engineer deploying this kernel on a real factory camera with an unknown, possibly higher noise level than the lab-tested data?
+
+<Solution>
+
+Test the trained kernel explicitly at the real camera's actual noise level before trusting it, and ideally include noisy examples in training (51.5's own subject, data augmentation and robustness) rather than assuming lab-measured accuracy transfers unchanged to the factory floor. Section 6's own real result shows accuracy can collapse completely outside the conditions it was trained under, with no warning from the training accuracy itself.
+
+</Solution>
+
+### Exercise 4 (coding)
+
+Using Code section 3's test-generation pattern, measure held-out accuracy at a noise level between the training level (0.15) and the failure level (0.6) tested in Section 6 — try noise = 0.3.
+
+<Solution>
+
+```python
+rng_mid = np.random.default_rng(555)
+mid_patches = []
+mid_labels = []
+for i in range(40):
+    kind = "vertical" if i % 2 == 0 else "horizontal"
+    mid_patches.append(make_patch(kind, rng_mid, noise=0.3))
+    mid_labels.append(1.0 if kind == "vertical" else 0.0)
+mid_patches = np.array(mid_patches)
+mid_labels = np.array(mid_labels)
+mid_preds = [forward(img, k, b_conv, w_out, b_out)[-1] for img in mid_patches]
+mid_acc = np.mean((np.array(mid_preds) > 0.5) == mid_labels)
+print(f"held-out accuracy at noise=0.3 (double the training noise): {mid_acc:.3f}")
+```
+
+Output:
+
+```text
+held-out accuracy at noise=0.3 (double the training noise): 0.500
+```
+
+Already at chance level at just double the training noise — the robustness boundary for this particular kernel sits somewhere between the training noise itself (0.15, 100% accuracy) and twice that (0.3, already 50%), much closer to the training conditions than Section 6's own 4x test might have suggested on its own.
+
+</Solution>
+
+## References
+
+1. Y. LeCun, B. Boser, J. S. Denker, D. Henderson, R. E. Howard, W. Hubbard, L. D. Jackel, "Backpropagation Applied to Handwritten Zip Code Recognition," *Neural Computation*, 1(4), 1989.
+2. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. — convolutional networks, Ch. 5.
+3. OpenCV 4.13.0 documentation: `cv2.filter2D`. https://docs.opencv.org/4.13.0/

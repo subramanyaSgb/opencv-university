@@ -222,3 +222,4 @@ export { FocusMetricLab } from "./FocusMetricLab";
 export { MtfLab } from "./MtfLab";
 export { NeuronLab } from "./NeuronLab";
 export { TrainLab } from "./TrainLab";
+export { ConvTrainLab } from "./ConvTrainLab";
