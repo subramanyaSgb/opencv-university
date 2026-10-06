@@ -1,0 +1,300 @@
+export const meta = {
+  number: "37.4",
+  title: "Non-max suppression",
+  minutes: 22,
+  objectives: [
+    "Compute Intersection over Union (IoU) for two boxes by hand",
+    "Run greedy non-max suppression on a small set of scored boxes, by hand",
+    "Turn 37.1's and 37.2's raw overlapping detections into clean final ones, with real data",
+    "Explain how NMS differs from OpenCV's simpler minNeighbors/groupRectangles grouping",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 37.4 (Part F, Module 37). Resolves the cliffhangers left open by 37.1 (53 raw
+  board-chip matches) and 37.2 (9 raw face-cascade windows): this chapter runs real non-max suppression on
+  both, using the real confidence scores (NCC score; detectMultiScale3's levelWeights).
+  IoU is introduced here just enough for NMS; the full treatment (and more metrics) is 54.1.
+  Lab: NmsLab (apps/web/components/visuals/NmsLab.tsx) — live greedy NMS (simple enough to run in the
+  browser) on the real raw detections from 37.1/37.2, precomputed by scripts/gen_nms_data.py.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 37.4 Non-max suppression
+
+<Definition term="Non-max suppression (NMS)">turning a pile of overlapping candidate detections, each with a confidence score, into one detection per real object: repeatedly take the highest-scoring remaining box, keep it, and discard every other box that overlaps it too much, until none are left.</Definition>
+
+37.1, 37.2 and 37.3 all ended the same way: one real object, many raw positive detections clustered around it. This chapter is the answer — the step every sliding-window detector needs before its output is actually usable, and the step OpenCV's convenience functions (`minNeighbors`, `groupRectangles`) only approximate.
+
+## 1. An analogy
+
+Several photographers all submit nearly-identical shots of the same subject to a contest, each cropped slightly differently. A judge doesn't award a prize to every submission — they look at the group, pick the one they rate highest, and set the rest aside as "the same photo, basically." NMS does exactly that with detections: group the ones that are clearly "the same object," keep only the best-rated one from each group.
+
+## 2. Measuring overlap: IoU
+
+Before deciding two boxes are "the same object," NMS needs a number for how much they overlap: **Intersection over Union (IoU)** = (area where the two boxes overlap) / (area covered by either box). IoU = 1 means identical boxes; IoU = 0 means no overlap at all. (IoU is covered in full, alongside other detection metrics, in 54.1 — this chapter only needs the one number.)
+
+<Flow
+  steps={[
+    { label: "Raw detections, each with a score", tone: "data" },
+    { label: "Sort by score, highest first", tone: "process" },
+    { label: "Keep the top box; discard any other box with IoU above a threshold", tone: "process" },
+    { label: "Repeat with what's left -> one box per real object", tone: "result" },
+  ]}
+/>
+
+## 3. A worked example by hand
+
+Three boxes (x, y, width, height) with scores: A = (0,0,10,10), score 0.9. B = (2,2,10,10), score 0.8. C = (20,20,10,10), score 0.7.
+
+**IoU(A, B)**: A spans x∈[0,10], y∈[0,10]; B spans x∈[2,12], y∈[2,12]. Overlap: x∈[2,10] (width 8), y∈[2,10] (height 8) → intersection = 8×8 = 64. Union = 100 + 100 − 64 = 136. IoU = 64/136 ≈ **0.47**.
+**IoU(A, C)**: no overlap at all (C starts at x=20, far past A's edge at x=10) → IoU = **0**.
+
+Greedy NMS with threshold 0.3: sort by score (A 0.9, B 0.8, C 0.7). Take **A** (highest), keep it. Compare A to B: IoU 0.47 > 0.3 → **discard B**. Compare A to C: IoU 0 ≤ 0.3 → C survives this round. Next highest remaining is **C** (0.7) → keep it. Nothing left. **Final result: A and C kept, B discarded** — exactly matching the intuition that A and B were "the same object, A rated higher" while C was a genuinely separate one.
+
+## 4. Resolving 37.1 and 37.2's cliffhangers, with real data
+
+<NmsLab caption="Live non-max suppression on real raw detections. Board: 53 raw NCC matches from 37.1. Face: 9 raw cascade windows from 37.2, with their real confidence scores. Drag the IoU threshold and watch the red (kept) boxes collapse to one per real object."/>
+
+**The board** (37.1): 53 raw template matches (NCC ≥ 0.7) across the whole circuit board. Running real greedy NMS (IoU threshold 0.3, ranked by NCC score):
+
+| Result | Count |
+| --- | --- |
+| Raw matches | 53 |
+| After NMS | **7** |
+
+The 7 surviving detections, by score, centre on (40,35) [the reference chip itself, score 1.0], (40,80) [0.995], (90,35) [0.995 — the "identical" chip 37.1 already named], (140,35) [0.991], (140,80) [0.991], (195,110) [0.983 — the "brighter" chip from Module 32], and (40,122) [0.961]. 53 raw windows, **7 real chip-like regions** — the actual answer to "how many chips does this template match, roughly, across the board."
+
+**The face** (37.2): 9 raw cascade windows, each with a real confidence score from `detectMultiScale3`'s `levelWeights` (ranging from −2.06 to 6.56). Proper NMS (IoU threshold 0.3) keeps exactly **1** box: (22, 15, 177, 177) — the single *highest-scoring* window, score 6.56. Compare this with 37.2's `minNeighbors`-based result, (17, 18, 174, 174): averaging all 9 raw boxes' coordinates gives (17.2, 18.1, 173.3, 173.6) — matching that almost exactly. **`minNeighbors`/`groupRectangles` effectively *averages* the overlapping cluster; proper score-based NMS picks the single best one and discards the rest.** The two methods agree closely here because the cluster was fairly tight and consistent, but they are not the same algorithm, and can give visibly different boxes when overlapping detections vary more in score.
+
+## 5. Industrial use
+
+- **Every sliding-window or region-proposal-based detector needs this step**, classical (this module) or modern (Module 54's anchor-based CNN detectors use exactly this same NMS algorithm on their raw candidate boxes).
+- **Counting distinct objects from a noisy per-pixel or per-window score map**: Section 4's board example is a direct, general template for "I have many overlapping candidate hits; how many real things are there?"
+- **Tuning the IoU threshold for the application**: a looser threshold (easier to count as "the same object") merges more aggressively; a tighter one risks keeping near-duplicate detections of the same object.
+
+## What you should remember from 37.4
+
+<Takeaways>
+<Takeaway n={1} title="IoU measures overlap">Intersection area over union area; 1 = identical, 0 = no overlap.</Takeaway>
+<Takeaway n={2} title="Greedy, score-first">Keep the best remaining box, discard everything that overlaps it too much, repeat.</Takeaway>
+<Takeaway n={3} title="A real, necessary step">53 raw matches became 7 real chips; 9 raw windows became 1 real face.</Takeaway>
+<Takeaway n={4} title="Not the same as minNeighbors">OpenCV's built-in grouping averages a cluster; proper NMS picks its single best member.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Two boxes: A = (0,0,4,4), B = (0,0,4,4) — identical. What is IoU(A, B)?
+
+<Solution>
+
+Intersection = union = the full 4×4 area = 16. IoU = 16/16 = **1**.
+
+</Solution>
+
+**Q2.** With a very high IoU threshold (say 0.95), would NMS suppress more or fewer boxes than with a low threshold (say 0.1)? Why?
+
+<Solution>
+
+**Fewer.** A high threshold only discards boxes that overlap *almost completely* with a kept one, so moderately-overlapping boxes (which a low threshold would already discard) survive. A low threshold is aggressive — it discards anything with even a little overlap — while a high threshold is permissive, keeping more of the near-duplicate detections.
+
+</Solution>
+
+### Next: 37.5 Face detection
+
+## Code
+
+### 1. The worked example, with NumPy
+
+```python
+import numpy as np
+import cv2
+
+def iou(a, b):
+    ax0, ay0, ax1, ay1 = a[0], a[1], a[0] + a[2], a[1] + a[3]
+    bx0, by0, bx1, by1 = b[0], b[1], b[0] + b[2], b[1] + b[3]
+    ix0, iy0 = max(ax0, bx0), max(ay0, by0)
+    ix1, iy1 = min(ax1, bx1), min(ay1, by1)
+    inter = max(0, ix1 - ix0) * max(0, iy1 - iy0)
+    union = a[2] * a[3] + b[2] * b[3] - inter
+    return inter / union if union > 0 else 0.0
+
+def nms(boxes, scores, thresh):
+    order = sorted(range(len(boxes)), key=lambda i: -scores[i])
+    kept = []
+    for i in order:
+        if all(iou(boxes[i], boxes[j]) <= thresh for j in kept):
+            kept.append(i)
+    return kept
+
+A, B, C = (0, 0, 10, 10), (2, 2, 10, 10), (20, 20, 10, 10)
+print("IoU(A, B):", round(iou(A, B), 3))
+print("IoU(A, C):", round(iou(A, C), 3))
+kept = nms([A, B, C], [0.9, 0.8, 0.7], thresh=0.3)
+print("kept indices (0=A, 1=B, 2=C):", kept)
+```
+
+Output:
+
+```text
+IoU(A, B): 0.471
+IoU(A, C): 0.0
+kept indices (0=A, 1=B, 2=C): [0, 2]
+```
+
+### 2. Real NMS on 37.1's board matches and 37.2's face windows
+
+```python
+board = cv2.imread("sample-board.png", cv2.IMREAD_GRAYSCALE)
+tpl = board[22:49, 25:56]
+th, tw = tpl.shape
+result = cv2.matchTemplate(board, tpl, cv2.TM_CCOEFF_NORMED)
+ys, xs = np.where(result >= 0.7)
+boxes = [(int(x), int(y), tw, th) for x, y in zip(xs, ys)]
+scores = [float(result[y, x]) for x, y in zip(xs, ys)]
+idx = cv2.dnn.NMSBoxes(boxes, scores, score_threshold=0.7, nms_threshold=0.3)
+print("board: raw", len(boxes), "-> after NMS", len(np.array(idx).ravel()))
+
+face = cv2.imread("sample-synth-face.png", cv2.IMREAD_GRAYSCALE)
+cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+objs, _, weights = cascade.detectMultiScale3(face, scaleFactor=1.05, minNeighbors=0, minSize=(60, 60), outputRejectLevels=True)
+fboxes = [tuple(int(v) for v in o) for o in objs]
+fscores = [float(w) for w in weights]
+fidx = cv2.dnn.NMSBoxes(fboxes, fscores, score_threshold=0.0, nms_threshold=0.3)
+fidx = np.array(fidx).ravel()
+print("face: raw", len(fboxes), "-> after NMS", len(fidx), "kept box", fboxes[fidx[0]], "score", round(fscores[fidx[0]], 3))
+print("mean of all 9 raw boxes:", np.array(fboxes).mean(axis=0).round(1))
+```
+
+Output:
+
+```text
+board: raw 53 -> after NMS 7
+face: raw 9 -> after NMS 1 kept box (22, 15, 177, 177) score 6.56
+mean of all 9 raw boxes: [ 17.2  18.1 173.3 173.6]
+```
+
+## OpenCV API notes
+
+- **`cv2.dnn.NMSBoxes(bboxes, scores, score_threshold, nms_threshold, eta=1.0, top_k=0)`**: `score_threshold` must be ≥ 0 (filters out low-confidence boxes before NMS even runs — a cascade's `levelWeights` can be negative, so filter or shift those separately first if needed); `nms_threshold` is this chapter's IoU threshold; returns the *indices* of kept boxes, not the boxes themselves.
+- **`cv2.groupRectangles(rectList, groupThreshold, eps)`**: the algorithm behind `minNeighbors` (37.2) and `groupThreshold` (37.3) — clusters similar rectangles and replaces each cluster with something close to its average (Section 4's comparison), rather than picking one real member of the cluster.
+- **`cascade.detectMultiScale3(..., outputRejectLevels=True)`**: the way to get real per-detection confidence (`levelWeights`) out of a cascade, instead of only the grouped boxes `detectMultiScale` normally returns — needed before real NMS can even be applied to cascade output.
+- **No single built-in "run NMS and return boxes" convenience** combining detection + NMS end to end for arbitrary detectors — `cv2.dnn.NMSBoxes` is the general building block, used as shown above regardless of where the boxes and scores came from.
+
+## Where it fails
+
+- **Greedy NMS can wrongly suppress a genuinely separate, nearby object** if it happens to overlap the top-scoring box more than the IoU threshold allows — a known limitation when real objects legitimately sit close together (crowded scenes); more advanced variants (Soft-NMS, among others) reduce rather than fully discard the score of overlapping lower boxes, instead of an all-or-nothing cut.
+- **The IoU threshold is a real trade-off, task-dependent**: no single value is correct for every application; Mini exercise Q2 spells out the two failure directions.
+- **NMS only ever chooses among boxes it is given** — it cannot recover a real object for which no box scored high enough to be in the raw candidate set in the first place.
+- **`score_threshold`'s non-negative requirement in `cv2.dnn.NMSBoxes`** means raw scores on an unusual scale (like a cascade's signed `levelWeights`) need handling before calling it directly (OpenCV API notes above).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Confusing `minNeighbors`/`groupRectangles` with true NMS**: Section 4 showed concretely that the former averages a cluster while the latter picks its single best member — different algorithms, often similar-looking results, not interchangeable in general.
+- **Running NMS without sorting by score first**: the greedy "take the best, discard overlapping ones" logic depends entirely on processing boxes in score order.
+- **Picking an IoU threshold without checking real detections**: too low discards genuinely separate nearby objects; too high leaves obvious duplicates in the output (Mini exercise Q2).
+- **Forgetting that `cv2.dnn.NMSBoxes` needs non-negative scores**: passing a cascade's raw signed `levelWeights` directly raises an assertion error (verified directly in this chapter's Code section).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Soft-NMS
+
+Instead of fully discarding every box that overlaps the top-scoring one above the threshold, Soft-NMS (Bodla et al. [1]) reduces their scores by an amount that grows with their IoU to the kept box, then continues — a lower-overlap box only loses a little confidence, a near-duplicate loses a lot. This can help in crowded scenes where greedy NMS's hard cutoff (Where it fails) is too aggressive.
+
+### NMS per class, not globally
+
+When a detector reports multiple object classes, NMS is normally run separately within each class — a "car" detection and a "person" detection that happen to overlap heavily are not competing for the same slot, even though a single global NMS pass would otherwise discard one of them. `cv2.dnn.NMSBoxesBatched` handles exactly this per-class case directly.
+
+### Learned alternatives to NMS
+
+Some modern detector architectures (outside classical NMS, touched on again in Module 54) are trained to directly predict one box per object without a separate post-processing suppression step — removing NMS's threshold-tuning and crowded-scene weaknesses at the cost of a different, learned mechanism doing the equivalent job during training.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does IoU measure?",
+      options: ["The distance between two box centres", "The overlap area of two boxes divided by the total area they cover together", "The confidence score of a detection", "The number of boxes in a cluster"],
+      answer: 1,
+      explanation: "Section 2: intersection area / union area; 1 = identical boxes, 0 = no overlap.",
+    },
+    {
+      question: "In greedy NMS, why does the algorithm process boxes in order of score, highest first?",
+      options: ["Order doesn't matter", "The highest-scoring box in a cluster is kept as that cluster's representative, and used to decide which lower-scoring overlapping boxes to discard", "Lower scores are processed first for efficiency", "Scores are ignored once boxes are sorted"],
+      answer: 1,
+      explanation: "Section 2-3: the kept box in each round is always the current highest-scoring survivor.",
+    },
+    {
+      question: "In Section 4, what did comparing proper NMS's result to minNeighbors' result on the face cascade's 9 raw windows reveal?",
+      options: ["They are always identical", "minNeighbors/groupRectangles produces something close to the AVERAGE of the raw cluster, while proper NMS picks the single highest-scoring box", "minNeighbors is strictly more accurate", "NMS cannot be applied to cascade output at all"],
+      answer: 1,
+      explanation: "The mean of all 9 raw boxes (17.2, 18.1, 173.3, 173.6) nearly matched minNeighbors' grouped box (17, 18, 174, 174).",
+    },
+    {
+      question: "Why can greedy NMS wrongly suppress a real, separate object?",
+      options: ["It never can", "If that object's box happens to overlap the current top-scoring box by more than the IoU threshold, it gets discarded even though it is a genuinely different object", "NMS only works on one object at a time by design", "Only Soft-NMS has this issue"],
+      answer: 1,
+      explanation: "Where it fails: a known weakness in crowded scenes where real objects sit close together.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Two boxes: A = (0,0,6,4), score 0.95. B = (3,0,6,4), score 0.85. Compute IoU(A, B) and determine whether B survives NMS at threshold 0.4.
+
+<Solution>
+
+A spans x∈[0,6], y∈[0,4]. B spans x∈[3,9], y∈[0,4]. Overlap: x∈[3,6] (width 3), y∈[0,4] (height 4) → intersection = 3×4 = 12. Union = 24 + 24 − 12 = 36. IoU = 12/36 = **0.333**.
+0.333 ≤ 0.4, so B is **not** suppressed — it survives (the overlap wasn't quite enough to cross this particular threshold).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using `nms` from the Code section, run it on the board's 53 raw matches with IoU threshold 0.1 instead of 0.3. Does the final count change?
+
+<Solution>
+
+```python
+boxes_list = list(zip(xs.tolist(), ys.tolist(), [tw] * len(xs), [th] * len(xs)))
+idx01 = nms(boxes_list, scores, thresh=0.1)
+print("threshold 0.1:", len(idx01), "kept")
+```
+
+Output:
+
+```text
+threshold 0.1: 7 kept
+```
+
+Same count (7) as threshold 0.3 — the real chip clusters on this board are either very tightly overlapping (well above 0.3 IoU, so a stricter 0.1 threshold still merges them) or clearly separate (near-zero IoU, unaffected by the threshold change), so this particular range of thresholds doesn't change the outcome. A threshold chosen badly for a different image might well show a difference.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A detector is being used to count people standing close together in a queue. Greedy NMS with a moderate IoU threshold is merging two adjacent people into one detection. What does this chapter suggest trying, and why?
+
+<Solution>
+
+Lowering the IoU threshold would help distinguish them (less willing to treat overlapping boxes as duplicates) — but Mini exercise Q2 and "Where it fails" both warn this is a genuine trade-off: too low a threshold elsewhere in the same image might start keeping obvious near-duplicate detections of a single person as if they were separate people. For a crowded-scene problem like this specifically, Soft-NMS (Go deeper) is a more targeted fix: it reduces rather than completely zeroes the score of a heavily-overlapping box, so a second real person standing close by isn't automatically discarded just for being near the first.
+
+</Solution>
+
+## References
+
+1. N. Bodla, B. Singh, R. Chellappa, L. S. Davis, "Soft-NMS — improving object detection with one line of code," *ICCV*, 2017, pp. 5561–5569.
+2. R. Girshick, "Rich feature hierarchies for accurate object detection and semantic segmentation," *CVPR*, 2014, pp. 580–587 (NMS as a standard post-processing step in detection pipelines).
+3. OpenCV 4.13.0 documentation: `cv2.dnn.NMSBoxes`, `cv2.groupRectangles`, `cv2.CascadeClassifier.detectMultiScale3`. https://docs.opencv.org/4.13.0/

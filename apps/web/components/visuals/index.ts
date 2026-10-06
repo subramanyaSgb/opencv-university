@@ -156,3 +156,4 @@ export { ClusterLab } from "./ClusterLab";
 export { WindowLab } from "./WindowLab";
 export { CascadeLab } from "./CascadeLab";
 export { HogSvmLab } from "./HogSvmLab";
+export { NmsLab } from "./NmsLab";
