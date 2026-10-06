@@ -736,6 +736,11 @@ _src_pts = np.float32([[0, 0], [400, 0], [400, 400], [0, 400]])
 _dst_pts = np.float32([[40, 20], [380, 0], [400, 380], [0, 400]])
 _H_aruco = cv2.getPerspectiveTransform(_src_pts, _dst_pts)
 images["sample-aruco-marker-warped.png"] = cv2.warpPerspective(_marker_canvas, _H_aruco, (400, 400), borderValue=200)
+
+# Module 38.2: a short printed string for character segmentation (connected components / projection profile).
+_charseg_img = np.full((60, 220), 255, np.uint8)
+cv2.putText(_charseg_img, "LOT42", (10, 42), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 0, 2, cv2.LINE_AA)
+images["sample-charseg-text.png"] = _charseg_img
 ft_b = cv2.warpPerspective(images["sample-feat.png"].astype(np.float64), FEAT_H, (320, 200), flags=cv2.INTER_LINEAR,
                            borderMode=cv2.BORDER_CONSTANT, borderValue=110)
 images["sample-feat-b.png"] = np.clip(np.rint(ft_b * 0.8 + 20 + np.random.default_rng(34).normal(0, 3, ft_b.shape)), 0, 255).astype(np.uint8)

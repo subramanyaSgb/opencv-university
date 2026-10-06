@@ -1,0 +1,302 @@
+export const meta = {
+  number: "38.2",
+  title: "Character segmentation",
+  minutes: 22,
+  objectives: [
+    "Find character boundaries from a column projection profile, by hand",
+    "Segment a real binary text image into characters with connected components and with a projection profile",
+    "Explain why touching characters defeat simple zero-gap segmentation, and how a profile valley can still recover a split",
+    "Know when to reach for connected components vs a projection profile",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 38.2 (Part F, Module 38).
+  Builds on 15.4 (OCR preprocessing: binarisation, deskew via horizontal projections) and 24.1-25.4
+  (contours/connected components) -- this chapter's new content is specifically segmenting a clean text
+  line into individual characters, including the touching-characters problem.
+  New asset: sample-charseg-text.png ("LOT42", cv2.putText).
+  Lab: CharSegLab (apps/web/components/visuals/CharSegLab.tsx) — two "characters" with an adjustable
+  connecting bridge (touching serifs), connected components vs projection-profile valley, live.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 38.2 Character segmentation
+
+<Definition term="Character segmentation">dividing a line of text, already binarised and deskewed (15.4), into separate boxes — one per character — so that each one can be recognised on its own.</Definition>
+
+15.4 got a photographed label to a clean, upright, high-contrast binary image. Before any single character can be read (38.3), something has to decide *where one character ends and the next begins*. For well-separated print, this is almost trivial; for touching or crowded characters, it is a genuinely harder problem, and the two classical tools — connected components and projection profiles — don't always agree.
+
+## 1. An analogy
+
+Cutting a strip of stamps along the perforations: when the perforations are clean and fully cut through, the stamps fall apart on their own — one glance tells you where each one is. If a few perforations are stuck together, the strip doesn't separate on its own, but you can still see a visibly thinner, weaker line where the join is, and cut there by eye. Connected components are "did it already fall apart"; a projection profile's thinnest point is "where would I cut it."
+
+## 2. Two tools for the same job
+
+<Flow
+  steps={[
+    { label: "Clean binary text line (15.4)", tone: "data" },
+    { label: "Connected components (25.1): each isolated blob = one character?", tone: "process" },
+    { label: "Column projection profile: sum each column's ink", tone: "process" },
+    { label: "Zero (or lowest) columns = boundaries between characters", tone: "result" },
+  ]}
+/>
+
+- **Connected components** (25.1): label every group of touching foreground pixels. Works perfectly when characters genuinely don't touch — each blob is exactly one character. Fails outright when two characters *do* touch: they become one blob, with no information left about where to split it.
+- **Column projection profile**: sum the ink (foreground pixel count) in every column. A gap between characters shows up as a run of zero (or very low) columns — the same projection idea 15.4 used on *rows* to find text lines, applied to *columns* within one line to find characters.
+- **Why they can disagree**: a projection profile only looks at column totals, blind to *which rows* the ink is in; two characters whose ink never shares a row but whose columns still overlap can still show a non-zero projection throughout, confusing a naive "wait for a zero column" rule, even when connected components would show them as perfectly separate blobs. The reverse also happens, and matters more in practice: two characters joined only by a thin connecting stroke (a serif, a ligature) are a single connected component, but the profile still dips sharply at the thin join — a recoverable split that connected components alone cannot offer.
+
+## 3. A worked example by hand
+
+A column projection profile (ink count per column) for a short strip: `0, 4, 4, 4, 0, 0, 3, 3, 3, 0, 5, 5, 5, 0`.
+
+Reading left to right: column 0 is empty (background margin). Columns 1–3 are non-zero (a character, height profile 4,4,4). Columns 4–5 are zero (a gap). Columns 6–8 are non-zero (a second character, 3,3,3). Column 9 is zero (another gap). Columns 10–12 are non-zero (a third character, 5,5,5). Column 13 is zero (trailing margin). **Three characters**, at columns [1–3], [6–8], [10–12], found purely by locating the zero-valued gaps.
+
+## 4. Real segmentation, and a real touching case
+
+<CharSegLab caption="Two blocks joined by an adjustable connecting bridge (a touching serif). At bridge height 0 they are two separate connected components; raise the bridge and watch them merge into one blob, while the projection profile's lowest column (red) still marks the real join."/>
+
+Segmenting the real string "LOT42" (`cv2.putText`, clean and well-separated): both connected components and the column projection profile agree exactly.
+
+| Method | Result |
+| --- | --- |
+| Connected components | **5** components |
+| Projection-profile segments (zero-gap boundaries) | **5** segments, at columns [13–31], [33–56], [57–77], [78–100], [102–123] |
+
+Now the touching case (Section 2's "joined by a thin stroke" scenario, built directly): two 20-pixel-wide blocks, full height 30 px, connected by a 2-pixel-wide bridge that is only 10 px tall (reaching up from the baseline, simulating two characters whose serifs touch near the bottom but whose main bodies don't):
+
+| Measurement | Value |
+| --- | --- |
+| Connected components | **1** (the bridge genuinely joins them — a real touch, not a projection artefact) |
+| Column height everywhere else | 30 |
+| Column height at the bridge (columns 20–21) | **10** |
+
+Connected components alone offers no way to split this single blob into two characters — but the projection profile's sharp dip (10, versus 30 everywhere else) marks exactly where the two original shapes meet, and cutting at the lowest column recovers a sensible split even though the pixels are, strictly, all one connected region.
+
+## 5. Industrial use
+
+- **Serial numbers, lot codes and date stamps** on packaging and parts: usually well-separated enough for connected components alone, which is simpler and faster when it applies.
+- **Dot-matrix and low-resolution printing**: characters printed close together or with ink bleed often touch slightly, needing the projection-profile valley approach (or more advanced segmentation) rather than connected components alone.
+- **A sensible pipeline order**: try connected components first (cheap, often sufficient); fall back to projection-profile valley splitting (or more advanced methods) only for components wider than a single expected character.
+
+## What you should remember from 38.2
+
+<Takeaways>
+<Takeaway n={1} title="Two tools, different information">Connected components use pixel adjacency; projection profiles use column totals — they can disagree.</Takeaway>
+<Takeaway n={2} title="Zero gaps are easy">Well-separated characters segment perfectly with either method.</Takeaway>
+<Takeaway n={3} title="Touching characters need the valley">A thin join merges components, but a profile's lowest point still marks the real boundary.</Takeaway>
+<Takeaway n={4} title="Check width before trusting a blob">A connected component much wider than expected is a signal to look for a hidden split, not a single character.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A projection profile: `0, 6, 6, 0, 0, 2, 2, 2, 0`. How many characters, and at which columns?
+
+<Solution>
+
+Columns 1–2 (non-zero), gap at 3–4, columns 5–7 (non-zero), trailing zero at 8. **Two characters**, at columns [1–2] and [5–7].
+
+</Solution>
+
+**Q2.** A character's expected width is about 20 px. A connected component comes out 45 px wide. What should happen next in the pipeline?
+
+<Solution>
+
+45 px is more than double the expected single-character width — a strong signal this component is actually two (or more) touching characters, not one unusually wide one. The next step should be projection-profile valley splitting (Section 4) on just this component, not passing it straight to recognition as if it were a single character.
+
+</Solution>
+
+### Next: 38.3 OCR engines
+
+## Code
+
+### 1. The worked example, and real segmentation with NumPy
+
+```python
+import numpy as np
+import cv2
+
+def segments_from_profile(profile):
+    nonzero = profile > 0
+    diffs = np.diff(nonzero.astype(int))
+    starts = (np.where(diffs == 1)[0] + 1).tolist()
+    ends = (np.where(diffs == -1)[0] + 1).tolist()
+    if nonzero[0]:
+        starts = [0] + starts
+    if nonzero[-1]:
+        ends = ends + [len(profile)]
+    return list(zip(starts, ends))
+
+toy_profile = np.array([0, 4, 4, 4, 0, 0, 3, 3, 3, 0, 5, 5, 5, 0])
+print("toy segments:", segments_from_profile(toy_profile))
+
+img = cv2.imread("sample-charseg-text.png", cv2.IMREAD_GRAYSCALE)
+_, bw = cv2.threshold(img, 128, 255, cv2.THRESH_BINARY_INV)
+n_components, labels, stats, centroids = cv2.connectedComponentsWithStats(bw)
+print("connected components:", n_components - 1)
+
+profile = (bw.sum(axis=0) // 255)
+segs = segments_from_profile(profile)
+print("projection segments:", segs, " count:", len(segs))
+```
+
+Output:
+
+```text
+toy segments: [(1, 4), (6, 9), (10, 13)]
+connected components: 5
+projection segments: [(13, 31), (33, 56), (57, 77), (78, 100), (102, 123)]  count: 5
+```
+
+### 2. A real touching case: connected components vs the profile valley
+
+```python
+w, h = 42, 30
+touching = np.zeros((h, w), np.uint8)
+touching[:, 0:20] = 255
+touching[:, 22:42] = 255
+touching[20:30, 20:22] = 255                       # a 10px-tall bridge: touching serifs
+
+n2, labels2, stats2, _ = cv2.connectedComponentsWithStats(touching)
+print("touching case, connected components:", n2 - 1)
+
+profile2 = touching.sum(axis=0) // 255
+valley = int(np.argmin(profile2))
+print("profile:", profile2.tolist())
+print(f"lowest column: {valley}, height {profile2[valley]} (vs {profile2.max()} elsewhere)")
+```
+
+Output:
+
+```text
+touching case, connected components: 1
+profile: [30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 10, 10, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30]
+lowest column: 20, height 10 (vs 30 elsewhere)
+```
+
+## OpenCV API notes
+
+- **`cv2.connectedComponentsWithStats(binaryImage)`** → `(count, labels, stats, centroids)`: `stats[i]` gives `[x, y, width, height, area]` for component `i` (0 is the background) — the same function Module 25 used for blob counting, applied here to individual characters.
+- **No dedicated "segment characters" function**: the projection-profile approach is ordinary NumPy (`.sum(axis=0)` on a binary image, as above) — there is nothing OpenCV-specific beyond the connected-components call itself.
+- **`cv2.boundingRect(contour)`** (24.4) is an equally valid way to get each character's box, if working from contours (24.1) rather than `connectedComponentsWithStats`.
+- **Speed**: both methods are single passes over the image (or a 1-D array derived from it) — negligible cost compared to almost anything else in an OCR pipeline; the real cost, if any, is in the preprocessing (15.4) that produces a clean binary image to segment in the first place.
+
+## Where it fails
+
+- **Severely touching or overlapping characters** (beyond a thin connecting stroke) can leave no clear valley at all in the projection profile — Section 4's bridge example works because the bridge is *much* thinner than the characters; a thicker, more substantial overlap may not show a usable dip.
+- **Characters with naturally disconnected parts** (i, j, accented letters, some fonts' multi-stroke glyphs) can appear as *more* connected components than there are characters — the opposite problem from touching characters, needing components to be grouped back together by proximity rather than split apart.
+- **A fixed zero-threshold for "gap" fails on noisy images**: a little residual noise can leave no column at exactly zero even between genuinely separate characters, requiring a small non-zero threshold (or, more robustly, finding *local minima* rather than requiring exact zeros, exactly as the touching-character approach does).
+- **Non-horizontal, non-uniform character spacing** (cursive, heavily kerned fonts) breaks the column-projection approach's basic assumption that characters are laid out in a simple left-to-right sequence with vertical gaps between them.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming connected components always equals character count**: Section 4's touching case is a direct, real counterexample — always sanity-check the component count and widths against what's expected.
+- **Requiring an exact zero column for a "gap"**: real images rarely cooperate; use a small threshold or look for local minima (Mini exercise Q2, Section 4).
+- **Not checking component width against the expected character width** before trusting it as a single character (Mini exercise Q2) — a simple, cheap sanity check that catches many touching-character cases early.
+- **Running recognition (38.3) directly on a merged, unsplit blob** and being confused by nonsensical results, rather than fixing the segmentation first.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Beyond a single global valley
+
+Real touching-character segmentation often needs more than "find the one lowest column": a wide, merged component might need splitting into three or more pieces, requiring multiple local minima to be found, or a different approach entirely (e.g. explicitly matching candidate split points against expected character widths, or using the vertical profile's *shape*, not just its minimum, to find the best cut).
+
+### Watershed and other shape-aware splitting
+
+For characters that overlap more substantially than a thin bridge, shape-based methods (the distance transform plus watershed, 27.4, is one classical option used for splitting touching blobs generally) can sometimes recover a better split than a 1-D column profile alone, by using the full 2-D shape of the merged region rather than collapsing it to one dimension.
+
+### Why this matters less for modern OCR
+
+Many modern OCR systems (38.3's deep-learning-based engines, and end-to-end text recognition models more broadly) skip explicit character segmentation entirely, reading a whole word or line directly — side-stepping the touching-character problem rather than solving it. Classical character-by-character segmentation remains relevant for simpler, well-controlled industrial text (fixed fonts, known spacing) where it is fast, interpretable, and reliable enough.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does a column projection profile measure?",
+      options: ["The number of connected components", "The amount of foreground ink in each column, summed down its height", "The character's font size", "The image's overall brightness"],
+      answer: 1,
+      explanation: "Section 2-3: a 1-D summary used to find gaps (or valleys) between characters.",
+    },
+    {
+      question: "In Section 4's touching case, why did connected components report only 1 component even though there are clearly two characters?",
+      options: ["A bug in cv2.connectedComponentsWithStats", "A thin 10px-tall bridge genuinely connects the two shapes' pixels, making them one connected region by construction", "Connected components cannot handle text", "The image was corrupted"],
+      answer: 1,
+      explanation: "This is a real touch, not a measurement artefact -- which is exactly why a different method (the profile valley) is needed to recover the split.",
+    },
+    {
+      question: "Why did the projection profile still correctly locate the split point in the touching case?",
+      options: ["It didn't -- the example failed", "The bridge, being much thinner (10px) than the full character height (30px), creates a sharp dip in the column totals exactly where the two shapes join", "Projection profiles always find the centre of an image", "The two characters were actually separate"],
+      answer: 1,
+      explanation: "Height 10 at the bridge vs 30 everywhere else -- a clear, recoverable local minimum.",
+    },
+    {
+      question: "Why is checking a connected component's width against the expected character width a useful sanity check?",
+      options: ["It isn't useful", "An unexpectedly wide component is a strong signal it may actually be multiple touching characters that need further splitting", "Width has no relation to character count", "Only height matters for character segmentation"],
+      answer: 1,
+      explanation: "Mini exercise Q2: a 45px component when ~20px is expected should trigger profile-based splitting, not be passed straight to recognition.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A projection profile: `0, 0, 5, 5, 5, 5, 0, 7, 0, 0, 2, 2, 0`. Find the character segments.
+
+<Solution>
+
+Columns 2–5 (non-zero, 4 columns wide), gap at 6, column 7 alone (non-zero, 1 column wide — perhaps a thin character like "l" or "1"), gap at 8–9, columns 10–11 (non-zero). **Three characters**, at columns [2–5], [7–7], [10–11].
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the Code section's `touching` image and `profile2`, reduce the bridge height from 10 to 3 and check whether the valley is still clearly distinguishable from the surrounding columns (still height 30).
+
+<Solution>
+
+```python
+touching_thin = np.zeros((h, w), np.uint8)
+touching_thin[:, 0:20] = 255
+touching_thin[:, 22:42] = 255
+touching_thin[27:30, 20:22] = 255                   # bridge height reduced to 3
+profile3 = touching_thin.sum(axis=0) // 255
+print("bridge height 3, valley value:", profile3[20], "vs elsewhere:", profile3.max())
+```
+
+Output:
+
+```text
+bridge height 3, valley value: 3 vs elsewhere: 30
+```
+
+Yes — even more clearly distinguishable (3 vs 30) than the original 10px bridge (10 vs 30). A thinner bridge gives an even sharper, more obvious valley; the splitting approach gets *easier* as the touching connection gets thinner, and only becomes genuinely hard as the bridge grows thick enough to approach the characters' own stroke width.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague's OCR pipeline segments characters with connected components only, and is failing specifically on a batch of labels printed with a worn, slightly smudged printer where ink occasionally bridges between adjacent characters. What would you suggest, based on this chapter?
+
+<Solution>
+
+Add a width check after connected components (Mini exercise Q2): any component significantly wider than the expected single-character width is a candidate for a touching pair (or more), and should be passed to projection-profile valley splitting (Section 4) rather than straight to recognition. This directly targets the described failure mode — occasional ink bridging — without needing to abandon connected components entirely for the (presumably more common) cleanly-separated characters, where it already works fine.
+
+</Solution>
+
+## References
+
+1. R. G. Casey, E. Lecolinet, "A survey of methods and strategies in character segmentation," *IEEE Transactions on Pattern Analysis and Machine Intelligence* 18(7), 1996, pp. 690–706.
+2. Gonzalez, Woods, *Digital Image Processing*, 4th ed., Section 9.5 (connected components) and Section 10.3 (projection-based segmentation methods).
+3. OpenCV 4.13.0 documentation: `cv2.connectedComponentsWithStats`. https://docs.opencv.org/4.13.0/
