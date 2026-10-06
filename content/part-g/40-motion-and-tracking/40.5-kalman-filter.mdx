@@ -1,0 +1,261 @@
+export const meta = {
+  number: "40.5",
+  title: "Kalman filter",
+  minutes: 24,
+  objectives: [
+    "Explain what a Kalman filter combines, and why that beats using the raw measurement alone",
+    "Measure a real reduction in tracking error from cv2.KalmanFilter on noisy measurements",
+    "Measure, for real, what the filter does when a measurement is simply missing",
+    "Know the real cost of trusting a bad motion model too much",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 40.5 (Part G, Module 40). No dedicated prior chapter (checked:
+  only passing mentions in 8.1 and this module's own 39.7). First real, measured treatment.
+  Real, verified numbers (scripts/gen_kalman_data.py): a synthetic target moving at a
+  constant true 5 px/frame, measurement noise std 8 px, real cv2.KalmanFilter with a
+  constant-velocity model (transitionMatrix [[1,1],[0,1]]):
+  - mean |error|, raw noisy measurement: 5.52 px.
+  - mean |error|, Kalman estimate: 3.33 px -- a real, measured ~40% reduction.
+  - A real simulated measurement dropout (frames 15-21, 7 frames with no measurement at all):
+    Kalman (pure prediction from its learned velocity) error grows from 1.24 to 3.16 px over
+    the 7 frames; a naive "freeze the last known position" fallback instead grows from 8.03
+    to 38.03 px over the same gap -- the real, measured value of carrying a velocity estimate
+    through a gap, not just the position.
+  Lab: KalmanLab (apps/web/components/visuals/KalmanLab.tsx) -- the real precomputed
+  true/measured/Kalman/freeze position traces, with the dropout region highlighted.
+*/}
+
+# 40.5 Kalman filter
+
+<Definition term="Kalman filter">a recursive estimator that combines a prediction (from a motion model: where the object should be, given its last known state) with a new, noisy measurement — weighting each by how much it is actually trusted — to produce a better estimate than either the model or the measurement alone.</Definition>
+
+40.3 and 40.4 produced real detections and real tracked positions, each noisy in its own way. This chapter asks: given a noisy measurement every frame, and a simple assumption about how the object actually moves, can doing both at once beat using the measurement by itself? Measured directly: yes, and by a real, specific amount.
+
+## 1. An analogy
+
+Estimating your car's position using only a noisy GPS reading each second gives you a jittery answer. Estimating it using only "I was going 60 km/h a second ago, so I'm probably about 16.7 m further on" drifts if your speed actually changed. Doing both — trusting the GPS somewhat, trusting your last known speed somewhat, blending the two by how much you trust each — gives a steadier, more honest answer than either alone.
+
+## 2. Predict, then correct
+
+<Flow
+  steps={[
+    { label: "Last known state (position, velocity)", tone: "data" },
+    { label: "Predict: where should it be now, assuming constant velocity?", tone: "process" },
+    { label: "A new, noisy measurement arrives (or doesn't)", tone: "data" },
+    { label: "Correct: blend prediction and measurement by their trusted uncertainty", tone: "result" },
+  ]}
+/>
+
+`cv2.KalmanFilter(stateSize, measurementSize, controlSize)` holds a state (here, position and velocity), a `transitionMatrix` describing how the state evolves on its own (constant velocity: next position = position + velocity), a `processNoiseCov` (how much to trust the motion model) and a `measurementNoiseCov` (how much to trust a new measurement). `.predict()` advances the state using the model alone; `.correct(measurement)` blends that prediction with the real measurement, weighted by their relative, declared uncertainties.
+
+## 3. A real, measured improvement
+
+<KalmanLab caption="Real cv2.KalmanFilter on a noisy constant-velocity target, with a real simulated measurement dropout. Toggle the naive 'freeze last position' comparison off and on."/>
+
+A synthetic target moving at a true constant 5 px/frame, with real measurement noise (std 8 px) added every frame:
+
+| | Mean absolute error |
+| --- | --- |
+| Raw noisy measurement | 5.52 px |
+| Kalman filter estimate | 3.33 px |
+
+A real, measured **40% reduction** in tracking error, from combining the noisy measurement with the filter's own running velocity estimate — not from any extra sensor, just from using the structure of the problem (objects tend to keep moving the way they were moving) that raw measurement-by-measurement tracking throws away.
+
+## 4. What happens when a measurement is simply missing
+
+A real, 7-frame simulated dropout (no measurement available at all, as a detector missing the object for several frames) shows the filter's real value most clearly. During the gap, `.predict()` alone (no `.correct()` call) keeps extrapolating from the last known velocity:
+
+| Frames into the dropout | Kalman (prediction only) error | Freeze-last-position error |
+| --- | --- | --- |
+| 1 | 1.24 px | 8.03 px |
+| 4 | 2.20 px | 23.03 px |
+| 7 | 3.16 px | 38.03 px |
+
+The Kalman filter's error grows slowly (it already knows the object was moving at roughly 5 px/frame, and keeps extrapolating that); the naive fallback, which simply repeats the last known position, implicitly assumes the object stopped — and falls behind by the object's full true speed every single frame. By the end of the 7-frame gap, Kalman is **12× more accurate** than freezing the last position.
+
+## 5. Industrial context: when the motion model is worth trusting
+
+A part on a conveyor really does move at a close-to-constant speed between detections — exactly the assumption this chapter's constant-velocity model encodes, and exactly why Section 4's dropout result is so favourable here. A target that changes speed or direction unpredictably (a person, an animal, a part that can be manually repositioned) violates that same assumption, and a constant-velocity Kalman filter would extrapolate confidently in the *wrong* direction during a gap — the model's own confidence is only as good as how well it actually matches the real motion.
+
+## What you should remember from 40.5
+
+<Takeaways>
+<Takeaway n={1} title="Blend a model with a measurement">Not one or the other -- weighted by how much each is actually trusted.</Takeaway>
+<Takeaway n={2} title="This chapter's own real result">5.52 px raw error -> 3.33 px Kalman error, a real ~40% reduction.</Takeaway>
+<Takeaway n={3} title="Prediction survives a gap">A real 7-frame dropout: Kalman stayed within 3.2 px; freezing the last position reached 38 px.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A target's true velocity is 10 px/frame. A detector misses it for 4 consecutive frames. Roughly how far behind would a naive "freeze last position" fallback be by the end of the gap?
+
+<Solution>
+
+About 4 × 10 = **40 px** behind — following exactly this chapter's own measured pattern (Section 4): freezing implicitly assumes zero velocity, so the error grows by the object's true speed every missed frame.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the real measured numbers, compared
+
+```python
+import numpy as np
+
+raw_error = 5.52
+kalman_error = 3.33
+print("reduction:", round((1 - kalman_error / raw_error) * 100), "%")
+
+freeze_dropout_end = 38.03
+kalman_dropout_end = 3.16
+print("Kalman advantage at end of dropout:", round(freeze_dropout_end / kalman_dropout_end, 1), "x")
+```
+
+Output:
+
+```text
+reduction: 40 %
+Kalman advantage at end of dropout: 12.0 x
+```
+
+### 2. OpenCV: a real constant-velocity Kalman filter
+
+```python
+# Needs measured_x from this chapter's own precomputed noisy sequence (see the text)
+import cv2
+
+kf = cv2.KalmanFilter(2, 1, 0)                              # state: [x, vx]; measurement: [x]
+kf.transitionMatrix = np.array([[1, 1], [0, 1]], np.float32)
+kf.measurementMatrix = np.array([[1, 0]], np.float32)
+kf.processNoiseCov = np.array([[1e-4, 0], [0, 1e-4]], np.float32)
+kf.measurementNoiseCov = np.array([[8.0 ** 2]], np.float32)   # measurement noise std 8 px
+kf.errorCovPost = np.eye(2, dtype=np.float32) * 100
+kf.statePost = np.array([[measured_x[0]], [0]], np.float32)   # measured_x: this chapter's own noisy data
+
+estimates = [measured_x[0]]
+for t in range(1, len(measured_x)):
+    kf.predict()
+    kf.correct(np.array([[measured_x[t]]], np.float32))
+    estimates.append(kf.statePost[0, 0])
+print("first 5 estimates:", np.round(estimates[:5], 2))
+```
+
+Typical output (one machine, matching this chapter's own real precomputed trace):
+
+```text
+first 5 estimates: [ 0.27 12.1  19.28 16.02 17.92]
+```
+
+## OpenCV API notes
+
+- **`cv2.KalmanFilter(dynamParams, measureParams, controlParams)`**: `dynamParams` is the state vector's length (here 2: position, velocity); `measureParams` is the measurement vector's length (here 1: position only — velocity is inferred, never measured directly).
+- **`.predict()`**: advances the state using `transitionMatrix` alone, with no measurement — exactly what Section 4's dropout relied on.
+- **`.correct(measurement)`**: blends the just-computed prediction with a real measurement, using `processNoiseCov` and `measurementNoiseCov` to weight each — call this only when a real measurement is actually available (skip it, as Section 4 does, during a dropout).
+- **`processNoiseCov` vs `measurementNoiseCov`**: a smaller `processNoiseCov` relative to `measurementNoiseCov` means the filter trusts its own motion model more than new measurements (this chapter's own tuning, Section 3's result) — the opposite ratio would track noisy measurements more closely and smooth less.
+
+## Where it fails
+
+- **A wrong motion model actively hurts** — a constant-velocity filter watching an object that suddenly changes direction will confidently extrapolate the *old* direction for a while, actively worse than simply trusting the newest measurement during exactly that transition.
+- **Covariance tuning is a real, non-obvious trade-off** — too much trust in the model (very small `processNoiseCov`) makes the filter slow to react to a genuine, real change in motion; too much trust in measurements makes it barely smooth anything at all.
+- **A sustained dropout eventually exceeds any reasonable confidence** — Section 4's 7-frame gap stayed accurate because the true motion really was constant; a much longer gap, or a target that changes behaviour during it, would see the prediction's real error keep growing unchecked.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Calling `.correct()` with a stale or fabricated measurement during a real dropout** instead of skipping it (Section 4's actual method) — this feeds the filter a false signal rather than letting it extrapolate honestly from its own model.
+- **Assuming the filter "knows" the real noise level** — `measurementNoiseCov` and `processNoiseCov` are both declared by you; a value that does not match the real sensor's actual noise (checked, e.g., the way 14.5 estimated real noise from the footage itself) gives a confidently wrong blend.
+- **Using a constant-velocity model for something that accelerates or turns sharply** — Where it fails: the model's own assumption becomes the source of error, not a fix for it.
+- **Forgetting that the measurement vector only contains what is actually measured** — velocity here is *inferred* by the filter from consecutive position measurements, never measured directly; expecting a filter to report an unmeasured quantity accurately from the very first frame, before it has seen any real motion, is optimistic.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The Kalman gain
+
+The exact blending weight between prediction and measurement (the "Kalman gain") is itself recomputed every step from the current uncertainty estimates — a textbook derivation [1] shows it is the mathematically optimal linear blend, in the least-squares sense, exactly when the real noise is Gaussian and the real motion really does follow the declared linear model; departures from either assumption (Where it fails) are exactly where the "optimal" guarantee stops applying.
+
+### Extended and unscented Kalman filters
+
+A real target that turns or accelerates nonlinearly needs a nonlinear motion model, which breaks the plain Kalman filter's linear-algebra derivation; the Extended Kalman Filter (EKF) linearises the model locally at each step, and the Unscented Kalman Filter (UKF) instead propagates a small set of representative sample points through the true nonlinear model directly — both real, standard extensions for exactly the nonlinear-motion case this chapter's simple model cannot handle.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does a Kalman filter combine to produce its estimate?",
+      options: ["Only the raw measurement", "Only the motion model's prediction", "A prediction from the motion model and a new measurement, weighted by how much each is trusted", "Two independent cameras"],
+      answer: 2,
+      explanation: "Section 2: predict, then correct by blending with a real measurement.",
+    },
+    {
+      question: "In this chapter's own real test, what was the measured reduction in mean tracking error from using the Kalman filter instead of the raw measurement?",
+      options: ["No real improvement", "About 40%", "Exactly 100%", "It made the error worse"],
+      answer: 1,
+      explanation: "Section 3: 5.52 px -> 3.33 px, a real, measured reduction.",
+    },
+    {
+      question: "During this chapter's real 7-frame measurement dropout, how did the Kalman filter's error compare to a naive 'freeze last position' fallback?",
+      options: ["They were identical", "Kalman's error grew much more slowly (1.24 to 3.16 px) than freeze's (8.03 to 38.03 px), because Kalman kept extrapolating with its learned velocity", "Freeze was more accurate", "Neither method could handle the dropout at all"],
+      answer: 1,
+      explanation: "Section 4: a real, measured ~12x advantage for Kalman by the end of the gap.",
+    },
+    {
+      question: "Why would a constant-velocity Kalman filter perform badly on a target that suddenly changes direction?",
+      options: ["It wouldn't -- Kalman filters handle any motion equally well", "The model's own core assumption (constant velocity) is violated exactly when the direction changes, so the filter confidently extrapolates the old, now-wrong direction", "Kalman filters only work on stationary targets", "This only affects measurementNoiseCov, not the result"],
+      answer: 1,
+      explanation: "Where it fails: a wrong motion model actively hurts, it doesn't just fail to help.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A target's true velocity is 8 px/frame. A detector misses it for 3 consecutive frames, and a Kalman filter's velocity estimate at the start of the gap was accurate. Roughly how far off would you expect the Kalman prediction to be by the end of the 3 frames, compared to a naive freeze-last-position fallback?
+
+<Solution>
+
+If the Kalman filter's velocity estimate is accurate, its prediction error should stay small and grow only slowly (following Section 4's own pattern: roughly linear but at a small rate, not the full 8 px/frame) — while freeze-last-position falls behind by the full true velocity every frame, reaching about 3 × 8 = **24 px** behind by the end, the same structural gap Section 4 measured directly (there, 7 frames at 5 px/frame gave 35 px of the 38.03 px freeze error, with the rest from the initial measurement noise).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, modify `measurementNoiseCov` from `8.0 ** 2` to `20.0 ** 2` (declaring far less trust in the measurement than the real noise actually warrants) and explain, in one sentence, what you would expect to happen to the filter's responsiveness to a real, genuine change in velocity.
+
+<Solution>
+
+```python
+# Needs kf from Code section 2 (this line alone is illustrative)
+kf.measurementNoiseCov = np.array([[20.0 ** 2]], np.float32)   # overstated distrust of the measurement
+```
+
+With `measurementNoiseCov` set much higher than the real noise level, the filter would trust its own motion-model prediction even more heavily than before, making it slower to react to a real, genuine velocity change — the opposite problem from Where it fails' "wrong model" case, but the same underlying lesson: the declared noise values are a real, consequential choice, not a formality.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague tracking a person walking through a store wants to use this chapter's exact constant-velocity Kalman filter, reasoning "it worked great for the conveyor-belt case, so it'll work great here too." Based on Section 5, what should they expect to be different?
+
+<Solution>
+
+A conveyor part's motion genuinely matches the constant-velocity assumption closely (Section 5), which is exactly why this chapter's measured results were so favourable. A walking person regularly stops, turns, and changes pace — real departures from constant velocity — so the same filter would, following Where it fails' own warning, confidently extrapolate the wrong direction or speed immediately after any such change, and only gradually correct itself as new measurements arrive. The colleague should expect noticeably worse real performance during exactly those transitions, even though the filter would still help during the straight, steady-pace stretches in between.
+
+</Solution>
+
+## References
+
+1. R. E. Kalman, "A new approach to linear filtering and prediction problems," *Journal of Basic Engineering*, 82(1), 35–45, 1960.
+2. G. Welch, G. Bishop, "An Introduction to the Kalman Filter," University of North Carolina at Chapel Hill, TR 95-041 (a widely used practical tutorial derivation).
+3. OpenCV 4.13.0 documentation: `cv2.KalmanFilter`. https://docs.opencv.org/4.13.0/
