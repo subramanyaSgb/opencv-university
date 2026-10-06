@@ -217,3 +217,4 @@ export { CrbLab } from "./CrbLab";
 export { PropagationLab } from "./PropagationLab";
 export { GaugeRRLab } from "./GaugeRRLab";
 export { SsimLab } from "./SsimLab";
+export { PtcLab } from "./PtcLab";

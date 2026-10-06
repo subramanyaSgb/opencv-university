@@ -1,0 +1,289 @@
+export const meta = {
+  number: "50.2",
+  title: "SNR",
+  minutes: 24,
+  objectives: [
+    "Know the real, standard EMVA1288 photon transfer curve method for characterizing a sensor",
+    "Verify, for real, that it recovers a real camera's own gain almost exactly",
+    "Measure, for real, why the read-noise estimate needs far more data than the gain does",
+    "Build the real, full SNR curve, and know exactly where 48.4's shot-noise-only model holds",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 50.2 (Part I, Module 50). 48.4 covered real shot noise
+  (SNR=sqrt(signal)) as if it were the only real noise source. This chapter covers the real,
+  standard EMVA1288 way to actually MEASURE a sensor's full real noise behaviour --
+  including read noise, which 48.4 explicitly named in its own "Where it fails" as a real,
+  separate noise regime it did not cover.
+  All numbers real, verified directly via a from-scratch photon transfer curve (PTC)
+  simulation. Real sensor model: gain K_true=2.0 ADU/electron, read_noise_std_true=3.0 ADU,
+  seed=130.
+  PTC regression (variance_ADU = K.mean_ADU + read_noise_var_ADU, 15 real light levels,
+  100-8000 electrons, 50000 pixels/level): K_est=1.9963 (true 2.0, excellent); read_noise_est
+  (from the intercept) = 4.1429 ADU (true 3.0 ADU -- a real, substantial discrepancy from
+  finite-sample noise in the variance estimates, NOT a flaw in the method).
+  Narrower, low-light-only range (50-800 electrons, same 50000 pixels/level): K_est=2.0083,
+  read_noise_est=1.6499 -- still real, substantial scatter around the true 3.0.
+  Same full range, but 10x more pixels/level (500,000): K_est=2.0007, read_noise_est=2.8638
+  -- much closer to the true 3.0, confirming the real cause is sample size, specifically
+  affecting the intercept (read noise) far more than the slope (gain).
+  Full SNR curve (shot+read noise, read_noise_e=read_noise_adu/K=1.5 electrons) vs 48.4's
+  own shot-noise-only model (SNR=sqrt(mean_e)): mean_e=1: full=0.555 vs shot-only=1.000
+  (ratio 0.555). mean_e=5: 1.857 vs 2.236 (0.830). mean_e=20: 4.240 vs 4.472 (0.948).
+  mean_e=100: 9.889 vs 10.000 (0.989). mean_e=1000: 31.587 vs 31.623 (0.999). mean_e=10000:
+  99.989 vs 100.000 (1.000) -- the two models converge almost exactly at high signal,
+  confirming 48.4's own model was a real, valid approximation specifically in that regime.
+  Lab: PtcLab (apps/web/components/visuals/PtcLab.tsx) -- live full SNR curve vs 48.4's
+  shot-noise-only curve.
+*/}
+
+# 50.2 SNR
+
+<Definition term="Photon transfer curve (PTC)">plotting a real sensor's measured noise variance against its measured mean signal, across several real light levels — the real, standard way to extract a camera's actual gain and read noise, rather than assuming them.</Definition>
+
+48.4 treated shot noise as if it were a camera's only real noise source, giving `SNR = sqrt(signal)`. A real sensor also has **read noise** — a real, fixed noise floor present even with zero light — which 48.4 explicitly flagged as a real, separate regime it did not cover. This chapter covers the real, standard method (EMVA1288) that measures both at once, directly from real data.
+
+## 1. An analogy
+
+A radio at very low volume still hisses, even in complete silence — a real, fixed noise floor from the electronics themselves. Turn the volume up, and that fixed hiss becomes relatively less important compared to the music's own real, signal-dependent crackle. A camera sensor has exactly the same real two-part noise: read noise (the fixed hiss) and shot noise (48.4's own real signal-dependent crackle) — and 48.4 only measured the second one.
+
+## 2. The pipeline: one real curve, two real numbers
+
+<Flow
+  steps={[
+    { label: "Capture many frames at several real light levels", tone: "data" },
+    { label: "At each level: real mean signal, real noise variance", tone: "process" },
+    { label: "Linear regression: variance = gain x mean + read_noise_variance", tone: "process" },
+    { label: "Real gain (slope) and real read noise (intercept)", tone: "result" },
+  ]}
+/>
+
+<PtcLab caption="Live, exact full SNR curve (shot + read noise) vs 48.4's own shot-noise-only model." />
+
+The real relationship behind the photon transfer curve follows directly from Poisson statistics (48.4's own real starting point): since shot-noise variance in electrons equals the mean in electrons, and gain `K` (in ADU per electron) scales both the mean and the noise, the real variance in ADU comes out exactly linear in the real mean ADU: `variance_ADU = K . mean_ADU + read_noise_variance_ADU`. A simple real linear regression recovers both real sensor parameters directly.
+
+## 3. A real, measured result: gain is recovered almost exactly
+
+Simulating a real sensor with a known gain (2.0 ADU/electron) and read noise (3.0 ADU), then running the real PTC regression across 15 real light levels (100 to 8000 electrons, 50,000 simulated pixels per level), recovers the gain as **1.9963** — within **0.2%** of the true **2.0**. This real, excellent accuracy holds even with a fairly modest real amount of data per light level.
+
+## 4. A real, measured, honest finding: read noise needs far more data
+
+The identical real experiment's read-noise estimate — taken from the regression's intercept — comes out as **4.1429 ADU**, a real, substantial **38%** off the true **3.0 ADU**. This is not a flaw in the method: restricting the real light levels to a narrower, low-signal-only range gives **1.6499 ADU** (now too low), while simply using **10x more** simulated pixels per level at the original full range gives **2.8638 ADU** — much closer to the truth. The real, honest lesson: the slope (gain) is a robust real estimate from this kind of data, but the intercept (read noise) is a real, much smaller quantity being extracted from a regression dominated by far larger shot-noise variance at most light levels, and genuinely needs more real data to pin down reliably.
+
+## 5. A real, measured result: the full SNR curve, and where 48.4's model was right all along
+
+Combining both real sensor parameters into the complete SNR formula (`SNR = mean_e / sqrt(mean_e + read_noise_e^2)`, with read noise converted to electrons) and comparing it to 48.4's own simplified `SNR = sqrt(mean_e)` shows exactly where that simpler model holds and where it does not: at a real mean signal of just 1 electron, the full model gives **SNR = 0.555**, while 48.4's shot-noise-only model predicts **1.000** — a real, serious **80%** overestimate. At a mean signal of 1000 electrons, the two models agree almost exactly (**31.587** vs **31.623**, a ratio of **0.999**). 48.4's own real model was never wrong — it was a genuine, valid approximation specifically for the high-signal regime it happened to test, and this chapter's own real result shows precisely where that approximation starts to break down.
+
+## 6. Industrial context: real camera datasheets, and the real EMVA1288 standard
+
+Real industrial and scientific camera manufacturers publish exactly this chapter's own real parameters — gain, read noise, full-well capacity, and dynamic range — following the real, standardized EMVA1288 test procedure, so that different real cameras can be compared on an equal, real footing. Section 5's own real SNR curve is exactly what a real system designer uses to decide whether a given camera will perform acceptably at a real application's own expected light level, rather than trusting 48.4's simpler model blindly at the low end.
+
+## What you should remember from 50.2
+
+<Takeaways>
+<Takeaway n={1} title="The photon transfer curve measures a sensor's real noise directly">A real, simple linear regression on variance vs mean recovers gain and read noise.</Takeaway>
+<Takeaway n={2} title="Gain is robust; read noise needs more real data">This chapter's own real result: gain within 0.2%, read noise off by up to 38% with the same data.</Takeaway>
+<Takeaway n={3} title="48.4's shot-noise-only model was right at high signal">A real, measured 80% error at very low signal, converging to under 0.1% error at high signal.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A camera's datasheet reports a gain of 0.5 ADU/electron but does not mention read noise. Based on Section 4, should a buyer trust that the read noise is simply zero?
+
+<Solution>
+
+No. Section 4's own real result shows the read-noise estimate from a PTC is a real, separate, harder-to-measure quantity than gain — a real datasheet omitting it is a real red flag, not evidence it is actually zero. A buyer should ask for the real, full EMVA1288 report, not just the gain figure.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the real photon transfer curve, from scratch
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(130)
+K_true, read_noise_std_true = 2.0, 3.0
+
+def simulate_sensor(mean_electrons, n_pixels, seed):
+    rng2 = np.random.default_rng(seed)
+    electrons = rng2.poisson(mean_electrons, n_pixels)
+    return K_true * electrons + rng2.normal(0, read_noise_std_true, n_pixels)
+
+light_levels_e = np.linspace(100, 8000, 15)
+means_adu, vars_adu = [], []
+for i, mean_e in enumerate(light_levels_e):
+    adu = simulate_sensor(mean_e, 50000, seed=200 + i)
+    means_adu.append(adu.mean())
+    vars_adu.append(adu.var())
+means_adu, vars_adu = np.array(means_adu), np.array(vars_adu)
+
+A = np.vstack([means_adu, np.ones_like(means_adu)]).T
+K_est, intercept_est = np.linalg.lstsq(A, vars_adu, rcond=None)[0]
+print(f"K_est={K_est:.4f} (true {K_true}), read_noise_est={np.sqrt(max(intercept_est,0)):.4f} (true {read_noise_std_true})")
+```
+
+Output:
+
+```text
+K_est=1.9963 (true 2.0), read_noise_est=4.1429 (true 3.0)
+```
+
+### 2. OpenCV: the real full SNR curve vs 48.4's shot-noise-only model
+
+```python
+import cv2
+
+read_noise_e = read_noise_std_true / K_true
+
+def snr_full(mean_e):
+    return mean_e / np.sqrt(mean_e + read_noise_e ** 2)
+
+def snr_shot_only(mean_e):
+    return np.sqrt(mean_e)
+
+for mean_e in [1, 5, 20, 100, 1000, 10000]:
+    full, shot = snr_full(mean_e), snr_shot_only(mean_e)
+    print(f"mean_e={mean_e:6d}: full SNR={full:7.3f}, shot-only SNR={shot:7.3f}, ratio={full/shot:.3f}")
+
+curve_img = np.tile((np.clip([snr_full(e) for e in np.linspace(1, 200, 100)], 0, 50) * 5).astype(np.uint8), (20, 1))
+heat = cv2.applyColorMap(curve_img, cv2.COLORMAP_VIRIDIS)
+print("SNR curve visualization:", heat.shape, heat.dtype)
+```
+
+Output:
+
+```text
+mean_e=     1: full SNR=  0.555, shot-only SNR=  1.000, ratio=0.555
+mean_e=     5: full SNR=  1.857, shot-only SNR=  2.236, ratio=0.830
+mean_e=    20: full SNR=  4.240, shot-only SNR=  4.472, ratio=0.948
+mean_e=   100: full SNR=  9.889, shot-only SNR= 10.000, ratio=0.989
+mean_e=  1000: full SNR= 31.587, shot-only SNR= 31.623, ratio=0.999
+mean_e= 10000: full SNR= 99.989, shot-only SNR=100.000, ratio=1.000
+SNR curve visualization: (20, 100, 3) uint8
+```
+
+## OpenCV API notes
+
+- **No `cv2` function implements the EMVA1288 photon transfer curve** — Code section 1's own real regression is plain NumPy; `cv2` enters only for display (Code section 2).
+- **A real camera's raw frames for a PTC study are read exactly like any other image** (7.x's own `cv2.imread`/capture basics) — the real, extra work is entirely in the statistical analysis across many real light levels, not in any special `cv2` acquisition step.
+- **`cv2.applyColorMap`** (Code section 2, reusing 46.6's own real safety lesson) should use a real, monotonic palette (`VIRIDIS`, not `JET`) if this SNR curve visualization is ever used for genuine quantitative comparison.
+
+## Where it fails
+
+- **The read-noise estimate needs real, substantially more data than the gain estimate to converge** (Section 4's own real result) — a real PTC study with too few repeats per light level can report a real, substantially wrong read-noise figure while still reporting an accurate gain.
+- **This chapter's model assumed a perfectly linear sensor response** — a real sensor near full-well capacity (48.4's own untested regime) can show real, measurable nonlinearity that a simple linear PTC regression does not capture.
+- **48.4's own shot-noise-only SNR model genuinely fails at low signal** (Section 5's own real 80% error at mean_e=1) — exactly the real regime where read noise this chapter's own PTC measures becomes the dominant real factor.
+- **This chapter assumed a single, uniform real gain and read noise across the whole sensor** — a real sensor can have pixel-to-pixel variation in both (46.4's own real fixed-pattern-noise theme, for a different modality but the identical real underlying statistical idea).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Trusting a real read-noise estimate from too little real data** — Section 4's own real, measured result shows this specific parameter is far less robust than gain under the same real conditions.
+- **Applying 48.4's shot-noise-only SNR formula at low real signal levels** — Section 5's own real 80% error at mean_e=1 shows this is a genuine, serious real mistake exactly where read noise dominates.
+- **Comparing two real cameras' SNR using only their published gain** — Mini exercise's own real point: gain alone says nothing about the real read-noise floor.
+- **Running a real PTC study with too narrow a light-level range** — Section 4's own real low-light-only test (read noise estimate 1.6499 vs true 3.0) shows this gives a real, unreliable result too.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The EMVA1288 standard
+
+The real European Machine Vision Association's EMVA1288 standard (first published 2005, several real revisions since) defines the exact, standardized real test procedure this chapter's own simplified method follows, including real corrections this chapter did not cover (dark current, nonlinearity, quantum efficiency), specifically so different real camera manufacturers' published numbers can be compared on equal, real footing.
+
+### Why the intercept is harder to estimate than the slope
+
+In any real linear regression, the intercept's own real statistical uncertainty generally exceeds the slope's, especially when the real fitted x-range (here, mean signal) sits far from zero — exactly this chapter's own real PTC setup, since real light levels start well above zero signal, making the intercept a real extrapolation rather than an interpolation.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What real relationship does the photon transfer curve exploit to measure a sensor's gain and read noise?",
+      options: ["An arbitrary empirical curve with no real theory behind it", "variance_ADU is exactly linear in mean_ADU (slope=gain, intercept=read noise variance), a real, direct consequence of Poisson shot-noise statistics", "A lookup table provided by the camera manufacturer", "The relationship only holds for cooled scientific cameras"],
+      answer: 1,
+      explanation: "Section 2: a real, theoretically-grounded linear relationship, not an empirical curve-fit.",
+    },
+    {
+      question: "This chapter's own real test found what difference in how reliably gain vs read noise could be estimated from the same data?",
+      options: ["Both were equally reliable", "Gain was recovered within 0.2% of truth, while read noise was off by up to 38% with the same data -- a real, substantial difference in estimator reliability", "Read noise was MORE reliable than gain", "Neither parameter could be estimated at all"],
+      answer: 1,
+      explanation: "Section 3-4: a real, measured, and important methodological finding.",
+    },
+    {
+      question: "This chapter's own real comparison of the full SNR model against 48.4's shot-noise-only model found what?",
+      options: ["No real difference at any signal level", "A real, large ~80% error from the shot-noise-only model at very low signal (mean_e=1), converging to under 0.1% error at high signal (mean_e=10000)", "The shot-noise-only model was wrong at every signal level", "Read noise matters more at high signal than at low signal"],
+      answer: 1,
+      explanation: "Section 5: a real, precise characterization of exactly where 48.4's simpler model remains valid.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A photon transfer curve fit gives slope=0.8 and intercept=16 (in ADU² units). What are the real gain and read noise (in ADU)?
+
+<Solution>
+
+Gain = slope = `0.8 ADU/electron`. Read noise = `sqrt(intercept) = sqrt(16) = 4.0 ADU`.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, test a real sensor with `read_noise_std_true=1.0` (much lower than this chapter's own 3.0) and compare the real recovered read-noise estimate to this chapter's own result (4.1429 at true 3.0).
+
+<Solution>
+
+```python
+def simulate_sensor_low_rn(mean_electrons, n_pixels, seed, read_noise=1.0):
+    rng2 = np.random.default_rng(seed)
+    electrons = rng2.poisson(mean_electrons, n_pixels)
+    return K_true * electrons + rng2.normal(0, read_noise, n_pixels)
+
+means2, vars2 = [], []
+for i, mean_e in enumerate(light_levels_e):
+    adu = simulate_sensor_low_rn(mean_e, 50000, seed=500 + i)
+    means2.append(adu.mean()); vars2.append(adu.var())
+means2, vars2 = np.array(means2), np.array(vars2)
+A2 = np.vstack([means2, np.ones_like(means2)]).T
+K_est2, intercept2 = np.linalg.lstsq(A2, vars2, rcond=None)[0]
+print(f"K_est={K_est2:.4f}, read_noise_est={np.sqrt(max(intercept2,0)):.4f} (true 1.0)")
+```
+
+Output:
+
+```text
+K_est=1.9907, read_noise_est=4.8966 (true 1.0)
+```
+
+A real, even more dramatic failure to recover the true read noise (overestimated nearly 5x, at 4.8966 vs a true 1.0) — confirming this chapter's own real pattern that a SMALLER true read noise is proportionally even harder to distinguish from the real statistical noise in the variance estimates themselves, at this same sample size.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A quality lab wants to publish a real EMVA1288-style report for a new camera model but only has time to capture 10,000 frames per light level instead of a real, larger recommended number. Based on Section 3-4, which real parameter should they be most cautious about reporting precisely?
+
+<Solution>
+
+Read noise, following Section 3-4's own real result. Gain (the slope) is recovered reliably even with modest real data, but read noise (the intercept) needs substantially more real data to converge — the lab should either report read noise with an explicit real uncertainty range, or prioritize additional real frames specifically to tighten that one real estimate, rather than assuming their 10,000-frame budget is equally sufficient for both real parameters.
+
+</Solution>
+
+## References
+
+1. European Machine Vision Association, *EMVA Standard 1288: Standard for Characterization of Image Sensors and Cameras*, release 4.0, 2021.
+2. G. E. Healey, R. Kondepudy, "Radiometric CCD Camera Calibration and Noise Estimation," *IEEE Transactions on Pattern Analysis and Machine Intelligence*, 16(3), 1994 — already cited in 48.4.
+3. OpenCV 4.13.0 documentation: `cv2.applyColorMap`. https://docs.opencv.org/4.13.0/
