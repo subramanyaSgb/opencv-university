@@ -185,3 +185,4 @@ export { PixelToMMLab } from "./PixelToMMLab";
 export { BirdsEyeLab } from "./BirdsEyeLab";
 export { HandEyeLab } from "./HandEyeLab";
 export { StereoLab } from "./StereoLab";
+export { EpipolarLab } from "./EpipolarLab";

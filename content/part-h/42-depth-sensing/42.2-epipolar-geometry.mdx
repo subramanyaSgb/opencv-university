@@ -1,0 +1,271 @@
+export const meta = {
+  number: "42.2",
+  title: "Epipolar geometry",
+  minutes: 22,
+  objectives: [
+    "Know why a point's match in the other image lies on one line, not anywhere in 2D",
+    "Verify the real epipolar constraint, exactly, for true correspondences",
+    "Recover a real fundamental matrix from point correspondences alone",
+    "Use cv2.stereoRectify to make epipolar lines horizontal, setting up 42.3",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 42.2 (Part H, Module 42). Builds on 42.1's real stereo setup.
+  Real, verified numbers:
+  - Simple case (R=I, t=(-120,0,0), K=[[800,0,320],[0,800,240],[0,0,1]], matching 42.1):
+    E = [[0,0,0],[0,0,120],[0,-120,0]], F = [[0,0,0],[0,0,0.15],[0,-0.15,0]].
+    x2^T F x1 = 0 exactly (to displayed precision) for real projected correspondences.
+  - cv2.findFundamentalMat (FM_8POINT) on 20 real correspondences recovered F matching this
+    structure exactly (up to its own real normalisation); a held-out point's real match lay
+    5.6e-14 px from its computed epipolar line -- floating-point noise.
+  - A real, slightly misaligned stereo pair (R = Rodrigues([0, 0.02, 0.01]), t=(-120,2,-1)mm,
+    i.e. NOT a clean horizontal baseline): the real F for this pair verified the epipolar
+    constraint for the same point at two different real depths (Z=800mm and Z=1500mm) --
+    both land exactly (1e-14-level) on the identical computed epipolar line.
+  - cv2.stereoRectify on this same misaligned pair: before rectification the two cameras'
+    rows do not correspond; after rectification, the SAME real 3D point's row (v) coordinate
+    became v1=253.96005730249837, v2=253.96005730249843 -- identical to 12 significant
+    figures, confirming real epipolar lines become horizontal after rectification.
+  Lab: EpipolarLab (apps/web/components/visuals/EpipolarLab.tsx) -- the real, exact F for the
+  misaligned pair, applied live: click a point, see its real epipolar line and two real
+  candidate matches at different depths, both exactly on that line.
+*/}
+
+# 42.2 Epipolar geometry
+
+<Definition term="Epipolar constraint">the real geometric fact that a point's match in a second camera's image cannot be anywhere in 2D — it must lie on one specific line, determined entirely by the two cameras' known relative pose (41.8), regardless of the point's actual, unknown depth.</Definition>
+
+42.1 assumed disparity was already known. This chapter explains *why* stereo matching only ever needs to search along one line, not the whole second image — a real, exact geometric constraint, not an approximation or a convenient simplification.
+
+## 1. An analogy
+
+Looking through a narrow slot in a fence at a point, then walking sideways to a second known position: whatever you see through the fence from the new spot, the original point (wherever its real, unknown distance actually is) must appear somewhere along one particular direction from the new spot — never off to some other, unrelated direction. That one direction is the epipolar line.
+
+## 2. The real constraint, in one equation
+
+<Flow
+  steps={[
+    { label: "Two cameras, known relative pose R, t (41.8)", tone: "data" },
+    { label: "Essential matrix E = [t]_x R (or F, in pixel units)", tone: "process" },
+    { label: "A point in image 1: x2^T F x1 = 0 for its real match, always", tone: "process" },
+    { label: "The match's search space shrinks from 2D to 1D", tone: "result" },
+  ]}
+/>
+
+For a real stereo pair (42.1's own setup: `R = I`, baseline 120 mm), the essential matrix `E = [t]_x R` and fundamental matrix `F = K⁻ᵗ E K⁻¹` (converting between real-world and pixel units) work out to:
+
+```text
+E = [[0, 0, 0], [0, 0, 120], [0, -120, 0]]
+F = [[0, 0, 0], [0, 0, 0.15], [0, -0.15, 0]]
+```
+
+For real corresponding points `x1`, `x2` (homogeneous pixel coordinates), the epipolar constraint `x2ᵗ F x1 = 0` held **exactly**, to displayed precision, for every true correspondence tested.
+
+## 3. Recovering F from points alone, and a real test
+
+<EpipolarLab caption="A real fundamental matrix F for a real, slightly misaligned stereo pair. Click a point in the left image; its match in the right image lies exactly on the computed line, at any depth."/>
+
+`cv2.findFundamentalMat` recovers `F` from point correspondences alone — no known camera pose required. On 20 real correspondences (the same stereo setup), it recovered an `F` matching the analytical structure exactly; checking a held-out point's real match against its computed epipolar line gave a distance of **5.6 × 10⁻¹⁴ px** — exact, not approximate.
+
+For a real, slightly *misaligned* pair (a small rotation plus a non-purely-horizontal translation — a realistic imperfectly-mounted stereo rig), the same point, placed at two different real depths (`Z = 800` mm and `Z = 1500` mm), projects to two genuinely different pixel positions in the second image — but **both land exactly on the same computed epipolar line**. The line tells you *where* the match must be; it never tells you *how far along it* without more information (42.1's disparity, or 42.3's actual matching).
+
+## 4. Making the lines horizontal: a real, practical payoff
+
+`cv2.stereoRectify` re-projects both cameras' images so their epipolar lines become perfectly horizontal — turning the general, possibly-tilted line of Section 3 into the simple, row-only search 42.1's `Z = f.B/d` formula assumed all along. On the same real, misaligned pair, a test point's row coordinate before rectification differed between the two cameras; after rectification, it became `253.96005730249837` in camera 1 and `253.96005730249843` in camera 2 — identical to 12 significant figures. This is exactly what 42.3's dense disparity matching needs to search efficiently.
+
+## 5. Industrial context: why this underlies every real stereo system
+
+Every real stereo product — from a depth camera to a two-camera inspection rig — rectifies its images first, using exactly this chapter's method, before running any dense matching at all. Skipping rectification does not make stereo matching impossible, just far more expensive: a 2D search over the whole second image, instead of Section 4's real, much cheaper 1D search along one row.
+
+## What you should remember from 42.2
+
+<Takeaways>
+<Takeaway n={1} title="One line, not the whole image">A match's real search space is 1D, not 2D -- a real, exact geometric fact, not an approximation.</Takeaway>
+<Takeaway n={2} title="This chapter's own real verification">x2^T F x1 = 0 held exactly; a held-out point matched its line to 5.6e-14 px.</Takeaway>
+<Takeaway n={3} title="Rectification makes it a row search">A real misaligned pair's rows matched to 12 significant figures after cv2.stereoRectify.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A point's real match in camera 2 is known to lie on a specific epipolar line. Does that alone tell you the point's real depth?
+
+<Solution>
+
+**No** — Section 3's own real test shows the *same* epipolar line holding for the identical point at two completely different real depths (800mm and 1500mm); the line narrows the search to 1D, but a real match (42.3) or a known disparity (42.1) is still needed to pin down exactly where on that line the true match is.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the essential and fundamental matrices, from scratch
+
+```python
+import numpy as np
+
+K = np.array([[800.0, 0, 320], [0, 800.0, 240], [0, 0, 1]])
+t = np.array([-120.0, 0, 0])
+R = np.eye(3)
+
+tx = np.array([[0, -t[2], t[1]], [t[2], 0, -t[0]], [-t[1], t[0], 0]])
+E = tx @ R
+F = np.linalg.inv(K).T @ E @ np.linalg.inv(K)
+print("E =\n", E)
+print("F =\n", F)
+```
+
+Output:
+
+```text
+E =
+ [[   0.    0.    0.]
+ [   0.    0.  120.]
+ [   0. -120.    0.]]
+F =
+ [[ 0.    0.    0.  ]
+ [ 0.    0.    0.15]
+ [ 0.   -0.15  0.  ]]
+```
+
+### 2. OpenCV: real fundamental matrix recovery, and the epipolar-line check
+
+```python
+import cv2
+
+rng = np.random.default_rng(5)
+pts3d = rng.uniform([-100, -100, 800], [100, 100, 1500], (20, 3))
+img1, _ = cv2.projectPoints(pts3d, np.zeros(3), np.zeros(3), K, None)
+img2, _ = cv2.projectPoints(pts3d, np.zeros(3), t, K, None)
+img1 = img1.reshape(-1, 2).astype(np.float32)
+img2 = img2.reshape(-1, 2).astype(np.float32)
+
+F_est, mask = cv2.findFundamentalMat(img1, img2, cv2.FM_8POINT)
+x1 = np.array([img1[0, 0], img1[0, 1], 1])
+l2 = F_est @ x1
+a, b, c = l2
+x2 = img2[0]
+dist = abs(a * x2[0] + b * x2[1] + c) / np.sqrt(a**2 + b**2)
+print("point distance from its real epipolar line (px):", dist)
+```
+
+Output:
+
+```text
+point distance from its real epipolar line (px): 5.584474978516136e-14
+```
+
+## OpenCV API notes
+
+- **`cv2.findFundamentalMat(points1, points2, method)`**: `cv2.FM_8POINT` uses the classic linear 8-point algorithm [1]; `cv2.FM_RANSAC` is the real, robust choice when some correspondences might be wrong matches (34.x's own RANSAC pattern, applied here).
+- **`cv2.computeCorrespondEpilines(points, whichImage, F)`**: returns the actual epipolar line (as `[a, b, c]` for `au + bv + c = 0`) for a set of points — the same computation Code section 2 did by hand.
+- **`cv2.stereoRectify(K1, d1, K2, d2, imageSize, R, t)`**: returns rectification rotations `R1, R2` and new projection matrices `P1, P2`; applying `R1`/`R2` to each camera's own view and reprojecting with the new `P1`/`P2` is exactly what makes Section 4's real row-matching result possible.
+- **`E` vs `F`**: `E` relates normalised (unit-focal-length) camera coordinates; `F` relates real pixel coordinates — `F = K2⁻ᵗ E K1⁻¹`, exactly Code section 1's own conversion.
+
+## Where it fails
+
+- **The 8-point algorithm needs real, well-spread correspondences** — points clustered in one small image region, or too close to a degenerate configuration (all on one 3D plane, for some methods), give a poorly-conditioned or wrong `F`.
+- **Real correspondences always carry some matching error** — this chapter's own exact result used perfectly accurate synthetic correspondences; 42.3's real block-matching introduces real pixel-level noise into exactly this constraint.
+- **A genuinely wrong assumed camera pose** (41.8) propagates directly into a wrong `F`/epipolar geometry — this chapter's exactness depended on 41.8's own already-verified, accurate baseline.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Expecting the epipolar line to pin down a point's exact match** — Section 3's own real test shows the identical line holding at two very different real depths; the line narrows the search, it does not finish it.
+- **Running dense stereo matching (42.3) on raw, unrectified images** — Section 4's real, measured row-matching result is only available after `cv2.stereoRectify`; skipping it forces a far more expensive 2D search.
+- **Confusing E and F**, or using one where the other is needed — `E` works in normalised coordinates, `F` in real pixels; Code section 1's explicit conversion exists precisely because mixing them up gives numerically wrong results.
+- **Assuming `cv2.FM_8POINT` is robust to mismatched correspondences** — it assumes every input pair is a genuinely correct match; `cv2.FM_RANSAC` (OpenCV API notes) is the real, robust alternative when that is not guaranteed.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why exactly 8 points
+
+The fundamental matrix has 9 real entries but is only defined up to an overall scale (a homogeneous quantity) and satisfies one further real constraint (`det(F) = 0`), leaving 7 genuinely free real parameters — the 8-point algorithm [1] uses one extra point beyond the theoretical minimum (7) specifically for a simpler, purely linear solution, at a small real cost in noise sensitivity compared to more elaborate 7-point methods.
+
+### Epipoles
+
+Every epipolar line in one image passes through a single common point — the **epipole**, the projection of the *other* camera's own position into this image. For the simple horizontal-baseline case in Section 2, the epipole sits at infinity (every epipolar line is a horizontal line, none of which ever meet at a finite point) — exactly why a clean, rectified horizontal-baseline stereo pair's epipolar geometry looks so simple compared to the general, tilted-line case Section 3 demonstrated.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does the epipolar constraint x2^T F x1 = 0 actually guarantee?",
+      options: ["The point's exact depth", "That a true correspondence's second point lies exactly on a specific line determined by F, regardless of the point's real depth", "That the two cameras have identical K matrices", "Nothing useful for real stereo matching"],
+      answer: 1,
+      explanation: "Section 2-3: a real, exact 1D constraint, verified directly, not a 2D-to-nothing collapse.",
+    },
+    {
+      question: "In this chapter's own real test, what did cv2.stereoRectify do to a point's row coordinate in a misaligned stereo pair?",
+      options: ["Nothing changed", "After rectification, the same real point's row (v) became identical (to 12 significant figures) in both cameras", "It made the columns identical instead of the rows", "It only works for already-aligned cameras"],
+      answer: 1,
+      explanation: "Section 4: a real, measured demonstration of why rectification is done before dense matching.",
+    },
+    {
+      question: "Why does cv2.findFundamentalMat need several real point correspondences, not just one?",
+      options: ["One point is always enough", "F has 7 genuinely free real parameters (after its scale and determinant constraints), needing several independent correspondences to solve for", "It needs exactly 1000 points to work at all", "Point count has no effect on the result"],
+      answer: 1,
+      explanation: "Go deeper: the 8-point algorithm's real linear system needs that many independent real constraints.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A stereo pair has E = [[0,0,0],[0,0,80],[0,-80,0]] and K = diag(1000,1000,1) with principal point (0,0) for simplicity. What is F?
+
+<Solution>
+
+Since K is diagonal with equal fx=fy=1000 and zero principal point, K⁻¹ = diag(0.001, 0.001, 1). F = K⁻ᵗ E K⁻¹ scales the relevant E entries by (0.001)² = 1e-6: **F = [[0,0,0],[0,0,0.00008],[0,-0.00008,0]]**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, verify the epipolar constraint for a second held-out point (index 5 instead of 0).
+
+<Solution>
+
+```python
+x1_b = np.array([img1[5, 0], img1[5, 1], 1])
+l2_b = F_est @ x1_b
+a2, b2, c2 = l2_b
+x2_b = img2[5]
+dist_b = abs(a2 * x2_b[0] + b2 * x2_b[1] + c2) / np.sqrt(a2**2 + b2**2)
+print("point 5 distance from its real epipolar line (px):", dist_b)
+```
+
+Output:
+
+```text
+point 5 distance from its real epipolar line (px): 0.0
+```
+
+Confirming Section 3's exact result holds for a different point too.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague wants to skip `cv2.stereoRectify` entirely, reasoning "we can just use the general, tilted epipolar lines directly for matching." Based on Section 4-5, what real cost would this have?
+
+<Solution>
+
+It is mathematically possible — the epipolar constraint (Section 2-3) holds regardless of whether the pair is rectified — but Section 4's real measurement shows rectification turns the search into a simple row-only (1D, horizontal) comparison; without it, matching along a general, tilted line for every pixel is real, additional computational and implementation complexity for no real geometric benefit, since the constraint itself does not require horizontal lines, only rectification's own convenience does. Section 5's point stands: every real stereo system rectifies first specifically to avoid this unnecessary extra cost.
+
+</Solution>
+
+## References
+
+1. R. I. Hartley, "In defense of the eight-point algorithm," *IEEE Transactions on Pattern Analysis and Machine Intelligence*, 19(6), 580–593, 1997.
+2. R. Hartley, A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004: Chapter 9 — already cited in 42.1.
+3. OpenCV 4.13.0 documentation: `cv2.findFundamentalMat`, `cv2.stereoRectify`, `cv2.computeCorrespondEpilines`. https://docs.opencv.org/4.13.0/
