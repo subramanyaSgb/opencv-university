@@ -1,0 +1,275 @@
+export const meta = {
+  number: "46.5",
+  title: "Temperature measurement in ROIs",
+  minutes: 24,
+  objectives: [
+    "Compute real ROI statistics (spot, max, mean) on a calibrated thermal image",
+    "Measure, for real, how much averaging over a larger ROI reduces real sensor noise",
+    "Measure, for real, a critical, dramatic error: an ROI bigger than its real target",
+    "Know which real ROI statistic avoids that error, and why",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 46.5 (Part I, Module 46). Delivers on 21.4's own forward
+  pointer: "read temperatures in regions defined on the visible image (46.5)". Builds on
+  46.1-46.2's radiance-mixing model (reused here for TWO real temperatures sharing one
+  measurement area, instead of object+reflection) and 46.3's bit-depth/noise theme.
+  All numbers real, verified directly.
+  Noise averaging (uniform object, NETD=0.05K, 2000 repeated trials, seed=5): std of the
+  reported ROI average vs ROI pixel count N, matching the real NETD/sqrt(N) prediction
+  almost exactly: N=1: 0.04905K (pred 0.05000). N=4: 0.02556 (pred 0.02500). N=16: 0.01238
+  (pred 0.01250). N=64: 0.00614 (pred 0.00625). N=256: 0.00315 (pred 0.00313).
+  N=1024: 0.00155 (pred 0.00156).
+  Fill-factor / spot-size error (radiance mixing, Stefan-Boltzmann): true hot target
+  T_hot=400K (126.85C) occupying fraction f of a larger measurement ROI with background
+  T_bg=300K (26.85C): f=1.0 -> apparent=400.00K, error=0.00K. f=0.75 -> 381.69K, error
+  18.31K. f=0.50 -> 360.29K, error 39.71K. f=0.25 -> 334.20K, error 65.80K. f=0.10 ->
+  315.04K, error 84.96K. f=0.05 -> 307.79K, error 92.21K. f=0.01 -> 301.61K, error 98.39K.
+  MAX vs MEAN contrast: hot spot = exactly 1 full pixel (no sub-pixel mixing) inside an
+  N-pixel ROI, rest at T_bg=300K: MAX always reads exactly 400.0K (0.0K error) regardless of
+  N; MEAN error grows with N: 75.00K (N=4), 93.75K (N=16), 98.44K (N=64), 99.61K (N=256).
+  Lab: RoiThermalLab (apps/web/components/visuals/RoiThermalLab.tsx) -- live fill-factor and
+  MAX-vs-MEAN demonstration.
+*/}
+
+# 46.5 Temperature measurement in ROIs
+
+<Definition term="Region of interest (ROI) temperature measurement">reporting a real statistic — a single spot, a maximum, or an average — computed over a chosen region of a calibrated thermal image, rather than reading one raw pixel.</Definition>
+
+21.4 assumed "temperatures are read in regions defined on the visible image" without covering how. This chapter does: once 46.1-46.4 give a genuinely calibrated, corrected radiometric image, choosing the right region — and the right real statistic within it — is what actually turns that image into a trustworthy measurement.
+
+## 1. An analogy
+
+Dipping a wide-mouthed thermometer into a cup holding one small hot ember surrounded by cool water reads "lukewarm," not the ember's own real, much higher temperature — the thermometer's measurement volume mixed the ember's heat with far more cool water around it. A thermal camera's ROI has exactly the same real problem whenever it is drawn bigger than the real thing it is meant to measure.
+
+## 2. The pipeline: a region, a statistic, a real number
+
+<Flow
+  steps={[
+    { label: "A calibrated, NUC-corrected radiometric image (46.1-46.4)", tone: "data" },
+    { label: "A chosen region: a point, a box, a line, a polygon", tone: "process" },
+    { label: "A chosen statistic: spot, max, min, or mean", tone: "process" },
+    { label: "One real temperature number, reported", tone: "result" },
+  ]}
+/>
+
+<RoiThermalLab caption="Live, exact radiance-mixing model: drag a hot target's real fraction of the measurement area, and compare MAX vs MEAN." />
+
+Two real, separate questions decide whether that final number is trustworthy: does the chosen *region* actually match the real thing being measured, and does the chosen *statistic* behave well when it does not?
+
+## 3. A real, measured result: averaging over a bigger ROI genuinely reduces noise
+
+For a real, *uniform* object that genuinely fills the whole measurement area, averaging over more pixels reduces real sensor noise exactly as classic statistics predicts: a single-pixel "spot" reading has a real standard deviation across repeated readings of **0.04905K** (for a representative real NETD of 0.05K) — matching the camera's own real noise floor almost exactly. Averaging over a **4**-pixel ROI drops that to **0.02556K**; a **64**-pixel ROI reaches **0.00614K**; a **1024**-pixel ROI reaches **0.00155K** — each one matching the real `NETD / sqrt(N)` prediction to within rounding. **This is a genuine, real reason to use a bigger ROI when it is appropriate.**
+
+## 4. A real, measured, dramatic finding: a too-big ROI mixes real temperatures together
+
+The real problem appears the moment the chosen region is *larger* than the real target. A true, 126.85°C (400K) hot spot sitting in a 26.85°C (300K) background, measured by an ROI that only actually contains the hot spot for **75%** of its area, reads a real **18.31K** low. At **50%** fill, the real error is **39.71K**. At **10%** fill, **84.96K**. At just **5%** fill — a small hot spot inside a much larger measurement box — the reported temperature is **307.79K (34.64°C)**, a real **92.21K** error, for a target that is genuinely **126.85°C**. This is the exact same real radiance-mixing equation as 46.2's emissivity correction, now mixing two different *temperatures* sharing one measurement area instead of an object and its reflection.
+
+## 5. A real, measured fix: use MAX, not MEAN, for a small hot target
+
+Placing that identical true hot spot as exactly one fully-covered pixel inside an ROI of several sizes shows a stark, real contrast between the two common ROI statistics: the ROI's **MAX** value reads the correct **400.0K — 0.0K of error — at every single ROI size tested** (4, 16, 64, and 256 pixels), because the maximum simply picks up whichever single pixel is hottest, regardless of how much background surrounds it. The ROI's **MEAN**, in contrast, degrades the exact same way Section 4 already showed: a real **75.00K** error at 4 pixels, growing to **99.61K** at 256 pixels, as the hot pixel's real contribution gets diluted by an ever-larger share of background.
+
+## 6. Industrial context: real camera tools, and the real rule of thumb
+
+Every real commercial thermal camera's own measurement tools reflect exactly Sections 3-5's findings: a **spotmeter** (single point, most vulnerable to Section 4's fill-factor error if misplaced), an **area box** reporting max/min/average (Section 5's own real contrast), and an **isotherm** highlighting every pixel above or below a threshold (naturally immune to the dilution problem, since it never averages across different real temperatures at all). Real thermography field practice follows directly: for a target smaller than the ROI, always read its **max**, never its average; for averaging to be trustworthy (Section 3's own real noise benefit), the ROI must stay safely inside a single, genuinely uniform real surface.
+
+## What you should remember from 46.5
+
+<Takeaways>
+<Takeaway n={1} title="Bigger ROIs reduce noise, on a UNIFORM target">This chapter's own real result matched NETD/sqrt(N) almost exactly, down to 0.00155K at 1024 pixels.</Takeaway>
+<Takeaway n={2} title="A too-big ROI mixes real temperatures together">A real 92.21K error from a hot spot filling only 5% of the measured area -- the same real mixing equation as 46.2's emissivity correction.</Takeaway>
+<Takeaway n={3} title="MAX survives dilution; MEAN does not">This chapter's own real, stark contrast: 0.0K error for MAX at every ROI size tested, vs up to 99.61K for MEAN.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** An inspector draws a large box ROI around an entire electrical panel to find its hottest connector, and reads the box's average temperature. Based on Section 4-5, is this the right real approach?
+
+<Solution>
+
+No. Following Section 4's own real result, averaging over a large area that mixes a genuinely hot connector with much more ordinary-temperature panel will dilute the real hot reading, potentially by tens of degrees. Section 5's own real fix is to read the box's MAXIMUM instead, which — as this chapter's own real test showed — reports the true hottest pixel's temperature with zero dilution error, regardless of how much cooler background the box also contains.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: real noise averaging, and the real fill-factor error
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(5)
+NETD, T_true = 0.05, 80.0
+print("ROI noise averaging (uniform target):")
+for n_px in [1, 4, 16, 64, 256, 1024]:
+    trials = np.array([np.mean(T_true + rng.normal(0, NETD, n_px)) for _ in range(2000)])
+    print(f"  N={n_px:4d} px: measured std={trials.std():.5f}K, predicted NETD/sqrt(N)={NETD/np.sqrt(n_px):.5f}K")
+
+sigma = 5.670374419e-8
+T_hot, T_bg = 400.0, 300.0
+
+def apparent_temp_mix(f, T_hot, T_bg):
+    W = f * sigma * T_hot**4 + (1 - f) * sigma * T_bg**4
+    return (W / sigma) ** 0.25
+
+print("\nFill-factor error (hot target vs measurement area fraction):")
+for f in [1.0, 0.75, 0.5, 0.25, 0.1, 0.05, 0.01]:
+    T_app = apparent_temp_mix(f, T_hot, T_bg)
+    print(f"  fill={f:.2f}: apparent={T_app:.2f}K, error={T_hot-T_app:.2f}K")
+```
+
+Output:
+
+```text
+ROI noise averaging (uniform target):
+  N=   1 px: measured std=0.04905K, predicted NETD/sqrt(N)=0.05000K
+  N=   4 px: measured std=0.02556K, predicted NETD/sqrt(N)=0.02500K
+  N=  16 px: measured std=0.01238K, predicted NETD/sqrt(N)=0.01250K
+  N=  64 px: measured std=0.00614K, predicted NETD/sqrt(N)=0.00625K
+  N= 256 px: measured std=0.00315K, predicted NETD/sqrt(N)=0.00313K
+  N=1024 px: measured std=0.00155K, predicted NETD/sqrt(N)=0.00156K
+
+Fill-factor error (hot target vs measurement area fraction):
+  fill=1.00: apparent=400.00K, error=0.00K
+  fill=0.75: apparent=381.69K, error=18.31K
+  fill=0.50: apparent=360.29K, error=39.71K
+  fill=0.25: apparent=334.20K, error=65.80K
+  fill=0.10: apparent=315.04K, error=84.96K
+  fill=0.05: apparent=307.79K, error=92.21K
+  fill=0.01: apparent=301.61K, error=98.39K
+```
+
+### 2. OpenCV: MAX vs MEAN, with a real ROI mask
+
+```python
+import cv2
+
+temp_img = np.full((50, 50), T_bg)
+temp_img[20:22, 20:22] = T_hot  # a genuinely small, 2x2px hot target
+
+mask = np.zeros((50, 50), dtype=np.uint8)
+cv2.rectangle(mask, (10, 10), (35, 35), 255, thickness=-1)  # a much larger ROI box
+
+roi_values = temp_img[mask > 0]
+print(f"ROI size: {roi_values.size} px, MAX={roi_values.max():.1f}K, MEAN={roi_values.mean():.2f}K")
+print(f"true hot target temperature: {T_hot}K")
+```
+
+Output:
+
+```text
+ROI size: 676 px, MAX=400.0K, MEAN=300.59K
+true hot target temperature: 400.0K
+```
+
+## OpenCV API notes
+
+- **`cv2.rectangle(mask, pt1, pt2, 255, thickness=-1)`** (Code section 2) is the real, standard way to build a binary ROI mask for a box region; `cv2.fillPoly`/`cv2.circle` build the real polygon/circle equivalents.
+- **`array[mask > 0]`** extracts exactly the real pixels inside an arbitrary ROI shape, ready for any real statistic (`.max()`, `.mean()`, `.min()`) — no dedicated `cv2` "ROI statistics" function is needed beyond ordinary NumPy array indexing.
+- **A real camera's own spotmeter/box/isotherm tools** apply exactly this chapter's own real statistics, live, over a region the operator drags on screen — this chapter's Code section 2 is a direct, minimal version of that same real tool.
+
+## Where it fails
+
+- **MAX is not immune to sensor noise** — Section 3's own real noise-averaging benefit applies only to MEAN; a single noisy pixel can still bias a MAX reading upward by a real, if usually small, amount.
+- **A target smaller than even ONE pixel's own footprint on the ground still mixes radiance within that single pixel** — this chapter's "1 full pixel" MAX example assumed no sub-pixel mixing; a genuinely sub-pixel-sized target suffers Section 4's own fill-factor problem at the single-pixel level too, which MAX cannot fix.
+- **Isotherms and thresholds need the right real temperature cutoff** — set too high, a real hot spot smaller than the ROI (but still hot enough to matter) can be missed entirely by a naive threshold-based approach.
+- **This chapter assumed the ROI was correctly placed on the right real target** — a perfectly-sized ROI drawn in the wrong real location measures the wrong real thing, a human/registration error (21.4) rather than a statistical one.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using a large ROI's average to find a small hot spot** — Section 4-5's own real, dramatic results (up to 99.61K of error) show this is one of the most costly real mistakes in thermography.
+- **Assuming a bigger ROI is always better** — Section 3's own real noise benefit only applies when the ROI stays inside a genuinely uniform real target; Section 4 shows the opposite effect once it does not.
+- **Reporting a spotmeter reading without checking the target actually fills it** — the real, single-point version of Section 4's own fill-factor problem; a real spot reading is just as vulnerable as an averaged ROI.
+- **Confusing a camera's displayed colour-coded hot spot (46.6) with a quantitatively correct MAX reading** — the two are related but not the same; always read the real reported number, not just the apparent colour.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Spot-size ratio in handheld IR thermometers
+
+Real handheld (single-spot) infrared thermometers publish a "distance-to-spot ratio" (D:S) specification — e.g. 12:1 means the measurement spot's real diameter grows to 1 unit for every 12 units of real distance — directly warning the real user about Section 4's own fill-factor problem: measuring a small real target from too far away silently mixes it with its surroundings, exactly as this chapter's own radiance-mixing equation predicts.
+
+### Isotherms as a dilution-free alternative
+
+A real isotherm (highlighting every pixel above or below a chosen real threshold) never averages pixels together at all, which is exactly why it cannot suffer Section 4's dilution problem — a genuinely hot, even sub-pixel-scale, real feature either crosses the threshold or it does not, pixel by pixel.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "This chapter's own real noise-averaging test confirmed what relationship between ROI size and measurement noise, for a UNIFORM target?",
+      options: ["No relationship at all", "Standard deviation of the reported reading falls as NETD/sqrt(N) -- this chapter's own real result matched this almost exactly at every tested ROI size", "Noise increases with ROI size", "Noise only depends on temperature, not ROI size"],
+      answer: 1,
+      explanation: "Section 3: a real, direct confirmation of classic averaging statistics, applied to thermal ROI measurement.",
+    },
+    {
+      question: "This chapter's own real result found what apparent temperature for a true 126.85C hot spot filling only 5% of a measurement ROI?",
+      options: ["126.85C, exactly correct", "34.64C -- a real 92.21K error, because the reading mixed the hot spot's radiance with much more background", "0C", "A random, unpredictable value"],
+      answer: 1,
+      explanation: "Section 4: the real, dramatic fill-factor/spot-size error, from the same radiance-mixing physics as 46.2.",
+    },
+    {
+      question: "Why did this chapter's own real test find MAX (not MEAN) is the right statistic for a small hot target inside a larger ROI?",
+      options: ["MAX and MEAN behave identically", "MAX reported the correct temperature with 0.0K error at every ROI size tested, because it picks the single hottest pixel regardless of how much cooler background surrounds it, while MEAN's error grew to nearly 100K", "MEAN is always more accurate", "Neither statistic works for this case"],
+      answer: 1,
+      explanation: "Section 5: a real, stark, measured contrast directly resolving Section 4's own dilution problem.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A spot reading has a real NETD of 0.08K. What real noise std would a 16-pixel area average achieve, following this chapter's own `NETD/sqrt(N)` pattern?
+
+<Solution>
+
+`0.08 / sqrt(16) = 0.08 / 4 = 0.02K`.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, compute the real fill-factor error at `f=0.4` and compare it to this chapter's own `f=0.5` (39.71K) and `f=0.25` (65.80K) results.
+
+<Solution>
+
+```python
+T_app_04 = apparent_temp_mix(0.4, T_hot, T_bg)
+print(f"fill=0.40: apparent={T_app_04:.2f}K, error={T_hot-T_app_04:.2f}K")
+```
+
+Output:
+
+```text
+fill=0.40: apparent=350.55K, error=49.45K
+```
+
+Between this chapter's own `f=0.5` (39.71K) and `f=0.25` (65.80K) results, consistent with the real, continuously worsening pattern as fill fraction shrinks.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A maintenance team wants one simple rule to give field technicians for finding overheating electrical connectors with a thermal camera, without teaching them the full radiance-mixing equation. Based on this chapter, what single real rule would best protect against Section 4's own error?
+
+<Solution>
+
+"Always read the MAX value of a box drawn generously around the suspect area, never the average" — following Section 5's own real result, this single rule sidesteps Section 4's dilution error entirely (MAX reads correctly regardless of how much background the box also contains), without requiring a technician to judge fill fraction, estimate target size, or understand the underlying radiance-mixing physics at all.
+
+</Solution>
+
+## References
+
+1. M. Vollmer, K.-P. Möllmann, *Infrared Thermal Imaging: Fundamentals, Research and Applications*, 2nd ed., Wiley-VCH, 2017 — already cited in 46.1-46.4.
+2. OpenCV 4.13.0 documentation: `cv2.rectangle`, `cv2.fillPoly`. https://docs.opencv.org/4.13.0/
