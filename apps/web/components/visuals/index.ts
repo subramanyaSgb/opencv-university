@@ -182,3 +182,4 @@ export { DistortionLab } from "./DistortionLab";
 export { CalibLab } from "./CalibLab";
 export { PnPLab } from "./PnPLab";
 export { PixelToMMLab } from "./PixelToMMLab";
+export { BirdsEyeLab } from "./BirdsEyeLab";

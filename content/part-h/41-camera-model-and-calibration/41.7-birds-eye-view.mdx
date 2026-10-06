@@ -1,0 +1,259 @@
+export const meta = {
+  number: "41.7",
+  title: "Bird's-eye view (ground-plane homography)",
+  minutes: 22,
+  objectives: [
+    "Know that a tilted camera's ground plane maps to the image by a single homography",
+    "Recover any ground point's real-world position from 4 known reference corners",
+    "Build the real top-down, metric rectified view with cv2.warpPerspective",
+    "Know this is 34.5's homography, applied to a new, metric-measurement problem",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 41.7 (Part H, Module 41). 34.5 (Homography) already covers
+  general planar homography estimation via RANSAC/DLT for matching two image VIEWS (feature
+  matching, stitching) -- this chapter reuses that same cv2.findHomography call for a
+  genuinely different purpose: a single, CALIBRATED camera's view of a known ground plane,
+  producing a metric, top-down rectified view. Not a repeat of 34.5's estimation math.
+  Real, verified numbers: a camera tilted 45 degrees down, K=[[800,0,320],[0,800,240],[0,0,1]],
+  looking at 4 known real ground-plane corners (a real 600x800mm rectangle, x in [-300,300]mm,
+  y in [400,1200]mm). Their real image positions: (98.36,448.96), (541.64,448.96),
+  (465.58,651.77), (174.42,651.77) -- confirmed via cv2.projectPoints.
+  cv2.findHomography on these 4 correspondences recovered H; applying it to a HELD-OUT ground
+  point (100, 700, 0)mm -- not one of the 4 corners -- via cv2.perspectiveTransform recovered
+  (99.99996, 699.99994)mm: error ~4e-5 mm, floating-point noise, essentially exact.
+  Verified H = K[r1 r2 t] (dropping the third rotation column, since every ground point has
+  Z=0) matches cv2.projectPoints exactly (diff ~4e-14) for the same points.
+  Lab: BirdsEyeLab (apps/web/components/visuals/BirdsEyeLab.tsx) -- the real H applied live to
+  a clicked image point, showing its exact real-world ground position.
+*/}
+
+# 41.7 Bird's-eye view (ground-plane homography)
+
+<Definition term="Ground-plane homography">the single 3x3 matrix that maps every point on a known, flat ground plane to its exact pixel position in a tilted camera's image — and, inverted, maps any pixel back to its exact real-world ground position.</Definition>
+
+34.5 already covered how to estimate a homography between two image views, for matching and stitching. This chapter reuses the exact same `cv2.findHomography` call for a different real job: one calibrated camera, one known flat ground plane, and a genuine metric measurement — not matching two photos, but turning a tilted view into a true top-down map.
+
+## 1. An analogy
+
+A tilted photograph of a tiled floor makes the far tiles look smaller and squeezed together, even though every real tile is the same size. Knowing the floor is flat and knowing where a few real reference points on it actually are lets you compute exactly how to "un-tilt" the photograph so every tile looks its true, equal size again — a bird's-eye view, built from real geometry, not guesswork.
+
+## 2. Why a ground plane is special: one matrix, not a full 3D model
+
+<Flow
+  steps={[
+    { label: "Every ground point has the same real Z (the plane equation)", tone: "data" },
+    { label: "41.2's full P = K[R|t] simplifies to one 3x3 matrix, H = K[r1 r2 t]", tone: "process" },
+    { label: "H maps ground (X,Y) directly to pixel (u,v), and back", tone: "process" },
+    { label: "No full 3D reconstruction needed -- a 2D problem on a known plane", tone: "result" },
+  ]}
+/>
+
+41.2's general projection needs all of `X, Y, Z`. Restricted to one known flat plane (`Z = 0` in the plane's own coordinates), the third column of the rotation matrix multiplies away entirely, leaving a genuine 3×3 matrix, `H = K [r1, r2, t]` — exactly a homography (34.5), derived here directly from the camera's own real calibration instead of estimated from matched image features.
+
+## 3. A real, exact recovery
+
+<BirdsEyeLab caption="A real ground-plane homography, fit to 4 known reference corners. Click inside the camera-view trapezoid and see the exact real-world ground position, computed live."/>
+
+Four known real ground-plane corners (a real 600×800 mm rectangle) and their real image positions, from a camera tilted 45° down:
+
+| Ground (mm) | Image pixel |
+| --- | --- |
+| (−300, 400) | (98.36, 448.96) |
+| (300, 400) | (541.64, 448.96) |
+| (300, 1200) | (465.58, 651.77) |
+| (−300, 1200) | (174.42, 651.77) |
+
+Fitting `cv2.findHomography` to exactly these 4 correspondences, then applying it to a **held-out** ground point, `(100, 700)` mm — not one of the 4 corners used to fit it — recovered `(99.99996, 699.99994)` mm: an error of about **0.00004 mm**, floating-point noise. Given the real geometry, the recovery is exact, not approximate.
+
+## 4. From "where is this point" to a real rectified image
+
+The same homography, applied to every pixel of the whole image with `cv2.warpPerspective(image, H, (W, H))`, produces the real bird's-eye view directly: a tilted trapezoid of ground becomes a true, undistorted rectangle, with every real distance in the output image proportional to real-world millimetres — exactly what Section 1's analogy described, now built from the real camera model instead of a guess.
+
+## 5. Industrial context: when a ground-plane view earns its place
+
+A single camera watching a flat floor, conveyor surface, or loading dock — for measuring object footprints, tracking position across the floor, or checking lane position — is exactly the case this chapter's method handles in one step, no stereo rig or depth sensor required, as long as the camera is genuinely calibrated (41.4) and the ground genuinely flat (41.6's own caveat about non-planar surfaces applies identically here). A scene with real 3D structure above the ground plane (stacked boxes, people standing up) is not correctly handled by this single-plane homography — only points actually on the known plane map correctly; anything above it projects to the wrong ground position.
+
+## What you should remember from 41.7
+
+<Takeaways>
+<Takeaway n={1} title="One plane, one matrix">A flat ground plane turns the full 3D camera model into a single 3x3 homography.</Takeaway>
+<Takeaway n={2} title="This chapter's own real result">A held-out point recovered to ~4e-5 mm from just 4 known reference corners.</Takeaway>
+<Takeaway n={3} title="Only the plane itself maps correctly">Anything above the ground plane projects to the wrong position under this method.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A ground-plane homography is fit using 4 known floor corners. A person is standing on the floor, 1.7m tall. Does the homography give their feet's correct ground position, their head's, both, or neither?
+
+<Solution>
+
+**Only their feet** — the feet are on the real ground plane the homography was built for; the head is 1.7m above it, and Section 5's own caveat applies: only points actually on the known plane map correctly under this method.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the ground-plane homography formula, from scratch
+
+```python
+import numpy as np
+
+K = np.array([[800.0, 0, 320], [0, 800.0, 240], [0, 0, 1]])
+pitch = np.deg2rad(45)
+R = np.array([[1, 0, 0], [0, np.cos(pitch), -np.sin(pitch)], [0, np.sin(pitch), np.cos(pitch)]])
+t = np.array([0.0, 0.0, 800.0])
+
+H = K @ np.column_stack([R[:, 0], R[:, 1], t])
+print("H =\n", np.round(H, 4))
+```
+
+Output:
+
+```text
+H =
+ [[8.000000e+02 2.262742e+02 2.560000e+05]
+ [0.000000e+00 7.353911e+02 1.920000e+05]
+ [0.000000e+00 7.071000e-01 8.000000e+02]]
+```
+
+### 2. OpenCV: fitting H from 4 real correspondences, and exact recovery
+
+```python
+import cv2
+
+ground_corners = np.array([[-300, 400, 0], [300, 400, 0], [300, 1200, 0], [-300, 1200, 0]], np.float64)
+rvec = cv2.Rodrigues(R)[0]
+img_corners, _ = cv2.projectPoints(ground_corners, rvec, t, K, None)
+img_corners = img_corners.reshape(-1, 2).astype(np.float32)
+ground_xy = ground_corners[:, :2].astype(np.float32)
+
+H_fit, _ = cv2.findHomography(img_corners, ground_xy)
+test_ground = np.array([[100.0, 700.0, 0.0]])
+test_img, _ = cv2.projectPoints(test_ground, rvec, t, K, None)
+recovered = cv2.perspectiveTransform(test_img.reshape(1, 1, 2).astype(np.float32), H_fit)
+print("true ground xy:", test_ground[0, :2])
+print("recovered ground xy:", recovered.reshape(-1))
+```
+
+Output:
+
+```text
+true ground xy: [100. 700.]
+recovered ground xy: [ 99.99996 699.99994]
+```
+
+## OpenCV API notes
+
+- **`cv2.findHomography(srcPoints, dstPoints)`** (34.5): the same call used here, just between 4 real ground-plane points and their image positions, instead of matched features between two photos.
+- **`cv2.perspectiveTransform(points, H)`**: applies a homography to a list of 2D points directly — the exact operation this chapter's real recovery used, handling the homogeneous division internally.
+- **`cv2.warpPerspective(image, H, dsize)`**: applies the same homography to every pixel of a whole image, producing the real rectified bird's-eye view (Section 4) in one call.
+- **This chapter's `H = K[r1, r2, t]` formula is specific to a flat ground plane** — a general `cv2.findHomography` call (as in 34.5, or Code section 2 here) does not need this derivation at all; it is shown here only to connect the ground-plane case back to 41.1-41.2's own camera model explicitly.
+
+## Where it fails
+
+- **Anything not actually on the known ground plane maps to the wrong position** (Section 5, Mini exercise) — a real, structural limitation, not a precision issue; no amount of better calibration fixes a point that simply is not on the plane.
+- **A genuinely non-flat "ground"** (a ramp, uneven terrain) has no single correct homography at all — 41.6's single-plane caveat applies identically here.
+- **Reference corners that are not accurately, independently known** bias the whole rectified view — Section 3's exact recovery assumed the 4 reference corners' real-world positions were themselves exactly correct.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Applying a ground-plane homography to an object standing above the ground** (a box, a person) and expecting its correct real-world footprint position — Mini exercise: only the part actually touching the plane is correctly mapped.
+- **Confusing this chapter's `H = K[r1, r2, t]` derivation with a general-purpose homography estimate** — real systems normally just call `cv2.findHomography` directly on known correspondences (Code section 2), without needing the camera's full K/R/t first.
+- **Assuming 4 reference points anywhere in the scene work equally well** — as with 41.5's PnP, points spread widely across the real plane of interest give a more reliable, better-conditioned homography than 4 points clustered close together.
+- **Forgetting that `warpPerspective`'s output size and homography must agree in units/scale** — mixing a millimetre-scale homography with a pixel-scale output size without converting produces a rectified image that is either tiny or absurdly large.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Inverse Perspective Mapping (IPM) in real systems
+
+This exact technique — a known ground plane, a single calibrated camera, a homography-based top-down rectification — is widely used in automotive advanced driver-assistance systems (surround-view parking cameras) and in warehouse/logistics robotics for lane and floor-marking detection, precisely because it turns a hard perspective problem into simple, flat 2D geometry once the ground plane is known.
+
+### Relationship to 41.5's PnP
+
+If the 4 real reference corners' ground-plane positions are known but the camera's pose is not, `cv2.solvePnP` (41.5) on those same 4 points recovers `R, t` directly, from which Section 2's `H = K[r1, r2, t]` can be built — the two methods (direct homography fit, or PnP then derive H) use the identical real information, just solved in a different order depending on what is already known.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why does a flat ground plane let the full 3D camera model collapse into a single 3x3 homography?",
+      options: ["It doesn't -- a full 3D model is always needed", "Every ground point shares the same Z in the plane's own coordinates, which makes the third rotation column multiply away entirely", "Homographies only work for ground planes, never for other surfaces", "K must be the identity matrix for this to work"],
+      answer: 1,
+      explanation: "Section 2: H = K[r1, r2, t] -- the third column of R drops out because Z=0 for every ground point.",
+    },
+    {
+      question: "In this chapter's own real test, how accurately was a held-out ground point's position recovered from just 4 known reference corners?",
+      options: ["Not accurately at all", "To about 0.00004 mm -- essentially exact", "Only to the nearest 10mm", "It required more than 4 points to work"],
+      answer: 1,
+      explanation: "Section 3: a real, measured, floating-point-noise-level recovery.",
+    },
+    {
+      question: "What happens if you apply a ground-plane homography to a point that is 1 metre above the actual ground plane?",
+      options: ["It still gives the correct 3D position", "It gives the wrong ground position -- only points actually on the known plane map correctly", "cv2 automatically detects and corrects for the height", "The homography becomes undefined"],
+      answer: 1,
+      explanation: "Section 5/Mini exercise: a real, structural limitation of the single-plane method.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Using Section 2's formula, if a camera's pitch is 0 (looking straight down the Z axis, no tilt), what does the second row of H simplify to?
+
+<Solution>
+
+With `pitch = 0`, `R` becomes the identity matrix, so `r1 = (1,0,0)`, `r2 = (0,1,0)`, and `H = K[r1, r2, t]` works out to `[[fx, 0, cx.Z], [0, fy, cy.Z], [0, 0, Z]]` (where `Z` is the camera's height, `t`'s third component). Applying it to a ground point `(X, Y, 1)` and dividing through by the third, `Z`, row gives `u = fx.X/Z + cx`, `v = fy.Y/Z + cy` — exactly 41.1's original pinhole formula, since with no tilt there is no rotation left to mix the axes together.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, test recovery of a second held-out point, (-200, 900, 0)mm, and confirm it is also recovered essentially exactly.
+
+<Solution>
+
+```python
+test_ground2 = np.array([[-200.0, 900.0, 0.0]])
+test_img2, _ = cv2.projectPoints(test_ground2, rvec, t, K, None)
+recovered2 = cv2.perspectiveTransform(test_img2.reshape(1, 1, 2).astype(np.float32), H_fit)
+print("true:", test_ground2[0, :2], " recovered:", recovered2.reshape(-1))
+```
+
+Output:
+
+```text
+true: [-200.  900.]  recovered: [-200.      899.9999]
+```
+
+Confirming Section 3's result generalises to a second, independently-chosen held-out point.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A warehouse wants to track forklifts' real floor positions using one overhead camera and this chapter's method. A colleague suggests tracking the top of each forklift's warning light instead of its wheels, "since it's easier to see." Based on Section 5, is that a good idea?
+
+<Solution>
+
+No — the warning light sits well above the actual floor, not on the known ground plane the homography was built for (Section 5, Mini exercise's identical lesson about a person's head vs feet). Tracking the light's pixel position through the ground-plane homography would report a real, systematically wrong floor position, growing with the light's actual height above the floor. The wheels (or any point that genuinely touches the floor) are the correct choice, even if a different image feature might be easier to detect reliably.
+
+</Solution>
+
+## References
+
+1. 34.5 Homography (this course) — the general homography estimation this chapter reuses for a new purpose.
+2. R. Hartley, A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004: Chapter 8 (planar homographies) — already cited in 41.1-41.2, 41.5.
+3. OpenCV 4.13.0 documentation: `cv2.findHomography`, `cv2.perspectiveTransform`, `cv2.warpPerspective`. https://docs.opencv.org/4.13.0/
