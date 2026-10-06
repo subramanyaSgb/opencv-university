@@ -1,0 +1,312 @@
+export const meta = {
+  number: "43.3",
+  title: "SLAM basics",
+  minutes: 24,
+  objectives: [
+    "Chain 43.2's visual odometry around a real closed loop and measure the real gap it leaves at the loop's own end",
+    "Combine 35.6's place recognition with that measured gap into a real, simple loop-closure correction",
+    "Measure, for real, how much (and how little) a simple correction actually helps",
+    "Know what a real production SLAM system adds beyond this chapter's simplified fix",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 43.3 (Part H, Module 43; closes the module). Builds directly on
+  43.2's chained cv2.recoverPose visual odometry and delivers on 35.6's own forward pointer
+  ("Loop closure in visual SLAM (43.3): recognising 'I have been at this place before' from a
+  BoVW-style comparison"). SLAM = VO (43.2) + place recognition (35.6) + a correction step that
+  uses a recognised revisit to fix accumulated drift.
+  All numbers real, verified via scripts/gen_slam_data.py -> apps/web/public/data/slam-data.json.
+  Setup: K=[[800,0,320],[0,800,240],[0,0,1]], 1500 world points scattered in a
+  [-40,40]x[-8,8]x[-40,40] box, camera drives a smooth closed circular loop: 60 steps of 1.0
+  unit forward + 6 degree yaw per step (2*pi/60), closing the loop exactly (true gap
+  2.7e-14, floating point noise). 0.5px pixel noise on every match. seed=13.
+  Real per-step cheirality inliers: min 47, mean 116.73, max 193 (of up to 1500 points) --
+  healthy throughout, no degenerate steps (unlike 43.1 Section 5's/43.2's narrow-baseline or
+  pure-rotation failures).
+  Chained VO (general rotation+translation case, oracle per-step scale as in 43.2): real loop
+  closure gap (estimated end position vs the known-identical start) = 0.8114 units, against a
+  60-unit true circumference (~1.35%).
+  Real, simple loop-closure correction: once place recognition (35.6) confirms the last pose
+  revisits the first, linearly redistribute the known 0.8114-unit closing error across all 60
+  poses (closing_error * i/60 subtracted from pose i). Real result: mean position error
+  0.3503 -> 0.1361 units (61.1% reduction), max error 0.8407 -> 0.2925 units (65.2%
+  reduction) -- genuine improvement, not perfect (some individual poses get slightly WORSE,
+  e.g. pose 5's error rose from 0.0442 to 0.0912), because linear redistribution ignores each
+  step's own real uncertainty, unlike full pose-graph optimisation.
+  Lab: SlamLab (apps/web/components/visuals/SlamLab.tsx) -- true vs raw vs corrected path,
+  top-down.
+*/}
+
+# 43.3 SLAM basics
+
+<Definition term="SLAM (Simultaneous Localization And Mapping)">building a map of an unknown environment and figuring out where you are in it, at the same time, using the same sensor for both — and, critically, using the map itself to catch and correct the tracking errors that 43.2's visual odometry alone cannot.</Definition>
+
+43.2's visual odometry chains pose estimates frame by frame and genuinely drifts — Section 3 of that chapter measured it directly. SLAM's one real, new idea is this: if the camera ever comes back to a place it has already mapped, *recognising* that return (35.6's own forward pointer to this chapter) gives a second, independent measurement of where it actually is — and that measurement can be used to correct the accumulated drift, not just flag it.
+
+## 1. An analogy
+
+A hiker using only step-counting (43.2's dead reckoning) drifts further from the truth with every mile. But if the trail loops back past a landmark the hiker recognises — a distinctive rock, a junction — they instantly know exactly how far their step count has drifted, and can correct their whole remembered path, not just their current position. That recognised landmark is doing exactly what 35.6's place recognition does for a real SLAM system.
+
+## 2. The pipeline: VO, plus recognition, plus correction
+
+<Flow
+  steps={[
+    { label: "43.2's chained VO: a drifting estimated path", tone: "data" },
+    { label: "35.6 BoVW: 'this view matches a place I've already mapped'", tone: "process" },
+    { label: "A known constraint: that revisited pose should coincide with the earlier one", tone: "process" },
+    { label: "Redistribute the measured gap across the path", tone: "result" },
+  ]}
+/>
+
+Nothing about pose estimation itself is new here — every single frame-to-frame step is 43.2's own `cv2.findEssentialMat` + `cv2.recoverPose` chain. What SLAM adds is the second and third boxes: recognising a revisit (35.6's bag-of-visual-words histogram comparison, applied to "does this frame look like a frame I saw many steps ago?" instead of "does this frame look like item X in a database?"), and then actually using that recognition to fix the path, not just to note it.
+
+## 3. A real, measured result: the gap a closed loop leaves behind
+
+<SlamLab caption="Real chained cv2.recoverPose visual odometry around a closed 60-step circular loop, before and after a real, simple loop-closure correction." />
+
+A synthetic camera drives a smooth circular loop — 60 steps, each 1 unit forward plus a 6° turn, 0.5 px pixel noise on every match — closing back to within floating-point noise of its own starting point by construction. Running 43.2's chained VO around this *entire* loop (healthy tracking throughout: 47 to 193 matched inliers per step, never degenerate) still lands the final estimated position **0.8114 units** away from the known-identical starting position — a real, measured **loop closure gap**, directly caused by the exact same per-step drift 43.2 Section 3 already found, just accumulated over a full return trip instead of a one-way path.
+
+## 4. A real, simple correction, and its real limits
+
+The loop closure gap in Section 3 is not just an error to report — it is new, *usable* information: place recognition (35.6) has told this system that the path's last pose and its first pose are the *same real place*, so whatever gap exists between them must be pure accumulated error. Redistributing that known **0.8114-unit** gap linearly across all 60 poses (subtracting a growing fraction of it from each one) drops the real mean position error across the whole path from **0.3503 to 0.1361 units** — a genuine **61%** reduction — and the max error from **0.8407 to 0.2925 units** (**65%**).
+
+This real improvement is not a perfect fix: a few individual poses actually get *slightly worse* after correction (this chapter's own real example: pose 5's error rose from 0.0442 to 0.0912 units), because a simple linear split spreads the gap evenly regardless of which specific steps were actually noisiest. A real production SLAM system instead runs **pose-graph optimisation** (Go deeper), which weighs each step by its own real uncertainty rather than splitting the error evenly.
+
+## 5. Industrial context: when this closes the gap VO alone cannot
+
+A warehouse AMR (autonomous mobile robot) or a cleaning robot that repeatedly covers the same floor is exactly 43.2 Section 5's own named use case for sensor fusion — except here the "second sensor" is the robot's *own* camera, recognising a previously-mapped spot instead of needing a separate IMU or wheel encoder at all. This is why visual SLAM (not just VO) is the real standard in indoor robotics and AR headsets that repeatedly revisit the same rooms: the environment itself supplies the correction, for free, every time the path crosses itself.
+
+## What you should remember from 43.3
+
+<Takeaways>
+<Takeaway n={1} title="SLAM = VO + recognition + correction">No new pose-estimation machinery; 43.2's own chained recoverPose, plus 35.6's place recognition, plus a real use for the gap it reveals.</Takeaway>
+<Takeaway n={2} title="A closed loop measures its own drift">This chapter's own real result: a 60-unit loop left an exact, real 0.81-unit gap at closure -- a free, direct measurement of accumulated VO error.</Takeaway>
+<Takeaway n={3} title="A simple correction helps a lot, but not perfectly">Real 61% mean-error reduction here, with a few individual poses genuinely worse off -- full pose-graph optimisation (Go deeper) fixes that remaining gap.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A robot's VO leaves a real loop closure gap of 2.0 metres after a 100-metre loop. Following this chapter's own pattern, is simply discarding that 2.0 m and continuing to trust the raw VO path a good idea?
+
+<Solution>
+
+No. The 2.0 m gap is a real, direct measurement of exactly how much the path has drifted — exactly the free information Section 4 used to cut error by 61% in this chapter's own test. Throwing it away discards a correction that costs nothing extra to compute once the revisit is recognised.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: a real closed loop, verified to close exactly
+
+```python
+import numpy as np
+import cv2
+
+K = np.array([[800.0, 0, 320], [0, 800.0, 240], [0, 0, 1]])
+NUM_STEPS, STEP_LEN = 60, 1.0
+DELTA_YAW = 2 * np.pi / NUM_STEPS  # 6 degrees/step -> exactly one full turn after 60 steps
+
+poses_true = []
+R_cur, C_cur = np.eye(3), np.array([0.0, 0.0, 0.0])
+poses_true.append((R_cur.copy(), C_cur.copy()))
+for _ in range(NUM_STEPS):
+    world_dir = R_cur.T @ np.array([0.0, 0.0, 1.0])  # camera's forward axis, in world coords
+    C_cur = C_cur + world_dir * STEP_LEN
+    yaw = cv2.Rodrigues(np.array([0.0, DELTA_YAW, 0.0]))[0]
+    R_cur = yaw @ R_cur
+    poses_true.append((R_cur.copy(), C_cur.copy()))
+
+print("true start:", poses_true[0][1], " true end:", poses_true[-1][1])
+print("true loop closure gap:", np.linalg.norm(poses_true[-1][1] - poses_true[0][1]))
+```
+
+Output:
+
+```text
+true start: [0. 0. 0.]  true end: [-2.60347299e-14  0.00000000e+00 -6.99440506e-15]
+true loop closure gap: 2.6957909126472033e-14
+```
+
+A real, geometrically closed loop: 60 steps of exactly 6° each turn exactly 360°, so the path returns to its own start to within floating-point noise. Any *measured* (estimated) gap at the end of VO around this same path (Code section 2) is therefore pure accumulated error, with nothing left to blame on the path's own geometry.
+
+### 2. OpenCV: the real chained result, and the real correction
+
+```python
+rng = np.random.default_rng(13)
+pts3d = rng.uniform(low=[-40, -8, -40], high=[40, 8, 40], size=(1500, 3))
+
+def project(pts, R, t):
+    rvec, _ = cv2.Rodrigues(R)
+    img, _ = cv2.projectPoints(pts, rvec, t, K, None)
+    return img.reshape(-1, 2)
+
+def pts_in_frame(i):
+    R, C = poses_true[i]
+    t = -R @ C.reshape(3, 1)
+    pts2d = project(pts3d, R, t)
+    Pc = (R @ pts3d.T + t).T
+    valid = (Pc[:, 2] > 0.5) & (pts2d[:, 0] > 0) & (pts2d[:, 0] < 640) & (pts2d[:, 1] > 0) & (pts2d[:, 1] < 480)
+    return pts2d + rng.normal(0, 0.5, pts2d.shape), valid
+
+R_accum, C_est = np.eye(3), np.array([0.0, 0.0, 0.0])
+est_positions, inliers = [C_est.copy()], []
+for i in range(NUM_STEPS):
+    pts_a, va = pts_in_frame(i)
+    pts_b, vb = pts_in_frame(i + 1)
+    valid = va & vb
+    pa, pb = pts_a[valid], pts_b[valid]
+    E, _ = cv2.findEssentialMat(pa, pb, K, method=cv2.RANSAC, prob=0.999, threshold=1.0)
+    n_in, R_rel, t_rel, _ = cv2.recoverPose(E, pa, pb, K)
+    inliers.append(int(n_in))
+    true_step = np.linalg.norm(poses_true[i + 1][1] - poses_true[i][1])
+    R_next = R_rel @ R_accum
+    world_step_dir = -(R_next.T @ t_rel.ravel())
+    C_est = C_est + (world_step_dir / np.linalg.norm(world_step_dir)) * true_step
+    R_accum = R_next
+    est_positions.append(C_est.copy())
+
+est_positions = np.array(est_positions)
+true_positions = np.array([p[1] for p in poses_true])
+err = np.linalg.norm(est_positions - true_positions, axis=1)
+gap = np.linalg.norm(est_positions[-1] - est_positions[0])
+print(f"inliers/step: min={min(inliers)} mean={np.mean(inliers):.2f} max={max(inliers)}")
+print(f"loop closure gap: {gap:.4f} units")
+print(f"mean error before correction: {err.mean():.4f}, max: {err.max():.4f}")
+
+closing_error = est_positions[-1] - est_positions[0]
+corrected = np.array([est_positions[i] - closing_error * (i / NUM_STEPS) for i in range(NUM_STEPS + 1)])
+err2 = np.linalg.norm(corrected - true_positions, axis=1)
+print(f"mean error after correction:  {err2.mean():.4f}, max: {err2.max():.4f}")
+```
+
+Output:
+
+```text
+inliers/step: min=47 mean=116.73 max=193
+loop closure gap: 0.8114 units
+mean error before correction: 0.3503, max: 0.8407
+mean error after correction:  0.1361, max: 0.2925
+```
+
+## OpenCV API notes
+
+- **No single `cv2` call performs loop closure or pose-graph optimisation** — this chapter's correction (Code section 2's last block) is plain NumPy, built from 43.2's own `cv2.recoverPose` chain plus a known constraint. OpenCV's contrib modules do not ship a SLAM back end; real systems use a dedicated library (g2o, GTSAM, Ceres — Go deeper).
+- **`cv2.recoverPose`'s general (rotating) case needs the accumulated rotation applied before adding a step** — `R_next = R_rel @ R_accum`, then `world_step_dir = -(R_next.T @ t_rel)` (Code section 2) — the real extension 43.2's own OpenCV API notes flagged as left for later; this chapter delivers it.
+- **Place recognition itself reuses 35.6's exact `cv2.BOWImgDescriptorExtractor` machinery unchanged** — comparing the current frame's descriptor histogram against every previously stored keyframe's histogram, exactly as 35.6 compared a query image against a database, just with "the database" being the path's own history.
+
+## Where it fails
+
+- **A loop that is never actually closed gets no correction at all** — a one-way inspection path, or a robot that never returns anywhere, leaves 43.2's own real, growing drift with nothing to fix it; SLAM's correction only fires when a revisit is both real and recognised.
+- **A false positive in place recognition corrupts the map** — if 35.6's BoVW comparison wrongly matches two genuinely different places, Section 4's correction step applies a completely wrong constraint, actively making the path worse rather than better.
+- **Linear redistribution is a real simplification, not the real fix** — Section 4's own result showed individual poses getting worse, not just better; a long path with many loops needs full pose-graph optimisation to distribute corrections according to each step's own real uncertainty.
+- **This chapter's loop used healthy tracking throughout (47-193 inliers every step)** — a real path that hits 43.1 Section 5's own narrow-baseline or pure-rotation failure partway around breaks the whole chain before any loop closure has a chance to fix it.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Treating VO drift as something to merely monitor rather than correct** — Section 4's own real 61% error reduction came from actually *using* a detected loop closure, not just logging it.
+- **Trusting a recognised revisit without any verification** — a real system should check the recognised match geometrically (an essential-matrix/inlier check, 43.1's own cheirality test) before applying a correction based on it, exactly to catch the false-positive failure above.
+- **Expecting a simple correction to be exact everywhere** — Section 4's own real result (some poses worse, most much better) is the honest, measured behaviour of a linear fix, not a sign that something is broken.
+- **Forgetting the general rotation case when chaining VO** — reusing 43.2's pure-translation accumulation on a path that also turns silently gives a wrong world-frame step direction; Code section 2's `R_next.T @ t_rel` handles this correctly.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Pose-graph optimisation
+
+A real SLAM back end represents every estimated pose as a node and every frame-to-frame (or loop-closure) measurement as an edge with its own real uncertainty, then jointly adjusts *all* poses to best satisfy *all* edges at once — not just the loop-closing one — using a nonlinear least-squares solver (g2o: Kümmerle et al., "g2o: A General Framework for Graph Optimization," ICRA 2011; GTSAM: Dellaert, "Factor Graphs and GTSAM," 2012). This is the real, general version of Section 4's own linear redistribution, and it is exactly what fixes that section's own "some poses get worse" real limitation.
+
+### Full SLAM vs this module's three chapters
+
+43.1 (structure from motion) solves the *offline, every-pair-at-once* version of this problem; 43.2 (visual odometry) solves the *online, one-direction* version; this chapter's loop closure is the one real ingredient that turns 43.2 into full SLAM. Production systems (ORB-SLAM: Mur-Artal, Montiel, Tardós, "ORB-SLAM: A Versatile and Accurate Monocular SLAM System," IEEE Transactions on Robotics, 2015) combine all three: real-time tracking (43.2), periodic local bundle adjustment (43.1's Go deeper), and loop closure (this chapter) in one running system.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What real, new ingredient does SLAM add on top of 43.2's visual odometry?",
+      options: ["A completely different pose-estimation algorithm", "Recognising a revisited place (35.6) and using that recognition to correct accumulated drift", "A requirement for a stereo camera", "Nothing -- they are the same thing"],
+      answer: 1,
+      explanation: "Section 2: every pose-estimation step is still 43.2's own recoverPose chain; recognition and correction are what's new.",
+    },
+    {
+      question: "This chapter's own real closed-loop test found what loop closure gap after chaining VO around the entire 60-unit loop?",
+      options: ["Exactly 0, VO is perfect on a closed loop", "A real, measured 0.8114 units -- direct, accumulated drift, the same real effect as 43.2 Section 3's", "60 units", "A gap too small to ever matter"],
+      answer: 1,
+      explanation: "Section 3: the real loop closure gap is a direct, free measurement of 43.2's own drift, now accumulated over the full loop.",
+    },
+    {
+      question: "After this chapter's own real, simple loop-closure correction (linear redistribution), what happened to mean position error across the whole path?",
+      options: ["It got worse everywhere", "It dropped from 0.3503 to 0.1361 units (61%), though a few individual poses got slightly worse", "It became exactly zero everywhere", "Nothing changed"],
+      answer: 1,
+      explanation: "Section 4: a real, substantial improvement, but not a perfect one -- full pose-graph optimisation (Go deeper) is the real, general fix.",
+    },
+    {
+      question: "What does a real production SLAM back end (pose-graph optimisation) do that this chapter's linear redistribution does not?",
+      options: ["Nothing extra", "Weighs each step's correction by its own real uncertainty, instead of splitting the known gap evenly across every pose", "Avoid needing cv2.recoverPose entirely", "Require a different camera model"],
+      answer: 1,
+      explanation: "Go deeper: g2o/GTSAM-style optimisation is the general version of this chapter's own simplified, evenly-split correction.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A robot's loop closure gap is measured at 1.2 m after a loop with 40 recorded poses. Using this chapter's own linear redistribution formula, how much correction (as a fraction of the total gap) is applied to pose 10, and to pose 30?
+
+<Solution>
+
+Fraction applied to pose `i` is `i / 40`. Pose 10: `10/40 = 0.25` → `0.25 x 1.2 m = 0.3 m` corrected. Pose 30: `30/40 = 0.75` → `0.75 x 1.2 m = 0.9 m` corrected.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, recompute the mean and max error after correction using a *quadratic* redistribution (`(i / NUM_STEPS) ** 2` instead of `i / NUM_STEPS`) and compare to this chapter's own linear result (mean 0.1361, max 0.2925).
+
+<Solution>
+
+```python
+corrected_quad = np.array([
+    est_positions[i] - closing_error * (i / NUM_STEPS) ** 2 for i in range(NUM_STEPS + 1)
+])
+err_quad = np.linalg.norm(corrected_quad - true_positions, axis=1)
+print(f"mean error, quadratic redistribution: {err_quad.mean():.4f}, max: {err_quad.max():.4f}")
+```
+
+Output:
+
+```text
+mean error, quadratic redistribution: 0.1215, max: 0.3138
+```
+
+A mixed real result against this chapter's own linear one: slightly *better* on mean error (0.1215 vs 0.1361) but slightly *worse* on max error (0.3138 vs 0.2925) — the quadratic schedule under-corrects the early poses (leaving a larger worst-case error there) while over-correcting later ones enough to pull the average down. Neither simple schedule is clearly best everywhere; this real trade-off is exactly why a production system (Go deeper) solves for the correction shape instead of guessing one.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A delivery robot's SLAM system recognises a "loop closure" against a place it has actually never visited before (a false positive from 35.6's place recognition, caused by two visually similar hallways). Based on Section 4 and "Where it fails," what happens if the system applies its usual correction anyway?
+
+<Solution>
+
+Following Section 4's own method, the correction step would distribute a "closing error" computed from two poses that are not actually the same real place — a completely wrong constraint. Since the correction actively moves every pose along the path (not just the misidentified ones), this would make the map actively *worse*, not just fail to improve it, exactly as "Where it fails" describes. The real fix is to geometrically verify a recognised match (an inlier/cheirality check, as in 43.1) before trusting it enough to correct the whole path.
+
+</Solution>
+
+## References
+
+1. R. Kümmerle, G. Grisetti, H. Strasdat, K. Konolige, W. Burgard, "g2o: A General Framework for Graph Optimization," *IEEE International Conference on Robotics and Automation (ICRA)*, 2011.
+2. F. Dellaert, "Factor Graphs and GTSAM: A Hands-on Introduction," Georgia Tech Technical Report, 2012.
+3. R. Mur-Artal, J. M. M. Montiel, J. D. Tardós, "ORB-SLAM: A Versatile and Accurate Monocular SLAM System," *IEEE Transactions on Robotics*, 31(5), 2015.
+4. OpenCV 4.13.0 documentation: `cv2.findEssentialMat`, `cv2.recoverPose`, `cv2.BOWImgDescriptorExtractor` (already cited in 35.6). https://docs.opencv.org/4.13.0/
