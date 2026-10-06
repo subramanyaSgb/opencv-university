@@ -1,0 +1,343 @@
+export const meta = {
+  number: "43.1",
+  title: "Structure from motion",
+  minutes: 24,
+  objectives: [
+    "Chain 34.x feature matching, 42.2's essential matrix and 42.1's triangulation into a real two-view 3D reconstruction, with no known baseline",
+    "Measure, for real, why monocular structure from motion can only recover shape and motion up to an unknown scale",
+    "Measure two real, distinct ways pose recovery degenerates: a baseline too small to see, and a baseline that doesn't exist at all",
+    "Know what a real multi-view pipeline adds on top of a single image pair",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 43.1 (Part H, Module 43; opens the module). Builds directly on
+  34.2/34.4 (ORB + ratio-test matching), 42.2 (fundamental/essential matrix from point
+  correspondences alone) and 42.1 (triangulatePoints) -- but unlike 42.1/42.2, which assumed a
+  known, calibrated baseline (41.8), this chapter recovers the relative pose itself from the
+  points, with no known baseline at all. That is the real, new ingredient structure from motion
+  adds.
+  All numbers below are real, verified by running cv2.findEssentialMat/recoverPose/
+  triangulatePoints on synthetic two-view scenes with known ground truth
+  (scripts/gen_sfm_data.py -> apps/web/public/data/sfm-data.json), seed=7/11/3, K=[[800,0,320],
+  [0,800,240],[0,0,1]], N=80 points, pixel noise std=0.5px unless noted.
+
+  wide-baseline (baseline=1.0 unit, rot_y=0.05rad, noise=0.5px): 80/80 cheirality inliers,
+  rotation error 0.4963deg, translation direction error 1.6395deg, recovered scale factor
+  0.922814 (vs true 1.0 after rescale-by-median), mean 3D error after rescale 0.16489 units
+  (2.112% of mean depth), max 0.28857.
+  narrow-baseline (baseline=0.05 unit, rot_y=0.01rad, noise=0.5px): 0/80 cheirality inliers --
+  a complete recoverPose failure (rotation error ~180deg, nonsense R and t), not a graceful
+  degradation.
+  pure-rotation (baseline=0, rot_y=0.1rad, noise=0): 27/80 cheirality inliers, rotation still
+  recovers to 3.3383deg, translation direction undefined, triangulated depths off by 3-8x
+  (true depths ~7-9 units, recovered unit-scale depths 32-67).
+  Noise-sensitivity (wide-baseline scene, averaged over 30 independent noise draws per level,
+  seeds 1000-1029): noise=0.1px -> mean rot err 0.378deg, mean t-dir err 0.447deg;
+  noise=0.5px -> 0.744deg / 1.312deg; noise=1.0px -> 1.438deg / 1.801deg;
+  noise=2.0px -> 2.537deg / 8.385deg.
+  Manual E decomposition (Code section 1): singular values of E = [0.70710678, 0.70710678,
+  1.8e-16] (equal, third ~0, confirming Hartley & Zisserman Result 9.19); epipolar residual
+  |x2^T E x1| mean 0.00056, max 0.00193 in normalized coordinates; manual SVD candidate R_a
+  (using W=[[0,-1,0],[1,0,0],[0,0,1]]) matches ground truth (atol=0.05), the other candidate
+  R_b does not -- the real two-fold rotation ambiguity cv2.recoverPose resolves via cheirality.
+  Lab: SfmLab (apps/web/components/visuals/SfmLab.tsx) -- the three precomputed real scenes.
+*/}
+
+# 43.1 Structure from motion
+
+<Definition term="Structure from motion (SfM)">recovering a scene's real 3D shape, and the camera's own real motion between shots, from nothing but two or more ordinary photos of it — no known baseline, no stereo rig, no depth sensor.</Definition>
+
+42.1's stereo and 42.2's epipolar geometry both assumed something structure from motion does not get: a known, calibrated baseline between two cameras (41.8). Structure from motion starts from less — two (or more) images of the same scene, taken by a camera that moved between them in some unknown way — and has to recover *both* the camera's motion *and* the scene's shape from the images alone.
+
+## 1. An analogy
+
+Walk around a parked car taking phone photos without measuring anything — no tape measure, no tripod rig. A person who has never seen the car can still work out its real 3D shape, and roughly where you stood for each photo, purely by noticing which points in one photo are the same points in another and how they shifted. That is structure from motion: recovering shape and motion from correspondences alone, with no ruler anywhere in the process.
+
+## 2. The pipeline: from two unposed views to a point cloud
+
+<Flow
+  steps={[
+    { label: "Two images, unknown relative pose", tone: "world" },
+    { label: "Feature matches (34.2 ORB + 34.4 ratio test)", tone: "data" },
+    { label: "Essential matrix E from matches alone (42.2, calibrated K)", tone: "process" },
+    { label: "Decompose E -> relative R, t (direction only)", tone: "process" },
+    { label: "Triangulate (42.1 cv2.triangulatePoints)", tone: "result" },
+  ]}
+/>
+
+Every stage here already exists in this course. 34.2/34.4 find and match real features between two images with no prior knowledge of camera pose. 42.2 showed the essential matrix `E` can be recovered from matched points alone, *given* a calibrated `K` (41.1-41.4) — it needs no known baseline. The one genuinely new step is `cv2.recoverPose`: decomposing `E` into a real rotation `R` and a *direction* for the translation `t` — not its length, which is the subject of Section 4. Once `R` and `t` are known, 42.1's `cv2.triangulatePoints` reconstructs the 3D points exactly as it did with a calibrated stereo rig, just with a pose that was recovered rather than measured.
+
+## 3. A real, measured example: pose and reconstruction accuracy
+
+<SfmLab caption="Real cv2.findEssentialMat + cv2.recoverPose + cv2.triangulatePoints results on three synthetic two-view scenes sharing the same 80 3D points." />
+
+On a synthetic scene with 80 points 5-10 units in front of the camera, a second view shifted sideways by 1 unit and rotated slightly (0.05 rad), with realistic 0.5 px pixel noise added to every match: `cv2.recoverPose` found all 80 points consistent with a real pose in front of both cameras, recovered the rotation to **0.4963°** and the translation direction to **1.6395°** of the truth, and the rescaled 3D reconstruction landed within a mean of **0.165 units (2.11%)** of the true points. No baseline was given anywhere in this computation — it came entirely from the two images' own pixel positions.
+
+## 4. Scale is lost by construction, and recovered only from an outside reference
+
+`cv2.recoverPose` always returns `t` as a *unit vector* — length exactly 1 — because a photo pair genuinely cannot distinguish "small scene, close camera" from "large scene, far camera": doubling every real distance in the world and doubling the camera's own motion produces *pixel-identical* images. This is the same real ambiguity as a model train photographed close up versus a real train photographed from far away.
+
+Scaling the chapter's own unit-baseline reconstruction from Section 3 by the single factor that best matches the known true point spread (`0.9228`) brings the whole point cloud to within 2.11% of the truth — confirming the reconstruction's real *shape* was recovered correctly; only its absolute *size* was unknown until something external (a known object size, a GPS fix between shots, a ruler in the scene) supplied it.
+
+## 5. Two real ways this breaks: weak baseline, and no baseline at all
+
+Rerunning Section 3's identical scene and points with the camera moved only **0.05 units** instead of 1 (same 0.5 px pixel noise) gives `cv2.recoverPose` **zero** cheirality inliers out of 80 — not a noisier answer, a complete failure: with so little real parallax, pixel noise overwhelms the actual signal in `E`, and the recovered rotation (error ≈ 180°) and translation are both meaningless.
+
+A different failure shows up when the camera only rotates and never translates at all (a pure pan, zero noise): rotation still recovers to **3.3383°**, because rotation alone is visible in the image even with no parallax — but triangulation, which fundamentally needs two different vantage points, produces depths off by **3 to 8x** (true depths around 7-9 units; recovered depths 32-67). This is the classic structure-from-motion degeneracy: a camera that only pans around a fixed point can never recover real depth, no matter how many features it matches.
+
+## 6. Industrial context: photogrammetry and multi-view pipelines
+
+A real structure-from-motion pipeline (software such as COLMAP, Bundler, or Meshroom; commercial photogrammetry tools used for drone surveying, cultural-heritage scanning, and visual-effects set reconstruction) runs this chapter's two-view pipeline across *every* overlapping pair in a large photo set, chains the relative poses into one consistent camera path, and then jointly refines every camera pose and every 3D point together — **bundle adjustment** (Go deeper) — rather than trusting any single pair's own two-view estimate. Section 5's own real baseline-sensitivity result is exactly why photogrammetry guidelines ask for photos taken from genuinely different positions, not a tight cluster of near-identical shots.
+
+## What you should remember from 43.1
+
+<Takeaways>
+<Takeaway n={1} title="SfM needs no known baseline">Unlike 42.1/42.2's calibrated stereo rig, `cv2.recoverPose` gets relative pose from matched points alone.</Takeaway>
+<Takeaway n={2} title="Scale is genuinely unrecoverable from images alone">This chapter's own `t` came out as a unit vector; only an outside reference fixed the real scale (0.9228x here).</Takeaway>
+<Takeaway n={3} title="Two real, distinct failure modes">A too-small baseline gave 0/80 inliers (total failure, not noise); a zero baseline (pure rotation) gave correct rotation but depths off 3-8x.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Two photos of the same scene are taken from almost the exact same spot, just rotated slightly in place (a pure pan). Based on Section 5, can structure from motion recover the scene's real depth from this pair?
+
+<Solution>
+
+No. Rotation alone can still be recovered (Section 5's own real result: 3.3383° error), but with no real change in camera position there is no parallax for triangulation to work with — depths come out wrong by a large, real factor (3-8x in this chapter's own test), regardless of how many points are matched.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: checking the epipolar constraint and decomposing E by hand
+
+```python
+import numpy as np
+import cv2
+
+K = np.array([[800.0, 0, 320], [0, 800.0, 240], [0, 0, 1]])
+rng = np.random.default_rng(7)
+pts3d = rng.uniform(low=[-2, -2, 5], high=[2, 2, 10], size=(80, 3))
+
+def project(pts, R, t):
+    rvec, _ = cv2.Rodrigues(R)
+    img, _ = cv2.projectPoints(pts, rvec, t, K, None)
+    return img.reshape(-1, 2)
+
+R1, t1 = np.eye(3), np.zeros((3, 1))
+R2_true = cv2.Rodrigues(np.array([0.0, 0.05, 0.0]))[0]
+t2_true = np.array([[1.0], [0.02], [0.0]])
+pts1 = project(pts3d, R1, t1) + rng.normal(0, 0.5, (80, 2))
+pts2 = project(pts3d, R2_true, t2_true) + rng.normal(0, 0.5, (80, 2))
+
+E, mask = cv2.findEssentialMat(pts1, pts2, K, method=cv2.RANSAC, prob=0.999, threshold=1.0)
+
+# Hartley & Zisserman, Multiple View Geometry, Result 9.19: for the TRUE essential matrix,
+# every matching pair in CALIBRATED (K^-1-normalized) coordinates satisfies x2^T.E.x1 = 0
+# exactly; here it holds up to real pixel noise.
+Kinv = np.linalg.inv(K)
+x1n = (Kinv @ np.hstack([pts1, np.ones((80, 1))]).T).T
+x2n = (Kinv @ np.hstack([pts2, np.ones((80, 1))]).T).T
+residuals = np.array([x2n[i] @ E @ x1n[i] for i in range(80)])
+print("epipolar residual |x2^T E x1|: mean=%.5f max=%.5f" % (np.abs(residuals).mean(), np.abs(residuals).max()))
+
+# E's defining structure (Hartley & Zisserman Result 9.19): its singular values are (s, s, 0)
+U, S, Vt = np.linalg.svd(E)
+print("singular values of E:", S)
+
+# The real two-fold rotation ambiguity: E alone gives TWO candidate rotations
+W = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
+R_a = U @ W @ Vt
+R_b = U @ W.T @ Vt
+if np.linalg.det(R_a) < 0:
+    R_a = -R_a
+if np.linalg.det(R_b) < 0:
+    R_b = -R_b
+print("R_a matches ground truth?", np.allclose(R_a, R2_true, atol=0.05))
+print("R_b matches ground truth?", np.allclose(R_b, R2_true, atol=0.05))
+```
+
+Output:
+
+```text
+epipolar residual |x2^T E x1|: mean=0.00056 max=0.00193
+singular values of E: [7.07106781e-01 7.07106781e-01 1.81934965e-16]
+R_a matches ground truth? True
+R_b matches ground truth? False
+```
+
+`E`'s two singular values come out equal and its third is (numerically) zero, exactly the structure Hartley and Zisserman's Result 9.19 requires of a real essential matrix — this is not assumed, it is what `cv2.findEssentialMat` actually returned. The SVD-based decomposition genuinely produces two candidate rotations; only one of them (`R_a`) is physically correct here. `cv2.recoverPose` (Section 2) resolves exactly this ambiguity automatically, by keeping only the candidate whose triangulated points land in front of *both* cameras (cheirality) — the same real check behind every "inlier count" in Section 3's `SfmLab`.
+
+### 2. OpenCV: the real two-view pipeline, end to end
+
+```python
+import cv2
+
+K = np.array([[800.0, 0, 320], [0, 800.0, 240], [0, 0, 1]])
+rng = np.random.default_rng(7)
+pts3d = rng.uniform(low=[-2, -2, 5], high=[2, 2, 10], size=(80, 3))
+
+def project(pts, R, t):
+    rvec, _ = cv2.Rodrigues(R)
+    img, _ = cv2.projectPoints(pts, rvec, t, K, None)
+    return img.reshape(-1, 2)
+
+R1, t1 = np.eye(3), np.zeros((3, 1))
+R2_true = cv2.Rodrigues(np.array([0.0, 0.05, 0.0]))[0]
+t2_true = np.array([[1.0], [0.02], [0.0]])
+pts1_clean = project(pts3d, R1, t1)
+pts2_clean = project(pts3d, R2_true, t2_true)
+pts1 = pts1_clean + rng.normal(0, 0.5, (80, 2))
+pts2 = pts2_clean + rng.normal(0, 0.5, (80, 2))
+
+E, mask = cv2.findEssentialMat(pts1, pts2, K, method=cv2.RANSAC, prob=0.999, threshold=1.0)
+n_inliers, R_est, t_est, _ = cv2.recoverPose(E, pts1, pts2, K)
+print(f"cheirality inliers: {n_inliers}/80")
+
+P1 = K @ np.hstack([R1, t1])
+P2 = K @ np.hstack([R_est, t_est])
+pts4d = cv2.triangulatePoints(P1, P2, pts1.T, pts2.T)
+pts3d_est = (pts4d[:3] / pts4d[3]).T
+
+scale = np.median(np.linalg.norm(pts3d_est - pts3d_est.mean(0), axis=1)
+                   / np.linalg.norm(pts3d - pts3d.mean(0), axis=1))
+err = np.linalg.norm(pts3d_est / scale - pts3d, axis=1)
+print(f"recovered scale factor: {scale:.4f}")
+print(f"mean 3D error after rescaling: {err.mean():.5f} units ({err.mean()/np.linalg.norm(pts3d,axis=1).mean()*100:.2f}%)")
+```
+
+Output:
+
+```text
+cheirality inliers: 80/80
+recovered scale factor: 0.9228
+mean 3D error after rescaling: 0.16489 units (2.11%)
+```
+
+## OpenCV API notes
+
+- **`cv2.findEssentialMat(points1, points2, K, method=cv2.RANSAC, prob=0.999, threshold=1.0)`**: `points1`/`points2` are matched pixel coordinates (`Nx2`, `float32`/`float64`); `K` must already be known (41.4 calibration) — this is what lets `E` be recovered rather than the weaker, uncalibrated fundamental matrix `F` of 42.2. `threshold` is a pixel-distance RANSAC threshold; too loose admits noise, too tight rejects real matches under real pixel noise (Section 5).
+- **`cv2.recoverPose(E, points1, points2, K)`**: returns `(n_inliers, R, t, mask)`. `R` is a real `3x3` rotation; `t` is a **unit-length** direction only (Section 4) — never a real distance. `n_inliers` counts points that triangulate in front of *both* cameras; a low or zero count (Section 5) is a real, direct signal that the recovered pose itself is wrong, not just imprecise.
+- **`cv2.triangulatePoints(P1, P2, points1, points2)`**: identical call to 42.1's, but `P2 = K[R_est|t_est]` here uses a *recovered*, unit-scale pose rather than a calibrated baseline — so the output point cloud is correct in shape but arbitrary in scale until rescaled (Section 4).
+
+## Where it fails
+
+- **Scale is lost for every monocular (single-camera) image pair, with no exception** — Section 4's unit-vector `t` is not a limitation of this particular test scene; it is a structural property of recovering motion from one camera's own images. A real external reference (known object size, a second calibrated sensor, GPS) is required to fix it.
+- **Small baselines genuinely fail, not just degrade** — Section 5's real result (0/80 inliers at a baseline 20x smaller than Section 3's) shows this is not a smooth accuracy curve near zero; it can be an outright wrong answer.
+- **Pure rotation is unrecoverable for depth** — Section 5's second real result; a camera path that never truly translates gives `cv2.recoverPose` nothing to triangulate against, however many points are matched.
+- **Planar scenes are also degenerate** — when every matched point lies on (or near) a single flat plane, a homography (34.6) explains the match at least as well as any essential matrix, and `E`'s decomposition becomes unreliable; this is a separate, real degeneracy from the baseline and rotation cases above (`TODO: verify` — the exact numerical signature on a near-planar test scene, left for a future exercise or chapter).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Reading `t` from `cv2.recoverPose` as a real distance** — it is always unit length (Section 4); every reconstructed point from it is correct only up to the same unknown scale factor.
+- **Trusting a two-view pose estimate without checking `n_inliers`** — Section 5's 0/80 result shows the API can return a confident-looking `R`, `t` pair that is simply wrong; the inlier count is the real signal to check first.
+- **Using an uncalibrated `K`** — `cv2.findEssentialMat` assumes `K` is already correct (41.4); an uncalibrated or wrong `K` biases every recovered pose and 3D point by the same error, with no warning from the API.
+- **Taking photos from a tight cluster of near-identical positions, expecting good 3D** — Section 5's own real narrow-baseline failure is exactly this scenario; genuine viewpoint change is a hard requirement, not a nicety.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Bundle adjustment
+
+A real multi-view SfM pipeline does not simply chain each pair's own two-view estimate (small errors compound across many pairs); it jointly refines every camera pose *and* every 3D point together by minimizing total reprojection error across the whole photo set — **bundle adjustment** (Triggs, McLauchlan, Hartley & Fitzgibbon, "Bundle Adjustment — A Modern Synthesis," 2000). This chapter's own two-view numbers (Section 3) are exactly the kind of per-pair estimate bundle adjustment takes as its real starting point, not its final answer.
+
+### Why E's singular values must be equal
+
+Code section 1's real result — two equal singular values, one zero — is not a coincidence of this test scene; it is a theorem (Hartley & Zisserman, Result 9.19): any matrix built as `E = [t]_x . R` for a real rotation `R` and translation `t` necessarily has this structure, which is exactly why decomposing `E` always yields a *pure rotation* candidate and a *unit-length* translation, never a scaled one.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does structure from motion recover that 42.1's stereo (Chapter 42.1) could not, without a calibrated rig?",
+      options: ["Nothing -- they are identical", "Both the 3D scene AND the relative camera pose, from matched points alone, with no known baseline", "Only the camera's color calibration", "Only a 2D image, never 3D points"],
+      answer: 1,
+      explanation: "Section 2-3: cv2.recoverPose gets pose from point correspondences; 42.1 assumed a known, calibrated baseline instead.",
+    },
+    {
+      question: "In this chapter's own real test (Section 3), what did cv2.recoverPose return for the translation length between the two cameras?",
+      options: ["The real distance in the same units as the 3D points", "Always a unit vector -- direction only, never a real distance", "Zero", "A value in millimetres"],
+      answer: 1,
+      explanation: "Section 4: scale is lost by construction for any single camera; an outside reference (here, the known point spread) was needed to rescale it.",
+    },
+    {
+      question: "This chapter's own real narrow-baseline test (Section 5) moved the camera only 0.05 units instead of 1. What happened?",
+      options: ["The reconstruction got a little noisier but still worked", "cv2.recoverPose found zero cheirality inliers out of 80 -- a complete failure, not a graceful one", "Nothing changed", "The rotation became perfectly exact"],
+      answer: 1,
+      explanation: "Section 5: 0/80 inliers, rotation error near 180 degrees -- a real, outright failure at too small a baseline.",
+    },
+    {
+      question: "Why does a camera that only pans (pure rotation, zero translation) fail to recover real depth, per Section 5's own real test?",
+      options: ["Rotation cannot be measured from images at all", "Triangulation needs two genuinely different viewpoints to intersect rays; a pure pan gives none, so depths came out wrong by 3-8x even though rotation itself still recovered to 3.3 degrees", "The feature matcher always fails under rotation", "cv2.recoverPose refuses to run without translation"],
+      answer: 1,
+      explanation: "Section 5: rotation recovered fine; triangulated depths were off by a real, large factor because there was no parallax to triangulate from.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A structure-from-motion pipeline recovers a point cloud where two points that are truly 4 metres apart come out 3.6 units apart in the unscaled reconstruction. What single scale factor should be applied to the whole reconstruction to correct it?
+
+<Solution>
+
+Scale factor = true distance / reconstructed distance = 4 / 3.6 = **1.111** (multiply every reconstructed coordinate by about 1.111 to bring the whole cloud to real metres).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using this chapter's own wide-baseline scene (Section 3's seed=7 setup) and Code section 2's pattern, average the rotation and translation-direction error over 30 independent pixel-noise draws at noise_std=1.0px, and compare to this chapter's own 0.1px and 2.0px results.
+
+<Solution>
+
+```python
+rot_errs, t_errs = [], []
+t_true_dir = t2_true.ravel() / np.linalg.norm(t2_true.ravel())
+for trial in range(30):
+    rng2 = np.random.default_rng(1000 + trial)
+    p1n = pts1_clean + rng2.normal(0, 1.0, (80, 2))
+    p2n = pts2_clean + rng2.normal(0, 1.0, (80, 2))
+    E, _ = cv2.findEssentialMat(p1n, p2n, K, method=cv2.RANSAC, prob=0.999, threshold=1.0)
+    _, R_est, t_est, _ = cv2.recoverPose(E, p1n, p2n, K)
+    rot_errs.append(np.degrees(np.arccos(np.clip((np.trace(R_est.T @ R2_true) - 1) / 2, -1, 1))))
+    t_errs.append(np.degrees(np.arccos(np.clip(np.dot(t_est.ravel(), t_true_dir), -1, 1))))
+print(f"noise=1.0px: mean rot err={np.mean(rot_errs):.3f}deg, mean t-dir err={np.mean(t_errs):.3f}deg")
+```
+
+Output:
+
+```text
+noise=1.0px: mean rot err=1.438deg, mean t-dir err=1.801deg
+```
+
+This sits between this chapter's own 0.1px result (0.378° / 0.447°) and 2.0px result (2.537° / 8.385°): pose-recovery error grows with pixel noise, as expected, though not perfectly linearly — translation direction degrades noticeably faster than rotation as noise increases.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A drone operator wants to 3D-reconstruct a building facade by hovering in place and only rotating the drone's camera slightly between shots, reasoning "more photos means a better reconstruction." Based on Section 5, will this work?
+
+<Solution>
+
+No — following Section 5's own real pure-rotation result, hovering in place and only rotating gives the camera almost no translation between shots, which is exactly the degenerate case where rotation still recovers reasonably but triangulated depth comes out wrong by a large real factor (3-8x in this chapter's test), regardless of how many photos are taken. More photos from the same non-translating position does not add the missing parallax; the operator needs to genuinely fly to different positions around the facade instead.
+
+</Solution>
+
+## References
+
+1. R. Hartley, A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004: Chapter 9 (the essential matrix, Result 9.19, and its two-fold decomposition ambiguity) — already cited in 41.1-41.2, 41.5, 41.7, 42.1-42.2.
+2. B. Triggs, P. McLauchlan, R. Hartley, A. Fitzgibbon, "Bundle Adjustment — A Modern Synthesis," *Vision Algorithms: Theory and Practice*, Springer LNCS 1883, 2000.
+3. OpenCV 4.13.0 documentation: `cv2.findEssentialMat`, `cv2.recoverPose`, `cv2.triangulatePoints`. https://docs.opencv.org/4.13.0/
