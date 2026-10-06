@@ -145,3 +145,4 @@ export { HogLab } from "./HogLab";
 export { HaarLab } from "./HaarLab";
 export { HashLab } from "./HashLab";
 export { BowLab } from "./BowLab";
+export { FeatureSpaceLab } from "./FeatureSpaceLab";

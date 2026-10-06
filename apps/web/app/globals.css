@@ -2268,3 +2268,11 @@ button.nl-cell { cursor: pointer; }
 .lklab .lk-table { font-size: 0.8rem; border-collapse: collapse; margin-top: 0.5rem; font-variant-numeric: tabular-nums; }
 .lklab .lk-table td, .lklab .lk-table th { border: 1px solid var(--line); padding: 0.15rem 0.45rem; text-align: right; }
 .lklab .lk-wrap { overflow-x: auto; max-width: 100%; }
+
+/* classify-kit (shared by the 2-D feature-space labs of Module 36; the figure carries class "cklab") */
+.cklab .ck-wrap { display: inline-block; max-width: 100%; }
+.cklab .ck-svg { display: block; width: 100%; max-width: 26rem; height: auto; border-radius: 3px; }
+.cklab .ck-axis { font-size: 10px; fill: var(--fg-soft); }
+.cklab .ck-legend { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.4rem; font-size: 0.8rem; color: var(--fg-soft); }
+.cklab .ck-chip { display: inline-flex; align-items: center; gap: 0.3rem; }
+.cklab .ck-dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; display: inline-block; }

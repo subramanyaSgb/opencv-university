@@ -1,0 +1,309 @@
+export const meta = {
+  number: "36.1",
+  title: "Features and classes",
+  minutes: 20,
+  objectives: [
+    "Explain what a feature vector and a class are, and how a classifier connects them",
+    "Plot and read a 2-D feature space by hand",
+    "Classify a point by its nearest class centroid",
+    "Recognise that a classifier is only as good as the features it is given",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 36.1 (Part F, Module 36: Pattern classification). Opens the module.
+  Lab: FeatureSpaceLab (apps/web/components/visuals/FeatureSpaceLab.tsx) — 8x8 tile (mean, std) features of
+  sample-texture-woven/smooth/blotchy.png (81 tiles each, reusing 35.1's images); click to classify a test
+  point by nearest centroid.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 36.1 Features and classes
+
+<Definition term="Classification">deciding which one of several predefined categories (classes) an object belongs to, based on a set of measurements (a feature vector) taken from it, not on the raw image itself.</Definition>
+
+Modules 33–35 spent a great deal of effort turning pixels into numbers: a corner's location, a descriptor, a texture histogram, a HOG vector. This module asks the next question: given those numbers, which **category** does this thing belong to? That is classification, and it turns out to need surprisingly little new machinery once the features are good — which is exactly why so much of this course, so far, has been about building good features.
+
+## 1. An analogy
+
+A fruit seller sorting produce by weight and colour into three bins: apples, lemons, grapes. Nobody needs to see a photograph of the fruit — two numbers (weight, colour) are usually enough, *if* those two numbers happen to separate the three kinds of fruit well. Classification is choosing a bin from measurements; the whole art is in choosing measurements that actually separate the bins.
+
+## 2. Feature vectors, feature space, classes
+
+<Flow
+  steps={[
+    { label: "Object / region", tone: "data" },
+    { label: "Measure features (Modules 1-35: colour, texture, shape, ...)", tone: "process" },
+    { label: "Feature vector (a point in feature space)", tone: "process" },
+    { label: "Classifier: which class's region does it fall in?", tone: "result" },
+  ]}
+/>
+
+- A **feature vector** is just a list of numbers measured from one object: `(mean grey level, standard deviation)` is a 2-D feature vector; a 1764-number HOG descriptor (35.3) is a 1764-D one.
+- **Feature space** is the space those vectors live in — for 2 features, a plane you can plot and look at directly; for more features, the same idea in more dimensions, impossible to draw but not conceptually different.
+- A **class** is one of the predefined categories the classifier must choose between (e.g. "woven," "smooth," "blotchy"; or "defect," "no defect"). Classes are defined by the task, not discovered by the algorithm — compare with **clustering** (36.8), which groups data *without* predefined classes.
+- A **classifier** is a rule that, given a new feature vector, outputs a class. The simplest possible rule — and the one used below — is: compute the **centroid** (mean feature vector) of each class from known examples, and assign a new point to whichever centroid it is nearest. This is the starting idea behind k-nearest-neighbours (36.3), formalised properly there.
+
+## 3. A worked example by hand
+
+Three classes, one example feature vector (mean grey level, standard deviation) each:
+
+| Class | Mean | Std. dev. |
+| --- | --- | --- |
+| Woven | 145.5 | 33.9 |
+| Smooth | 139.9 | 13.3 |
+| Blotchy | 136.6 | 49.6 |
+
+A new point: (142.6, 5.1). Distance to each centroid (Euclidean, √(Δmean² + Δstd²)):
+
+- To Woven: √((142.6−145.5)² + (5.1−33.9)²) = √(8.4 + 829.4) = **28.9**
+- To Smooth: √((142.6−139.9)² + (5.1−13.3)²) = √(7.3 + 67.2) = **8.6**
+- To Blotchy: √((142.6−136.6)² + (5.1−49.6)²) = √(36.0 + 1980.3) = **44.9**
+
+Nearest is **Smooth** (8.6), by a wide margin. This new point was, in fact, measured from the "missing weave" defect patch of 35.1 — a patch *of the woven fabric* with its texture erased. In (mean, std) feature space, it looks nothing like "Woven": it looks like "Smooth," because that is what a low-standard-deviation patch looks like to these two features, regardless of what produced it.
+
+## 4. A real feature space, tile by tile
+
+<FeatureSpaceLab caption="Each dot is one 8x8 tile's (mean, std) from the woven/smooth/blotchy textures (35.1); black circles are the class centroids. Click anywhere to drop a test point and see which centroid is nearest."/>
+
+Splitting each 72×72 texture image into 81 non-overlapping 8×8 tiles and computing (mean, std) per tile gives a real 2-D feature space, 81 points per class:
+
+| Class | Centroid mean | Centroid std |
+| --- | --- | --- |
+| Woven | 145.49 | 33.54 |
+| Smooth | 139.93 | 4.50 |
+| Blotchy | 136.56 | 27.56 |
+
+One specific tile, cut from inside the "missing weave" defect patch (tile column 3, row 3 of `sample-texture-defect.png`): mean 142.77, std 4.93. Distances to the three centroids above: Woven 28.74, **Smooth 2.87**, Blotchy 23.46 — nearest to Smooth, again by a wide margin, for the same reason as Section 3: locally, a patch with no weave pattern simply *is* smooth, by these two features. (Note the Smooth centroid's std here, 4.50, is much lower than the whole-image std reported in 35.1, 13.3 — a single 8×8 tile of a slowly-varying image has far less internal variation than the whole image does across all its slow variation; always know exactly what region a feature is being measured over.)
+
+## 5. Industrial use
+
+- **Sorting and grading**: any task where a part must be assigned to one of a known, fixed set of categories (grade A/B/C; pass/fail; part type 1/2/3) from measured features.
+- **Defect classification** (not just detection): once something is flagged as unusual (as Section 3's example might be), a classifier can further say *which kind* of defect it resembles, if trained on examples of each kind.
+- **Every subsequent chapter in this module** builds a more capable classifier than "nearest centroid" — but every one of them still starts from a feature vector and predefined classes, exactly as described here.
+
+## What you should remember from 36.1
+
+<Takeaways>
+<Takeaway n={1} title="Feature vector">A list of numbers measured from one object — a point in feature space.</Takeaway>
+<Takeaway n={2} title="Classes are given">Classification chooses among predefined categories; clustering (36.8) does not.</Takeaway>
+<Takeaway n={3} title="Nearest centroid">The simplest classifier: assign to the class whose average feature vector is closest.</Takeaway>
+<Takeaway n={4} title="Features decide everything">A classifier can only separate classes that its features actually separate (Section 3's defect patch is proof).</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Two classes, 1-D feature (just a single number): class A's examples average to 10, class B's average to 50. Where would a new point at 25 be classified, by nearest centroid?
+
+<Solution>
+
+Distance to A = |25−10| = 15. Distance to B = |25−50| = 25. Nearer to **A**.
+
+</Solution>
+
+**Q2.** Why couldn't (mean, std) distinguish the defect patch from "Smooth," in Sections 3–4, even though a person can immediately tell a photo of plain smooth shading from a photo of fabric with a flaw?
+
+<Solution>
+
+Because a person is using far more information than just two numbers — overall layout, context, the surrounding weave pattern, edges at the defect's border. (Mean, std) only describes the *statistics of grey values inside one small patch*, which genuinely is similar between the two cases. The fix is not a smarter classifier but **better features** — e.g. the LBP or GLCM descriptors of 35.1–35.2, which do capture local pattern structure that (mean, std) throws away.
+
+</Solution>
+
+### Next: 36.2 Bayes
+
+## Code
+
+### 1. The worked example, and the tile feature space, with NumPy
+
+```python
+import numpy as np
+import cv2
+
+centroids = {"woven": (145.5, 33.9), "smooth": (139.9, 13.3), "blotchy": (136.6, 49.6)}
+point = (142.6, 5.1)
+for name, c in centroids.items():
+    d = np.hypot(point[0] - c[0], point[1] - c[1])
+    print(f"distance to {name}: {d:.1f}")
+
+TILE = 8
+def tile_features(img, label):
+    h, w = img.shape
+    feats = []
+    for ty in range(h // TILE):
+        for tx in range(w // TILE):
+            patch = img[ty * TILE:(ty + 1) * TILE, tx * TILE:(tx + 1) * TILE].astype(np.float64)
+            feats.append((patch.mean(), patch.std(), label))
+    return feats
+
+classes = {}
+for name in ["woven", "smooth", "blotchy"]:
+    img = cv2.imread(f"sample-texture-{name}.png", cv2.IMREAD_GRAYSCALE)
+    classes[name] = tile_features(img, name)
+
+centroids_real = {name: (np.mean([f[0] for f in feats]), np.mean([f[1] for f in feats])) for name, feats in classes.items()}
+for name, c in centroids_real.items():
+    print(f"{name}: {len(classes[name])} tiles, centroid ({c[0]:.2f}, {c[1]:.2f})")
+```
+
+Output:
+
+```text
+distance to woven: 28.9
+distance to smooth: 8.6
+distance to blotchy: 44.9
+woven: 81 tiles, centroid (145.49, 33.54)
+smooth: 81 tiles, centroid (139.93, 4.50)
+blotchy: 81 tiles, centroid (136.56, 27.56)
+```
+
+### 2. Classifying one tile of the defect image by nearest centroid
+
+```python
+defect = cv2.imread("sample-texture-defect.png", cv2.IMREAD_GRAYSCALE)
+tile = defect[24:32, 24:32].astype(np.float64)                 # tile (3, 3): fully inside the missing-weave patch
+mean, std = tile.mean(), tile.std()
+print(f"defect tile (3,3): mean={mean:.2f} std={std:.2f}")
+for name, c in centroids_real.items():
+    d = np.hypot(mean - c[0], std - c[1])
+    print(f"distance to {name}: {d:.2f}")
+```
+
+Output:
+
+```text
+defect tile (3,3): mean=142.77 std=4.93
+distance to woven: 28.74
+distance to smooth: 2.87
+distance to blotchy: 23.46
+```
+
+## OpenCV API notes
+
+- **No dedicated OpenCV function for "nearest-centroid classification"** — it is three lines of NumPy (as above). OpenCV's `ml` module provides full classifiers (`cv2.ml.KNearest`, `cv2.ml.SVM`, `cv2.ml.NormalBayesClassifier`, `cv2.ml.RTrees`, `cv2.ml.Boost`, among others), introduced properly as this module goes on (36.2–36.6).
+- **`cv2.ml` classifiers share a common interface**: `.train(samples, layout, responses)` where `layout` is `cv2.ml.ROW_SAMPLE` (each row is one feature vector) or `cv2.ml.COL_SAMPLE`, and `.predict(samples)` returns predicted labels — the same pattern every chapter from 36.2 on will use.
+- **Feature scaling matters for distance-based methods**: here, "std" (roughly 0–50) and "mean" (roughly 80–200) are on different scales; a feature with naturally larger numbers can dominate a Euclidean distance even if it's not more informative. (Both features above happen to work reasonably at their natural scales, but normalising features to comparable ranges — e.g. subtracting the mean and dividing by the standard deviation of each feature across the training set — is standard practice before any distance-based classifier.)
+
+## Where it fails
+
+- **A classifier cannot separate classes its features don't separate** — Section 3's whole point. No algorithm fixes bad or insufficient features; better features (more of them, or more discriminative ones) are usually the real fix.
+- **Nearest-centroid assumes each class forms one compact, roughly round cluster** around its mean — classes shaped like crescents, rings, or with several separate sub-groups are not well described by a single centroid (36.3's k-nearest-neighbours and 36.4's SVM handle more complex shapes).
+- **Centroids computed from very few examples are unreliable** — one or two examples per class (as in Section 3) is a teaching simplification; real classifiers need enough labelled examples to estimate class statistics reliably (Module 58 covers datasets and splits in depth).
+- **Outliers skew a centroid**: a single mislabelled or unusual training example shifts the mean of its whole class.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Confusing classification with clustering**: classification assigns to *predefined* classes; clustering (36.8) discovers groups with no predefined labels. If you don't already know the categories, you want clustering, not classification.
+- **Expecting more features to always help**: an uninformative or noisy feature can *hurt* a distance-based classifier by adding irrelevant variation to the distance calculation — feature selection matters as much as feature creation.
+- **Not normalising features of very different scales** before computing distances (OpenCV API notes above).
+- **Judging a feature space by eye in 2-D and assuming the same intuition holds in high dimensions** — 2-D plots (as in Section 4) are great for building intuition, but real feature vectors are often tens, hundreds or thousands of dimensions, where "nearest" and "compact cluster" behave somewhat differently (the so-called curse of dimensionality, touched on again in 36.3).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Supervised vs unsupervised learning
+
+Classification (this module, mostly) is **supervised learning**: training examples come with known class labels. Clustering (36.8) is **unsupervised**: no labels, only the data's own structure. Many real systems combine both — cluster first to discover structure, then hand-label the clusters and classify new data against them.
+
+### The curse of dimensionality
+
+As the number of features grows, the volume of feature space grows exponentially, and a fixed number of training examples covers it ever more sparsely; "nearest neighbour" distances between points also tend to become less discriminative (everything ends up roughly equally far from everything else) unless the data has real low-dimensional structure. This motivates both careful feature selection and dimensionality reduction (PCA, 36.7) before classification.
+
+### Generative vs discriminative classifiers
+
+Nearest-centroid implicitly assumes classes are shaped like simple blobs around their means. Bayes classifiers (36.2) make this assumption explicit and probabilistic (a **generative** model: how likely is this feature vector, given each class?). SVMs (36.4) instead focus directly on the boundary between classes (a **discriminative** model), without necessarily modelling each class's full distribution.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is a feature vector?",
+      options: ["The raw pixels of an image", "A list of measurements taken from an object, forming a point in feature space", "A class label", "A classifier"],
+      answer: 1,
+      explanation: "Section 2: a feature vector is the input to a classifier, not the image itself.",
+    },
+    {
+      question: "What is the key difference between classification and clustering?",
+      options: ["Classification is always faster", "Classification assigns to predefined classes (supervised); clustering finds groups with no predefined labels (unsupervised)", "Clustering only works on images", "There is no difference"],
+      answer: 1,
+      explanation: "Go deeper: supervised (labelled) vs unsupervised (unlabelled) learning.",
+    },
+    {
+      question: "In Section 3-4, why was the defect-patch tile classified as 'Smooth' rather than 'Woven', even though it was cut from the woven image?",
+      options: ["A calculation error", "Its (mean, std) genuinely resembles the Smooth class more closely than the Woven class, by these two features", "Nearest-centroid always picks the first class", "The tile was mislabelled"],
+      answer: 1,
+      explanation: "A patch with the weave erased has low local std, which is what 'Smooth' looks like by these features.",
+    },
+    {
+      question: "What does Section 3's result actually demonstrate?",
+      options: ["Nearest-centroid classification is broken", "A classifier can only separate what its features actually encode -- (mean, std) does not encode 'has a weave pattern'", "Woven fabric cannot be classified", "Standard deviation is a useless feature in general"],
+      answer: 1,
+      explanation: "The lesson is about feature choice, not about this particular classifier being wrong.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Two classes in 2-D: class A centroid (0, 0), class B centroid (8, 0). Classify the points (3, 0) and (5, 0) by nearest centroid.
+
+<Solution>
+
+(3, 0): distance to A = 3, to B = 5 → **A**.
+(5, 0): distance to A = 5, to B = 3 → **B**.
+The midpoint, (4, 0), would be exactly tied — the decision boundary for nearest-centroid between two classes is always the perpendicular bisector of the line joining their centroids.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using `tile_features` and `centroids_real` from the Code section, classify tile (0, 0) of `sample-texture-blotchy.png` (which should, sensibly, come out nearest to "blotchy") by nearest centroid.
+
+<Solution>
+
+```python
+blotchy_img = cv2.imread("sample-texture-blotchy.png", cv2.IMREAD_GRAYSCALE)
+tile00 = blotchy_img[0:8, 0:8].astype(np.float64)
+m, s = tile00.mean(), tile00.std()
+print(f"tile (0,0): mean={m:.2f} std={s:.2f}")
+for name, c in centroids_real.items():
+    print(f"distance to {name}: {np.hypot(m - c[0], s - c[1]):.2f}")
+```
+
+Output:
+
+```text
+tile (0,0): mean=89.34 std=37.71
+distance to woven: 56.30
+distance to smooth: 60.51
+distance to blotchy: 48.30
+```
+
+Nearest to "blotchy," as expected — this particular tile's own statistics are genuinely close to its class's centroid, unlike the deliberately tricky defect-patch example in Sections 3–4.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague proposes classifying industrial parts as "defective" or "good" using a single feature: the part's average brightness. Before building anything, what question should you ask them?
+
+<Solution>
+
+Essentially Section 3's question: **does average brightness actually differ between defective and good parts, for the defects you care about?** If defects are things like cracks, scratches, or missing features that don't change the overall average brightness (as this chapter's defect patch did not), a brightness-only classifier will fail regardless of how it's implemented — not because the method is wrong, but because the one feature chosen doesn't carry the information needed. The right next step is to look at real examples of both classes and find a feature (texture, edges, shape, a learned feature) that actually separates them, before investing in a classifier.
+
+</Solution>
+
+## References
+
+1. R. O. Duda, P. E. Hart, D. G. Stork, *Pattern Classification*, 2nd ed., Wiley, 2001, Chapter 1 (general introduction to features, classes and classifiers).
+2. C. M. Bishop, *Pattern Recognition and Machine Learning*, Springer, 2006, Chapter 1.
+3. OpenCV 4.13.0 documentation: `cv2.ml` module overview. https://docs.opencv.org/4.13.0/
