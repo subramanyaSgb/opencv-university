@@ -216,3 +216,4 @@ export { UncertaintyLab } from "./UncertaintyLab";
 export { CrbLab } from "./CrbLab";
 export { PropagationLab } from "./PropagationLab";
 export { GaugeRRLab } from "./GaugeRRLab";
+export { SsimLab } from "./SsimLab";
