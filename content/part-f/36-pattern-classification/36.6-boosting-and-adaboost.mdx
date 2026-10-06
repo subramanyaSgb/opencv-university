@@ -1,0 +1,327 @@
+export const meta = {
+  number: "36.6",
+  title: "Boosting and AdaBoost",
+  minutes: 24,
+  objectives: [
+    "Run two rounds of AdaBoost by hand: fit a stump, compute its weight, reweight the training points",
+    "Explain why boosting focuses increasing attention on the points earlier rounds got wrong",
+    "Watch training accuracy climb as more weak learners are added, and know why OpenCV's default settings can defeat that",
+    "Use cv2.ml.Boost, and know it is a two-class method",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 36.6 (Part F, Module 36).
+  Lab: BoostLab (apps/web/components/visuals/BoostLab.tsx) — AdaBoost (cv2.ml.Boost, REAL, depth-1 stumps)
+  decision regions as weak-learner count grows, on a binary Woven-vs-Blotchy subset (Boost is 2-class);
+  toggle OpenCV's default weightTrimRate against it disabled.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 36.6 Boosting and AdaBoost
+
+<Definition term="AdaBoost (Adaptive Boosting)">a way of combining many weak classifiers (each only slightly better than guessing — classically, decision stumps, 36.5's depth-1 trees) into one strong classifier, by training them one at a time, each one focusing more on the training points the previous ones got wrong, and voting with a weight proportional to how accurate each one was.</Definition>
+
+36.5's random forest combined many trees trained *independently* (in parallel, on random samples). AdaBoost combines many weak learners trained *sequentially* — each new one is deliberately built to fix the mistakes of the ones before it, by reweighting the training data to emphasise exactly the points still being got wrong.
+
+## 1. An analogy
+
+A team of specialists reviewing a stack of hard cases one after another. The first reviewer does a quick, rough pass and flags most things correctly, but gets a few tricky cases wrong. The second reviewer is told specifically about those tricky cases and focuses extra attention on them, fixing some but perhaps missing a couple of easy ones in the process. A third reviewer is told about whatever is *still* wrong, and so on. The final verdict is a weighted vote of all the reviewers, trusting the more generally-accurate ones more.
+
+## 2. The algorithm
+
+<Flow
+  steps={[
+    { label: "Equal weight on every training point", tone: "data" },
+    { label: "Fit the best weak learner (e.g. a stump) for the current weights", tone: "process" },
+    { label: "Weight that learner by its accuracy; increase weight on points it got wrong", tone: "process" },
+    { label: "Repeat; final prediction = weighted vote of all weak learners", tone: "result" },
+  ]}
+/>
+
+For each round t: fit a weak learner h_t that minimises the *weighted* error on the current point weights. Its vote weight is α_t = ½ ln((1 − err_t) / err_t) — larger when err_t is smaller (a more accurate learner gets a louder vote; err_t = 0.5, no better than a coin flip, gives α_t = 0). Then every point's weight is updated: multiplied by exp(−α_t) if that learner got it right (weight shrinks), or exp(+α_t) if wrong (weight grows), then renormalised to sum to 1. The next round's weak learner is fit on these new weights — pulled toward whatever is still being missed.
+
+## 3. A worked example by hand: two rounds
+
+Six points, binary labels (+1/−1): x = 1 (+1), 2 (+1), 3 (−1), 4 (−1), 5 (−1), 6 (+1) — five points fit a simple pattern, one (x=6) is the "hard" outlier. Start with equal weights, 1/6 each.
+
+**Round 1**: the stump "x < 2.5 → +1, else −1" gets everything right except x=6 (predicted −1, true +1). Weighted error = 1/6 ≈ 0.167. α₁ = ½·ln(0.833/0.167) = ½·ln(5) ≈ **0.805**.
+Reweight: the 5 correct points shrink (×e^−0.805 ≈ 0.447), the one wrong point grows (×e^+0.805 ≈ 2.236). After renormalising: **w = [0.1, 0.1, 0.1, 0.1, 0.1, 0.5]** — x=6 alone now carries half the total weight.
+
+**Round 2**: with x=6 now dominant, the stump "x < 5.5 → −1, else +1" gets x=6 right, but gets x=1 and x=2 wrong (predicted −1, true +1) this time. Weighted error (using round 1's new weights) = 0.1 + 0.1 = 0.2. α₂ = ½·ln(0.8/0.2) = ½·ln(4) = **ln(2) ≈ 0.693**.
+
+Combined vote after 2 rounds: F(x) = α₁·h₁(x) + α₂·h₂(x). For x=6: F = 0.805·(−1) + 0.693·(+1) = **−0.112** — still (barely) negative, so the combined classifier *still* gets x=6 wrong, even though round 2 was built specifically to fix it: α₁'s stump still has slightly more total say than α₂'s. A third round, focusing even harder on x=6 (whose weight is back up to 0.3125 after round 2's reweighting), would be needed to tip the vote — boosting improves things round by round, not necessarily in one.
+
+## 4. A real climb, and a real pitfall
+
+<BoostLab caption="AdaBoost (cv2.ml.Boost, REAL type, depth-1 stumps) on a Woven-vs-Blotchy subset. Watch the decision region sharpen as weak learners increase, with weightTrimRate disabled -- then switch to OpenCV's default (0.95) and watch it get worse instead of better."/>
+
+Training AdaBoost (depth-1 stumps) on 162 tiles (81 Woven, 81 Blotchy, from 35.1), as weak-learner count grows:
+
+| Weak learners | Training accuracy (weightTrimRate = 1.0) | Training accuracy (OpenCV's default, 0.95) |
+| --- | --- | --- |
+| 1 | 82.7% | 82.7% |
+| 5 | 95.7% | 80.2% |
+| 10 | 98.8% | 66.7% |
+| 30 | 100.0% | 66.7% |
+| 100 | 100.0% | 66.7% |
+
+With `weightTrimRate` disabled (1.0), accuracy climbs steadily to a perfect fit, exactly as Section 2 predicts. With OpenCV's **default** `weightTrimRate` of 0.95 — which skips training each new weak learner on the lowest-weighted fraction of points, as a speed optimisation — accuracy on this small, 162-point dataset actually **gets worse** as more learners are added, collapsing to 66.7%. This is a genuine, verified pitfall, not a one-off fluke: a weight-trimming optimisation tuned for large datasets can misbehave on a small one, and the only way to notice is to check actual performance, never to assume a library's default is automatically safe for your data.
+
+## 5. Industrial use
+
+- **The original driver of real-time face detection**: Viola and Jones (35.4, 37.2) used AdaBoost specifically to select which handful of Haar-like features, out of well over 100,000 candidates, were actually worth evaluating.
+- **Any setting with a large pool of cheap, individually-weak signals**: boosting is a principled way to combine many weak rules of thumb into one strong classifier.
+- **Gradient boosting** (a generalisation covered in Go deeper) remains one of the strongest, most widely used methods for structured/tabular data classification and regression, well beyond computer vision.
+
+## What you should remember from 36.6
+
+<Takeaways>
+<Takeaway n={1} title="Sequential, not parallel">Each weak learner is fit specifically to fix what previous ones got wrong (unlike a random forest's independent trees).</Takeaway>
+<Takeaway n={2} title="Weighted vote">Each learner's say (α) is larger the more accurate it was; a coin-flip learner gets zero say.</Takeaway>
+<Takeaway n={3} title="Reweighting">Points got wrong gain weight; points got right lose it — the next round is pulled toward the hard cases.</Takeaway>
+<Takeaway n={4} title="Check your library's defaults">A speed optimisation (weight trimming) tuned for large data measurably hurt this small dataset — verify, don't assume.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A weak learner has weighted error 0.5 (no better than a coin flip). What is its vote weight α?
+
+<Solution>
+
+α = ½·ln((1−0.5)/0.5) = ½·ln(1) = ½·0 = **0**. A learner no better than chance gets no say in the final vote at all — exactly as it should.
+
+</Solution>
+
+**Q2.** After round 1 in Section 3, point x=6's weight rose from 1/6 (≈0.167) to 0.5 — roughly triple. Why does a *wrong* prediction increase a point's weight, rather than, say, removing it from training?
+
+<Solution>
+
+Boosting's whole mechanism is to make the *next* weak learner pay more attention to exactly the points still being missed — removing a hard point would mean never learning to handle it at all. Increasing its weight makes the next round's error calculation penalise getting it wrong more heavily, pulling the next stump's chosen threshold toward correctly classifying it, without discarding any information.
+
+</Solution>
+
+### Next: 36.7 PCA
+
+## Code
+
+### 1. The worked example, with NumPy
+
+```python
+import numpy as np
+import cv2
+
+x = np.array([1, 2, 3, 4, 5, 6], dtype=float)
+y = np.array([1, 1, -1, -1, -1, 1], dtype=float)
+w = np.full(6, 1 / 6)
+
+def stump(x, thresh, low_label):
+    return np.where(x < thresh, low_label, -low_label)
+
+h1 = stump(x, 2.5, 1)
+err1 = w[h1 != y].sum()
+alpha1 = 0.5 * np.log((1 - err1) / err1)
+print(f"round 1: err={err1:.4f}  alpha={alpha1:.4f}")
+w1 = w * np.exp(-alpha1 * y * h1)
+w1 /= w1.sum()
+print("weights after round 1:", np.round(w1, 4))
+
+h2 = stump(x, 5.5, -1)
+err2 = w1[h2 != y].sum()
+alpha2 = 0.5 * np.log((1 - err2) / err2)
+print(f"round 2: err={err2:.4f}  alpha={alpha2:.4f}")
+
+F = alpha1 * h1 + alpha2 * h2
+print("combined vote F(x):", np.round(F, 4))
+print("predicted:", np.sign(F), " true:", y)
+```
+
+Output:
+
+```text
+round 1: err=0.1667  alpha=0.8047
+weights after round 1: [0.1 0.1 0.1 0.1 0.1 0.5]
+round 2: err=0.2000  alpha=0.6931
+combined vote F(x): [ 0.1116  0.1116 -1.4979 -1.4979 -1.4979 -0.1116]
+predicted: [ 1.  1. -1. -1. -1. -1.]  true: [ 1.  1. -1. -1. -1.  1.]
+```
+
+### 2. cv2.ml.Boost, weak-learner count, and the weightTrimRate pitfall
+
+```python
+TILE = 8
+def tile_features(img):
+    h, w = img.shape
+    feats = []
+    for ty in range(h // TILE):
+        for tx in range(w // TILE):
+            patch = img[ty * TILE:(ty + 1) * TILE, tx * TILE:(tx + 1) * TILE].astype(np.float64)
+            feats.append((patch.mean(), patch.std()))
+    return np.array(feats)
+
+woven = tile_features(cv2.imread("sample-texture-woven.png", cv2.IMREAD_GRAYSCALE))
+blotchy = tile_features(cv2.imread("sample-texture-blotchy.png", cv2.IMREAD_GRAYSCALE))
+X = np.vstack([woven, blotchy]).astype(np.float32)
+y = np.array([0] * len(woven) + [1] * len(blotchy), dtype=np.int32)
+
+for trim_rate, name in [(1.0, "trimming disabled"), (0.95, "OpenCV default")]:
+    for n_weak in (1, 5, 10, 30, 100):
+        bst = cv2.ml.Boost_create()
+        bst.setBoostType(cv2.ml.Boost_REAL)
+        bst.setWeakCount(n_weak)
+        bst.setMaxDepth(1)
+        bst.setWeightTrimRate(trim_rate)
+        bst.train(X, cv2.ml.ROW_SAMPLE, y)
+        acc = (bst.predict(X)[1].ravel() == y).mean()
+        print(f"{name}, {n_weak} weak learners: training accuracy {acc:.3f}")
+```
+
+Output:
+
+```text
+trimming disabled, 1 weak learners: training accuracy 0.827
+trimming disabled, 5 weak learners: training accuracy 0.957
+trimming disabled, 10 weak learners: training accuracy 0.988
+trimming disabled, 30 weak learners: training accuracy 1.000
+trimming disabled, 100 weak learners: training accuracy 1.000
+OpenCV default, 1 weak learners: training accuracy 0.827
+OpenCV default, 5 weak learners: training accuracy 0.802
+OpenCV default, 10 weak learners: training accuracy 0.667
+OpenCV default, 30 weak learners: training accuracy 0.667
+OpenCV default, 100 weak learners: training accuracy 0.667
+```
+
+## OpenCV API notes
+
+- **`cv2.ml.Boost_create()`**: `.setBoostType(...)` — `Boost_DISCRETE` (original AdaBoost, ±1 votes), `Boost_REAL` (real-valued confidence per weak learner, generally the preferred modern variant, used above), `Boost_LOGIT`, `Boost_GENTLE`. `.setWeakCount(n)`, `.setMaxDepth(d)` (1 = classic decision stumps).
+- **`.setWeightTrimRate(r)`**: a speed optimisation (default **0.95**) that excludes the lowest-weighted fraction `1 − r` of points from training each new weak learner, since they contribute little to the weighted error anyway on large datasets. **Section 4 shows this can measurably hurt a small dataset** — set it to `1.0` to disable if results look wrong.
+- **`cv2.ml.Boost` is a two-class algorithm**: training it on 3 classes (as a quick check confirms) silently predicts only 2 of the 3 labels, never the third — for 3+ classes, use `cv2.ml.RTrees`, `cv2.ml.SVM` (36.4, 36.5; both handle multi-class internally), or combine several binary boosted classifiers one-vs-rest yourself.
+- **Inherits `cv2.ml.DTrees`'s depth/sample-count controls** (36.5), since each weak learner is itself a (typically very shallow) decision tree.
+
+## Where it fails
+
+- **Sensitive to label noise and outliers**: a genuinely mislabelled training point looks exactly like a "hard" point boosting should focus on, and can end up with a very large weight, distorting later rounds (closely related to Section 3's x=6, which was a legitimate hard case here, but a mislabelling would look identical to the algorithm).
+- **cv2.ml.Boost's two-class limitation** (OpenCV API notes above) is a real practical constraint in OpenCV specifically, not a limitation of AdaBoost as an idea (multi-class extensions of AdaBoost exist in the broader literature and other libraries).
+- **A speed optimisation can silently misbehave on small data** (Section 4) — always check actual accuracy, especially after changing a library's defaults, rather than assuming a default is universally safe.
+- **Sequential training cannot be parallelised across weak learners** the way a random forest's independent trees can — each round genuinely depends on the previous one's reweighting.
+- Superseded for most large-scale structured-data problems today by gradient boosting frameworks (XGBoost, LightGBM — outside OpenCV, Go deeper) or deep learning (Part J) for unstructured data like raw images.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming more weak learners always means higher accuracy, without checking**: Section 4's default-settings table is a direct counterexample on this specific small dataset.
+- **Using `cv2.ml.Boost` directly for a 3+-class problem** and not noticing one class is never predicted — check `np.unique` of your predictions.
+- **Confusing AdaBoost's sequential reweighting with a random forest's independent bagging** (36.5) — they combine weak models in fundamentally different ways, with different strengths (boosting: often higher accuracy, more overfitting/noise risk; bagging: more robust, has the free OOB check).
+- **Not disabling (or at least checking) `weightTrimRate`** when working with a small training set, exactly as Section 4 demonstrates.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### AdaBoost as additive logistic regression
+
+Friedman, Hastie and Tibshirani [2] showed that AdaBoost can be understood as fitting an additive model to minimise a specific exponential loss function via a greedy, stage-wise procedure — connecting it to statistical model-fitting more generally, and motivating the `REAL`, `LOGIT` and `GENTLE` boost variants (different loss functions and update rules) that OpenCV offers alongside the original `DISCRETE` AdaBoost.
+
+### Gradient boosting
+
+A more general framework, **gradient boosting**, generalises the same "fit a weak learner to the current residual error, add it in, repeat" idea to arbitrary differentiable loss functions, not just AdaBoost's specific exponential loss. Modern implementations (XGBoost, LightGBM, scikit-learn's `GradientBoostingClassifier` — none shipped with OpenCV) are, as of this writing, among the strongest widely-used methods for structured/tabular data.
+
+### Why boosting tends to resist overfitting, up to a point
+
+Despite fitting training data increasingly closely (Section 4's climb to 100%), boosted ensembles often continue to generalise well for quite a while past the point a single complex model would start overfitting — a somewhat subtle property related to the margin (in a different sense from 36.4's SVM margin) by which training points are correctly classified continuing to improve even after they are already correctly classified. This is not a guarantee against overfitting, though — enough rounds, or noisy enough data, can still overfit eventually.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "How does AdaBoost decide how much weight (vote) a weak learner gets?",
+      options: ["Every learner gets equal weight", "alpha = 0.5*ln((1-err)/err), so a more accurate learner (lower weighted error) gets a larger weight", "By the order it was trained in", "Randomly"],
+      answer: 1,
+      explanation: "Section 2-3: alpha depends only on the weighted error of that one weak learner.",
+    },
+    {
+      question: "What happens to a training point's weight after a round where it was misclassified?",
+      options: ["It decreases", "It increases, so the next round's weak learner is trained to pay it more attention", "It is removed from training", "Nothing changes"],
+      answer: 1,
+      explanation: "Section 3: x=6's weight rose from 1/6 to 1/2 after being misclassified in round 1.",
+    },
+    {
+      question: "In Section 4, why did training accuracy get WORSE as more weak learners were added, under OpenCV's default weightTrimRate?",
+      options: ["AdaBoost always gets worse with more learners", "The default weightTrimRate (0.95) excludes low-weight points from training each new learner, a speed optimisation that measurably hurt this small, 162-point dataset", "A bug in cv2.ml.Boost", "The data was mislabelled"],
+      answer: 1,
+      explanation: "With weightTrimRate disabled (1.0), accuracy climbed to 100% as expected.",
+    },
+    {
+      question: "Why can't cv2.ml.Boost be used directly for a 3-class problem?",
+      options: ["It can, with no changes needed", "cv2.ml.Boost is a two-class algorithm; trained on 3 classes it only ever predicts 2 of them", "It requires exactly 100 weak learners", "AdaBoost cannot use decision stumps"],
+      answer: 1,
+      explanation: "OpenCV API notes: use RTrees, SVM, or combine several binary boosted classifiers one-vs-rest for 3+ classes.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A weak learner has weighted error 0.1 (very accurate). Compute its vote weight α, and compare it with the α for a weak learner with weighted error 0.4 (barely better than chance).
+
+<Solution>
+
+α(0.1) = ½·ln(0.9/0.1) = ½·ln(9) ≈ ½·2.197 ≈ **1.10**.
+α(0.4) = ½·ln(0.6/0.4) = ½·ln(1.5) ≈ ½·0.405 ≈ **0.20**.
+The accurate learner's vote (1.10) counts roughly 5.5 times as much as the barely-better-than-chance one's (0.20) — α grows quickly as error falls below 0.5, and shrinks toward 0 as error approaches 0.5.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the Code section's data, train `cv2.ml.Boost` (REAL, weightTrimRate disabled) with weak counts 2, 3 and 4 to see exactly how quickly accuracy climbs in the first few rounds on the real texture data.
+
+<Solution>
+
+```python
+for n_weak in (2, 3, 4):
+    bst = cv2.ml.Boost_create()
+    bst.setBoostType(cv2.ml.Boost_REAL)
+    bst.setWeakCount(n_weak)
+    bst.setMaxDepth(1)
+    bst.setWeightTrimRate(1.0)
+    bst.train(X, cv2.ml.ROW_SAMPLE, y)
+    acc = (bst.predict(X)[1].ravel() == y).mean()
+    print(f"{n_weak} weak learners: training accuracy {acc:.3f}")
+```
+
+Output:
+
+```text
+2 weak learners: training accuracy 0.938
+3 weak learners: training accuracy 0.957
+4 weak learners: training accuracy 0.957
+```
+
+Progress is not perfectly smooth round to round (3 and 4 weak learners tie here) — each new stump is chosen to best reduce the *current* weighted error, which does not guarantee every single additional round improves raw accuracy, only that it is the best available weighted-error reduction at that step; the overall trend (Section 4's table) is still clearly upward.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A dataset has one badly mislabelled point (a human data-entry error, not a genuinely hard case) among otherwise clean, well-separated data. What is likely to happen if AdaBoost is trained on it for many rounds?
+
+<Solution>
+
+The mislabelled point will look, from AdaBoost's perspective, exactly like a persistently "hard" point: every weak learner that follows the (correct) pattern of the rest of the data will get it wrong, so its weight will keep growing round after round, exactly as x=6 did in Section 3 for a legitimate reason. Eventually, later weak learners may be contorted specifically to accommodate this one bad point, potentially hurting accuracy on everything else — a concrete reason AdaBoost is described as sensitive to label noise and outliers (Where it fails), and a good reason to check training data quality before trusting a boosted model's behaviour on hard-looking points.
+
+</Solution>
+
+## References
+
+1. Y. Freund, R. E. Schapire, "A decision-theoretic generalization of on-line learning and an application to boosting," *Journal of Computer and System Sciences* 55(1), 1997, pp. 119–139.
+2. J. Friedman, T. Hastie, R. Tibshirani, "Additive logistic regression: a statistical view of boosting," *The Annals of Statistics* 28(2), 2000, pp. 337–407.
+3. OpenCV 4.13.0 documentation: `cv2.ml.Boost`. https://docs.opencv.org/4.13.0/
