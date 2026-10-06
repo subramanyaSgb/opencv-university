@@ -1,0 +1,291 @@
+export const meta = {
+  number: "45.2",
+  title: "Light fields",
+  minutes: 24,
+  objectives: [
+    "Know what a light field captures that one photo, or even 44.3's calibrated views, do not",
+    "Build real synthetic-aperture refocusing: shift-and-average many sub-aperture views at a chosen depth",
+    "Measure, for real, how many views it takes to see through sparse foreground clutter onto a background",
+    "Measure, for real, the opposite choice: refocusing onto the clutter itself instead",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 45.2 (Part H, Module 45). Reuses 44.3's own multi-camera-array
+  setup, but for a different real purpose: not estimating depth, but synthesizing a NEW,
+  chosen-after-capture image by shifting and averaging many views -- the real light-field
+  "synthetic aperture" / digital refocusing idea (Levoy & Hanrahan 1996; Vaish et al. 2004's
+  seeing-through-occluders application).
+  All numbers real, verified via scripts/gen_lightfield_data.py ->
+  apps/web/public/data/lightfield-data.json. Setup: f=800px, background texture at
+  Z_bg=1000mm (noise std 40), sparse random occluders at Z_fg=500mm covering 7.7% of the
+  scene (opaque, value 30 vs background ~128), camera spacing 50mm, sensor noise std=3.0,
+  300 reference pixels.
+  Refocus ON the background (seeing through the occluders): mean error on occluded pixels
+  104.69 (1 view, i.e. unusable, fully blocked) -> 46.80 (3 views) -> 18.74 (9 views) ->
+  13.60 (17 views) -> 10.80 (33 views). Overall error (incl. unoccluded pixels): 11.30 ->
+  9.92 -> 8.43 -> 7.90 -> 7.14.
+  Refocus ON the occluder plane instead (occluders become sharp, background blurs): mean
+  error on occluder pixels 2.81 (1 view -- already small, since an opaque occluder is always
+  visible regardless of viewpoint) -> 1.58 (3) -> 0.83 (9) -> 0.59 (17) -> 0.47 (33) -- more
+  views here mainly average down ordinary sensor noise, a real, different, much smaller
+  benefit than the background case's real occlusion removal.
+  Lab: LightFieldLab (apps/web/components/visuals/LightFieldLab.tsx).
+*/}
+
+# 45.2 Light fields
+
+<Definition term="Light field">the full set of light rays passing through a region of space — not just the single image one camera position records, but what every nearby viewpoint would have seen, all at once.</Definition>
+
+44.3 used many calibrated views to recover depth. This chapter reuses that same real multi-camera setup for a genuinely different purpose: synthesizing a brand new image — refocused at whichever depth is chosen *after* capture — directly from the raw views themselves, with no depth map required at all.
+
+## 1. An analogy
+
+Looking at a distant friend through a chain-link fence with one eye closed, parts of their face are blocked by the fence wires no matter how you squint. Rapidly shifting your head slightly side to side, each glimpse sees a *different* sliver of their face around a *different* wire — and your eye-brain system fuses those glimpses into something close to a complete, un-fenced view. A light field camera captures many such glimpses — many slightly different viewpoints — simultaneously, and this chapter's own real method fuses them exactly the same way.
+
+## 2. The pipeline: shift-and-average at a chosen depth
+
+<Flow
+  steps={[
+    { label: "Many sub-aperture views (44.3's own camera array)", tone: "data" },
+    { label: "Pick a depth to focus on", tone: "process" },
+    { label: "Shift every view by THAT depth's own disparity", tone: "process" },
+    { label: "Average all shifted views -- a synthetic aperture", tone: "result" },
+  ]}
+/>
+
+<LightFieldLab caption="Real, from-scratch shift-and-average light-field refocusing (precomputed), toggling which depth is chosen and how many views are combined." />
+
+Shifting every view by a candidate depth's own disparity (44.3's own `f . baseline / Z` formula) and averaging them is the whole real method. Content that genuinely sits *at* that depth lines up correctly across every shifted view and stays sharp in the average; content at any *other* depth lines up differently in each view, so it smears into a soft blur instead — exactly 44.3's variance-based consistency check, just producing a new synthesized image instead of a depth label.
+
+## 3. A real, measured result: more views see further around an occluder
+
+A background texture sits at 1000mm, with sparse, randomly-placed opaque occluders at 500mm covering **7.7%** of the scene — a real stand-in for foliage, a fence, or any clutter between a camera and its real subject. With a single view, a pixel blocked by an occluder is simply lost — a real mean error of **104.69** (on a 0-255-ish scale) comparing the recovered value to the true, hidden background. Refocusing on the background depth using more views genuinely recovers more of that hidden detail: **3** views cut the error to **46.80**, **9** views to **18.74**, **17** views to **13.60**, and **33** views to **10.80** — because with enough different vantage points, most background points are unblocked from *at least one* of them, and the shift-and-average correctly combines whichever views can actually see through.
+
+## 4. A real, measured result: the opposite choice is a different, smaller benefit
+
+Refocusing instead on the occluder's own depth gives a real, structurally *different* pattern: even a single view already recovers the occluder correctly to within **2.81** of its true value — because an opaque object directly in front of the camera is visible from essentially any single nearby viewpoint, with no occlusion problem to solve. More views here (**3**: 1.58, **9**: 0.83, **17**: 0.59, **33**: 0.47) mainly average down ordinary sensor noise, the same real benefit 44.3 Section 3 measured for depth estimation — a genuinely smaller, different kind of improvement than Section 3's own occlusion-removal result.
+
+## 5. Industrial and scientific context: camera arrays and consumer light-field cameras
+
+The real Stanford Multi-Camera Array (Wilburn et al., 2005) and Vaish et al.'s own real synthetic-aperture confocal imaging used exactly this chapter's shift-and-average method to see through foliage and crowds in real surveillance and photography research; the consumer Lytro camera packed an equivalent capability — many sub-aperture views, via a microlens array in front of a single sensor — into a handheld device, letting a photo be refocused after the fact on a phone or computer, exactly Section 3-4's own real trade-off between "recover what was hidden" and "just reduce noise," depending on which depth is chosen.
+
+## What you should remember from 45.2
+
+<Takeaways>
+<Takeaway n={1} title="A light field is many viewpoints, captured at once">The real input to this chapter's method is exactly 44.3's own camera array, reused for synthesis instead of depth.</Takeaway>
+<Takeaway n={2} title="Shift-and-average at a chosen depth = digital refocusing">Content AT that depth stays sharp; content elsewhere blurs away, by the same real mechanism as 44.3's consistency check.</Takeaway>
+<Takeaway n={3} title="Seeing through occlusion and reducing noise are different real benefits">This chapter's own real numbers: occluded-background recovery improved 104.69 to 10.80 (10x); occluder-plane noise reduction only needed to go from 2.81 to 0.47 (6x), starting from a much smaller problem.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A single-camera photo of a bird partly hidden behind a few thin tree branches is refocused in post-processing software using ordinary digital blur. Based on Section 3, would this actually recover the parts of the bird hidden directly behind the branches?
+
+<Solution>
+
+No. Ordinary digital blur on a *single* photo has no information about what was actually behind the branches — it can only soften what is already there. Section 3's own real recovery (104.69 down to 10.80 error) came specifically from combining *multiple, different real viewpoints*, each of which saw a slightly different part of the bird around the branches; a single photo, however it is processed afterward, never captured that missing information in the first place.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: real shift-and-average refocusing
+
+```python
+import numpy as np
+
+F, Z_BG, Z_FG = 800.0, 1000.0, 500.0
+rng = np.random.default_rng(55)
+texture_bg = 128 + rng.normal(0, 40, 6000)
+rng_occ = np.random.default_rng(77)
+occ_mask_world = rng_occ.random(6000) < 0.08
+SLAT_VALUE = 30.0
+
+PMIN, PMAX = -3000, 3000
+PIX_RANGE = np.arange(PMIN, PMAX)
+REF_PIXELS = np.arange(100, 400)
+
+def sample_tex(tex, pos):
+    pos_c = np.clip(pos, 0, len(tex) - 2)
+    i0 = np.floor(pos_c).astype(int)
+    return tex[i0] * (1 - (pos_c - i0)) + tex[i0 + 1] * (pos_c - i0)
+
+def is_occluder(world_x):
+    idx = np.clip(np.round(world_x).astype(int), 0, 5999)
+    return occ_mask_world[idx]
+
+def render_camera(cam_x, noise_std, seed):
+    val_bg = sample_tex(texture_bg, cam_x + PIX_RANGE * Z_BG / F)
+    occ = is_occluder(cam_x + PIX_RANGE * Z_FG / F)
+    val = np.where(occ, SLAT_VALUE, val_bg)
+    return val + np.random.default_rng(seed).normal(0, noise_std, len(PIX_RANGE))
+
+def lookup(arr, p):
+    idx = np.clip(p - PMIN, 0, len(arr) - 2)
+    i0 = np.floor(idx).astype(int)
+    return arr[i0] * (1 - (idx - i0)) + arr[i0 + 1] * (idx - i0)
+
+def refocus(cam_positions, observed, z_focus, ref_pixels):
+    wx_ref = cam_positions[0] + ref_pixels * z_focus / F
+    vals = [lookup(observed[ci], (wx_ref - cx) * F / z_focus) for ci, cx in enumerate(cam_positions)]
+    return np.mean(vals, axis=0)
+
+true_bg_at_ref = sample_tex(texture_bg, REF_PIXELS * Z_BG / F)
+for n_cams in [1, 9, 33]:
+    cam_positions = np.arange(n_cams) * 50.0
+    observed = [render_camera(cx, 3.0, seed=700 + ci) for ci, cx in enumerate(cam_positions)]
+    refocused_bg = refocus(cam_positions, observed, Z_BG, REF_PIXELS)
+    err = np.abs(refocused_bg - true_bg_at_ref)
+    wx_fg_ref = cam_positions[0] + REF_PIXELS * Z_FG / F
+    occluded = is_occluder(wx_fg_ref)
+    print(f"{n_cams} views, focus on background: error on occluded px = {err[occluded].mean():.2f}")
+```
+
+Output:
+
+```text
+1 views, focus on background: error on occluded px = 104.69
+9 views, focus on background: error on occluded px = 18.74
+33 views, focus on background: error on occluded px = 10.80
+```
+
+### 2. OpenCV: converting a refocused result into a displayable image
+
+```python
+import cv2
+
+refocused_fg = refocus(cam_positions, observed, Z_FG, REF_PIXELS)
+display_8bit = cv2.convertScaleAbs(refocused_fg.astype(np.float32))
+print("refocused result dtype before:", refocused_fg.dtype, " after cv2.convertScaleAbs:", display_8bit.dtype)
+print("sample values:", np.round(refocused_fg[:5], 1), "->", display_8bit[:5].ravel())
+```
+
+Output:
+
+```text
+refocused result dtype before: float64  after cv2.convertScaleAbs: uint8
+sample values: [155.7 160.8  29.8  30.8 162.1] -> [156 161  30  31 162]
+```
+
+## OpenCV API notes
+
+- **No `cv2` function performs light-field refocusing** — the whole real method (Code section 1) is NumPy shift-and-average, reusing 44.3's own disparity formula per candidate depth.
+- **`cv2.convertScaleAbs(src, alpha=1, beta=0)`** (Code section 2) is the real, standard way to turn a float-valued computed result (any negative values become their absolute value, then everything clips to `[0, 255]` as `uint8`) into a normal displayable image — the last real step after any from-scratch NumPy pipeline in this course.
+- **A real microlens-array light-field camera (Lytro, Ng et al. 2005) captures all of this chapter's "many views" in a single exposure**, trading sensor resolution for the ability to refocus and shift viewpoint entirely in software afterward — the real reason this chapter's camera-array simulation generalizes directly to that single-shot hardware.
+
+## Where it fails
+
+- **Dense occlusion (not sparse) defeats this method, not just slows it down** — this chapter's real test used 7.7% coverage; much denser clutter leaves too few unblocked viewpoints for any real number of views to recover the background cleanly (a real, structural limit, not solved by adding more cameras, similar in spirit to 44.3 Section 5's textureless-region exception).
+- **The synthetic aperture (camera spread) must be wide enough relative to the occluder's own size and depth separation** — too narrow a spread (cameras too close together) barely changes viewpoint at all, and recovers little more than a single camera would.
+- **This chapter assumed exact, known depths for both layers** — a real scene needs its own depth estimate first (44.3's own plane-sweep, or a dedicated light-field depth algorithm) before refocusing can target the right real depth at all.
+- **Moving scene content between captured views breaks the model entirely** — like every method in this course relying on multiple views of the same static scene, any real motion during capture invalidates the whole shift-and-average assumption.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Expecting a single photo, processed afterward, to reveal information a light field's many viewpoints would have captured** — Mini exercise's own real point: there is a hard, physical difference between softening existing pixels and actually seeing around an occluder.
+- **Assuming more views always help the same amount** — Section 3 and Section 4's own real, different improvement curves (10x vs 6x, starting from very different error levels) show the real benefit depends heavily on which depth is being focused on and why.
+- **Confusing synthetic-aperture refocusing with simple image blurring** — the real method (Code section 1) explicitly uses each view's own real, different vantage point; a single blurred image has no such extra information to draw on.
+- **Forgetting that a too-narrow camera/microlens spread limits how much occlusion can be seen through** — the real, physical aperture width of a light-field camera directly bounds this chapter's own real recovery performance.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The two-plane light field parameterization
+
+Levoy and Hanrahan ("Light Field Rendering," SIGGRAPH 1996) formalized a light field as a 4-D function `L(u, v, s, t)` — two coordinates `(u, v)` for which ray, and two more `(s, t)` for where that ray starts — of which this chapter's 1-D camera array and pixel index are a simplified, one-dimensional slice.
+
+### Synthetic aperture confocal imaging
+
+Vaish, Garg, Talvala, Antunez, Wilburn, Horowitz, Levoy, "Synthetic Aperture Focusing Using a Shear-Warp Factorization of the Viewing Transform" (CVPR Workshop, 2005) is the real, foundational application behind Section 3's own occlusion-removal result, used in real research for seeing through foliage, crowds, and other dense real-world clutter with a real camera array.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does a light field capture that a single photograph does not?",
+      options: ["Higher resolution only", "The full set of light rays from many different nearby viewpoints at once, not just one camera position's view", "Only color information", "Nothing different -- they are the same thing"],
+      answer: 1,
+      explanation: "Section 2: this extra viewpoint information is exactly what Section 3's occlusion-removal result depends on.",
+    },
+    {
+      question: "This chapter's own real test found what effect from adding more views when refocusing on a background partly hidden by sparse occluders?",
+      options: ["No effect at all", "Real, substantial error reduction: from 104.69 (1 view) to 10.80 (33 views) as more viewpoints saw around the occluders", "Error got worse with more views", "Only works with exactly 2 views"],
+      answer: 1,
+      explanation: "Section 3: a real, roughly 10x improvement from combining enough different real vantage points.",
+    },
+    {
+      question: "Why did a SINGLE view already recover the occluder's own depth fairly well (Section 4), unlike the background case?",
+      options: ["Single views are always perfectly accurate", "An opaque occluder directly in the camera's path is visible from essentially any one viewpoint -- there is no occlusion problem to solve there, only ordinary sensor noise", "The occluder was actually transparent", "This result is a measurement error"],
+      answer: 1,
+      explanation: "Section 4: a real, structurally different (and much smaller) benefit than Section 3's occlusion removal.",
+    },
+    {
+      question: "What is the real, standard shift-and-average refocusing method, in terms of this course's own prior chapters?",
+      options: ["A completely new, unrelated algorithm", "44.3's own per-candidate-depth disparity warp and averaging, reused to synthesize a new image instead of estimating a depth label", "A machine learning model", "The same thing as 44.2's photometric stereo"],
+      answer: 1,
+      explanation: "Section 2: the real mechanism is identical to 44.3's plane-sweep consistency check, applied for a different purpose.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A light-field camera array has 9 views. Based on Section 3's own real pattern, would increasing to 17 views be expected to help more with seeing through sparse occluders, or with reducing ordinary sensor noise on an already-unoccluded background?
+
+<Solution>
+
+More with seeing through occluders. Section 3's own real result showed a much bigger relative improvement from occlusion-related error (18.74 to 13.60, a real structural recovery) than Section 4's noise-only case (0.83 to 0.59, a smaller, diminishing-returns reduction) over a similar jump in view count.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, test `n_cams=65` and report what goes wrong, given this chapter's `PMIN, PMAX = -3000, 3000` array bounds.
+
+<Solution>
+
+```python
+cam_positions_65 = np.arange(65) * 50.0
+print("farthest camera position (mm):", cam_positions_65[-1])
+print("array bounds (mm) at Z_BG:", PMIN * Z_BG / F, "to", PMAX * Z_BG / F)
+```
+
+Output:
+
+```text
+farthest camera position (mm): 3200.0
+array bounds (mm) at Z_BG: -3750.0 to 3750.0
+```
+
+At 65 cameras spaced 50mm apart, the farthest camera sits at 3200mm — still inside this chapter's -3750mm to 3750mm array bounds at the background depth, so this particular configuration stays safe; a reader experimenting with even more cameras, a wider spacing, or a shallower candidate depth (which needs a proportionally larger pixel lookup range for the same real-world distance) should check this same bound before trusting a result, exactly the kind of boundary check this chapter's own data generation needed before its real numbers could be trusted.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A nature documentary team wants to photograph a bird deep inside a bush, mostly hidden by branches, and is considering a single high-resolution DSLR versus a lower-resolution light-field camera array. Based on this chapter, which real trade-off should they expect?
+
+<Solution>
+
+Following Section 3's own real result, no amount of single-camera resolution or post-processing can recover the parts of the bird that no single lens position ever actually saw — resolution and "seeing around an occluder" are different real problems (Mini exercise). A light-field array, even at lower per-view resolution, combines many real, different vantage points and can genuinely reconstruct more of the hidden bird (this chapter's own 10x real error reduction from 1 to 33 views), at the cost of a bulkier rig and a real, additional processing step to pick and apply the right focus depth.
+
+</Solution>
+
+## References
+
+1. M. Levoy, P. Hanrahan, "Light Field Rendering," *ACM SIGGRAPH*, 1996.
+2. R. Ng, M. Levoy, M. Brédif, G. Duval, M. Horowitz, P. Hanrahan, "Light Field Photography with a Hand-Held Plenoptic Camera," Stanford Tech Report, 2005 (the real basis of the Lytro consumer camera).
+3. V. Vaish, G. Garg, E. Talvala, E. Antunez, B. Wilburn, M. Horowitz, M. Levoy, "Synthetic Aperture Focusing Using a Shear-Warp Factorization of the Viewing Transform," *CVPR Workshops*, 2005.
+4. B. Wilburn et al., "High Performance Imaging Using Large Camera Arrays," *ACM SIGGRAPH*, 2005 (the Stanford Multi-Camera Array).
+5. OpenCV 4.13.0 documentation: `cv2.convertScaleAbs`. https://docs.opencv.org/4.13.0/

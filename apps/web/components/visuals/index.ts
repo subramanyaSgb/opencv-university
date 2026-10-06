@@ -197,3 +197,4 @@ export { PointCloudLab } from "./PointCloudLab";
 export { PhotoStereoLab } from "./PhotoStereoLab";
 export { MultiViewStereoLab } from "./MultiViewStereoLab";
 export { PanoramaLab } from "./PanoramaLab";
+export { LightFieldLab } from "./LightFieldLab";
