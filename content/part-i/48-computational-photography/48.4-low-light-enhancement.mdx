@@ -1,0 +1,273 @@
+export const meta = {
+  number: "48.4",
+  title: "Low-light enhancement",
+  minutes: 22,
+  objectives: [
+    "Know why low light is fundamentally a signal-to-noise problem, not just a brightness problem",
+    "Verify the real shot-noise SNR=sqrt(signal) relationship directly",
+    "Measure, for real, that naive brightening leaves SNR completely unchanged",
+    "Measure, for real, how multi-frame averaging genuinely improves SNR instead",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 48.4 (Part I, Module 48; closes the module). 12.3 already
+  proved CLAHE cannot improve CNR beyond the original image's own real limit ("No contrast
+  operation improves the CNR of the original"); this chapter explains WHY at the physical
+  level -- real shot noise -- and covers the one real technique that DOES genuinely improve
+  SNR: multi-frame averaging, the real basis of phone "night mode."
+  All numbers real, verified directly via real NumPy Poisson sampling (100,000 trials per
+  test, seed=50).
+  Shot-noise SNR=sqrt(signal) verification: true signal=5: measured std=2.240 (theory
+  sqrt(5)=2.236), SNR=2.232. signal=20: std=4.461 (theory 4.472), SNR=4.484. signal=100:
+  std=9.987 (theory 10.000), SNR=10.013. signal=500: std=22.394 (theory 22.361), SNR=22.327.
+  Naive brightening (gain multiplication) leaves SNR EXACTLY unchanged: at signal=20,
+  SNR=4.476 at gain=1, gain=5, AND gain=10 -- identical to 3+ significant figures.
+  Multi-frame averaging genuinely improves SNR by sqrt(N): at signal=20, n_frames=1:
+  std=4.4775, SNR=4.467. n_frames=4: std=2.2343, SNR=8.951 (~2x). n_frames=16: std=1.1183,
+  SNR=17.884 (~4x). n_frames=64: std=0.5593, SNR=35.761 (~8x) -- matching sqrt(N) almost
+  exactly (sqrt(4)=2, sqrt(16)=4, sqrt(64)=8).
+  Lab: ShotNoiseLab (apps/web/components/visuals/ShotNoiseLab.tsx) -- live Poisson SNR vs
+  signal level, gain, and frame count.
+*/}
+
+# 48.4 Low-light enhancement
+
+<Definition term="Low-light enhancement">genuinely recovering a usable image from a dark scene — which 12.3's own real result already proved cannot be done by brightness or contrast adjustment alone, because the real problem is signal-to-noise ratio, not brightness.</Definition>
+
+12.3 proved something important and left it unexplained: "no contrast operation improves the CNR of the original." This chapter covers the real physics behind that result — shot noise — and the one real technique that genuinely does improve signal-to-noise: using more than one frame.
+
+## 1. An analogy
+
+Turning up a radio's volume knob makes both the music and the static louder by the exact same amount — the real ratio between them, which is what actually determines how clearly the music can be heard, never changes. Brightening a dark photo is the identical real operation: it amplifies the real signal and the real noise together, by the same factor, leaving the underlying problem exactly as bad as before.
+
+## 2. The pipeline: why dark means noisy, not just dim
+
+<Flow
+  steps={[
+    { label: "Few real photons reach each pixel in low light", tone: "world" },
+    { label: "Real Poisson (shot) noise: std = sqrt(signal)", tone: "process" },
+    { label: "Brightening (gain) scales signal AND noise together -- no real SNR change", tone: "process" },
+    { label: "Real fix: average several frames -- noise shrinks, signal does not", tone: "result" },
+  ]}
+/>
+
+<ShotNoiseLab caption="Live, exact Poisson shot-noise SNR -- signal level, brightening gain, and multi-frame averaging." />
+
+A camera sensor counts real, individual photons, and real photon arrival follows **Poisson statistics**: for a true signal level `s`, the real standard deviation of the measured count is `sqrt(s)`. Low light means a small `s`, and `sqrt(s)` shrinks more slowly than `s` itself does — so the real signal-to-noise ratio, `s / sqrt(s) = sqrt(s)`, genuinely gets worse as light gets scarcer. This is not a display or processing artifact; it is a fundamental, real property of light itself at low intensity.
+
+## 3. A real, measured result: the shot-noise formula, verified exactly
+
+Sampling real Poisson-distributed photon counts at several true signal levels confirms the formula directly: at a true signal of 5, the real measured standard deviation is **2.240** (theory: `sqrt(5) = 2.236`), giving a real SNR of **2.232**. At signal 500, the real measured std is **22.394** (theory: **22.361**), SNR **22.327**. The real SNR grows with the signal exactly as `sqrt(signal)` predicts — and at low signal levels, that SNR is genuinely, unavoidably poor.
+
+## 4. A real, measured result: brightening changes nothing about SNR
+
+Multiplying a noisy low-light signal (true level 20) by a real gain of 1, 5, or 10 gives an SNR of **4.476 in every single case** — identical to three significant figures, regardless of how much brighter the image now looks. This is the real, exact mathematical reason behind 12.3's own finding: gain (and, by the same real logic, any single-frame contrast curve) scales signal and noise by the identical factor, so their real ratio — the only thing that actually determines how much real detail survives — cannot change.
+
+## 5. A real, measured result: averaging several frames is the real fix
+
+Averaging several real, independent noisy frames of the same true signal genuinely improves SNR, because the real, independent noise partially cancels while the true signal does not: at signal level 20, a single frame gives SNR **4.467**; averaging **4** frames reaches **8.951** (almost exactly double, `sqrt(4)=2`); **16** frames reaches **17.884** (almost exactly `sqrt(16)=4` times better); **64** frames reaches **35.761** (almost exactly `sqrt(64)=8` times better). This is the real, physical basis of a phone camera's "night mode": capturing and averaging several real exposures instead of just brightening one.
+
+## 6. Industrial context: real low-light techniques working together
+
+A real low-light pipeline typically uses this chapter's own real multi-frame averaging to genuinely improve SNR first, *then* 12.3's CLAHE (or 15.3's illumination correction) to redistribute the now-genuinely-better signal for display — exactly the right real order, since Section 4's own result shows contrast operations alone, applied first, would accomplish nothing toward the real underlying noise problem. Machine-vision inspection stations facing genuinely low light often use a real strobe and multiple synchronized captures for exactly this reason, rather than simply raising a single exposure's gain.
+
+## What you should remember from 48.4
+
+<Takeaways>
+<Takeaway n={1} title="Low light is a real SNR problem, not just a dim one">Real shot noise gives SNR=sqrt(signal) -- a fundamental physical limit, verified exactly.</Takeaway>
+<Takeaway n={2} title="Brightening alone never helps, provably">This chapter's own real result: identical SNR (4.476) at every gain tested -- explaining 12.3's own CNR finding.</Takeaway>
+<Takeaway n={3} title="Multi-frame averaging genuinely helps">A real, measured sqrt(N) SNR improvement -- the real physics behind night mode.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A phone's "night mode" captures and combines 8 frames instead of 1. Based on Section 5's own real sqrt(N) pattern, roughly how much real SNR improvement should be expected?
+
+<Solution>
+
+`sqrt(8) ≈ 2.83x` — consistent with this chapter's own real results (sqrt(4)=2x, sqrt(16)=4x), interpolating to roughly 2.8x better SNR than a single frame.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: real shot-noise SNR, and why brightening cannot fix it
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(50)
+
+print("real shot-noise SNR vs signal level:")
+for s in [5, 20, 100, 500]:
+    samples = rng.poisson(s, 100000)
+    print(f"  signal={s}: std={samples.std():.3f} (theory sqrt={np.sqrt(s):.3f}), SNR={s/samples.std():.3f}")
+
+print("\ndoes brightening (gain) change SNR?")
+s = 20
+samples = rng.poisson(s, 100000).astype(np.float64)
+for gain in [1, 5, 10]:
+    brightened = samples * gain
+    print(f"  gain={gain}: SNR after brightening={(s*gain)/brightened.std():.3f}")
+```
+
+Output:
+
+```text
+real shot-noise SNR vs signal level:
+  signal=5: std=2.240 (theory sqrt=2.236), SNR=2.232
+  signal=20: std=4.461 (theory sqrt=4.472), SNR=4.484
+  signal=100: std=9.987 (theory sqrt=10.000), SNR=10.013
+  signal=500: std=22.394 (theory sqrt=22.361), SNR=22.327
+
+does brightening (gain) change SNR?
+  gain=1: SNR after brightening=4.476
+  gain=5: SNR after brightening=4.476
+  gain=10: SNR after brightening=4.476
+```
+
+### 2. OpenCV: multi-frame averaging, the real fix
+
+```python
+import cv2
+
+print("does multi-frame averaging improve SNR?")
+s = 20
+for n_frames in [1, 4, 16, 64]:
+    frames = rng.poisson(s, (n_frames, 100000)).astype(np.float32)
+    averaged = np.mean(frames, axis=0)
+    print(f"  n_frames={n_frames}: std={averaged.std():.4f}, SNR={s/averaged.std():.3f}")
+
+# a real, tiny averaged-frame demo via cv2.accumulate, as a burst-capture loop would use
+acc = np.zeros((4, 4), dtype=np.float32)
+for i in range(16):
+    frame = rng.poisson(s, (4, 4)).astype(np.float32)
+    cv2.accumulate(frame, acc)
+averaged_img = acc / 16
+print("cv2.accumulate-based average, sample pixel:", round(float(averaged_img[0, 0]), 2), "(true signal:", s, ")")
+```
+
+Output:
+
+```text
+does multi-frame averaging improve SNR?
+  n_frames=1: std=4.4775, SNR=4.467
+  n_frames=4: std=2.2343, SNR=8.951
+  n_frames=16: std=1.1183, SNR=17.884
+  n_frames=64: std=0.5593, SNR=35.761
+cv2.accumulate-based average, sample pixel: 20.88 (true signal: 20 )
+```
+
+## OpenCV API notes
+
+- **`cv2.accumulate(src, dst)`** (Code section 2) adds a real frame into a running floating-point sum — the real, standard `cv2` building block for burst/multi-frame averaging; dividing the final sum by the frame count gives the averaged result.
+- **No `cv2` function "fixes" low light from a single frame** — consistent with this chapter's own real result (Section 4): a genuine SNR improvement needs real additional data (more frames), not a cleverer single-frame operation.
+- **`cv2.fastNlMeansDenoising`** (18.5) is a real, different approach: instead of averaging real independent exposures, it averages similar-looking PATCHES within one single image — a real alternative when only one frame is available, with its own real trade-offs already covered in that chapter.
+
+## Where it fails
+
+- **Multi-frame averaging needs real frame alignment if anything moves** — a moving subject or camera between frames causes real ghosting or blur in the averaged result, directly analogous to 48.1's own HDR ghosting problem.
+- **Averaging more frames takes real, additional time** — a real trade-off between SNR improvement (Section 5) and capture speed, unsuitable for genuinely fast-moving real scenes.
+- **This chapter's model assumed pure shot noise only** — a real sensor also has read noise and dark current (2.5), which do not average away in exactly the same simple way, especially at very low real signal levels.
+- **12.3's own CLAHE/contrast tools remain genuinely useful for DISPLAY**, after a real SNR improvement — this chapter's own point is that they cannot substitute for one, not that they are useless.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Believing that brightening a dark photo "fixes" low light** — Section 4's own real, exact result (identical SNR at every gain) directly disproves this.
+- **Applying CLAHE or histogram equalization expecting a real noise reduction** — 12.3's own real finding, now explained: no single-frame contrast operation can improve real SNR.
+- **Averaging frames of a moving scene without real alignment** — Where it fails's own real ghosting problem, avoidable with the same real registration techniques covered in 21.x.
+- **Assuming all low-light noise is shot noise** — Where it fails's own point: a real sensor's read noise and dark current behave differently, especially in very dark conditions.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Burst photography pipelines
+
+Real "night mode" implementations (e.g. Google's HDR+ / Night Sight, Hasinoff et al., "Burst Photography for High Dynamic Range and Low-Light Imaging on Mobile Cameras," SIGGRAPH Asia 2016) combine this chapter's own real multi-frame averaging with real frame alignment (to tolerate real hand-shake) and 48.1's own HDR merging, in one real combined pipeline.
+
+### Why read noise matters more at very low signal
+
+At extremely low real signal levels, a sensor's own fixed real read noise (which does NOT scale with signal, unlike shot noise) can dominate over shot noise entirely — a real, different noise regime from this chapter's own shot-noise-dominated analysis, needing its own real characterization (2.5) before Section 5's own averaging strategy can be properly tuned.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why does low light cause real, poor image quality, according to this chapter's own verified physics?",
+      options: ["Only because the image looks dim", "Real Poisson shot noise gives SNR=sqrt(signal) -- at low signal, this ratio is fundamentally poor, a real physical limit, not a display issue", "Low light has no real effect on image quality", "This is purely a software/processing limitation"],
+      answer: 1,
+      explanation: "Section 2-3: a real, exactly-verified physical relationship, not an assumption.",
+    },
+    {
+      question: "This chapter's own real test found what effect from brightening (gain) on signal-to-noise ratio?",
+      options: ["Brightening always improves SNR", "SNR was EXACTLY unchanged (4.476) at every gain tested (1, 5, 10) -- directly explaining 12.3's own real finding that no contrast operation improves CNR", "Brightening made SNR worse", "SNR could not be measured after brightening"],
+      answer: 1,
+      explanation: "Section 4: a real, exact, measured confirmation -- gain scales signal and noise together.",
+    },
+    {
+      question: "This chapter's own real multi-frame test found what SNR improvement from averaging 64 frames instead of 1?",
+      options: ["No improvement at all", "A real, measured improvement matching sqrt(64)=8x almost exactly (SNR rose from 4.467 to 35.761)", "A 64x improvement", "Averaging made SNR worse"],
+      answer: 1,
+      explanation: "Section 5: a real, measured confirmation of the sqrt(N) averaging law -- the real basis of night mode.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Using this chapter's own real `SNR=sqrt(signal)` relationship, roughly what SNR would you expect at a true signal level of 50 (between this chapter's own tested 20 and 100)?
+
+<Solution>
+
+`sqrt(50) ≈ 7.07` — between this chapter's own real signal=20 (SNR≈4.48) and signal=100 (SNR≈10.01) results, consistent with the real square-root relationship.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, test `n_frames=256` and compare the real SNR improvement to this chapter's own `n_frames=64` result (35.761).
+
+<Solution>
+
+```python
+frames_256 = rng.poisson(20, (256, 100000)).astype(np.float32)
+avg_256 = np.mean(frames_256, axis=0)
+print(f"n_frames=256: std={avg_256.std():.4f}, SNR={20/avg_256.std():.3f}")
+```
+
+Output:
+
+```text
+n_frames=256: std=0.2805, SNR=71.298
+```
+
+Almost exactly double this chapter's own `n_frames=64` result (35.761), matching the real `sqrt(256)/sqrt(64) = 16/8 = 2x` prediction.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A security camera manufacturer wants to improve low-light performance and is debating between adding a "brightness boost" software feature versus a real multi-frame-averaging "night mode." Based on this chapter, which should they recommend, and why?
+
+<Solution>
+
+Multi-frame averaging, following this chapter's own real, exact result (Section 4): a brightness-boost feature cannot improve the real signal-to-noise ratio at all, since gain scales signal and noise identically — it would only make an already-noisy image look brighter and equally noisy. Multi-frame averaging (Section 5) genuinely improves real SNR, following the measured `sqrt(N)` law, at the real cost of needing multiple frames (and handling any real motion between them, per Where it fails) — a real, justified engineering trade-off for a genuine improvement, rather than a purely cosmetic one.
+
+</Solution>
+
+## References
+
+1. S. W. Hasinoff et al., "Burst Photography for High Dynamic Range and Low-Light Imaging on Mobile Cameras," *ACM SIGGRAPH Asia*, 2016.
+2. G. E. Healey, R. Kondepudy, "Radiometric CCD Camera Calibration and Noise Estimation," *IEEE Transactions on Pattern Analysis and Machine Intelligence*, 16(3), 1994 (shot noise and sensor noise characterization) — already related to 2.5's own sensor-noise treatment.
+3. OpenCV 4.13.0 documentation: `cv2.accumulate`. https://docs.opencv.org/4.13.0/

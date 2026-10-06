@@ -211,3 +211,4 @@ export { WindowLevelLab } from "./WindowLevelLab";
 export { HdrLab } from "./HdrLab";
 export { InpaintLab } from "./InpaintLab";
 export { DehazeLab } from "./DehazeLab";
+export { ShotNoiseLab } from "./ShotNoiseLab";
