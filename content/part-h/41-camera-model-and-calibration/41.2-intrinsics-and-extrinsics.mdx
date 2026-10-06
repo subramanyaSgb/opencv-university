@@ -1,0 +1,250 @@
+export const meta = {
+  number: "41.2",
+  title: "Intrinsics and extrinsics",
+  minutes: 20,
+  objectives: [
+    "Separate what belongs to the camera itself (K) from what belongs to where it's placed (R, t)",
+    "Build a real rotation matrix with cv2.Rodrigues and use it in a real projection",
+    "Measure, for real, how much the same point's pixel moves when only the camera moves",
+    "Assemble the full P = K[R|t] camera matrix",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 41.2 (Part H, Module 41). Builds directly on 41.1's K matrix.
+  Real, verified numbers: K from 41.1 (fx=fy=2318.84, cx=638.2, cy=362.1). A world point
+  (50, 20, 800) projects to (783.1275, 420.071) with zero rotation/translation (matching
+  41.1's own result exactly). Rotating the camera 15 degrees (about Y, via a real
+  cv2.Rodrigues rotation matrix) and translating it 30mm along X moves the SAME point's
+  projection to (1509.067, 423.138) -- confirmed two independent ways: cv2.projectPoints
+  directly, and hand transforming the point into the camera frame (R @ p + t) then applying
+  K, giving an identical result to 6 decimal places.
+  Lab: CameraMatrixLab (mode="extrinsics", shared with 41.1) -- live yaw/translation sliders
+  on the same intrinsic projection.
+*/}
+
+# 41.2 Intrinsics and extrinsics
+
+<Definition term="Extrinsics (R, t)">the camera's own position and orientation in the world — a rotation matrix R and a translation vector t that convert a point's world coordinates into coordinates relative to the camera, before 41.1's intrinsic matrix K ever gets involved.</Definition>
+
+41.1's K describes something that belongs entirely to the camera itself — its lens and sensor — and does not change if you pick the camera up and move it. This chapter adds the part that *does* change the moment you move the camera: where it is, and which way it's pointing.
+
+## 1. An analogy
+
+K is like a specific pair of glasses' prescription — fixed, a property of the glasses themselves. Extrinsics are like where your head is and which way you're looking — completely independent of the glasses' own prescription, but just as necessary for predicting exactly what you'll see.
+
+## 2. Two separate transforms, one pipeline
+
+<Flow
+  steps={[
+    { label: "A point's world coordinates", tone: "data" },
+    { label: "Extrinsics: R, t -- where is the camera, which way is it pointing?", tone: "process" },
+    { label: "The point's coordinates relative to the camera", tone: "data" },
+    { label: "Intrinsics: K -- the camera's own lens/sensor projection (41.1)", tone: "result" },
+  ]}
+/>
+
+A world point `p` is first transformed into the camera's own frame: `p_camera = R . p + t`. Only then does 41.1's intrinsic projection apply: `u = fx . X_camera/Z_camera + cx` (and the same for `v`). The full pipeline is often written as one matrix product, `P = K [R | t]`, applied to the point in homogeneous coordinates (5.3).
+
+## 3. A real, measured separation
+
+<CameraMatrixLab caption="The same point, the same K -- only the camera's own yaw and translation change. Watch the projected pixel move purely from the extrinsics." mode="extrinsics" />
+
+The same world point `(50, 20, 800)`, the same K from 41.1, with two different extrinsics:
+
+| Extrinsics | Projected pixel |
+| --- | --- |
+| R = identity, t = 0 (no motion) | (783.13, 420.07) |
+| R = 15 deg yaw, t = (30, 0, 0) mm | (1509.07, 423.14) |
+
+Moving and rotating the *camera* — nothing about the lens or sensor changed — shifted the same point's pixel by over 725 px in u. `K` never changed between these two rows; only `R` and `t` did. This is the real, practical reason the two are calibrated and reasoned about separately: `K` is a property of one physical camera unit, `R, t` describe one specific moment's placement of it.
+
+## 4. A real rotation matrix, not just an angle
+
+`cv2.Rodrigues` converts between a compact 3-number rotation vector and a full 3×3 rotation matrix — the form `cv2.projectPoints` and `cv2.solvePnP` (41.5) actually use internally. Building the 15° yaw rotation by hand and converting it with `cv2.Rodrigues`, then transforming the point directly (`R @ p + t`) and applying `K` by hand, gives exactly the same pixel as calling `cv2.projectPoints` with the equivalent `rvec`/`tvec` — confirmed to six decimal places (Code section 2), not approximately.
+
+## 5. Industrial context: why this separation matters
+
+A single physical camera, bolted once to a fixture, has one real `K` that never changes again — 41.4's chessboard calibration measures it once. That same camera, if it's on a robot arm or a pan-tilt mount, has a *different* `R, t` every time it moves — and every one of those positions needs its own extrinsics, re-derived (41.5's PnP, or known from the robot's own encoders), while reusing the identical, already-known `K`. Treating the two as one combined, retuned-from-scratch-every-time unknown would throw away real, already-known information every time the camera moves.
+
+## What you should remember from 41.2
+
+<Takeaways>
+<Takeaway n={1} title="Intrinsics: fixed per camera">K describes the lens and sensor, unchanged when the camera moves.</Takeaway>
+<Takeaway n={2} title="Extrinsics: fixed per moment">R, t describe where the camera is right now -- different every time it moves.</Takeaway>
+<Takeaway n={3} title="This chapter's own real measurement">The same point, same K: 783.13 px vs 1509.07 px in u, purely from extrinsics.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A camera's K never changes, but it is moved to a new position (new R, t). Does the new picture need a new calibration of K, a new set of extrinsics, or both?
+
+<Solution>
+
+Only a new set of **extrinsics** (R, t) — K belongs to the camera's own lens and sensor, which did not change; only where the camera is sitting changed, exactly as Section 3 measured directly.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: transforming a point into the camera frame by hand
+
+```python
+import numpy as np
+
+yaw = np.deg2rad(15)
+R = np.array([[np.cos(yaw), 0, np.sin(yaw)], [0, 1, 0], [-np.sin(yaw), 0, np.cos(yaw)]])
+t = np.array([30.0, 0, 0])
+p_world = np.array([50.0, 20.0, 800.0])
+p_camera = R @ p_world + t
+print("point in camera frame:", np.round(p_camera, 4))
+```
+
+Output:
+
+```text
+point in camera frame: [285.3515  20.     759.7997]
+```
+
+### 2. OpenCV: the same transform, via cv2.Rodrigues and cv2.projectPoints
+
+```python
+import cv2
+
+K = np.array([[2318.84, 0, 638.2], [0, 2318.84, 362.1], [0, 0, 1]], np.float64)
+rvec, _ = cv2.Rodrigues(R)
+tvec = t
+point_world_cv = np.array([[50.0, 20.0, 800.0]])
+img_pt, _ = cv2.projectPoints(point_world_cv, rvec, tvec, K, None)
+print("rvec:", rvec.flatten())
+print("projected pixel:", img_pt.reshape(-1))
+
+u_hand = K[0, 0] * p_camera[0] / p_camera[2] + K[0, 2]
+v_hand = K[1, 1] * p_camera[1] / p_camera[2] + K[1, 2]
+print("hand-computed pixel:", round(u_hand, 4), round(v_hand, 4))
+```
+
+Output:
+
+```text
+rvec: [0.         0.26179939 0.        ]
+projected pixel: [1509.06705634  423.13819133]
+hand-computed pixel: 1509.0671 423.1382
+```
+
+## OpenCV API notes
+
+- **`cv2.Rodrigues(R)` / `cv2.Rodrigues(rvec)`**: converts both ways between a full 3×3 rotation matrix and a compact 3-element rotation vector (axis × angle, in radians) — `cv2.solvePnP` (41.5) and `cv2.projectPoints` both use the compact `rvec` form.
+- **`cv2.projectPoints(objectPoints, rvec, tvec, K, distCoeffs)`**: internally does exactly Section 2's pipeline — rotate and translate into the camera frame, then apply the intrinsic projection — confirmed here by matching its result against the same calculation done by hand.
+- **The order matters**: `p_camera = R @ p_world + t`, not `R @ (p_world + t)` — rotation is applied first, around the camera's own origin, then the translation shifts that result; swapping the order gives a different, wrong answer whenever `t` is nonzero.
+
+## Where it fails
+
+- **Confusing which frame a rotation is expressed in** — `R` here rotates a world point into the camera's frame; using the same numeric matrix the other way round (camera frame into world) requires its transpose/inverse, not the same matrix.
+- **Re-estimating K every time the camera moves** wastes real, already-known information (Section 5) — K should be calibrated once per physical camera (41.4), extrinsics re-derived per position (41.5) only.
+- **Assuming a rotation vector's three numbers are simply roll/pitch/yaw angles** — `rvec` is an axis-angle representation (the vector's direction is the rotation axis, its length is the angle in radians), not three separate Euler angles; converting between the two needs real, explicit formulas, not just relabelling.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Treating K as if it changes with the camera's position** — Section 3's own real result confirms K is identical in both rows; only R, t differ.
+- **Applying translation before rotation** — Where it fails: the order is not interchangeable once t is nonzero.
+- **Assuming `cv2.Rodrigues`'s rotation vector elements are Euler angles** — they are axis-angle components; reading `rvec[1] = 0.2618` directly as "yaw in radians" happens to work only because this particular rotation was purely about the Y axis.
+- **Forgetting `cv2.projectPoints` needs `rvec`, not a 3x3 matrix, directly** — passing a full rotation matrix where `rvec` is expected is a real, common shape-mismatch error; convert with `cv2.Rodrigues` first (Code section 2).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why axis-angle, not Euler angles
+
+Euler angles (separate roll, pitch, yaw numbers) suffer from a real, well-known ambiguity problem (gimbal lock) and from the fact that the same rotation can be written several different ways depending on the chosen rotation order (XYZ vs ZYX, etc.). Axis-angle representation (what `rvec` actually is) avoids both problems — one real axis, one real angle, a single unambiguous description — which is exactly why OpenCV's calibration and pose-estimation functions use it internally, converting to a full rotation matrix with `cv2.Rodrigues` only when a matrix form is actually needed for a matrix multiplication.
+
+### The full camera matrix P
+
+`P = K [R | t]` is a single 3×4 matrix: multiplying it by a world point in homogeneous coordinates (5.3), `[X, Y, Z, 1]^T`, in one matrix-vector product, does Section 2's entire two-step pipeline (extrinsic transform, then intrinsic projection) at once — the form most 3D computer vision literature [1] actually writes the camera model in, rather than as two separate steps.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What stays the same about a camera when it is picked up and moved to a new position?",
+      options: ["Nothing stays the same", "The intrinsic matrix K -- it describes the lens and sensor, not the camera's position", "The extrinsics R, t", "The projected pixel of every point"],
+      answer: 1,
+      explanation: "Section 5: K is a property of the physical camera unit; R, t describe where it is right now.",
+    },
+    {
+      question: "In this chapter's own real measurement, what caused the same point's projected pixel to move from 783.13 to 1509.07?",
+      options: ["A change to K", "A change to the extrinsics (R, t) only -- K was identical in both cases", "Lens distortion", "A different world point"],
+      answer: 1,
+      explanation: "Section 3: a real, measured shift from extrinsics alone, with K held fixed.",
+    },
+    {
+      question: "What does cv2.Rodrigues convert between?",
+      options: ["Pixels and millimetres", "A full 3x3 rotation matrix and a compact 3-element rotation vector (axis-angle)", "Intrinsics and extrinsics", "RGB and grayscale"],
+      answer: 1,
+      explanation: "OpenCV API notes: the two equivalent representations cv2.projectPoints and cv2.solvePnP use.",
+    },
+    {
+      question: "In p_camera = R @ p_world + t, why does the order (rotate first, then translate) matter?",
+      options: ["It doesn't matter at all", "Rotation is applied around the camera's own origin; swapping the order with translation gives a different result whenever t is nonzero", "Translation must always come first by convention only", "Only rotation matters; t can be applied at any point"],
+      answer: 1,
+      explanation: "Where it fails: this chapter's own worked example depends on applying them in this specific order.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Using this chapter's own R (15 deg yaw) and t = (30, 0, 0), transform the point (0, 0, 500) into the camera frame.
+
+<Solution>
+
+p_camera = R @ [0, 0, 500] + [30, 0, 0]. R's third column (for a Y-axis rotation) is [sin(15°), 0, cos(15°)] ≈ [0.2588, 0, 0.9659], so R @ [0,0,500] = [500 × 0.2588, 0, 500 × 0.9659] ≈ [129.4, 0, 482.95]. Adding t: **(159.4, 0, 482.95)**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, project the point (0, 0, 500) with the same K, rvec, and tvec, and verify it matches Exercise 1's hand calculation once the intrinsic projection is applied.
+
+<Solution>
+
+```python
+point2 = np.array([[0.0, 0.0, 500.0]])
+img_pt2, _ = cv2.projectPoints(point2, rvec, tvec, K, None)
+print("projected pixel:", img_pt2.reshape(-1))
+```
+
+Output:
+
+```text
+projected pixel: [1403.56969447  362.1       ]
+```
+
+u = 2318.84 x 159.41/482.96 + 638.2 ≈ 1403.57, v = 2318.84 x 0/482.96 + 362.1 = 362.1 — matching Exercise 1's hand-computed camera-frame point once the intrinsic projection (41.1) is applied.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague recalibrates a camera's full K, R, and t together every time a robot arm holding it moves to a new position, reasoning "it's simpler to just solve for everything at once." Based on Section 5, what real cost does this have?
+
+<Solution>
+
+Treating K as unknown every time throws away real, already-known information: K belongs to the camera's own lens and sensor (Section 2), which did not change when the robot arm moved — only R, t did. Re-solving for K every time wastes the real calibration effort already spent once (41.4), and, with fewer real constraints actually needed (only R, t are genuinely unknown at each new position), is more prone to an unstable or inaccurate solution than correctly treating K as fixed and solving only for the real unknowns, R and t (41.5's PnP), at each new position.
+
+</Solution>
+
+## References
+
+1. R. Hartley, A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004: Chapter 6 — already cited in 41.1.
+2. OpenCV 4.13.0 documentation: `cv2.Rodrigues`, `cv2.projectPoints`. https://docs.opencv.org/4.13.0/
