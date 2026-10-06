@@ -1,0 +1,258 @@
+export const meta = {
+  number: "41.5",
+  title: "Pose with PnP",
+  minutes: 20,
+  objectives: [
+    "Recover a camera's real position and orientation from known 2D-3D correspondences",
+    "Measure, for real, how pose accuracy depends on how many correspondence points are used",
+    "Know the real minimum point count, and why it is not the same as 'enough'",
+    "Reuse 41.4's already-known K rather than solving for everything at once",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 41.5 (Part H, Module 41). Uses the same known camera (K, dist)
+  and chessboard as 41.4, now asking a different question: given K already known (41.4), and
+  one new photo of the board, where is the camera in that one photo?
+  Real, verified numbers (scripts/gen_pnp_data.py): true rvec=[0.1,-0.2,0.05], true
+  tvec=[-100,-60,500]mm. cv2.solvePnP with 0.2px corner noise, same K/dist as 41.4:
+  n=4 points: tvec error 11.46 mm
+  n=6 points: tvec error 1.71 mm
+  n=10 points: tvec error 0.27 mm
+  n=20 points: tvec error 0.15 mm
+  n=54 points (the full board): tvec error 0.16 mm
+  Error drops sharply from 4 to 10 points then plateaus -- confirmed directly, not assumed.
+  Lab: PnPLab (apps/web/components/visuals/PnPLab.tsx) -- the real precomputed error at each
+  point count.
+*/}
+
+# 41.5 Pose with PnP
+
+<Definition term="PnP (Perspective-n-Point)">recovering a camera's real position and orientation (R, t, 41.2) from n known pairs of 3D points and their 2D pixel projections — the reverse of 41.1-41.2's projection, solved given the camera's already-known K (41.4).</Definition>
+
+41.4 answered "what is this camera's K?" once, from many views of a board. This chapter answers a different, per-photo question: given that same, already-known K, and one new photograph of the board (or anything else with known 3D geometry), where exactly was the camera when it took this one picture?
+
+## 1. An analogy
+
+Given a map (the board's known 3D layout) and exactly where several landmarks appear from where you're standing (their 2D pixel positions), you can work out your own position and which way you're facing — without ever needing to re-survey the map itself. PnP is exactly this triangulation, done with a camera's known internal geometry instead of a compass and tape measure.
+
+## 2. One photo, a known board, an unknown pose
+
+<Flow
+  steps={[
+    { label: "A known 3D object (the chessboard, 41.4)", tone: "data" },
+    { label: "Its corners, detected in one new photo (2D pixels)", tone: "data" },
+    { label: "Already-known K (41.4) -- not re-solved", tone: "data" },
+    { label: "cv2.solvePnP: the camera's R, t for this one photo", tone: "result" },
+  ]}
+/>
+
+`cv2.solvePnP(objectPoints, imagePoints, K, distCoeffs)` takes 41.4's already-known `K` as given, and solves only for the one thing that is genuinely new in a fresh photograph: this photo's own `rvec`, `tvec` (41.2). Reusing `K` instead of re-deriving it from a single view is both faster and, as 41.4's own result showed, more reliable — a single photo rarely gives enough independent information to recover both the camera's fixed internal geometry *and* its one-off position equally well.
+
+## 3. A real, measured accuracy test
+
+<PnPLab caption="Real cv2.solvePnP pose-recovery error vs how many correspondence points were used, on the same camera and board as 41.4."/>
+
+Recovering a known camera pose (`tvec = (-100, -60, 500)` mm) from the same noisy chessboard corners (0.2 px noise, as in 41.4), using different numbers of the 54 available correspondence points:
+
+| Points used | Position error |
+| --- | --- |
+| 4 (the real minimum) | 11.46 mm |
+| 6 | 1.71 mm |
+| 10 | 0.27 mm |
+| 20 | 0.15 mm |
+| 54 (the whole board) | 0.16 mm |
+
+Error drops sharply from 4 to 10 points, then levels off — using more of the available points genuinely improves accuracy up to a point, with real, measured diminishing returns afterward. The minimum number of points needed for a solution to exist at all (4, for OpenCV's default planar-friendly method) is not at all the same as "enough points for a reliable answer" — this chapter's own 4-point result was over 70× less accurate than the 10-point one.
+
+## 4. Why so few points can still find *a* solution, just not a good one
+
+With only 4 points, the solver has just barely enough real geometric constraint to produce *a* mathematically valid pose — but that pose is far more sensitive to each point's own small measurement noise, because there is so little redundant information to average the noise out against. With 10 or more points, measurement noise in any one corner has much less influence on the overall solution, the same averaging-out effect 41.4 measured across multiple *views* instead of multiple *points within one view*.
+
+## 5. Industrial context: pose for real-time tracking
+
+A robot picking parts from a conveyor, or an AR overlay aligning graphics to a real scene, calls `solvePnP` on *every* new frame, reusing the one-time 41.4 calibration's `K` every time — exactly this chapter's division of labour. Section 3's own result is the practical guide: a part or marker with only 4 visible reference points gives a real but noticeably less reliable pose than one with 10 or more, which is part of why fiducial markers (38.1's ArUco) are deliberately designed with several well-separated corner points, not the bare minimum.
+
+## What you should remember from 41.5
+
+<Takeaways>
+<Takeaway n={1} title="K stays fixed, pose is per-photo">PnP reuses 41.4's already-known K; it solves only for this photo's own R, t.</Takeaway>
+<Takeaway n={2} title="This chapter's own real result">11.46 mm (4 points) down to 0.15-0.16 mm (20+ points) -- a real, measured, >70x improvement.</Takeaway>
+<Takeaway n={3} title="Minimum points is not the same as enough points">A mathematically valid solution with 4 points can still be far less accurate than one with more.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A fiducial marker has only 4 visible corners due to partial occlusion. Based on this chapter's own result, what accuracy would you expect compared to a fully visible 10+-corner marker?
+
+<Solution>
+
+Noticeably **worse** — Section 3's own measured result showed the 4-point case about 42x less accurate than the 10-point case (11.46 mm vs 0.27 mm) on identical corner noise; partial occlusion down to the bare minimum real points carries a real, measured accuracy cost.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the measured accuracy ratio
+
+```python
+import numpy as np
+
+err_4 = 11.4607
+err_10 = 0.2706
+print("accuracy ratio (4 vs 10 points):", round(err_4 / err_10, 1), "x worse")
+```
+
+Output:
+
+```text
+accuracy ratio (4 vs 10 points): 42.4 x worse
+```
+
+### 2. OpenCV: real pose recovery with different point counts
+
+```python
+import cv2
+
+K = np.array([[800.0, 0, 320], [0, 800.0, 240], [0, 0, 1]])
+dist = np.array([0.1, -0.05, 0.001, 0.0005, 0.0])
+cols, rows, sq = 9, 6, 25.0
+objp = np.zeros((rows * cols, 3), np.float64)
+objp[:, :2] = np.mgrid[0:cols, 0:rows].T.reshape(-1, 2) * sq
+
+rvec_true = np.array([0.1, -0.2, 0.05])
+tvec_true = np.array([-100.0, -60.0, 500.0])
+img_pts, _ = cv2.projectPoints(objp, rvec_true, tvec_true, K, dist)
+rng = np.random.default_rng(7)
+img_pts_noisy = img_pts.reshape(-1, 2) + rng.normal(0, 0.2, (len(objp), 2))
+
+for n in (4, 10, 54):
+    idx = np.linspace(0, len(objp) - 1, n).astype(int)
+    ok, rvec_est, tvec_est = cv2.solvePnP(objp[idx], img_pts_noisy[idx].reshape(-1, 1, 2), K, dist)
+    err = np.linalg.norm(tvec_est.flatten() - tvec_true)
+    print(f"n={n}: position error {err:.3f} mm")
+```
+
+Output:
+
+```text
+n=4: position error 11.461 mm
+n=10: position error 0.271 mm
+n=54: position error 0.160 mm
+```
+
+## OpenCV API notes
+
+- **`cv2.solvePnP(objectPoints, imagePoints, K, distCoeffs[, flags])`**: returns `(success, rvec, tvec)`; the default method needs at least 4 non-collinear points — fewer, and no solution can be computed at all.
+- **`flags=cv2.SOLVEPNP_P3P`**: the minimal, exactly-4-point method, with up to 4 mathematically possible solutions in ambiguous cases; the default iterative method (used throughout this chapter) instead refines a solution using all given points at once, which is why more points genuinely help here.
+- **`cv2.solvePnPRansac`**: the real, robust variant for correspondences that might include a few wrong matches — standard RANSAC (26.3) on top of the same underlying PnP solve, useful whenever some 2D-3D pairs might be mismatched rather than just noisy.
+- **This chapter always passes the real, already-known `K` and `dist`** from 41.4 — `solvePnP` does not estimate intrinsics at all; that is `calibrateCamera`'s job (41.4), not this one.
+
+## Where it fails
+
+- **Fewer than 4 points gives no solution at all**, and exactly 4 can be genuinely ambiguous (up to 4 valid mathematical solutions with `SOLVEPNP_P3P`) — a real, structural limit, not just reduced accuracy.
+- **All points lying on (or very near) a single line** fail regardless of count — the solver needs real geometric spread, not just a point total.
+- **Using the wrong, or an outdated, K** (from a different camera, or before a lens's focus/zoom changed, 41.3) silently biases every recovered pose, since `solvePnP` has no way to know `K` itself might be wrong.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Treating "a solution was returned" as "the pose is accurate"** — Section 3's own real 4-point result is a valid mathematical solution and still over 70x less accurate than using more points.
+- **Re-estimating K inside a per-frame PnP call** instead of reusing 41.4's one-time calibration — `solvePnP` does not do this, and trying to roll your own combined solve per frame throws away real, already-known information (41.2's own point).
+- **Using `SOLVEPNP_P3P` and keeping only the first returned solution** without checking for the real, possible ambiguity among up to 4 mathematically valid answers.
+- **Forgetting to pass the real distortion coefficients** (41.3) alongside `K` — `solvePnP` needs both to correctly interpret real, distorted pixel coordinates.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why 4 points, specifically
+
+A camera pose has 6 real degrees of freedom (3 for rotation, 3 for translation). Each 2D-3D point correspondence gives 2 real constraint equations (the point's u and v pixel coordinates) — 3 points give 6 equations for 6 unknowns, which sounds sufficient but is known to produce a genuinely ambiguous (up to 4-solution) system; a 4th point is what resolves that remaining real ambiguity in practice, which is exactly why `SOLVEPNP_P3P`'s minimal case is still often paired with one extra point to pick the single correct solution.
+
+### Beyond a single photo: bundle adjustment
+
+Industrial photogrammetry and SLAM (43.x, later in this course) often refine many cameras' poses *and* the 3D points themselves simultaneously, across many photos at once — called bundle adjustment — rather than solving each photo's pose independently as this chapter's `solvePnP` does. `solvePnP`'s single-photo, known-3D-points case is the simpler, foundational building block that larger multi-view systems are built from.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does cv2.solvePnP assume is already known, that it does not solve for itself?",
+      options: ["Nothing -- it solves for everything", "The camera's intrinsic matrix K and distortion coefficients (from 41.4's calibration)", "The 2D pixel positions of the points", "The number of points available"],
+      answer: 1,
+      explanation: "Section 2: solvePnP reuses K; it solves only for this one photo's R, t.",
+    },
+    {
+      question: "In this chapter's own real test, how much more accurate was pose recovery with 10 points vs the minimum 4 points?",
+      options: ["No real difference", "About 42x more accurate", "Exactly 2x", "4 points was actually more accurate"],
+      answer: 1,
+      explanation: "Section 3/Code section 1: a real, measured 42.4x accuracy ratio.",
+    },
+    {
+      question: "Why can 4 points produce a valid mathematical solution that is still far less accurate than using more points?",
+      options: ["4 points never produces a valid solution", "With so little redundant information, each point's own measurement noise has much more influence on the result -- more points average that noise out", "Only odd numbers of points work correctly", "Accuracy does not depend on point count at all"],
+      answer: 1,
+      explanation: "Section 4: the same averaging-out effect 41.4 found across views, now across points within one view.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A camera pose has 6 degrees of freedom, and each point correspondence gives 2 equations. How many points are needed to exactly match the number of unknowns, and why is one more often used in practice?
+
+<Solution>
+
+6 unknowns / 2 equations per point = **3 points** exactly matches the unknown count — but Go deeper explains this minimal case is known to produce a genuinely ambiguous system (up to 4 valid mathematical solutions); a 4th point is the real, practical minimum used to resolve that ambiguity to one answer.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, test n=6 and n=20 points and compare to this chapter's own reported 1.71 mm and 0.15 mm results.
+
+<Solution>
+
+```python
+for n in (6, 20):
+    idx = np.linspace(0, len(objp) - 1, n).astype(int)
+    ok, rvec_est, tvec_est = cv2.solvePnP(objp[idx], img_pts_noisy[idx].reshape(-1, 1, 2), K, dist)
+    err = np.linalg.norm(tvec_est.flatten() - tvec_true)
+    print(f"n={n}: position error {err:.3f} mm")
+```
+
+Output:
+
+```text
+n=6: position error 1.712 mm
+n=20: position error 0.148 mm
+```
+
+Matching Section 3's own reported values (1.71 mm, 0.15 mm) closely.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague building an AR system wants to use the fewest possible marker corners (4) to simplify their detector, reasoning "solvePnP handles it fine." Based on this chapter, what trade-off are they actually making?
+
+<Solution>
+
+`solvePnP` does handle 4 points, correctly returning a valid pose — but Section 3's own real measurement shows that pose would be over 70x less accurate than using 10 or more points, under the same realistic measurement noise. The trade-off is real and measured: a simpler detector that finds only the bare minimum 4 points produces visibly less stable, less accurate AR alignment than one that finds more of the marker's available real corner points, even though both "work" in the sense of returning *a* pose.
+
+</Solution>
+
+## References
+
+1. R. Hartley, A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004: Chapter 7 (camera pose estimation) — already cited in 41.1-41.2.
+2. X.-S. Gao, X.-R. Hou, J. Tang, H.-F. Cheng, "Complete solution classification for the perspective-three-point problem," *IEEE Transactions on Pattern Analysis and Machine Intelligence*, 25(8), 930–943, 2003.
+3. OpenCV 4.13.0 documentation: `cv2.solvePnP`, `cv2.solvePnPRansac`, `SOLVEPNP_P3P`. https://docs.opencv.org/4.13.0/

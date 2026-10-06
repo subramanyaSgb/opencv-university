@@ -1,0 +1,1 @@
+{"tvec_true":[-100.0,-60.0,500.0],"rvec_true":[0.1,-0.2,0.05],"results":[{"n_points":4,"tvec_error_mm":11.460652713256312},{"n_points":6,"tvec_error_mm":1.7116133038443673},{"n_points":10,"tvec_error_mm":0.2705527692205088},{"n_points":20,"tvec_error_mm":0.14755723304883994},{"n_points":54,"tvec_error_mm":0.16015671401473186}]}
