@@ -1,0 +1,450 @@
+export const meta = {
+  number: "51.4",
+  title: "Pooling",
+  minutes: 24,
+  objectives: [
+    "Know what max and average pooling actually compute, and how they differ from 20.1's own Gaussian pyramid downsampling",
+    "Work a tiny pooling example by hand and verify it against real NumPy output",
+    "Verify, for real, that two real cv2 operations reproduce pooling exactly: dilation (max) and INTER_AREA resize (average)",
+    "Measure, for real, how much more shift-tolerant max pooling is than average pooling or no pooling at all",
+    "Verify, for real, each pooling mode's own backward pass by a finite-difference check",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 51.4 (Part J, Module 51). 20.1 already covered Gaussian-pyramid
+  downsampling (blur, then subsample) and its own Go-deeper subsection even named "shift-
+  invariant alternatives" without covering pooling. 51.3 ended its own tiny network with GLOBAL
+  average pooling (over the whole feature map); this chapter covers LOCAL, windowed pooling
+  (2x2, stride 2) -- the version that actually appears between conv layers in real CNNs (53) --
+  and contrasts it directly, on the same real image, with 20.1's own pyrDown.
+  All numbers real, verified on this pinned OpenCV 4.13.0.92 / NumPy 2.5.3 build.
+  8x8 test image (rng seed 21, integers 0-255). max-pool (2x2, stride 2):
+    [[199 251 181 242] [254 234 251 193] [236 167 244 242] [221 204 200 229]]
+  avg-pool: [[128. 165.5 117.5 95.] [201.75 169. 186.75 159.5] [151. 73.75 167.25 107.]
+    [140. 96.25 147.25 114.75]]
+  cv2.pyrDown (20.1's own Gaussian blur + subsample) on the IDENTICAL image gives a THIRD,
+  different real set of numbers: [[144.28 164.18 142.59 127.41] [180.51 182.7 159.53 147.2]
+    [151.42 120.15 153.79 147.62] [134.84 108.46 139.97 150.35]].
+  cv2.dilate(img, 2x2 structuring element, anchor=(0,0)) then subsampled [0::2,0::2] matches
+  the from-scratch max-pool EXACTLY (np.array_equal True) -- max pooling is dilation (23) plus
+  subsampling. cv2.resize(img, half size, interpolation=INTER_AREA) matches the from-scratch
+  average-pool EXACTLY (np.allclose True, atol 1e-4).
+  Shift-invariance Monte Carlo (2000 trials, rng seed 31, 8x8 random feature maps each with one
+  spike of value 10.0 at a random location, shifted by a random (dx,dy) in {-1,0,1}^2 via
+  np.roll): max-pooled cells unchanged after the shift = 32.1%; average-pooled cells unchanged
+  = 10.6%; raw (unpooled) cells unchanged = 10.6%. The trivial baseline from shift=(0,0) alone
+  is 1/9 = 11.1%, so average/raw sit AT that baseline (no real extra robustness) while max
+  pooling sits meaningfully ABOVE it (32.1% vs 11.1%) -- real, quantified extra shift-tolerance.
+  Pooling backward pass (4x4 grid, rng seed 41), loss = sum of pooled outputs (upstream grad
+  all-ones): max-pool backward routes the gradient only to the argmax of each window (verified
+  against a finite-difference numeric gradient, exact match); average-pool backward splits the
+  gradient evenly, 1/4 to every cell in each window (exact match).
+  Tiny by-hand worked example (4x4, matches lib/pool-ops.test.ts):
+    [[1,8,3,2],[4,2,1,9],[5,6,7,1],[0,3,2,4]] -> max-pool [[8,9],[6,7]], avg-pool
+    [[3.75,3.75],[3.5,3.5]].
+  Lab: PoolLab (apps/web/components/visuals/PoolLab.tsx) -- max/avg toggle plus 1-pixel shift
+  buttons on a small feature map with one strong feature, showing directly which pooling mode
+  keeps its output unchanged; backed by lib/pool-ops.ts (unit-tested, both backward passes).
+*/}
+
+# 51.4 Pooling
+
+<Definition term="Pooling">replacing every small, non-overlapping window of a feature map with a single real number — its maximum (max pooling) or its average (average pooling) — shrinking the map while keeping only one summary value per window.</Definition>
+
+20.1 already shrank images by blurring first, then subsampling (`cv2.pyrDown`). 51.3's own tiny network ended with a *global* average over the whole feature map. This chapter covers the version that sits between conv layers inside a real CNN (53): a small, *local*, non-overlapping window — typically 2×2 — reduced to one number, repeated across the whole map.
+
+## 1. An analogy
+
+A building inspector walking a factory floor with a checklist does not report every single reading from every single sensor to head office; for each small zone, they report only the worst reading in that zone (a "max" summary) or the zone's average reading. Either way, the full grid of detailed readings shrinks to a short, zone-by-zone summary — exactly what pooling does to a feature map, one small window at a time.
+
+## 2. The pipeline: one window, one number, repeated
+
+<Flow
+  steps={[
+    { label: "A feature map (e.g. 51.3's own conv output)", tone: "data" },
+    { label: "Slide a small window (2×2) across it, no overlap", tone: "process" },
+    { label: "Each window → its max (max pool) or its mean (average pool)", tone: "process" },
+    { label: "A smaller map: one number per window", tone: "result" },
+  ]}
+/>
+
+<PoolLab caption="Max vs average pooling on a small feature map, with 1-pixel shift buttons to see shift-tolerance directly." />
+
+## 3. A tiny worked example, by hand
+
+Take this 4×4 grid and pool it with 2×2, non-overlapping windows:
+
+```text
+[[1, 8, 3, 2],
+ [4, 2, 1, 9],
+ [5, 6, 7, 1],
+ [0, 3, 2, 4]]
+```
+
+The top-left window is `[[1,8],[4,2]]`: its max is 8, its average is (1+8+4+2)/4 = 3.75. Working through all four windows gives:
+
+- **Max pool:** `[[8, 9], [6, 7]]`
+- **Average pool:** `[[3.75, 3.75], [3.5, 3.5]]`
+
+Same input, same window placement, two genuinely different real outputs — the choice of max vs average is not a minor detail.
+
+## 4. A real, three-way comparison: pooling is not pyrDown
+
+20.1's own `cv2.pyrDown` blurs an image first, *then* subsamples — a wide, smooth, overlapping operation. Pooling uses a small, non-overlapping window with no blur at all. Running max pool, average pool, and `cv2.pyrDown` on the identical real 8×8 image gives three genuinely different real results (Code section 1): max pooling keeps each window's brightest pixel exactly (e.g. 251 survives untouched where it was already the window's maximum), average pooling blends each window evenly, and `pyrDown`'s wide Gaussian blur mixes in neighbouring pixels from *outside* each window entirely, giving a third, smoother set of numbers again. Pooling and pyramid downsampling solve related but different problems.
+
+## 5. A real, measured reason pooling is used inside CNNs: shift tolerance
+
+Why pool at all, instead of just letting the next layer see every pixel? A real Monte Carlo test — 2000 random 8×8 feature maps, each with one strong "feature" at a random location, each shifted by a random single pixel — gives a direct, measured answer: after the shift, **32.1%** of max-pooled cells are completely unchanged, versus only **10.6%** of average-pooled cells and **10.6%** of raw, unpooled pixels. The trivial baseline — cells that only "survive" because the random shift happened to be zero — is 1-in-9 ≈ **11.1%**. Average pooling and raw pixels sit right at that trivial baseline (no real extra robustness), while max pooling sits meaningfully above it: as long as the strongest feature in a window stays inside that same window, max pooling's output for it does not change at all, however the feature moves within the window.
+
+## 6. Pooling is just as trainable as anything else
+
+Pooling adds no new weights, but it is still part of the real computation graph (51.2) and must pass a gradient backward correctly. Max pooling's backward rule is simple but easy to get subtly wrong: the gradient flows *only* to whichever single cell was the maximum in each window (every other cell in that window gets zero gradient for this step). Average pooling's backward rule splits the gradient evenly — exactly 1/4 to every cell in a 2×2 window. Both rules, implemented from scratch and checked against an independent finite-difference gradient (Code section 4), match exactly.
+
+## 7. Industrial context: pooling inside a real pipeline
+
+51.3's own tiny network used *global* average pooling as its very last step, collapsing an entire feature map to one number. Real CNNs (53) instead use *local* pooling like this chapter's own 2×2 windows repeatedly, between many conv layers, shrinking the spatial size at each stage while conv layers keep adding depth (more feature channels) — the standard CNN pattern of "smaller but deeper" as data flows through the network.
+
+## What you should remember from 51.4
+
+<Takeaways>
+<Takeaway n={1} title="Pooling replaces a small window with one number: its max, or its average">a genuinely different operation from 20.1's own blur-then-subsample pyramid.</Takeaway>
+<Takeaway n={2} title="Two real cv2 operations already compute pooling exactly">dilation for max pooling, INTER_AREA resize for average pooling — verified, not approximate.</Takeaway>
+<Takeaway n={3} title="Max pooling is measurably more shift-tolerant than average pooling">Section 5's own real result: 32.1% vs 10.6% of cells unchanged after a 1-pixel shift.</Takeaway>
+<Takeaway n={4} title="Pooling has its own correct, verified backward pass">max routes the gradient to one cell per window; average splits it evenly.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Based on Section 4's own real result, would you expect `cv2.pyrDown` and 2×2 max pooling to give the same output on a typical image?
+
+<Solution>
+
+No — Section 4's own real comparison on an identical 8×8 image gave three genuinely different outputs for max pool, average pool, and `pyrDown`. `pyrDown` blurs across a wide neighbourhood (mixing in pixels outside any one pooling window) before subsampling, while max pooling looks only inside its own small, non-overlapping window and keeps the single brightest value found there, untouched by any blur.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: max pooling, average pooling, and 20.1's own pyrDown, side by side
+
+```python
+import numpy as np
+import cv2
+
+rng = np.random.default_rng(21)
+img = rng.integers(0, 256, size=(8, 8)).astype(np.float64)
+
+def max_pool2x2(x):
+    H, W = x.shape
+    return x.reshape(H // 2, 2, W // 2, 2).max(axis=(1, 3))
+
+def avg_pool2x2(x):
+    H, W = x.shape
+    return x.reshape(H // 2, 2, W // 2, 2).mean(axis=(1, 3))
+
+mp = max_pool2x2(img)
+ap = avg_pool2x2(img)
+pd = cv2.pyrDown(img.astype(np.float32))
+print("max-pooled (2x2, stride 2):")
+print(mp.astype(int))
+print("avg-pooled (2x2, stride 2):")
+print(ap.round(2))
+print("cv2.pyrDown (Gaussian blur + subsample, 20.1's own operator):")
+print(pd.round(2))
+```
+
+Output:
+
+```text
+max-pooled (2x2, stride 2):
+[[199 251 181 242]
+ [254 234 251 193]
+ [236 167 244 242]
+ [221 204 200 229]]
+avg-pooled (2x2, stride 2):
+[[128.   165.5  117.5   95.  ]
+ [201.75 169.   186.75 159.5 ]
+ [151.    73.75 167.25 107.  ]
+ [140.    96.25 147.25 114.75]]
+cv2.pyrDown (Gaussian blur + subsample, 20.1's own operator):
+[[144.28 164.18 142.59 127.41]
+ [180.51 182.7  159.53 147.2 ]
+ [151.42 120.15 153.79 147.62]
+ [134.84 108.46 139.97 150.35]]
+```
+
+### 2. OpenCV: two real operations that already ARE pooling
+
+Max pooling is a sliding maximum over a small window, then subsampling; `cv2.dilate` (23) computes exactly that sliding maximum, so dilating with a 2×2 structuring element and then keeping every other row and column should reproduce max pooling exactly. Average pooling over non-overlapping 2×2 blocks is exactly what `cv2.resize` with `INTER_AREA` does when shrinking by precisely a factor of 2.
+
+```python
+kernel2x2 = np.ones((2, 2), np.uint8)
+dilated = cv2.dilate(img.astype(np.float32), kernel2x2, anchor=(0, 0))
+dilated_subsampled = dilated[0::2, 0::2]
+print("cv2.dilate (2x2 structuring element) + subsample matches max_pool2x2:", np.array_equal(dilated_subsampled, mp))
+
+resized_area = cv2.resize(img.astype(np.float32), (4, 4), interpolation=cv2.INTER_AREA)
+print("cv2.resize(..., INTER_AREA) to half size matches avg_pool2x2:", np.allclose(resized_area, ap, atol=1e-4))
+```
+
+Output:
+
+```text
+cv2.dilate (2x2 structuring element) + subsample matches max_pool2x2: True
+cv2.resize(..., INTER_AREA) to half size matches avg_pool2x2: True
+```
+
+### 3. NumPy: a real test of shift-tolerance
+
+```python
+trials = 2000
+H = W = 8
+unchanged_max = 0
+unchanged_avg = 0
+unchanged_raw = 0
+total_cells = 0
+rng2 = np.random.default_rng(31)
+for t in range(trials):
+    fmap = rng2.normal(scale=1.0, size=(H, W))
+    si, sj = rng2.integers(0, H), rng2.integers(0, W)
+    fmap[si, sj] = 10.0
+    di, dj = rng2.integers(-1, 2), rng2.integers(-1, 2)
+    shifted = np.roll(np.roll(fmap, di, axis=0), dj, axis=1)
+
+    mp_before, mp_after = max_pool2x2(fmap), max_pool2x2(shifted)
+    ap_before, ap_after = avg_pool2x2(fmap), avg_pool2x2(shifted)
+
+    unchanged_max += np.sum(np.isclose(mp_before, mp_after))
+    unchanged_avg += np.sum(np.isclose(ap_before, ap_after, atol=1e-6))
+    unchanged_raw += np.sum(np.isclose(fmap, shifted))
+    total_cells += mp_before.size
+
+print(f"max-pooled cells unchanged:  {100*unchanged_max/total_cells:.1f}%")
+print(f"avg-pooled cells unchanged:  {100*unchanged_avg/total_cells:.1f}%")
+print(f"raw (no pooling) cells unchanged: {100*unchanged_raw/(H*W*trials):.1f}%")
+```
+
+Output:
+
+```text
+max-pooled cells unchanged:  32.1%
+avg-pooled cells unchanged:  10.6%
+raw (no pooling) cells unchanged: 10.6%
+```
+
+### 4. NumPy: pooling has a gradient too, verified by finite differences
+
+```python
+def max_pool_backward(x, d_out):
+    H, W = x.shape
+    xr = x.reshape(H // 2, 2, W // 2, 2)
+    dr = np.zeros_like(xr)
+    for i in range(H // 2):
+        for j in range(W // 2):
+            window = xr[i, :, j, :]
+            idx = np.unravel_index(np.argmax(window), window.shape)
+            dr[i, idx[0], j, idx[1]] = d_out[i, j]
+    return dr.reshape(H, W)
+
+def avg_pool_backward(d_out, H, W):
+    return np.repeat(np.repeat(d_out, 2, axis=0), 2, axis=1) / 4.0
+
+rng3 = np.random.default_rng(41)
+x = rng3.normal(size=(4, 4))
+d_out = np.ones((2, 2))
+grad_max = max_pool_backward(x, d_out)
+grad_avg = avg_pool_backward(d_out, 4, 4)
+
+eps = 1e-6
+num_grad_max = np.zeros_like(x)
+num_grad_avg = np.zeros_like(x)
+for i in range(4):
+    for j in range(4):
+        xp = x.copy(); xp[i, j] += eps
+        xm = x.copy(); xm[i, j] -= eps
+        num_grad_max[i, j] = (max_pool2x2(xp).sum() - max_pool2x2(xm).sum()) / (2 * eps)
+        num_grad_avg[i, j] = (avg_pool2x2(xp).sum() - avg_pool2x2(xm).sum()) / (2 * eps)
+
+print("max-pool backward matches finite differences:", np.allclose(grad_max, num_grad_max, atol=1e-6))
+print("avg-pool backward matches finite differences:", np.allclose(grad_avg, num_grad_avg, atol=1e-6))
+```
+
+Output:
+
+```text
+max-pool backward matches finite differences: True
+avg-pool backward matches finite differences: True
+```
+
+## OpenCV API notes
+
+- **`cv2.dilate(img, kernel, anchor)`** (23's own morphology operator) computes a sliding local maximum; Code section 2's own real result shows it reproduces max pooling exactly once subsampled to the pooling stride.
+- **`cv2.resize(img, size, interpolation=cv2.INTER_AREA)`** when shrinking by an exact integer factor averages each non-overlapping block of source pixels — Code section 2's own real result shows this is exactly average pooling, not merely similar to it.
+- **No `cv2` function is named "pooling"** — OpenCV is not a deep learning training framework (51.1's own note about `cv2.ml.ANN_MLP` applies here too); this chapter's own real cross-checks show the *operations* already exist under other names.
+
+## Where it fails
+
+- **Pooling throws away information permanently** — once a window is reduced to one number, the rest of that window's values cannot be recovered; this is a deliberate trade-off for a smaller map, not a free operation.
+- **Average pooling and raw (unpooled) pixels showed no real extra shift-tolerance beyond pure chance** — Section 5's own real, measured result (10.6% at an 11.1% trivial baseline); only max pooling showed a genuine, measurable benefit on this test.
+- **Max pooling's shift-tolerance only holds within a single window** — Section 5's own real 32.1% result still means most shifts DO change the output; a shift large enough to cross a window boundary changes max pooling's result too.
+- **This chapter tested one specific pooling size (2×2, stride 2) and one specific feature-map statistic** — different window sizes and strides trade shift-tolerance against spatial resolution differently; the real numbers here are specific to this exact setup.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Confusing pooling with 20.1's own pyramid downsampling** — Section 4's own real, three-way comparison: same input, three genuinely different outputs.
+- **Assuming average pooling is just as shift-tolerant as max pooling** — Section 5's own real, measured result shows average pooling offers no real advantage over doing nothing at all, on this test.
+- **Forgetting that max pooling's backward pass sends gradient to only one cell per window** — the other three cells in that window get exactly zero gradient from this step, verified in Section 6 / Code section 4.
+- **Treating pooling as a free size reduction with no cost** — Where it fails: the discarded values are genuinely gone, not recoverable later in the network.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why pooling windows are usually small (2×2 or 3×3)
+
+A very large pooling window would discard most of a feature map's spatial detail in one step; real CNN architectures (53) instead use small pooling windows repeated across many layers, shrinking gradually while conv layers in between keep adding new feature channels at each spatial scale.
+
+### Overlapping pooling and other variants
+
+Some architectures use overlapping pooling windows (stride smaller than the window size) or global pooling (this chapter's own Section 7, already used by 51.3), trading the exact shift-tolerance numbers measured here for different resolution/robustness trade-offs; the backward-pass principles (Section 6) generalize the same way regardless of window size or stride.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Working the by-hand example in Section 3 ([[1,8,3,2],[4,2,1,9],[5,6,7,1],[0,3,2,4]]), what is the average-pooled value of the top-left 2x2 window?",
+      options: ["8", "3.75", "1", "5"],
+      answer: 1,
+      explanation: "Section 3: (1+8+4+2)/4 = 3.75, verified against the chapter's own NumPy output.",
+    },
+    {
+      question: "This chapter's own real comparison in Section 4 found what about cv2.pyrDown versus 2x2 max/average pooling on the identical image?",
+      options: [
+        "All three gave identical results",
+        "All three gave genuinely different real results -- pyrDown blurs across a wider neighbourhood before subsampling, unlike either pooling mode",
+        "pyrDown is just another name for max pooling",
+        "Pooling cannot be compared to pyrDown at all",
+      ],
+      answer: 1,
+      explanation: "Section 4: a real, measured three-way difference on the same 8x8 test image.",
+    },
+    {
+      question: "This chapter's own real Monte Carlo test in Section 5 found what about shift-tolerance?",
+      options: [
+        "Average pooling was more shift-tolerant than max pooling",
+        "Max pooling kept 32.1% of cells unchanged after a 1-pixel shift, while average pooling and raw pixels sat at the trivial ~11.1% baseline (10.6% each) with no real extra robustness",
+        "Neither pooling mode showed any shift-tolerance",
+        "All three were identical at exactly 11.1%",
+      ],
+      answer: 1,
+      explanation: "Section 5: a real, quantified advantage for max pooling specifically.",
+    },
+    {
+      question: "Per this chapter's own verified backward-pass rule, if a 2x2 max-pooling window's maximum was at its bottom-right cell, how is the upstream gradient distributed to that window's 4 input cells?",
+      options: [
+        "Split evenly, 1/4 to each cell",
+        "All of it goes to the bottom-right cell; the other 3 cells get exactly zero",
+        "All of it goes to the top-left cell always",
+        "It is discarded entirely",
+      ],
+      answer: 1,
+      explanation: "Section 6 / Code section 4: max pooling's gradient routes only to the argmax location.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Using the same 4×4 grid as Section 3, what is the max-pooled value of the bottom-right 2×2 window (rows 2-3, columns 2-3: `[[7,1],[2,4]]`)?
+
+<Solution>
+
+7 — the largest of 7, 1, 2, and 4. This matches the chapter's own NumPy result, `[[8, 9], [6, 7]]`, whose bottom-right entry is 7.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's functions, compute max pooling and average pooling with a 4×4 window (stride 4) instead of 2×2, on the same 8×8 image, and report the results.
+
+<Solution>
+
+```python
+def max_pool4x4(x):
+    H, W = x.shape
+    return x.reshape(H // 4, 4, W // 4, 4).max(axis=(1, 3))
+
+def avg_pool4x4(x):
+    H, W = x.shape
+    return x.reshape(H // 4, 4, W // 4, 4).mean(axis=(1, 3))
+
+print("4x4 max-pooled:", max_pool4x4(img).astype(int))
+print("4x4 avg-pooled:", avg_pool4x4(img).round(2))
+```
+
+Output:
+
+```text
+4x4 max-pooled: [[254 251]
+ [236 244]]
+4x4 avg-pooled: [[166.06 139.69]
+ [115.25 134.06]]
+```
+
+A much larger window keeps only a 2×2 result from the original 8×8 image — far more aggressive shrinking, and far more information discarded per step, than Section 3's own 2×2 windows.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Based on Section 5's own real result (max pooling is more shift-tolerant, but average pooling is not), would you expect a network using only average pooling to be just as robust as one using max pooling to small camera jitter in a real inspection system?
+
+<Solution>
+
+Not based on this chapter's own evidence — Section 5's real, measured result found average pooling gave no real shift-tolerance advantage over doing no pooling at all (10.6% unchanged, versus an 11.1% trivial baseline). A network relying on average pooling alone for robustness to small camera jitter would need some other source of that robustness (e.g. training with jittered data, 51.5's own subject), since this chapter's own measurement found average pooling itself does not reliably provide it.
+
+</Solution>
+
+### Exercise 4 (coding)
+
+Using Code section 4's gradient functions, verify the max-pool backward pass on a DIFFERENT 4×4 random grid (a new rng seed) and confirm it still matches the finite-difference check.
+
+<Solution>
+
+```python
+rng4 = np.random.default_rng(99)
+x2 = rng4.normal(size=(4, 4))
+grad_max2 = max_pool_backward(x2, np.ones((2, 2)))
+num_grad_max2 = np.zeros_like(x2)
+for i in range(4):
+    for j in range(4):
+        xp = x2.copy(); xp[i, j] += eps
+        xm = x2.copy(); xm[i, j] -= eps
+        num_grad_max2[i, j] = (max_pool2x2(xp).sum() - max_pool2x2(xm).sum()) / (2 * eps)
+print("max-pool backward matches finite differences on a new grid:", np.allclose(grad_max2, num_grad_max2, atol=1e-6))
+```
+
+Output:
+
+```text
+max-pool backward matches finite differences on a new grid: True
+```
+
+Confirms the backward rule is correct in general, not only for the one particular grid used in the chapter's own Code section 4.
+
+</Solution>
+
+## References
+
+1. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. — pooling in convolutional networks, Ch. 5.
+2. OpenCV 4.13.0 documentation: `cv2.dilate`, `cv2.resize`. https://docs.opencv.org/4.13.0/
