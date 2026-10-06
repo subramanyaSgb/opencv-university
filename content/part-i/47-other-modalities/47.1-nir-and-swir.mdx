@@ -1,0 +1,252 @@
+export const meta = {
+  number: "47.1",
+  title: "NIR and SWIR",
+  minutes: 22,
+  objectives: [
+    "Know why an ordinary silicon camera can already see well into the near-infrared",
+    "Compute real sensor cutoff wavelengths from a material's own bandgap energy",
+    "Measure, for real, why silicon physically cannot see SWIR, no matter how sensitive it is",
+    "Know the real sensor technology (and real applications) SWIR actually needs",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 47.1 (Part I, Module 47; opens the module). 46.1 named NIR/SWIR/
+  MWIR/LWIR as real wavelength bands; this chapter covers the real physics that determines
+  which SENSOR MATERIAL can detect which band -- a semiconductor bandgap cutoff, not an
+  arbitrary engineering choice.
+  All numbers real, verified directly via E=hc/lambda and the real bandgap energies of
+  silicon (1.12 eV), InGaAs (0.73 eV), germanium (0.67 eV), and GaAs (1.42 eV) -- standard,
+  published semiconductor physics constants.
+  h=6.62607015e-34 J.s, c=2.99792458e8 m/s, 1eV=1.602176634e-19 J.
+  Cutoff wavelength = hc/Eg: silicon -> 1107.0nm. InGaAs -> 1698.4nm. Germanium -> 1850.5nm.
+  GaAs -> 873.1nm.
+  Real illuminator photon energies: 850nm->1.459eV, 940nm->1.319eV (both ABOVE silicon's
+  1.12eV bandgap -- silicon CAN detect them, real security/night-vision illuminator
+  wavelengths). 1050nm->1.181eV (still just above). 1450nm->0.855eV, 1550nm->0.800eV (both
+  BELOW silicon's bandgap -- silicon CANNOT detect them at all; both are comfortably above
+  InGaAs's 0.73eV bandgap, hence real SWIR sensors use InGaAs, not silicon).
+*/}
+
+# 47.1 NIR and SWIR
+
+<Definition term="NIR and SWIR imaging">capturing light just beyond what a human eye can see — near-infrared (NIR, roughly 750-1000nm) and short-wave infrared (SWIR, roughly 1000-1700nm) — using sensor materials chosen specifically for how far into that range they can physically detect.</Definition>
+
+46.1 named NIR, SWIR, MWIR, and LWIR as real wavelength bands. This chapter answers the real, practical question that matters for building a camera: which sensor material can actually *detect* which band, and why an ordinary silicon camera already sees further into the infrared than most people realize.
+
+## 1. An analogy
+
+A dog's own hearing extends well above the highest pitch a human ear can detect — not because dogs have "better" ears in some vague sense, but because their real cochlea is physically built to respond to a wider real range of sound frequencies. A silicon camera sensor is exactly the same: it is not specially modified for infrared, it is simply built from a real material (silicon) whose own physical response naturally extends past the edge of human vision, for free.
+
+## 2. The pipeline: a photon's energy must clear the material's own real bandgap
+
+<Flow
+  steps={[
+    { label: "A photon of a given wavelength", tone: "data" },
+    { label: "Photon energy: E = h.c / wavelength", tone: "process" },
+    { label: "Must exceed the sensor material's own real bandgap energy", tone: "process" },
+    { label: "Only then does it register as a detected electron", tone: "result" },
+  ]}
+/>
+
+A photodetector only responds to a photon if that photon's own real energy exceeds the material's **bandgap** — the minimum real energy needed to knock an electron free. Longer wavelengths carry less energy per photon (`E = hc/lambda`), so every real sensor material has its own hard, physical cutoff wavelength beyond which it simply cannot detect light at all, however sensitive its electronics otherwise are.
+
+## 3. A real, measured result: silicon already reaches deep into the NIR
+
+<BandgapLab caption="Live, exact photon energy vs real sensor-material bandgaps -- drag the wavelength and watch each material's own detection cutoff." />
+
+Silicon's own real bandgap is **1.12 eV** — converting that to a cutoff wavelength (`hc/Eg`) gives **1107.0 nm**, deep into the NIR. This is exactly why an ordinary silicon security camera, with its infrared-blocking filter removed, sees clearly under **850nm** or **940nm** LED illumination — both real wavelengths carry **1.459 eV** and **1.319 eV** of photon energy respectively, comfortably above silicon's own 1.12 eV cutoff, while remaining genuinely invisible to a human eye. No exotic hardware is needed: the same silicon already inside an ordinary camera does the job.
+
+## 4. A real, measured surprise: silicon cannot see SWIR, at any sensitivity
+
+Real SWIR wavelengths behave completely differently. A **1450nm** photon carries only **0.855 eV**, and a **1550nm** photon only **0.800 eV** — both genuinely *below* silicon's own 1.12 eV bandgap. No amount of extra gain, cooling, or sensitivity can change this: those photons simply do not carry enough real energy to free an electron in silicon at all. This is a real, hard, physical limit, not an engineering shortfall — exactly why SWIR cameras use a completely different real sensor material.
+
+## 5. Industrial context: the real material SWIR needs, and what it's good for
+
+**InGaAs** has a real bandgap of **0.73 eV**, giving a cutoff of **1698.4 nm** — comfortably covering both of Section 4's own real SWIR wavelengths, which is exactly why real SWIR cameras are built from InGaAs, not silicon. Real SWIR applications exploit genuinely different physics than NIR: many materials opaque in visible and NIR light (some plastics, silicon wafers themselves, certain inks) become real transparent "windows" in SWIR, and water has real, strong absorption features in this range — the basis of real produce moisture sorting and counterfeit-ink detection (47.3's own multispectral methods build on exactly this real idea).
+
+## What you should remember from 47.1
+
+<Takeaways>
+<Takeaway n={1} title="A sensor's cutoff is set by its own real bandgap">Silicon's 1.12eV bandgap gives a real 1107.0nm cutoff -- not an arbitrary design choice.</Takeaway>
+<Takeaway n={2} title="Silicon already sees NIR illuminators for free">850/940nm (1.459/1.319eV) both clear silicon's own bandgap -- the real basis of ordinary night-vision cameras.</Takeaway>
+<Takeaway n={3} title="SWIR needs a genuinely different material">1450/1550nm photons (0.855/0.800eV) are real, physically below silicon's bandgap; InGaAs's lower 0.73eV bandgap is what actually detects them.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** An engineer wants to build a camera to see 1300nm light using an ordinary, unmodified silicon sensor. Based on Section 4, will this work?
+
+<Solution>
+
+No. A 1300nm photon carries `hc/1300nm ≈ 0.954 eV`, below silicon's real 1.12 eV bandgap (consistent with Section 4's 1450nm/1550nm results) — silicon physically cannot detect it, regardless of sensor design. A different material (InGaAs, Section 5) is genuinely required.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: real bandgap-based cutoff wavelengths and illuminator photon energies
+
+```python
+import numpy as np
+
+h, c, eV = 6.62607015e-34, 2.99792458e8, 1.602176634e-19
+
+def bandgap_cutoff_nm(Eg_eV):
+    return (h * c / (Eg_eV * eV)) * 1e9
+
+materials = {"Silicon": 1.12, "InGaAs": 0.73, "Germanium": 0.67, "GaAs": 1.42}
+for name, Eg in materials.items():
+    print(f"{name}: bandgap={Eg} eV -> cutoff={bandgap_cutoff_nm(Eg):.1f} nm")
+
+print()
+for wl_nm in [850, 940, 1050, 1450, 1550]:
+    E_eV = (h * c / (wl_nm * 1e-9)) / eV
+    print(f"{wl_nm}nm: photon energy={E_eV:.3f} eV (silicon bandgap=1.12 eV)")
+```
+
+Output:
+
+```text
+Silicon: bandgap=1.12 eV -> cutoff=1107.0 nm
+InGaAs: bandgap=0.73 eV -> cutoff=1698.4 nm
+Germanium: bandgap=0.67 eV -> cutoff=1850.5 nm
+GaAs: bandgap=1.42 eV -> cutoff=873.1 nm
+
+850nm: photon energy=1.459 eV (silicon bandgap=1.12 eV)
+940nm: photon energy=1.319 eV (silicon bandgap=1.12 eV)
+1050nm: photon energy=1.181 eV (silicon bandgap=1.12 eV)
+1450nm: photon energy=0.855 eV (silicon bandgap=1.12 eV)
+1550nm: photon energy=0.800 eV (silicon bandgap=1.12 eV)
+```
+
+### 2. OpenCV: a real IR-cut-filter removal effect, simulated on channel response
+
+```python
+import cv2
+
+# A silicon sensor's real relative response rises through NIR before falling past ~1100nm;
+# this simplified model shows the effect of removing a real IR-cut filter on a captured image.
+img = np.full((50, 50, 3), 128, dtype=np.uint8)
+nir_leakage = np.clip(img.astype(np.int32) + 40, 0, 255).astype(np.uint8)  # illustrative NIR brightening
+print("mean brightness, visible-only:", img.mean(), " with simulated NIR leakage:", nir_leakage.mean())
+```
+
+Output:
+
+```text
+mean brightness, visible-only: 128.0  with simulated NIR leakage: 168.0
+```
+
+## OpenCV API notes
+
+- **No `cv2` function models sensor bandgap physics** — Code section 1 is plain physics; a real NIR/SWIR imaging pipeline otherwise uses the exact same `cv2` tools (image I/O, filtering, thresholding) as any visible-light pipeline once the raw sensor data has been captured.
+- **A real NIR-converted camera needs no special `cv2` handling** — once its IR-cut filter is physically removed, its raw sensor output is processed by `cv2` exactly like any ordinary image; the real difference is entirely in the optics and illumination, not the software.
+- **A genuine InGaAs SWIR camera's raw data is usually still delivered as an ordinary array** (often 12/14-bit, 46.3's own precision theme) that `cv2`/NumPy can process identically to a visible or thermal image once captured.
+
+## Where it fails
+
+- **This chapter's bandgap model is a simplification** — a real sensor's quantum efficiency curve falls off gradually near its cutoff, not instantly; Section 3-4's exact cutoff numbers mark where detection becomes negligible, not a hard binary switch.
+- **A silicon sensor's NIR sensitivity is usually deliberately blocked** by a real IR-cut ("hot mirror") filter in ordinary consumer cameras, specifically to avoid NIR light corrupting real colour accuracy — removing it (Section 3) trades colour fidelity for NIR sensitivity.
+- **SWIR imaging through InGaAs is real, but far more expensive** than ordinary silicon — a genuine real cost trade-off this chapter's physics does not capture.
+- **Atmospheric and material absorption still apply** — a real NIR/SWIR wavelength that clears a sensor's own bandgap can still be blocked or absorbed before it ever reaches the sensor, a separate, additional real consideration from this chapter's detector-only physics.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming "infrared" always needs special, expensive hardware** — Section 3's own real result shows ordinary silicon already covers a useful real NIR range for free.
+- **Assuming a silicon sensor can be pushed to see SWIR with enough gain or cooling** — Section 4's own real result (SWIR photons literally below silicon's bandgap) shows this is a hard physical impossibility, not a sensitivity problem.
+- **Confusing NIR illumination wavelength with visibility** — 850/940nm (Section 3) are genuinely invisible to humans while still detectable by silicon; this is the real basis of covert night-vision illumination, not a contradiction.
+- **Treating all "infrared" sensor technologies as interchangeable** — Section 5's own real result shows NIR (silicon) and SWIR (InGaAs) need fundamentally different real hardware, not just a different filter.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Hot mirrors and full-spectrum conversion
+
+A real "hot mirror" or IR-cut filter, standard in consumer cameras, reflects or absorbs real NIR light specifically to keep it from corrupting visible-light colour accuracy; physically removing this filter ("full-spectrum conversion") is the real, standard hobbyist/scientific technique behind Section 3's own NIR-sensitive silicon camera result.
+
+### Why water absorbs NIR/SWIR at specific real wavelengths
+
+Water's own real molecular vibrational overtones produce distinct real absorption peaks near 970nm, 1200nm, and 1450nm (Workman, Weyer, *Practical Guide to Interpretive Near-Infrared Spectroscopy*, 2nd ed., CRC Press, 2012) — the real physical basis for NIR/SWIR moisture sensing in agriculture and food sorting, built on in 47.3's own multispectral methods.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What real physical property sets a sensor material's maximum detectable wavelength?",
+      options: ["An arbitrary engineering choice by the manufacturer", "The material's own real bandgap energy -- a photon must carry at least that much energy to be detected, and energy falls as wavelength grows", "The camera's own frame rate", "The lens material used"],
+      answer: 1,
+      explanation: "Section 2: a real, hard physical cutoff, computed directly from E=hc/lambda and the material's bandgap.",
+    },
+    {
+      question: "This chapter's own real result found what about silicon's ability to detect 850nm and 940nm light?",
+      options: ["Silicon cannot detect either wavelength", "Both carry more photon energy (1.459eV, 1.319eV) than silicon's 1.12eV bandgap, so silicon detects them easily -- the real basis of ordinary night-vision cameras", "Only 850nm is detectable, not 940nm", "This requires a special silicon variant"],
+      answer: 1,
+      explanation: "Section 3: ordinary silicon already covers this real, useful NIR range.",
+    },
+    {
+      question: "Why can't silicon detect real SWIR wavelengths like 1450nm or 1550nm, per this chapter's own result?",
+      options: ["Silicon can detect them with enough gain", "Their real photon energy (0.855eV, 0.800eV) is below silicon's 1.12eV bandgap -- a hard, physical impossibility, not a sensitivity limit", "These wavelengths don't actually exist", "Silicon sensors are simply too small"],
+      answer: 1,
+      explanation: "Section 4: exactly why real SWIR cameras need a different material (InGaAs) entirely.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Using `E = hc/lambda`, is a 1100nm photon's energy above or below silicon's 1.12eV bandgap (silicon's own real cutoff is 1107.0nm)?
+
+<Solution>
+
+Just above the cutoff wavelength (1100nm < 1107.0nm), so its energy is just above 1.12eV — still (barely) detectable by silicon.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, compute the real cutoff wavelength for a material with a 0.35eV bandgap (a real value close to indium antimonide, InSb, used in some cooled MWIR detectors), and compare it to this chapter's own InGaAs (1698.4nm) and germanium (1850.5nm) results.
+
+<Solution>
+
+```python
+cutoff_035 = bandgap_cutoff_nm(0.35)
+print(f"0.35 eV bandgap: cutoff={cutoff_035:.1f} nm")
+```
+
+Output:
+
+```text
+0.35 eV bandgap: cutoff=3542.4 nm
+```
+
+Far beyond this chapter's own InGaAs (1698.4nm) and germanium (1850.5nm) results — consistent with a real MWIR-capable material needing a substantially smaller real bandgap than either.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A startup wants to build a low-cost camera to detect counterfeit banknotes using a real SWIR ink feature at 1550nm, and is considering simply using a sensitive, cooled silicon sensor to save cost versus a genuine InGaAs camera. Based on Section 4, will this work?
+
+<Solution>
+
+No. Following Section 4's own real result, a 1550nm photon carries only 0.800eV, genuinely below silicon's 1.12eV bandgap — no amount of cooling or added sensitivity changes this hard physical fact, since cooling reduces thermal noise, not the fundamental energy threshold for detection. The startup genuinely needs an InGaAs (or similarly low-bandgap) sensor, following Section 5's own real result, regardless of cost.
+
+</Solution>
+
+## References
+
+1. B. E. A. Saleh, M. C. Teich, *Fundamentals of Photonics*, 3rd ed., Wiley, 2019 (semiconductor photodetector bandgap physics).
+2. J. Workman, L. Weyer, *Practical Guide to Interpretive Near-Infrared Spectroscopy*, 2nd ed., CRC Press, 2012.
+3. M. Vollmer, K.-P. Möllmann, *Infrared Thermal Imaging: Fundamentals, Research and Applications*, 2nd ed., Wiley-VCH, 2017 — already cited in 46.1-46.6.
+4. OpenCV 4.13.0 documentation: standard image I/O, unaffected by sensor modality. https://docs.opencv.org/4.13.0/
