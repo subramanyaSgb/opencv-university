@@ -52,13 +52,15 @@ export function TableOfContents() {
     <div className="toc">
       {concepts.length > 0 && (
         <div className="toc-group">
-          <div className="toc-group-title">Concepts</div>
+          <div className="toc-group-head">
+            <span className="toc-group-title">Concepts</span>
+            {concepts.length > COLLAPSE_THRESHOLD && (
+              <button type="button" className="toc-toggle" onClick={() => setShowAll((v) => !v)}>
+                {showAll ? "Collapse" : "Show all"}
+              </button>
+            )}
+          </div>
           <ol className="toc-list">{visibleConcepts.map(row)}</ol>
-          {concepts.length > COLLAPSE_THRESHOLD && (
-            <button type="button" className="toc-toggle" onClick={() => setShowAll((v) => !v)}>
-              {showAll ? "Show current section only" : `Show all ${concepts.length} sections`}
-            </button>
-          )}
         </div>
       )}
       {practice.length > 0 && (

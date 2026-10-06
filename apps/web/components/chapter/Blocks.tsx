@@ -4,9 +4,12 @@ import { ChevronDown, Info, KeyRound, Search, TriangleAlert } from "lucide-react
 /** Section 1 of every chapter: "Term = plain-language meaning". */
 export function Definition({ term, children }: { term: string; children: ReactNode }) {
   return (
-    <p className="definition">
-      <strong>{term}</strong> = {children}
-    </p>
+    <div className="definition">
+      <p className="definition-label">Key idea</p>
+      <p className="definition-body">
+        <strong>{term}</strong> = {children}
+      </p>
+    </div>
   );
 }
 

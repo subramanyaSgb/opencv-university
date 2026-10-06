@@ -16,8 +16,10 @@ interface Props {
 
 function LearningObjectives({ meta }: { meta: ChapterMeta }) {
   return (
-    <div className="learning-objectives">
-      <div className="side-title">Learning objectives</div>
+    <details className="learning-objectives" open>
+      <summary>
+        <span className="side-title">Learning objectives</span>
+      </summary>
       <ul>
         {meta.objectives.map((o) => (
           <li key={o}>{o}</li>
@@ -26,7 +28,7 @@ function LearningObjectives({ meta }: { meta: ChapterMeta }) {
       <div className="side-meta">
         <Clock size={14} strokeWidth={2} aria-hidden="true" /> About {meta.minutes} minutes
       </div>
-    </div>
+    </details>
   );
 }
 
