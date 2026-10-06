@@ -1,0 +1,261 @@
+export const meta = {
+  number: "42.1",
+  title: "Stereo",
+  minutes: 22,
+  objectives: [
+    "Compute real depth from disparity, given a real calibrated baseline (41.8)",
+    "Recover a full 3D point exactly with cv2.triangulatePoints",
+    "Measure, for real, why stereo depth gets less precise at longer range",
+    "Know what stereo needs that a single camera (41.1-41.7) cannot provide alone",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 42.1 (Part H, Module 42; opens the module). Builds directly on
+  41.8's real, calibrated stereo baseline (120mm, recovered to ~2e-6mm) -- this chapter uses
+  that known baseline to recover real depth, which a single camera's model (41.1-41.7) cannot
+  do: one camera alone cannot tell how far away a point is from its pixel position alone
+  (41.1's x=f.X/Z has two unknowns, X and Z, from one equation).
+  Real, verified numbers: K=[[800,0,320],[0,800,240],[0,0,1]], baseline=120mm (41.8's own
+  recovered value), true point (30,-10,1000)mm. Left camera pixel x=344.0, right camera pixel
+  x=248.0 (right camera 120mm to the right of the left one), disparity=96.0 px.
+  Z = f.B/disparity = 800*120/96 = 1000.0mm, exactly the true Z.
+  cv2.triangulatePoints recovered the full 3D point (30,-10,1000) to ~1e-13/1e-14 mm --
+  floating-point noise, exact.
+  Real depth-error sensitivity to a fixed 1px disparity error, at different true distances:
+  Z=500mm: error 2.6mm. Z=1000mm: error 10.5mm. Z=2000mm: error 42.6mm. Z=5000mm: error 274.7mm
+  -- growing roughly with Z^2, confirmed directly by computation, not assumed.
+  Lab: StereoLab (apps/web/components/visuals/StereoLab.tsx) -- the real Z=f.B/disparity
+  formula and the real 1px-disparity-error depth sensitivity, live.
+*/}
+
+# 42.1 Stereo
+
+<Definition term="Stereo depth">recovering how far away a point actually is by seeing it from two cameras a known distance apart, and measuring how differently it appears to each — the same real trick human (and most animal) binocular vision relies on.</Definition>
+
+41.1's `x = f.X/Z` has two real unknowns, `X` and `Z`, from one equation — a single camera genuinely cannot tell distance from one pixel alone. 41.8 calibrated the one real, fixed relationship (the baseline) between two cameras. This chapter uses that known baseline to do what one camera alone cannot: recover real depth.
+
+## 1. An analogy
+
+Close one eye and hold a finger up at arm's length, then alternate eyes without moving your finger — it appears to jump sideways. The closer the finger, the bigger the jump; farther away, the jump shrinks. That jump — **disparity** — is exactly the same real quantity this chapter measures with two cameras instead of two eyes.
+
+## 2. From disparity to depth, with real numbers
+
+<Flow
+  steps={[
+    { label: "The same real point, seen by both cameras (41.8's known baseline)", tone: "data" },
+    { label: "Disparity: how differently its pixel x differs between the two images", tone: "process" },
+    { label: "Z = f . baseline / disparity", tone: "process" },
+    { label: "A real depth, in real units (mm)", tone: "result" },
+  ]}
+/>
+
+A real point at `(30, −10, 1000)` mm, seen by two cameras 120 mm apart (41.8's own calibrated baseline), with `fx = 800` px:
+
+| | Left camera pixel x | Right camera pixel x |
+| --- | --- | --- |
+| Projected position | 344.0 | 248.0 |
+
+**Disparity** = 344.0 − 248.0 = **96.0 px**. Depth: `Z = f . B / disparity = 800 x 120 / 96 = 1000.0 mm` — exactly the true distance, recovered from nothing but two 2D pixel positions and the known baseline.
+
+## 3. Full 3D recovery, exactly
+
+<StereoLab caption="The real Z = f.B/disparity formula, and the real depth error a single pixel of disparity error causes, at different real distances."/>
+
+`cv2.triangulatePoints` recovers the *full* 3D point — not just depth, all three coordinates — from the two cameras' projection matrices and the two observed pixel positions. On this chapter's own real test point, it recovered `(30, −10, 1000)` to within **10⁻¹³ mm** of the true value: exact, given exact pixel positions and a correctly calibrated baseline.
+
+## 4. A real, measured limitation: depth precision shrinks with distance
+
+Rearranging `Z = f.B/d` shows disparity itself shrinks as `1/Z` — so the *same* one-pixel measurement error in disparity translates into very different real depth errors depending on how far away the point already is:
+
+| True distance | Depth error from a 1 px disparity error |
+| --- | --- |
+| 500 mm | 2.6 mm |
+| 1000 mm | 10.5 mm |
+| 2000 mm | 42.6 mm |
+| 5000 mm | 274.7 mm |
+
+A single pixel of disparity measurement noise costs a real 2.6 mm up close, but a real **274.7 mm** at 5 metres — growing roughly with the square of distance, not linearly. This is not a flaw in any particular stereo algorithm; it is a structural, measured consequence of the `Z = f.B/d` relationship itself.
+
+## 5. Industrial context: when stereo is, and isn't, the right tool
+
+A part a known, short, fixed distance from a stereo rig (a few hundred mm, common for close-range inspection) sees Section 4's own real error stay small — stereo depth is genuinely precise there. The same rig watching a scene several metres away (a yard, a warehouse aisle) inherits a real, much larger depth uncertainty from the identical one-pixel disparity noise — exactly why long-range depth sensing often reaches for a longer baseline, a higher-resolution sensor, or a different technology entirely (structured light, 42.4; time of flight, 42.6) rather than close-range stereo.
+
+## What you should remember from 42.1
+
+<Takeaways>
+<Takeaway n={1} title="One camera can't see depth alone">41.1's formula has two unknowns from one equation; a second, known-baseline camera resolves it.</Takeaway>
+<Takeaway n={2} title="Z = f.B/disparity">This chapter's own real example: 96 px disparity, 1000mm depth, exactly recovered.</Takeaway>
+<Takeaway n={3} title="Depth precision shrinks with distance, measurably">A real 1px disparity error cost 2.6mm at 500mm but 274.7mm at 5000mm.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A stereo rig has f=1000px, baseline=200mm. A point has disparity 50px. What is its depth?
+
+<Solution>
+
+Z = f.B/d = 1000 x 200 / 50 = **4000 mm**.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the depth-from-disparity formula and its real sensitivity
+
+```python
+import numpy as np
+
+f, B = 800.0, 120.0
+for Z in [500, 1000, 2000, 5000]:
+    d = f * B / Z
+    Z_with_1px_error = f * B / (d - 1)
+    print(f"Z={Z}mm: disparity={d:.2f}px, error from 1px disparity noise={Z_with_1px_error - Z:.1f}mm")
+```
+
+Output:
+
+```text
+Z=500mm: disparity=192.00px, error from 1px disparity noise=2.6mm
+Z=1000mm: disparity=96.00px, error from 1px disparity noise=10.5mm
+Z=2000mm: disparity=48.00px, error from 1px disparity noise=42.6mm
+Z=5000mm: disparity=19.20px, error from 1px disparity noise=274.7mm
+```
+
+### 2. OpenCV: real exact triangulation
+
+```python
+import cv2
+
+K = np.array([[800.0, 0, 320], [0, 800.0, 240], [0, 0, 1]])
+P1 = K @ np.hstack([np.eye(3), np.zeros((3, 1))])
+P2 = K @ np.hstack([np.eye(3), np.array([[-120.0], [0], [0]])])
+
+true_point = np.array([30.0, -10.0, 1000.0])
+img1, _ = cv2.projectPoints(true_point.reshape(1, 3), np.zeros(3), np.zeros(3), K, None)
+img2, _ = cv2.projectPoints(true_point.reshape(1, 3), np.zeros(3), np.array([-120.0, 0, 0]), K, None)
+print("left pixel:", img1.reshape(-1), " right pixel:", img2.reshape(-1))
+
+pts4d = cv2.triangulatePoints(P1, P2, img1.reshape(2, 1), img2.reshape(2, 1))
+pts3d = (pts4d[:3] / pts4d[3]).flatten()
+print("triangulated point:", pts3d)
+```
+
+Output:
+
+```text
+left pixel: [344. 232.]  right pixel: [248. 232.]
+triangulated point: [  30.  -10. 1000.]
+```
+
+## OpenCV API notes
+
+- **`cv2.triangulatePoints(P1, P2, points1, points2)`**: `P1`, `P2` are each camera's full `3x4` projection matrix (`K[R|t]`, 41.2); returns points in homogeneous 4D — divide by the 4th coordinate (Code section 2) to get real 3D coordinates.
+- **Disparity is a simple pixel difference** — no dedicated `cv2` function is needed for `Z = f.B/d` itself (Code section 1); the real work is in getting an accurate disparity measurement in the first place (42.3's dense disparity maps).
+- **This chapter assumed perfectly rectified, axis-aligned cameras** (identical `fy`, no vertical offset, purely horizontal baseline) — real stereo rigs need `cv2.stereoRectify` (42.2) first to actually achieve this simplified geometry from a real, imperfectly-aligned pair.
+
+## Where it fails
+
+- **Depth precision degrades with distance, measurably** (Section 4) — stereo is a close-to-medium-range technique by nature, not because of any one implementation's shortcoming.
+- **A wrong or poorly-calibrated baseline** (41.8) biases every recovered depth by the same proportional error `Z = f.B/d` implies — a 1% baseline error gives a real 1% depth error at every distance.
+- **Disparity itself must come from somewhere real** — this chapter assumed it was already known; 42.3 covers actually measuring it from two real images, which is its own real source of error on top of Section 4's fundamental limit.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Treating stereo depth precision as constant across distance** — Section 4's own real numbers show a roughly 100x worse error at 5m than at 500mm from the identical 1-pixel disparity noise.
+- **Using two cameras without first establishing their real baseline** (41.8) — `Z = f.B/d` needs a real, known `B`; guessing it biases every depth measurement by the same fraction.
+- **Assuming disparity can be measured to sub-pixel-free precision** — real disparity estimation (42.3) always carries some real measurement noise, which Section 4's sensitivity table applies to directly.
+- **Forgetting the sign/direction convention for which camera is "left"** — this chapter's own Code section 2 needed camera 2 placed at `t = (-120, 0, 0)` (physically to the right) for the familiar left-minus-right positive-disparity convention to hold.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why depth error grows with Z^2
+
+Differentiating `Z = f.B/d` with respect to `d` gives `dZ/dd = -f.B/d^2 = -Z^2/(f.B)` — the sensitivity of depth to a small disparity error is itself proportional to `Z^2`, exactly matching Section 4's own measured, roughly-quadratic error growth: the farther away a point already is, the more a fixed disparity measurement error costs in real depth terms.
+
+### Active vs passive stereo
+
+This chapter's method — two ordinary cameras, relying entirely on the scene's own natural texture to find matching points — is "passive" stereo; it fails outright on a flat, featureless surface with nothing to match between the two views. "Active" stereo systems project their own pattern onto the scene specifically to guarantee something matchable exists everywhere, which is exactly structured light's (42.4) own real motivation.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why can't a single camera determine a point's depth from its pixel position alone?",
+      options: ["It can, trivially", "41.1's projection formula has two real unknowns (X and Z) but only one equation per axis -- depth and position are tangled together", "Cameras are physically unable to measure distance at all", "This is only true for very old cameras"],
+      answer: 1,
+      explanation: "Section 1-2: a second, known-baseline camera is what resolves the ambiguity.",
+    },
+    {
+      question: "In this chapter's own real example (f=800px, baseline=120mm, disparity=96px), what was the computed depth?",
+      options: ["96 mm", "120 mm", "1000 mm, exactly matching the true value", "800 mm"],
+      answer: 2,
+      explanation: "Section 2: Z = f.B/d = 800x120/96 = 1000mm, verified against the known true point.",
+    },
+    {
+      question: "This chapter measured the real depth error from a fixed 1-pixel disparity error at several distances. What pattern did it find?",
+      options: ["The error was the same at every distance", "The error grew roughly with the square of distance: 2.6mm at 500mm vs 274.7mm at 5000mm", "The error shrank at greater distances", "Disparity errors have no effect on depth accuracy"],
+      answer: 1,
+      explanation: "Section 4: a real, measured, roughly quadratic growth in depth error with distance.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A stereo rig has f=600px, baseline=80mm. A point has disparity 40px. What is its depth?
+
+<Solution>
+
+Z = f.B/d = 600 x 80 / 40 = **1200 mm**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, compute the real depth error from a 1px disparity error at Z=3000mm, and compare it to the chapter's own 2000mm and 5000mm results.
+
+<Solution>
+
+```python
+Z = 3000
+d = 800.0 * 120.0 / Z
+err = 800.0 * 120.0 / (d - 1) - Z
+print(f"Z={Z}mm: error from 1px disparity noise={err:.1f}mm")
+```
+
+Output:
+
+```text
+Z=3000mm: error from 1px disparity noise=96.8mm
+```
+
+Between the chapter's own 2000mm (42.6mm) and 5000mm (274.7mm) results, following the same real, roughly-quadratic growth pattern.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A team wants to use a close-range stereo rig (120mm baseline) to measure depth at 8 metres for a yard-monitoring application, reasoning "it worked great for our 1-metre inspection station." Based on this chapter, what should they expect?
+
+<Solution>
+
+Following Section 4's own real, measured pattern (error growing roughly with Z^2), the same 120mm baseline and disparity-measurement precision that worked well at 1 metre (a real ~10.5mm error from 1px of noise) would be expected to perform far worse at 8 metres — extrapolating the chapter's own trend, the error at 8m would be dramatically larger than at 5m's already-substantial 274.7mm, likely too imprecise for most real yard-monitoring needs. They should expect to need a longer baseline, a higher-resolution/longer-focal-length setup, or a different real depth technology (structured light or time-of-flight, later in this module) better suited to that range.
+
+</Solution>
+
+## References
+
+1. R. Hartley, A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004: Chapter 9 (stereo correspondence and triangulation) — already cited in 41.1-41.2, 41.5, 41.7.
+2. OpenCV 4.13.0 documentation: `cv2.triangulatePoints`, `cv2.stereoRectify`. https://docs.opencv.org/4.13.0/
