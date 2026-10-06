@@ -142,3 +142,4 @@ export { DescLab } from "./DescLab";
 export { LbpLab } from "./LbpLab";
 export { GlcmLab } from "./GlcmLab";
 export { HogLab } from "./HogLab";
+export { HaarLab } from "./HaarLab";

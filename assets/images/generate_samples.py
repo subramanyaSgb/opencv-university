@@ -630,6 +630,19 @@ FEAT_H = np.array([[0.9 * np.cos(np.radians(15)), -0.9 * np.sin(np.radians(15)),
                    [0.0002, 0.0001, 1.0]])
 images["sample-feat.png"] = feat_scene()
 images["sample-hog-l.png"] = images["sample-feat.png"][17:81, 112:176]   # 64x64 crop around the L-shape, for HOG (35.3)
+
+# Module 35.4: a schematic (not real) 24x24 "face" for Haar-like features -- forehead, two dark eye
+# rectangles either side of a light nose-bridge rectangle, and a dark mouth bar. Drawn with cv2.rectangle,
+# no photograph involved.
+def face_schematic(size=24):
+    img = np.full((size, size), 190.0)
+    cv2.rectangle(img, (0, 0), (size - 1, 5), 200, -1)    # forehead band
+    cv2.rectangle(img, (4, 8), (9, 13), 70, -1)           # left eye (dark)
+    cv2.rectangle(img, (14, 8), (19, 13), 70, -1)         # right eye (dark)
+    cv2.rectangle(img, (10, 8), (13, 13), 210, -1)        # nose bridge between the eyes (light)
+    cv2.rectangle(img, (6, 18), (17, 20), 90, -1)         # mouth (dark)
+    return np.clip(img, 0, 255).astype(np.uint8)
+images["sample-haar-face.png"] = face_schematic()
 ft_b = cv2.warpPerspective(images["sample-feat.png"].astype(np.float64), FEAT_H, (320, 200), flags=cv2.INTER_LINEAR,
                            borderMode=cv2.BORDER_CONSTANT, borderValue=110)
 images["sample-feat-b.png"] = np.clip(np.rint(ft_b * 0.8 + 20 + np.random.default_rng(34).normal(0, 3, ft_b.shape)), 0, 255).astype(np.uint8)

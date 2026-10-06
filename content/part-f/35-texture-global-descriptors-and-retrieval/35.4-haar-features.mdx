@@ -1,0 +1,294 @@
+export const meta = {
+  number: "35.4",
+  title: "Haar features",
+  minutes: 20,
+  objectives: [
+    "Compute a two-rectangle and a three-rectangle Haar-like feature value from rectangle sums",
+    "Use an integral image to get those rectangle sums from four lookups each, however large the rectangles are",
+    "Explain why 'eyes are darker than the cheeks below them' and 'eyes are darker than the bridge between them' are useful features",
+    "Know that a single Haar feature is a weak signal, meant to be combined with many others (Modules 36-37)",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 35.4 (Part F, Module 35).
+  Lab: HaarLab (apps/web/components/visuals/HaarLab.tsx) — sample-haar-face.png (24x24 schematic), a
+  2-rectangle feature with a row slider and the fixed 3-rectangle eyes-vs-bridge feature, both computed from
+  a live integral image built in the browser.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 35.4 Haar features
+
+<Definition term="Haar-like feature">the difference between the sum of pixel intensities in one rectangle (or set of rectangles) and the sum in an adjacent rectangle (or set), both inside a small window. Named for a loose resemblance to Haar wavelets' step shape, not for being Haar wavelets themselves.</Definition>
+
+35.1–35.3 built descriptors from a whole region's statistics. A Haar-like feature is almost the opposite: one single number, from comparing two or three specific rectangles against each other — but a detector evaluates thousands of them, at every position and size, and learns (Module 36) which handful are actually useful. This chapter builds one feature by hand; Module 37 builds a real cascade from many of them.
+
+## 1. An analogy
+
+Holding two cardboard rectangles up to a face, one over each eye and one over the forehead between them, and asking "is the eye-shaped one darker than the forehead-shaped one, on average?" For a real eye, almost always yes. That single yes/no (or the actual brightness difference) is one Haar-like feature. A face detector asks this question, with rectangles of many shapes and sizes, in many places, and listens to the few questions that turn out to matter most (Module 36's boosting).
+
+## 2. Two classic shapes
+
+<Flow
+  steps={[
+    { label: "Window (e.g. 24x24)", tone: "data" },
+    { label: "Place 2 or 3 adjacent rectangles inside it", tone: "process" },
+    { label: "Sum the pixels in each rectangle", tone: "process" },
+    { label: "Feature = (sum of the 'positive' rectangles) - (sum of the 'negative' ones)", tone: "result" },
+  ]}
+/>
+
+- **Two-rectangle feature**: one rectangle positive, the adjacent one (same size) negative. Viola and Jones' original motivating example [1]: a rectangle over the eye region compared with one over the cheek just below it — eyes are usually darker.
+- **Three-rectangle feature**: a middle rectangle positive, flanked by two equal outer rectangles negative (or vice versa). Their other classic example: the bridge of the nose, between the two eyes, is usually lighter than either eye.
+- Both are evaluated as the **difference of means** (not raw sums) when the positive and negative areas differ in size, so a feature reports a genuine brightness difference, not just "the bigger rectangle has more pixels."
+
+## 3. A worked example by hand
+
+A tiny 4×2 window, values already known (no need for an integral image at this size):
+
+```text
+ 50  50  50  50
+200 200 200 200
+```
+
+Two-rectangle feature, top row positive, bottom row negative: sum(top) = 4 × 50 = 200, sum(bottom) = 4 × 200 = 800. As a **difference of means** (4 pixels each, so this is also just the sum difference ÷ 4): mean(top) − mean(bottom) = 50 − 200 = **−150**. A large negative value: the top really is much darker than the bottom.
+
+## 4. Real rectangles on a schematic face
+
+<HaarLab initialPattern="2rect" caption="Blue = positive-weight rectangle, red = negative. Slide the 2-rectangle feature's row and watch the value change; switch to the fixed 3-rectangle feature for the eyes-vs-bridge comparison."/>
+
+On the 24×24 schematic above (forehead 200, eyes 70, nose bridge 210, cheeks 190, mouth 90 — a drawn schematic, not a photograph), two features computed through a real integral image:
+
+| Feature | Positive rectangle(s) | Negative rectangle(s) | Value (mean difference) |
+| --- | --- | --- | --- |
+| Two-rectangle | eye band, rows 10–13 | cheek band, rows 14–17 | −85.0 |
+| Three-rectangle | nose bridge, rows 8–13, cols 10–13 | both eyes, rows 8–13, cols 4–9 and 14–19 | +140.0 |
+
+(The table reads "positive − negative"; the lab shows "mean(blue) − mean(red)", the same comparison with blue as positive.) Both values are large: −85.0 says the eye band is much darker than the cheek just below it; +140.0 says the bridge between the eyes is much lighter than the eyes themselves. Either would be a much stronger signal than almost any random placement of rectangles — exactly why Viola and Jones picked these two specific shapes as their motivating examples, long before any learning takes place.
+
+## 5. Fast evaluation: the integral image
+
+Each rectangle sum above came from **four lookups** into one integral image (17.5): for a rectangle from (x0,y0) to (x1,y1) inclusive, sum = S[y1+1][x1+1] − S[y0][x1+1] − S[y1+1][x0] + S[y0][x0]. A two-rectangle feature costs 2 such lookups-sets (8 numbers); a three-rectangle feature costs 3 (12 numbers) — regardless of how large the rectangles are. A real detector evaluates on the order of 100 000+ feature candidates per image during training, and thousands per window during detection (37.2); only the integral image makes this remotely fast enough to run in real time, which is the whole reason Viola and Jones built their detector around integral images in the first place [1].
+
+## 6. Industrial use
+
+- **Face detection** (37.5) and, historically, the whole Viola–Jones real-time face detector, still shipped in OpenCV's `cv2.CascadeClassifier`.
+- **Any detector built the same way**: Haar-like features plus boosting (36.6) have been used for other rigid, roughly-fixed-appearance objects (traffic signs, certain parts) when training data and compute were limited.
+- **Conceptually**, "compare the sum of one region against an adjacent region" generalises to simple, fast inspection checks (e.g. "is this patch darker than its neighbour" for some defect types) even without the full cascade machinery.
+
+## What you should remember from 35.4
+
+<Takeaways>
+<Takeaway n={1} title="One feature, one number">A Haar-like feature is a difference of rectangle means — nothing more.</Takeaway>
+<Takeaway n={2} title="Two shapes">Two-rectangle (adjacent regions) and three-rectangle (middle vs two flanks) are the classic examples.</Takeaway>
+<Takeaway n={3} title="Integral images make it cheap">Any rectangle's sum, in 4 lookups, whatever its size — essential at the scale a real detector runs at.</Takeaway>
+<Takeaway n={4} title="One feature is weak">A single feature is a hint, not a detector; Module 36 combines many.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A two-rectangle feature has positive rectangle mean 120 and negative rectangle mean 80. What is the feature value?
+
+<Solution>
+
+120 − 80 = **40**.
+
+</Solution>
+
+**Q2.** Why compute the *mean* of each rectangle rather than the raw sum, when the rectangles are different sizes (as in the three-rectangle feature, Section 2)?
+
+<Solution>
+
+A bigger rectangle has a bigger raw sum purely from having more pixels, even at the same average brightness. Using the mean makes the comparison about actual brightness, independent of how many pixels each rectangle happens to contain.
+
+</Solution>
+
+### Next: 35.5 Perceptual hashing
+
+## Code
+
+### 1. The by-hand feature, and the real ones via cv2.integral
+
+```python
+import numpy as np
+import cv2
+
+tiny = np.array([[50, 50, 50, 50], [200, 200, 200, 200]], dtype=np.float64)
+print("by-hand feature (top - bottom):", tiny[0].mean() - tiny[1].mean())
+
+def face_schematic(size=24):
+    img = np.full((size, size), 190.0)
+    cv2.rectangle(img, (0, 0), (size - 1, 5), 200, -1)
+    cv2.rectangle(img, (4, 8), (9, 13), 70, -1)
+    cv2.rectangle(img, (14, 8), (19, 13), 70, -1)
+    cv2.rectangle(img, (10, 8), (13, 13), 210, -1)
+    cv2.rectangle(img, (6, 18), (17, 20), 90, -1)
+    return np.clip(img, 0, 255).astype(np.uint8)
+
+face = face_schematic()
+S = cv2.integral(face)                                 # (25, 25): one extra zero row/column
+
+def rect_sum(x0, y0, x1, y1):                            # inclusive pixel coordinates
+    return float(S[y1 + 1, x1 + 1] - S[y0, x1 + 1] - S[y1 + 1, x0] + S[y0, x0])
+
+def rect_mean(x0, y0, x1, y1):
+    return rect_sum(x0, y0, x1, y1) / ((x1 - x0 + 1) * (y1 - y0 + 1))
+
+eye_band = rect_mean(4, 10, 19, 13)
+cheek = rect_mean(4, 14, 19, 17)
+print("two-rectangle (eye band - cheek):", round(eye_band - cheek, 1))
+
+eyes = (rect_sum(4, 8, 9, 13) + rect_sum(14, 8, 19, 13)) / (6 * 6 * 2)
+bridge = rect_mean(10, 8, 13, 13)
+print("three-rectangle (bridge - eyes):", round(bridge - eyes, 1))
+```
+
+Output:
+
+```text
+by-hand feature (top - bottom): -150.0
+two-rectangle (eye band - cheek): -85.0
+three-rectangle (bridge - eyes): 140.0
+```
+
+### 2. A real pretrained cascade does not fire on this schematic
+
+```python
+cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+detections = cascade.detectMultiScale(face)
+print("detections on the 24x24 schematic:", detections)
+```
+
+Output:
+
+```text
+detections on the 24x24 schematic: ()
+```
+
+No detections — the real cascade (37.2) was trained on thousands of actual photographs at a range of scales and expects real image structure and texture, not four flat rectangles; this schematic only illustrates the *feature calculation*, not a realistic input to a trained detector.
+
+## OpenCV API notes
+
+- **No single `cv2.haarFeature(...)` function** computes one feature value directly — build it from `cv2.integral` and the rectangle-sum formula (17.5), exactly as above.
+- **`cv2.integral(src, sdepth=-1)`**: returns an (h+1)×(w+1) sum image; see 17.5 for the full API (including `integral2` for sums of squares and `integral3` for 45°-tilted sums, used for rotated Haar features).
+- **`cv2.CascadeClassifier(filename)`** and **`cv2.data.haarcascades`**: the full trained-cascade detector (many Haar features combined by boosting, 36.6, arranged in stages) is covered in 37.2 and used for faces in 37.5; this chapter only covers the feature itself, one of the thousands a cascade is built from.
+- **Rotated (45°) features**: Viola and Jones' original work used only axis-aligned rectangles; Lienhart and Maydt [2] extended the feature set with 45°-rotated rectangles (computed from `cv2.integral3`'s tilted sums), which OpenCV's cascades also support.
+
+## Where it fails
+
+- **One feature is weak by design**: on its own, a single Haar feature misclassifies plenty of windows; it is only useful as part of a large combination (Module 36's boosting, Module 37's cascade).
+- **Axis-aligned rectangles only** (without the 45° extension) cannot directly capture diagonal structure.
+- **Sensitive to scale and alignment**: a feature tuned to a specific eye-to-eye spacing at a specific window size needs the image resized to match, or the feature resized — real detectors search over both position and scale (37.2).
+- **A hand-picked feature (as in Sections 3–4) assumes you already know where the useful structure is**; a real system does not hand-pick — it tries huge numbers of candidate rectangles and lets boosting (36.6) select the useful ones automatically from labelled examples.
+- **Superseded for most detection tasks today** by CNN-based detectors (Part J), though Haar cascades remain extremely fast and still ship in OpenCV for lightweight, CPU-only use cases.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using raw rectangle sums instead of means** when the rectangles differ in area (Mini exercise Q2) — this biases the feature toward whichever side has more pixels.
+- **Forgetting the sign convention**: "positive − negative" and "negative − positive" are the same feature with the opposite sign; keep it consistent when comparing many features (e.g. during boosting, 36.6).
+- **Expecting a trained cascade to work on something far outside its training distribution** (Section "Code", example 2) — a schematic, a cartoon, or an unusual pose/lighting can simply produce no detections.
+- **Confusing a Haar-like feature with a Haar wavelet**: the name is historical (a passing resemblance to the wavelet's step shape); Haar-like features here are plain rectangle-sum differences, not a wavelet transform (31.2).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Viola and Jones (2001/2004)
+
+Viola and Jones [1] combined three ideas into the first real-time face detector: Haar-like rectangle features, integral images for evaluating them in constant time, and AdaBoost (36.6) to both select a small useful subset of features out of over 100 000 candidates and combine them into a strong classifier, arranged into a cascade of increasingly strict stages (37.2) so that most non-face windows are rejected after just a few cheap features.
+
+### The extended feature set
+
+Lienhart and Maydt [2] added rotated (45°) two- and three-rectangle features, plus some additional shapes, improving detection accuracy over the original axis-aligned-only set; OpenCV's shipped cascades (`cv2.data.haarcascades`) use this extended set.
+
+### Why these two shapes specifically?
+
+The two- and three-rectangle shapes in Sections 2–4 are not arbitrary: they are the two examples Viola and Jones used to motivate the whole feature family, because they so directly match the physical structure of a face (eyes vs. cheeks; eyes vs. the bridge between them). Most of the 100 000+ candidate features a real cascade considers during training are far less obviously meaningful — boosting is what finds the useful ones among them.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is a Haar-like feature?",
+      options: ["A wavelet transform of the image", "A difference between the (mean) sums of two or three adjacent rectangles", "A single pixel's value", "A histogram of gradients"],
+      answer: 1,
+      explanation: "Section 1-2: compare rectangle(s) against adjacent rectangle(s).",
+    },
+    {
+      question: "Why use the difference of means rather than the difference of raw sums, for the three-rectangle feature?",
+      options: ["Means are faster to compute", "The outer (eyes) and middle (bridge) rectangles have different areas; means make the comparison about brightness, not pixel count", "OpenCV requires it", "Sums would be negative"],
+      answer: 1,
+      explanation: "Mini exercise Q2: using the mean removes the bias from unequal rectangle areas.",
+    },
+    {
+      question: "Why does an integral image matter for Haar features specifically?",
+      options: ["It is only cosmetic", "A real detector evaluates huge numbers of rectangle features per window; the integral image makes each one cost 4 lookups regardless of rectangle size", "It converts the image to colour", "It replaces the need for a classifier entirely"],
+      answer: 1,
+      explanation: "Section 5: Viola and Jones built their detector around integral images specifically for this reason.",
+    },
+    {
+      question: "In the Code section, the real pretrained face cascade found no detections on the 24x24 schematic. Why?",
+      options: ["The code has a bug", "The schematic has no real texture or the fine image structure a cascade trained on real photographs expects", "cv2.CascadeClassifier cannot detect faces at all", "The image was too large"],
+      answer: 1,
+      explanation: "The schematic only illustrates the feature calculation, not a realistic detector input.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A two-rectangle feature: positive rectangle is 3×4 pixels, all value 180; negative rectangle is 3×4 pixels, all value 60. What is the feature value?
+
+<Solution>
+
+Both rectangles are the same size (12 pixels each), so mean = value directly: 180 − 60 = **120**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using `rect_mean` from the Code section, compute the two-rectangle feature with the top band at rows 0–3 and the bottom band at rows 4–7 (both full width, cols 0–23) on the schematic face. Compare it with the −85.0 value from Section 4 (rows 10–13 vs 14–17) — which part of the face is this new feature actually comparing?
+
+<Solution>
+
+```python
+top04 = rect_mean(0, 0, 23, 3)
+bot48 = rect_mean(0, 4, 23, 7)
+print(round(top04, 1), round(bot48, 1), " feature:", round(top04 - bot48, 1))
+```
+
+Output:
+
+```text
+200.0 195.0  feature: 5.0
+```
+
+Only +5.0 — much weaker than −85.0. Rows 0–7 are entirely forehead/background (the forehead band is rows 0–5 at 200, the plain background just below it is 190), so this feature compares two very similar regions and finds almost nothing, unlike the eye-vs-cheek placement in Section 4.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A detector designer proposes checking only the single best two-rectangle feature (the one with the largest magnitude on the training set) and skipping boosting entirely. What would likely go wrong?
+
+<Solution>
+
+One feature only encodes one specific comparison (e.g. "is the eye region darker than the cheek below it"); real faces vary in lighting, pose, skin tone and expression, and plenty of non-face regions can accidentally satisfy that one comparison too (e.g. shadows, dark objects on a light background). A single feature cannot distinguish most of these cases; it is a weak classifier, correct more often than chance but far from reliable alone. Boosting (36.6) combines many weak features, each correcting for cases the others get wrong, into a strong classifier — which is why Viola and Jones needed it, not just one good feature.
+
+</Solution>
+
+## References
+
+1. P. Viola, M. Jones, "Rapid object detection using a boosted cascade of simple features," *Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR)*, 2001, pp. I-511–I-518; extended as "Robust real-time face detection," *International Journal of Computer Vision* 57(2), 2004, pp. 137–154.
+2. R. Lienhart, J. Maydt, "An extended set of Haar-like features for rapid object detection," *Proceedings of the IEEE International Conference on Image Processing (ICIP)*, 2002, pp. I-900–I-903.
+3. OpenCV 4.13.0 documentation: `cv2.integral`, `cv2.CascadeClassifier`, `cv2.data`. https://docs.opencv.org/4.13.0/
