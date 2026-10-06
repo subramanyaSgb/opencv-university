@@ -1,0 +1,320 @@
+export const meta = {
+  number: "43.2",
+  title: "Visual odometry",
+  minutes: 22,
+  objectives: [
+    "Chain 43.1's two-view pose recovery across many frames into one estimated camera path",
+    "Measure, for real, how position error accumulates even when every step's scale is known exactly",
+    "Measure a real, structurally different failure: no scale reference at all",
+    "Know a real, verified cv2.recoverPose sign-convention trap that silently reverses a path",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 43.2 (Part H, Module 43). Builds directly on 43.1's two-view
+  cv2.findEssentialMat/recoverPose/triangulatePoints pipeline -- the new ingredient here is
+  CHAINING that same pipeline across many consecutive frames to estimate a camera's own path,
+  which is exactly what "visual odometry" (VO) means.
+  All numbers real, verified via scripts/gen_vo_data.py -> apps/web/public/data/vo-data.json.
+  Setup: K=[[800,0,320],[0,800,240],[0,0,1]], 200 world points scattered 3-25 units ahead,
+  camera moves straight forward along -Z in 20 frames of 0.3 units/step, 0.5px pixel noise,
+  seed=5.
+  Real per-step cheirality inliers: 48-81 (of 129-170 matched/visible points per pair); mean
+  59.47 -- healthy throughout, no degenerate steps in this scenario.
+  Sign convention (verified twice): in a CLEAN, noiseless single-pair check, cv2.recoverPose's
+  t_rel = [~0,~0,1.0] while the true motion direction is [0,0,-1] -- dot product EXACTLY -1.0.
+  t_rel points from the NEW camera back toward the OLD one; the real forward-motion direction
+  is -t_rel. In the real, noisy 20-frame chain this same dot product (computed on the first,
+  noisy step) is -0.964 -- close to -1 but not exact, under real pixel noise.
+  Chained result WITH the true per-step scale supplied from outside (an oracle, standing in for
+  e.g. known speed or a wheel encoder): position error grows from 0.0800 units at frame 1 to
+  0.2529 units at frame 19 (true path length 5.7 units) -- real, slow drift from accumulated
+  per-step rotation/translation-direction noise, even though scale itself was never wrong.
+  Chained result with NO scale reference at all (naively assuming unit (|t|=1) step length
+  every frame, since that's literally what cv2.recoverPose returns): final estimated distance
+  is 18.8131 units vs a true 5.7 units -- a CONSTANT-FACTOR error of 3.3037x (close to
+  1/true_step=3.33), not a growing one; the path's shape (a straight line) stayed correct.
+  Lab: VoLab (apps/web/components/visuals/VoLab.tsx) -- both real chained trajectories.
+*/}
+
+# 43.2 Visual odometry
+
+<Definition term="Visual odometry (VO)">estimating a moving camera's own path — where it has been, frame by frame — by chaining 43.1's two-view pose recovery across every consecutive pair of frames in a video, with no wheels, GPS, or external tracker involved.</Definition>
+
+43.1 recovered the relative pose between *two* images. A camera moving through the world produces not two images but a long sequence of them — and running 43.1's exact pipeline on every consecutive pair, then chaining the results together, is visual odometry: literally "distance measurement from vision," the camera's own version of a car's odometer.
+
+## 1. An analogy
+
+A hiker without GPS can still track roughly how far and which direction they have walked by counting strides and noting turns, one step at a time. Each individual step estimate has some small error, but those errors do not cancel out — they accumulate, so a mile of walking this way lands less precisely than a single stride does. Visual odometry is the same real process, with 43.1's pose recovery standing in for "one stride."
+
+## 2. The pipeline: chaining two-view pose recovery
+
+<Flow
+  steps={[
+    { label: "Frame i, frame i+1: matched features (34.2/34.4)", tone: "data" },
+    { label: "43.1's recoverPose: relative R, unit-direction t", tone: "process" },
+    { label: "Scale this step from an outside reference", tone: "process" },
+    { label: "Add this step onto the running path estimate", tone: "result" },
+  ]}
+/>
+
+Nothing here is new machinery: every arrow reuses 43.1's own `cv2.findEssentialMat` + `cv2.recoverPose` call, run once per consecutive frame pair instead of once for a single image pair. The one new, real engineering problem is the one 43.1 Section 4 already named: each step's `t` is a unit vector, so *some* real-world scale — a known speed, a wheel encoder tick, a second sensor — has to be supplied from outside, every single step, or the whole chained path is wrong by an unknown, compounding factor.
+
+## 3. A real, measured result: drift even when scale is known exactly
+
+<VoLab caption="Real chained cv2.recoverPose results over 20 frames of a synthetic forward-moving camera, with the true per-step scale supplied from outside." />
+
+A synthetic camera moves straight ahead by 0.3 units every frame for 20 frames, past 200 scattered 3D points, with realistic 0.5 px pixel noise on every match. Supplying the *true* step distance at every single step (an oracle standing in for a real external reference, like a wheel encoder) still lands the estimated position **0.2529 units** away from the truth by frame 19 — up from **0.0800 units** at frame 1. The true scale was never wrong; what accumulated was each step's own small rotation and translation-*direction* error, compounding exactly like the hiker's strides in Section 1.
+
+## 4. A different, real failure: no scale reference at all
+
+Running the identical 20-frame chain but naively assuming every step was exactly **1 unit** long (since that is literally what `cv2.recoverPose`'s unit-length `t` provides, with no external reference supplied) lands the final estimate at **18.81 units** of forward travel against a true **5.7 units** — a **3.30x** error. The path's *shape* is still a correct straight line; only its overall *size* is wrong, by a close-to-constant factor (`1/0.3 ≈ 3.33`, matching almost exactly). This is a structurally different kind of error from Section 3's growing drift: a wrong constant bias, not an accumulating one, and it is the single most common real mistake in a from-scratch monocular VO system.
+
+## 5. Industrial context: why real VO systems fuse in another sensor
+
+Section 3's own real, slow drift and Section 4's own real, large constant-scale error are exactly why no serious robot or AR headset trusts visual odometry alone for long: real systems fuse VO with wheel encoders (ground robots), an IMU (phones, drones — "visual-inertial odometry," Go deeper), or periodic GPS fixes, using the same real Kalman/particle-filter machinery from 40.5-40.6 to blend a second, independently-scaled and independently-drifting measurement with VO's own frame-to-frame estimate. Neither sensor alone is reliable over a long path; together, each corrects the other's specific real weakness.
+
+## What you should remember from 43.2
+
+<Takeaways>
+<Takeaway n={1} title="VO is 43.1, chained">The exact same cv2.findEssentialMat + recoverPose call, run on every consecutive frame pair.</Takeaway>
+<Takeaway n={2} title="Drift accumulates even with correct scale">This chapter's own real result: 0.08 units of error at frame 1 growing to 0.25 by frame 19, from compounding per-step noise alone.</Takeaway>
+<Takeaway n={3} title="No scale reference gives a different, constant-factor error">A real 3.30x distance error here, with the path's shape still correct — not the same failure as drift.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A monocular VO system has no external scale reference and assumes a unit step length every frame, when the true step length is actually 0.5 units. Based on Section 4's pattern, roughly what constant factor should the final estimated distance be off by?
+
+<Solution>
+
+Roughly `1 / 0.5 = 2x` too far — following this chapter's own real result (true step 0.3, naive unit step 1.0, final error ≈ `1/0.3 ≈ 3.33x`, matching the real 3.30x almost exactly).
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the real sign convention, checked directly
+
+```python
+import numpy as np
+import cv2
+
+K = np.array([[800.0, 0, 320], [0, 800.0, 240], [0, 0, 1]])
+rng = np.random.default_rng(5)
+pts3d = rng.uniform(low=[-5, -5, 3], high=[5, 5, 25], size=(200, 3))
+
+def project(pts, R, t):
+    rvec, _ = cv2.Rodrigues(R)
+    img, _ = cv2.projectPoints(pts, rvec, t, K, None)
+    return img.reshape(-1, 2)
+
+C0, C1 = np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, -0.3])
+pts_a = project(pts3d, np.eye(3), -C0.reshape(3, 1))
+pts_b = project(pts3d, np.eye(3), -C1.reshape(3, 1))
+
+E, _ = cv2.findEssentialMat(pts_a, pts_b, K, method=cv2.RANSAC, threshold=1.0)
+n, R_rel, t_rel, _ = cv2.recoverPose(E, pts_a, pts_b, K)
+
+true_dir = (C1 - C0) / np.linalg.norm(C1 - C0)
+print("t_rel:", t_rel.ravel())
+print("true motion direction:", true_dir)
+print("dot(t_rel, true_dir):", np.dot(t_rel.ravel(), true_dir))
+print("dot(-t_rel, true_dir):", np.dot(-t_rel.ravel(), true_dir))
+```
+
+Output:
+
+```text
+t_rel: [ 8.55458212e-12 -6.97135615e-12  1.00000000e+00]
+true motion direction: [ 0.  0. -1.]
+dot(t_rel, true_dir): -1.0
+dot(-t_rel, true_dir): 1.0
+```
+
+In this clean, noiseless check, `t_rel` points in *exactly* the opposite direction of the camera's real forward motion — the dot product with the true direction is exactly `-1.0`. `cv2.recoverPose`'s `t` is the position of the *first* camera as seen from the *second* one, not the direction the camera actually travelled; `-t_rel` is the real motion direction needed for Section 2's pipeline (Code section 2 uses this directly).
+
+### 2. OpenCV: the real chained 20-frame result
+
+```python
+NUM_FRAMES, STEP, NOISE = 20, 0.3, 0.5
+cam_true = [np.array([0.0, 0.0, -i * STEP]) for i in range(NUM_FRAMES)]
+
+def pts_in_frame(i):
+    t = -cam_true[i].reshape(3, 1)
+    pts2d = project(pts3d, np.eye(3), t)
+    Pc = pts3d + t.ravel()
+    valid = (Pc[:, 2] > 0.5) & (pts2d[:, 0] > 0) & (pts2d[:, 0] < 640) & (pts2d[:, 1] > 0) & (pts2d[:, 1] < 480)
+    return pts2d, valid
+
+est_oracle, est_naive, inliers = [np.zeros(3)], [np.zeros(3)], []
+for i in range(NUM_FRAMES - 1):
+    pts_a0, va = pts_in_frame(i)
+    pts_b0, vb = pts_in_frame(i + 1)
+    valid = va & vb
+    pa = pts_a0[valid] + rng.normal(0, NOISE, (valid.sum(), 2))
+    pb = pts_b0[valid] + rng.normal(0, NOISE, (valid.sum(), 2))
+    E, _ = cv2.findEssentialMat(pa, pb, K, method=cv2.RANSAC, prob=0.999, threshold=1.0)
+    n_in, R_rel, t_rel, _ = cv2.recoverPose(E, pa, pb, K)
+    inliers.append(int(n_in))
+    true_step = np.linalg.norm(cam_true[i + 1] - cam_true[i])
+    motion_dir = -t_rel.ravel()
+    est_oracle.append(est_oracle[-1] + motion_dir * true_step)
+    est_naive.append(est_naive[-1] + motion_dir * 1.0)
+
+err_oracle_last = np.linalg.norm(est_oracle[-1] - cam_true[-1])
+ratio_naive = np.linalg.norm(est_naive[-1]) / np.linalg.norm(cam_true[-1])
+print(f"mean inliers/step: {np.mean(inliers):.2f}")
+print(f"position error at frame {NUM_FRAMES-1}, true scale known: {err_oracle_last:.4f} units")
+print(f"total distance ratio, no scale reference: {ratio_naive:.4f}x")
+```
+
+Output:
+
+```text
+mean inliers/step: 59.47
+position error at frame 19, true scale known: 0.2529 units
+total distance ratio, no scale reference: 3.3037x
+```
+
+## OpenCV API notes
+
+- **`cv2.recoverPose(E, points1, points2, K)` returns `t` pointing from camera 2 back to camera 1** — Code section 1's own real, exact `-1.0` dot product; negate it to get the actual direction of travel. This is a real, silent trap: get the sign wrong and the whole reconstructed path runs backwards, with no error or warning from the API.
+- **Chaining is simple vector addition in world coordinates for a non-rotating path** (this chapter's scenario); a path that also turns needs the accumulated rotation applied to each new step's direction before adding it — `R_accum = R_rel @ R_accum`, `position += R_accum.T @ (motion_dir * step)` in general, left as a real extension beyond this chapter's straight-line case.
+- **No `cv2` function supplies real-world scale** — Section 4's own real 3.30x error is what happens when none is given; a real system must supply it itself (41.8's calibrated stereo baseline, a known speed, an IMU) every single step.
+
+## Where it fails
+
+- **Drift accumulates with every frame, even when scale is exact** (Section 3) — this is not a bug to be fixed, it is the structural cost of estimating motion incrementally rather than from one global reference.
+- **A missing scale reference gives a different, constant-factor error** (Section 4) — a 1-off to check before trusting any monocular VO distance.
+- **43.1's own degenerate cases apply at every single step** — a momentary pure-rotation step (camera only turning, not translating) or too small a baseline between two particular frames reproduces 43.1 Section 5's own real 0/80-inlier total failure or 3-8x depth error, for *that* step, corrupting the whole chain from that point on.
+- **Lost feature tracks need periodic re-detection** — 34.2/34.4's matching (or 40.3's optical flow) can simply lose track of too many points between frames (fast motion, motion blur, a featureless wall); this chapter assumed healthy matches (48-81 inliers every step) throughout.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using `t` directly as the motion direction without checking its sign** — Code section 1's own real, exact result: the dot product with true motion is `-1.0`, not `+1.0`. Every step compounds the mistake if missed.
+- **Assuming a single pair's own two-view accuracy survives unchanged over a long sequence** — Section 3's own real result shows error growing with frame count, even under otherwise identical conditions.
+- **Chaining without ever supplying real scale** — Section 4's own real 3.30x constant-factor error is the direct, measured consequence.
+- **Treating a VO drop in inlier count as noise rather than a signal** — 43.1 Section 5's 0-inlier failure mode means a single bad step (degenerate baseline, pure rotation) can poison every position estimate chained after it.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Visual-inertial odometry (VIO)
+
+Fusing VO with an inertial measurement unit (accelerometer + gyroscope) is the real, standard answer to both of this chapter's own real failures: the IMU supplies real, independently-measured scale and short-term motion (fixing Section 4's constant-factor error) while VO corrects the IMU's own, different drift tendency (bias accumulation) over longer stretches — the basis of the real MSCKF approach (Mourikis & Roumeliotis, "A Multi-State Constraint Kalman Filter for Vision-aided Inertial Navigation," ICRA 2007) used in phones, drones, and AR headsets.
+
+### Keyframes, not every frame
+
+A real VO system rarely chains *every* captured frame; it selects a sparser set of "keyframes" (Scaramuzza & Fraundorfer, "Visual Odometry [Tutorial]," IEEE Robotics & Automation Magazine, 2011) spaced out enough to give each pair a real, usable baseline — directly avoiding 43.1 Section 5's own narrow-baseline total failure, which a too-frequent keyframe rate would walk straight into.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is visual odometry, in terms of this course's own prior chapters?",
+      options: ["A completely new algorithm unrelated to earlier chapters", "43.1's two-view pose recovery pipeline, run on every consecutive pair of frames in a sequence and chained together", "A hardware sensor", "The same thing as 42.3's dense disparity"],
+      answer: 1,
+      explanation: "Section 2: VO reuses 43.1's exact cv2.findEssentialMat/recoverPose call, once per consecutive frame pair.",
+    },
+    {
+      question: "In this chapter's own real test, supplying the TRUE per-step scale at every step still produced what?",
+      options: ["A perfect, zero-error path", "A real, growing position error -- 0.08 units at frame 1, 0.25 units by frame 19 -- from accumulated per-step pose noise", "Instant total failure", "An error that shrank over time"],
+      answer: 1,
+      explanation: "Section 3: drift accumulates even with exactly correct scale, because each step's own small rotation/direction error compounds.",
+    },
+    {
+      question: "What real, different failure appeared when NO scale reference was supplied at all (Section 4)?",
+      options: ["The same growing drift as Section 3", "A roughly constant-factor distance error (3.30x here) with the path's correct shape preserved", "The path's shape became wrong but its total distance was correct", "No change at all"],
+      answer: 1,
+      explanation: "Section 4: a near-constant bias close to 1/true_step, structurally different from Section 3's compounding drift.",
+    },
+    {
+      question: "This chapter's own real, exact check (Code section 1) found what about cv2.recoverPose's t vector?",
+      options: ["It already points in the real direction of camera motion", "Its dot product with the true motion direction was exactly -1.0 -- it points the opposite way, and must be negated", "It is always zero", "It only works for rotation, not translation"],
+      answer: 1,
+      explanation: "Code section 1: a real, verified sign convention trap -- t points from the new camera back to the old one.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A VO chain over 10 frames has a per-step scale error of roughly 2% on average, consistently in the same direction (always too short). Would you expect the total path-length error after 10 frames to be closer to 2% or to 20%?
+
+<Solution>
+
+Closer to **20%** — a *consistent*, same-direction bias compounds roughly additively over steps (unlike random per-step noise, which partly cancels), so 10 steps each 2% short compounds toward the sum, not the average.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, rerun the chain with `NOISE = 1.5` (three times this chapter's own 0.5 px) and compare the resulting oracle-scale position error at frame 19 to this chapter's own 0.2529-unit result.
+
+<Solution>
+
+```python
+NOISE2 = 1.5
+rng2 = np.random.default_rng(5)
+pts3d2 = rng2.uniform(low=[-5, -5, 3], high=[5, 5, 25], size=(200, 3))
+
+def pts_in_frame2(i):
+    t = -cam_true[i].reshape(3, 1)
+    pts2d = project(pts3d2, np.eye(3), t)
+    Pc = pts3d2 + t.ravel()
+    valid = (Pc[:, 2] > 0.5) & (pts2d[:, 0] > 0) & (pts2d[:, 0] < 640) & (pts2d[:, 1] > 0) & (pts2d[:, 1] < 480)
+    return pts2d, valid
+
+est2 = [np.zeros(3)]
+for i in range(NUM_FRAMES - 1):
+    pts_a0, va = pts_in_frame2(i)
+    pts_b0, vb = pts_in_frame2(i + 1)
+    valid = va & vb
+    pa = pts_a0[valid] + rng2.normal(0, NOISE2, (valid.sum(), 2))
+    pb = pts_b0[valid] + rng2.normal(0, NOISE2, (valid.sum(), 2))
+    E, _ = cv2.findEssentialMat(pa, pb, K, method=cv2.RANSAC, prob=0.999, threshold=1.0)
+    _, R_rel, t_rel, _ = cv2.recoverPose(E, pa, pb, K)
+    true_step = np.linalg.norm(cam_true[i + 1] - cam_true[i])
+    est2.append(est2[-1] + (-t_rel.ravel()) * true_step)
+
+err2 = np.linalg.norm(np.array(est2[-1]) - cam_true[-1])
+print(f"position error at frame 19, noise={NOISE2}px: {err2:.4f} units")
+```
+
+Output:
+
+```text
+position error at frame 19, noise=1.5px: 0.8013 units
+```
+
+Roughly 3.2x this chapter's own 0.2529-unit result at 0.5 px noise — error grows with pixel noise, broadly consistent with 43.1's own noise-sensitivity finding, though not by a simple fixed ratio across a chained, multi-step path.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A warehouse robot uses only monocular visual odometry (no wheel encoders, no IMU) to track its position over an 8-hour shift. Based on this chapter, what real problem should the team expect, and what is the most direct fix?
+
+<Solution>
+
+Following Section 3's own real result, position error accumulates continuously over the whole shift's worth of frames, even if every individual step's pose estimate is good — there is no mechanism in pure VO to stop this drift from growing without bound over many hours. The most direct real fix is exactly Section 5's: fuse VO with a second, independently-scaled and independently-drifting source (wheel encoders, an IMU, or periodic fixed landmarks/GPS-equivalent), using Kalman or particle-filter fusion (40.5-40.6) so each sensor corrects the other's specific weakness — or, as covered next (43.3), add loop closure so revisiting a known location can reset accumulated drift directly.
+
+</Solution>
+
+## References
+
+1. D. Scaramuzza, F. Fraundorfer, "Visual Odometry [Tutorial]," *IEEE Robotics & Automation Magazine*, 18(4), 2011, pp. 80-92 (Part I); 19(2), 2012 (Part II).
+2. A. I. Mourikis, S. I. Roumeliotis, "A Multi-State Constraint Kalman Filter for Vision-aided Inertial Navigation," *IEEE International Conference on Robotics and Automation (ICRA)*, 2007.
+3. R. Hartley, A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004: Chapter 9 — already cited in 41.1-41.2, 41.5, 41.7, 42.1-42.2, 43.1.
+4. OpenCV 4.13.0 documentation: `cv2.findEssentialMat`, `cv2.recoverPose`. https://docs.opencv.org/4.13.0/

@@ -191,3 +191,4 @@ export { StructuredLightLab } from "./StructuredLightLab";
 export { LaserTriangulationLab } from "./LaserTriangulationLab";
 export { TimeOfFlightLab } from "./TimeOfFlightLab";
 export { SfmLab } from "./SfmLab";
+export { VoLab } from "./VoLab";
