@@ -1,0 +1,280 @@
+export const meta = {
+  number: "46.3",
+  title: "Radiometric data",
+  minutes: 22,
+  objectives: [
+    "Know the real difference between a thermal PICTURE and real radiometric DATA",
+    "Measure, for real, how much bit depth matters for real temperature precision",
+    "Measure, for real, how much worse things get trying to recover temperature from an exported colour image",
+    "Know which real file formats actually preserve radiometric data, and which do not",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 46.3 (Part I, Module 46). 21.4 explicitly deferred this chapter's
+  own subject ("46.3") when it said "In a real system `aligned` holds temperatures (46.3)".
+  Builds on 46.1 (Planck/Stefan-Boltzmann) and 46.2 (the radiometric equation) for the real
+  calibration curve, and on 3.2/4.4's general bit-depth/quantization theme, specialized to
+  the thermal radiometric case.
+  All numbers real, verified directly. Simplified real sensor model: raw digital count
+  proportional to total radiance (Stefan-Boltzmann), calibrated over a real industrial span
+  -20C to 150C (253.15K to 423.15K).
+  Round-trip quantization error (true T -> count -> recovered T) at several real test
+  temperatures (0,20,37,60,100,140 C):
+  8-bit (256 levels): max error=0.4279K (worst at 0C), smallest ~0.0512K (at 37C).
+  14-bit (16384 levels): max error=0.0082K.
+  16-bit (65536 levels): max error=0.0022K.
+  Real, measured palette-export hazard: a synthetic 300x60 gradient scene spanning the full
+  -20C to 150C range, encoded as 8-bit counts, then colourized with cv2.applyColorMap
+  (COLORMAP_INFERNO) and inverted back via nearest-LUT-entry matching:
+  exact (no compression) colormap inversion: max error=0.763K, mean=0.198K -- already worse
+  than plain 8-bit grayscale quantization (0.4279K max) because of the extra inversion step.
+  after REAL cv2.imencode('.jpg', quality=90) lossy compression: max error=2.941K, mean=
+  0.353K -- a real, measured, further degradation from lossy compression on top.
+  Lab: InfraRecLab (apps/web/components/visuals/InfraRecLab.tsx) -- live bit-depth vs
+  round-trip quantization error.
+*/}
+
+# 46.3 Radiometric data
+
+<Definition term="Radiometric data">per-pixel data that can still be converted back into a real temperature, because the raw sensor values (and the camera's own calibration) were kept — as opposed to a thermal "picture," which only keeps a colourized image for people to look at.</Definition>
+
+21.4 assumed an aligned thermal image's pixels "hold temperatures" without explaining what makes that true. This chapter covers it directly: whether a thermal file's pixels can still answer "how many degrees was this?" depends entirely on whether real radiometric data — not just a nice-looking picture — was kept.
+
+## 1. An analogy
+
+A blurry photo of a digital thermometer's display might show "98" where the real reading was "98.6" — the photo captured an *image* of the number, not the number itself, and any compression or blur along the way can genuinely corrupt it. The thermometer's own internal electronic reading never has that problem, because it is the real number, not a picture of one. A thermal camera's raw sensor data is like that internal electronic reading; a colourized thermal JPEG is like the blurry photo of the display.
+
+## 2. The pipeline: real data, then (optionally) a picture
+
+<Flow
+  steps={[
+    { label: "Real scene radiance (46.1-46.2's own physics)", tone: "world" },
+    { label: "Raw sensor digital count (a real ADC value, 14-16 bit)", tone: "data" },
+    { label: "Camera's calibration curve: count -> real temperature", tone: "process" },
+    { label: "A colour palette, applied ONLY for display (46.6) -- a one-way step", tone: "result" },
+  ]}
+/>
+
+The real calibration curve in the third box is exactly 46.1-46.2's physics, pre-computed once by the manufacturer for the camera's own detector band and stored inside it. Keeping the *raw count* (or an already-converted real temperature value) per pixel preserves everything; applying a colour palette for a human to look at (46.6) throws real precision away, on purpose, because a person does not need (or want) 16-bit precision in a picture they are just looking at.
+
+## 3. A real, measured result: bit depth sets the real precision floor
+
+<InfraRecLab caption="Live, exact round-trip quantization error -- true temperature in, a digital count at a chosen bit depth, true temperature recovered back out." />
+
+Calibrating a real sensor's raw count linearly against total radiance (Stefan-Boltzmann) over a representative industrial range (-20°C to 150°C) and round-tripping several real test temperatures through it gives a real, measured precision floor set purely by bit depth: an ordinary **8-bit** image (256 levels) has a real round-trip error up to **0.4279K**; a real **14-bit** sensor (16,384 levels, a common real thermal-camera ADC depth) cuts that to **0.0082K**; a full **16-bit** range reaches **0.0022K**. This is exactly why real thermal cameras store far more than 8 bits per pixel internally — an 8-bit palette picture (46.6) could never hold this chapter's own real 14/16-bit precision even before any colour is applied.
+
+## 4. A real, measured surprise: a picture is worse than just "low precision"
+
+Taking that same scene, encoding it as 8-bit counts, applying a real colour palette (`cv2.applyColorMap`) for display, and then trying to invert that palette back to a temperature gives a real result *worse* than Section 3's own plain 8-bit number: **0.763K** maximum error even with an exact, uncompressed colour image — because converting to colour and back adds its own real matching error on top of the original 8-bit quantization. Running that same colourized image through **real JPEG compression** (quality 90, an everyday real setting) pushes the real maximum error to **2.941K** — a genuinely large, real, additional degradation, entirely from one ordinary lossy save.
+
+## 5. Industrial context: keep the real file, not just the picture
+
+A real inspection team that saves only a colourized JPEG screenshot of a thermal reading has permanently discarded the ability to recover a trustworthy real temperature later — Section 4's own real numbers show the best case is already measurably wrong, and a routine JPEG save makes it worse still. Real thermal cameras instead offer (and real inspection workflows should always keep) a genuine radiometric file: a **radiometric JPEG** (a normal-looking JPEG with the real raw 16-bit data embedded separately in its EXIF metadata, a real FLIR format), a **16-bit TIFF**, or a proprietary **radiometric video** format (SEQ/CSQ) — every one of which keeps Section 3's own real, full precision intact for later re-analysis with a different emissivity (46.2) or a different region of interest (46.5).
+
+## What you should remember from 46.3
+
+<Takeaways>
+<Takeaway n={1} title="A picture and real data are not the same thing">21.4's "aligned holds temperatures" depends entirely on keeping real radiometric data, not just a colourized picture.</Takeaway>
+<Takeaway n={2} title="Bit depth sets a real precision floor">This chapter's own real result: 0.4279K (8-bit) down to 0.0022K (16-bit) round-trip error.</Takeaway>
+<Takeaway n={3} title="A colourized, compressed picture is measurably worse still">A real 2.941K error from an ordinary JPEG save -- always keep the camera's own native radiometric file.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A team deletes a thermal camera's native `.seq` file after exporting a colourized JPEG "for the report," believing the JPEG is good enough for later analysis. Based on Section 4, is this safe?
+
+<Solution>
+
+No. Section 4's own real result shows even an exact, uncompressed inversion of a colourized 8-bit image already has a measurable real error (0.763K), and the JPEG itself (lossy) made that worse (2.941K). The native radiometric file is the only real copy with the camera's own full precision (Section 3); once it is deleted, that precision is genuinely gone.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: real round-trip quantization error by bit depth
+
+```python
+import numpy as np
+
+sigma = 5.670374419e-8
+T_min, T_max = -20 + 273.15, 150 + 273.15
+W_min, W_max = sigma * T_min**4, sigma * T_max**4
+
+def temp_to_count(T, n_bits):
+    W = sigma * T**4
+    n_levels = 2**n_bits
+    count = np.round((W - W_min) / (W_max - W_min) * (n_levels - 1))
+    return np.clip(count, 0, n_levels - 1)
+
+def count_to_temp(count, n_bits):
+    n_levels = 2**n_bits
+    W = W_min + (count / (n_levels - 1)) * (W_max - W_min)
+    return (W / sigma) ** 0.25
+
+test_temps_C = [0, 20, 37, 60, 100, 140]
+for bits in [8, 14, 16]:
+    errs = []
+    for tC in test_temps_C:
+        T = tC + 273.15
+        count = temp_to_count(np.array([T]), bits)[0]
+        errs.append(abs(count_to_temp(count, bits) - T))
+    print(f"{bits}-bit ({2**bits} levels): max round-trip error={max(errs):.4f}K")
+```
+
+Output:
+
+```text
+8-bit (256 levels): max round-trip error=0.4279K
+14-bit (16384 levels): max round-trip error=0.0082K
+16-bit (65536 levels): max round-trip error=0.0022K
+```
+
+### 2. OpenCV: the real cost of a colourized, compressed export
+
+```python
+import cv2
+
+H, W_IMG = 60, 300
+T_scene = np.linspace(-20, 150, W_IMG) + 273.15
+T_scene_img = np.tile(T_scene, (H, 1))
+count8 = temp_to_count(T_scene_img, 8).astype(np.uint8)
+
+lut_input = np.arange(256, dtype=np.uint8).reshape(-1, 1)
+lut_colors = cv2.applyColorMap(lut_input, cv2.COLORMAP_INFERNO).reshape(-1, 3)
+colorized = cv2.applyColorMap(count8, cv2.COLORMAP_INFERNO)
+_, jpeg_bytes = cv2.imencode(".jpg", colorized, [cv2.IMWRITE_JPEG_QUALITY, 90])
+reloaded = cv2.imdecode(jpeg_bytes, cv2.IMREAD_COLOR)
+
+def invert_colormap(img_bgr, lut):
+    flat = img_bgr.reshape(-1, 3).astype(np.int32)
+    nearest = np.argmin(np.linalg.norm(flat[:, None, :] - lut[None, :, :], axis=2), axis=1)
+    return nearest.reshape(img_bgr.shape[:2]).astype(np.uint8)
+
+rec_exact = count_to_temp(invert_colormap(colorized, lut_colors).astype(np.float64), 8)
+rec_jpeg = count_to_temp(invert_colormap(reloaded, lut_colors).astype(np.float64), 8)
+print(f"exact colourized inversion: max error={np.abs(rec_exact-T_scene_img).max():.3f}K")
+print(f"after real JPEG q=90 compression: max error={np.abs(rec_jpeg-T_scene_img).max():.3f}K")
+```
+
+Output:
+
+```text
+exact colourized inversion: max error=0.763K
+after real JPEG q=90 compression: max error=2.941K
+```
+
+## OpenCV API notes
+
+- **`cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 90])`** (Code section 2) is real, standard lossy JPEG compression — this chapter's own direct, measured demonstration of what it costs a thermal picture's recoverable precision.
+- **`cv2.applyColorMap`** is a one-way, display-only operation — nothing in `cv2` "undoes" it exactly; Code section 2's own nearest-LUT-entry inversion is a best-effort reconstruction, not a real guarantee, and already loses real precision even before any compression.
+- **No `cv2` function reads a manufacturer's embedded radiometric EXIF data** — real analysis of a genuine radiometric JPEG needs the camera vendor's own SDK or a dedicated real tool (ExifTool, FLIR Tools) to extract the raw 16-bit payload those files actually carry.
+
+## Where it fails
+
+- **Keeping the native radiometric file is necessary but not sufficient** — 46.4's non-uniformity correction and calibration drift still apply; a perfectly preserved raw count from a badly-calibrated sensor is still a real, wrong temperature.
+- **A "radiometric video" stream compressed with an ordinary lossy video codec (H.264/H.265) can destroy precision exactly like Section 4's JPEG case** — a real radiometric video format must either use lossless compression or store the raw radiometric stream separately from its viewable preview.
+- **Even genuine radiometric data still needs the correct emissivity and reflected temperature (46.2) applied at analysis time** — raw counts alone are not yet a real, correct temperature without that real correction.
+- **This chapter's calibration model was a simplified broadband approximation** (as in 46.1-46.2) — a real camera's own calibration curve is measured empirically against real reference blackbody sources, not derived purely from Stefan-Boltzmann.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Deleting a camera's native file after exporting a colourized "report" image** — Mini exercise's own real point: that colourized picture already has a real, measurably worse precision than the original, and gets worse again if it's a JPEG.
+- **Assuming any 8-bit thermal image can be used for real quantitative analysis** — Section 3's own real 0.4279K floor is before any colour or compression is even involved; an already-colourized JPEG is measurably worse still (Section 4).
+- **Treating a camera's displayed colour palette as reversible** — Section 4's own real result (0.763K error even with NO compression) shows the inversion itself is already lossy, let alone after a real lossy file save.
+- **Forgetting that raw radiometric data still needs 46.2's emissivity correction** — "radiometric" means the real precision was kept, not that the number is automatically the correct real temperature.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Real radiometric file formats
+
+FLIR's own radiometric JPEG format stores a normal, viewable JPEG preview plus the real, full raw 14/16-bit sensor data in a proprietary EXIF block — readable by FLIR's own tools or third-party libraries (e.g. the real, open-source `flir_image_extractor` tooling), letting a single real file serve both as a shareable picture and as a source of genuine temperature data. Radiometric TIFF (often 16-bit, uncompressed or losslessly compressed) is a simpler, vendor-neutral real alternative.
+
+### Why 14-bit, not 16-bit, is common
+
+Many real thermal camera ADCs output 14-bit data (16,384 levels) rather than a full 16-bit (65,536) — Section 3's own real numbers show 14-bit already reaches sub-0.01K round-trip precision for this chapter's test range, which is already far finer than the sensor's own real noise floor (its NETD, 46.1), so the extra 2 bits a true 16-bit ADC would add provide little additional *real* benefit for most thermal cameras' own actual measurement precision.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is the real difference between a thermal 'picture' and real radiometric data?",
+      options: ["There is no real difference", "Radiometric data keeps the real per-pixel sensor values (or already-converted temperatures) that can be used for real quantitative analysis; a picture only keeps a colourized image meant for people to look at", "A picture always has more real precision", "Radiometric data is always stored as a colour image"],
+      answer: 1,
+      explanation: "Section 1-2: this is exactly what 21.4's own 'aligned holds temperatures' statement depended on.",
+    },
+    {
+      question: "This chapter's own real test found what round-trip temperature error at 8-bit vs 16-bit precision?",
+      options: ["Identical error at both bit depths", "A real 0.4279K maximum error at 8-bit, falling to 0.0022K at 16-bit -- bit depth directly sets a real precision floor", "16-bit was WORSE than 8-bit", "Bit depth has no effect on real temperature precision"],
+      answer: 1,
+      explanation: "Section 3: a real, direct, measured relationship between bit depth and recoverable precision.",
+    },
+    {
+      question: "Why was inverting a colourized, uncompressed 8-bit image back to temperature (Section 4) already WORSE than Section 3's own plain 8-bit result?",
+      options: ["It wasn't worse, it was identical", "Converting to colour and matching back to the nearest palette entry adds its own real error on top of the original 8-bit quantization", "Colour images always have more real precision than grayscale", "This is a bug, not a real effect"],
+      answer: 1,
+      explanation: "Section 4: a real, measured, additional real-world cost of the colourization/inversion round trip itself.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A thermal sensor has a 12-bit ADC (4096 levels) over a real -20°C to 150°C span. Roughly how does its real round-trip precision compare to this chapter's own 8-bit (256-level) and 14-bit (16,384-level) results?
+
+<Solution>
+
+4096 levels sits between 256 and 16,384, so the real round-trip error should fall between this chapter's own 8-bit (0.4279K) and 14-bit (0.0082K) results — closer to the 14-bit end, since 4096 is a real 16x improvement over 256 but only a real 4x reduction from 16,384.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, compute the real round-trip error at 12-bit precision and compare it to this chapter's own 8-bit and 14-bit results.
+
+<Solution>
+
+```python
+errs_12bit = []
+for tC in test_temps_C:
+    T = tC + 273.15
+    count = temp_to_count(np.array([T]), 12)[0]
+    errs_12bit.append(abs(count_to_temp(count, 12) - T))
+print(f"12-bit (4096 levels): max round-trip error={max(errs_12bit):.4f}K")
+```
+
+Output:
+
+```text
+12-bit (4096 levels): max round-trip error=0.0159K
+```
+
+Between this chapter's own 8-bit (0.4279K) and 14-bit (0.0082K) results, as predicted in Exercise 1.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A company's quality archive stores only colourized JPEG screenshots from their thermal camera's live display, taken for visual records over several years. An insurance claim now needs the actual real temperatures from an incident six months ago. Based on this chapter, what should they expect?
+
+<Solution>
+
+Following Section 4's own real result, the best possible recovery from those stored JPEGs already carries a real, measurable error (around 0.76K in this chapter's own exact, uncompressed case, and worse — up to several degrees — for an actually-compressed JPEG), on top of Section 3's own 8-bit precision floor. The real temperatures cannot be recovered with the same confidence the original radiometric file would have given; the company should expect a genuinely degraded, less trustworthy real number, and should adopt archiving the native radiometric files going forward to avoid repeating this real loss.
+
+</Solution>
+
+## References
+
+1. M. Vollmer, K.-P. Möllmann, *Infrared Thermal Imaging: Fundamentals, Research and Applications*, 2nd ed., Wiley-VCH, 2017 — already cited in 46.1-46.2.
+2. OpenCV 4.13.0 documentation: `cv2.applyColorMap`, `cv2.imencode`, `cv2.imdecode`. https://docs.opencv.org/4.13.0/

@@ -200,3 +200,4 @@ export { PanoramaLab } from "./PanoramaLab";
 export { LightFieldLab } from "./LightFieldLab";
 export { InfraredLab } from "./InfraredLab";
 export { EmissivityLab } from "./EmissivityLab";
+export { InfraRecLab } from "./InfraRecLab";
