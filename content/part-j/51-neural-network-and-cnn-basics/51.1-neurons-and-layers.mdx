@@ -1,0 +1,400 @@
+export const meta = {
+  number: "51.1",
+  title: "Neurons and layers",
+  minutes: 25,
+  objectives: [
+    "Know exactly what one artificial neuron computes: a weighted sum, a bias, then a fixed nonlinearity",
+    "Build a tiny multi-layer network from scratch in NumPy and read off its real output by hand",
+    "Verify, for real, why a stack of purely linear layers cannot do more than a single linear layer",
+    "Verify, for real, that the from-scratch forward pass matches OpenCV's own trainable network class, cv2.ml.ANN_MLP",
+    "Know how this relates to 8.7's own hand-set convolutional network and 17.1's own hand-designed kernels",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 51.1 (Part J, Module 51). The very first chapter of the
+  deep-learning part of the course. 8.7 already ran inference on a tiny, HAND-SET (not
+  learned) ONNX network via cv2.dnn, and showed NumPy reproducing cv2.dnn's forward pass
+  exactly. 17.1 covered hand-designed convolution kernels. This chapter builds forward: the
+  general neuron/layer/network math (generic dense connections, meant to be learned -- training
+  itself is 51.2), and a NEW real verification against cv2.ml.ANN_MLP (OpenCV's own trainable
+  multi-layer perceptron class, not cv2.dnn), including reverse-engineering and verifying its
+  exact internal weight layout and its SIGMOID_SYM activation formula, which the OpenCV docs
+  describe only in text, not as runnable code.
+  All numbers real, verified on this pinned OpenCV 4.13.0.92 build.
+  Worked example (by hand): x=[0.5,-1.0,2.0], w=[0.4,0.3,-0.2], b=0.1 -> z=-0.4,
+  sigmoid(z)=0.4013, tanh(z)=-0.3799, relu(z)=0.0.
+  Tiny 3->4->2 tanh network (rng seed 7, scale 0.5): hidden=[-0.2087,-0.474,0.3598,-0.186],
+  output=[0.4558,0.1924].
+  Linear-collapse check (same weights, no activation): two stacked linear layers vs one
+  equivalent collapsed layer (W_eq = W1 @ W2) match to 1.11e-16 (machine precision) on this
+  input.
+  cv2.ml.ANN_MLP verification (rng seed 1, 40 synthetic samples, SIGMOID_SYM alpha=1 beta=1,
+  BACKPROP, 200 iterations, ANN_MLP_NO_INPUT_SCALE|NO_OUTPUT_SCALE flags via TrainData_create):
+  getWeights(1) is (nIn+1, nHidden) with the bias as the LAST row; getWeights(2) is
+  (nHidden+1, nOut), same convention; getWeights(0) and getWeights(L) are (1, 2*n) input/output
+  auto-scale vectors (not used here since both scale flags were passed). A from-scratch NumPy
+  forward pass using these exact extracted weights and sigmoid_sym(x)=beta*(1-e^-ax)/(1+e^-ax)
+  matches ann.predict() to atol=1e-4 on every sample checked.
+  Common-mistake numbers: standard sigmoid(0)=0.5 vs ANN_MLP's own SIGMOID_SYM(0)=0.0; standard
+  sigmoid(-0.4)=0.4013 vs SIGMOID_SYM(-0.4)=-0.1974 -- genuinely different functions.
+  Lab: NeuronLab (apps/web/components/visuals/NeuronLab.tsx) -- one live neuron, 3 input and
+  weight sliders, a bias, activation choice; backed by lib/nn-ops.ts (unit-tested), reused by
+  later 51.x chapters.
+*/}
+
+# 51.1 Neurons and layers
+
+<Definition term="Artificial neuron">one real, tiny, fixed computation: multiply each input by its own weight, add them all up with a bias, then pass the result through one fixed nonlinear function — the single building block every network in this module is made of, nothing more.</Definition>
+
+8.7 already ran a real network — a tiny, hand-built ONNX graph with hand-chosen weights — through `cv2.dnn`, and showed NumPy reproducing its forward pass exactly. This chapter opens up what each of those nodes actually computes, in general: a neuron, a layer of neurons, and a network of layers, with weights meant to be *learned* rather than hand-set (training itself is 51.2).
+
+## 1. An analogy
+
+A bouncer at a door checks a few things — age, dress code, whether the venue is already full — and weighs each one differently before deciding "let in" or "turn away." Nobody hands the bouncer a formula; they weigh each factor by experience and apply their own personal cutoff (a bias toward being stricter or more lenient). A single artificial neuron works exactly this way: weigh several real numbers, add a personal bias, then squash the result into a decision-shaped output.
+
+## 2. The pipeline: inputs to one squashed number
+
+<Flow
+  steps={[
+    { label: "Real inputs x₁, x₂, x₃ (a feature vector)", tone: "data" },
+    { label: "Weighted sum + bias: z = w·x + b", tone: "process" },
+    { label: "One fixed nonlinearity: a = activation(z)", tone: "process" },
+    { label: "A single real number, ready to feed the next neuron", tone: "result" },
+  ]}
+/>
+
+<NeuronLab caption="Live: one neuron, three inputs and weights, a bias, and a choice of activation function." />
+
+## 3. A real worked example, by hand
+
+Take x = [0.5, −1.0, 2.0], weights w = [0.4, 0.3, −0.2], and bias b = 0.1:
+
+```text
+z = w·x + b = (0.4)(0.5) + (0.3)(−1.0) + (−0.2)(2.0) + 0.1
+  = 0.2 − 0.3 − 0.4 + 0.1 = −0.4
+```
+
+That single number, −0.4, then passes through one fixed, chosen nonlinearity:
+
+| activation | a(−0.4) |
+|---|---|
+| sigmoid | 0.4013 |
+| tanh | −0.3799 |
+| ReLU | 0.0000 |
+
+All three functions take the identical real number −0.4 and squash it differently: sigmoid always lands in (0, 1), tanh in (−1, 1), and ReLU simply clips anything negative to exactly 0.
+
+## 4. From one neuron to a layer, to a network
+
+A **layer** is several neurons, each with its own weights and bias, all looking at the *same* input vector — stacking their weight vectors side by side turns the layer into one matrix multiply, `x @ W + b`, with one column of `W` per neuron. A **network** is layers chained end to end, each layer's output feeding the next layer's input. Unlike 17.1's own hand-designed kernels or 8.7's own hand-set conv weights, every number in `W` and `b` here is generic and arbitrary — in a real network these are exactly the numbers 51.2 will learn from data, not choose by hand.
+
+## 5. A real, verified reason nonlinearity is not optional
+
+It would be tempting to skip the activation function and just stack plain weighted sums. Section 3's worked example used one neuron; stack two full *linear* layers (no activation at all) on the same tiny input, and compare against a single combined layer built by multiplying the two weight matrices together (`W_eq = W1 @ W2`, `b_eq = b1 @ W2 + b2`): the two outputs match to **1.11 × 10⁻¹⁶** — machine precision, i.e. genuinely, exactly the same computation. Any number of stacked *linear* layers collapses algebraically to one linear layer, no matter how many you chain — which is precisely why every real network inserts a nonlinearity between layers: it is the only thing that lets depth add real computational power.
+
+## 6. Industrial context: this is what every real network actually runs
+
+8.7's own real `cv2.dnn` example ran exactly this computation — weighted sums and fixed nonlinearities — just with a convolution instead of a plain dense layer, and with every weight hand-set rather than learned. Every production object detector, OCR engine, or defect classifier (37, 38, and 54 onward) is, underneath, an enormous number of these same tiny neurons, wired into specific structures (53's own architectures) and trained (51.2) on real labelled data rather than hand-picked by an engineer.
+
+## What you should remember from 51.1
+
+<Takeaways>
+<Takeaway n={1} title="A neuron is exactly: weighted sum, bias, one fixed nonlinearity">nothing more, however large the network built from them.</Takeaway>
+<Takeaway n={2} title="A layer is a matrix multiply; a network is layers chained together">weights here are meant to be learned, unlike 8.7's and 17.1's own hand-set/hand-designed weights.</Takeaway>
+<Takeaway n={3} title="Stacked linear layers collapse to one linear layer — verified to machine precision">nonlinearity is what makes depth add real power.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A colleague proposes a "deep" network built from five stacked layers, none of which has an activation function. Based on Section 5's own real result, how many of those five layers are actually doing useful extra work beyond what one layer could do?
+
+<Solution>
+
+Effectively none beyond the first — Section 5's own real, verified result shows any number of purely linear layers collapses algebraically to one equivalent linear layer. The five-layer network computes nothing a single, correctly-chosen linear layer could not compute exactly.
+
+</Solution>
+
+## Code
+
+### 1. NumPy from scratch: one neuron, several activations, a tiny network
+
+```python
+import numpy as np
+import cv2
+
+x = np.array([0.5, -1.0, 2.0])
+w = np.array([0.4, 0.3, -0.2])
+b = 0.1
+z = w @ x + b
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-z))
+
+def relu(z):
+    return np.maximum(0, z)
+
+print(f"z = w.x + b = {z}")
+print(f"sigmoid(z) = {sigmoid(z):.4f}")
+print(f"tanh(z)    = {np.tanh(z):.4f}")
+print(f"relu(z)    = {relu(z):.4f}")
+
+rng = np.random.default_rng(7)
+W1 = rng.normal(scale=0.5, size=(3, 4))
+b1 = rng.normal(scale=0.5, size=4)
+W2 = rng.normal(scale=0.5, size=(4, 2))
+b2 = rng.normal(scale=0.5, size=2)
+
+def network(x):
+    h = np.tanh(x @ W1 + b1)
+    out = h @ W2 + b2
+    return out
+
+out = network(x)
+print(f"hidden layer (4 units): {np.tanh(x @ W1 + b1).round(4)}")
+print(f"network output (2 units): {out.round(4)}")
+```
+
+Output:
+
+```text
+z = w.x + b = -0.4
+sigmoid(z) = 0.4013
+tanh(z)    = -0.3799
+relu(z)    = 0.0000
+hidden layer (4 units): [-0.2087 -0.474   0.3598 -0.186 ]
+network output (2 units): [0.4558 0.1924]
+```
+
+### 2. NumPy: stacked linear layers collapse to one layer
+
+Reusing `W1, b1, W2, b2` from Code section 1 with their activation removed, and comparing against one combined layer built by multiplying the weight matrices directly together:
+
+```python
+def network_linear(x):
+    h = x @ W1 + b1
+    out = h @ W2 + b2
+    return out
+
+W_eq = W1 @ W2
+b_eq = b1 @ W2 + b2
+out_stacked = network_linear(x)
+out_single = x @ W_eq + b_eq
+print(f"two linear layers:  {out_stacked.round(6)}")
+print(f"one equivalent layer: {out_single.round(6)}")
+print(f"max abs difference: {np.max(np.abs(out_stacked - out_single)):.2e}")
+```
+
+Output:
+
+```text
+two linear layers:  [0.48299  0.217396]
+one equivalent layer: [0.48299  0.217396]
+max abs difference: 1.11e-16
+```
+
+### 3. OpenCV: NumPy reproduces cv2.ml.ANN_MLP's own forward pass exactly
+
+`cv2.ml.ANN_MLP` is OpenCV's own trainable multi-layer perceptron class (distinct from `cv2.dnn`, which only runs pre-built graphs). Its `getWeights(i)` layout is not spelled out as runnable code in the OpenCV docs, so it is verified here directly: `getWeights(1)` is shape `(nIn+1, nHidden)` with the bias as the *last* row, and likewise `getWeights(2)` is `(nHidden+1, nOut)`; passing `ANN_MLP_NO_INPUT_SCALE | ANN_MLP_NO_OUTPUT_SCALE` (via `TrainData_create`, since the simpler 3-argument `train()` call does not accept flags) turns off ANN_MLP's automatic input/output rescaling so the raw weights are enough to reproduce its output.
+
+```python
+rng2 = np.random.default_rng(1)
+X = rng2.normal(size=(40, 3)).astype(np.float32)
+y_raw = (X[:, 0] + 0.5 * X[:, 1] - 0.3 * X[:, 2] > 0).astype(np.float32)
+Y = (np.stack([y_raw, 1 - y_raw], axis=1) * 2 - 1).astype(np.float32)
+
+ann = cv2.ml.ANN_MLP_create()
+ann.setLayerSizes(np.array([3, 4, 2]))
+ann.setActivationFunction(cv2.ml.ANN_MLP_SIGMOID_SYM, 1, 1)
+ann.setTrainMethod(cv2.ml.ANN_MLP_BACKPROP, 0.1, 0.1)
+ann.setTermCriteria((cv2.TERM_CRITERIA_MAX_ITER, 200, 0))
+flags = cv2.ml.ANN_MLP_NO_INPUT_SCALE | cv2.ml.ANN_MLP_NO_OUTPUT_SCALE
+td = cv2.ml.TrainData_create(X, cv2.ml.ROW_SAMPLE, Y)
+ann.train(td, flags)
+
+W1b = ann.getWeights(1)
+W2b = ann.getWeights(2)
+
+def sigmoid_sym(v, alpha=1.0, beta=1.0):
+    return beta * (1 - np.exp(-alpha * v)) / (1 + np.exp(-alpha * v))
+
+def numpy_forward(xi):
+    z1 = np.concatenate([xi, [1.0]]) @ W1b
+    a1 = sigmoid_sym(z1)
+    z2 = np.concatenate([a1, [1.0]]) @ W2b
+    return sigmoid_sym(z2)
+
+for i in range(3):
+    _, cv2_pred = ann.predict(X[i:i + 1])
+    mine = numpy_forward(X[i])
+    print(f"sample {i}: cv2={cv2_pred[0].round(4)}, numpy={mine.round(4)}, match={np.allclose(mine, cv2_pred[0], atol=1e-4)}")
+```
+
+Output:
+
+```text
+sample 0: cv2=[ 0.9997 -0.9996], numpy=[ 0.9997 -0.9996], match=True
+sample 1: cv2=[-0.9998  0.9997], numpy=[-0.9998  0.9997], match=True
+sample 2: cv2=[-0.9931  0.9926], numpy=[-0.9931  0.9926], match=True
+```
+
+## OpenCV API notes
+
+- **`cv2.ml.ANN_MLP_create()` / `setLayerSizes([nIn, ..., nOut])`** declares a dense, fully-connected network architecture — one real number per layer, input layer first.
+- **`setActivationFunction(cv2.ml.ANN_MLP_SIGMOID_SYM, alpha, beta)`** sets a *symmetric* sigmoid, `beta·(1 − e^(−αx)) / (1 + e^(−αx))`, which is not the standard logistic sigmoid (see Common mistakes) — `ANN_MLP_RELU` and `ANN_MLP_LEAKYRELU` are also available on this build.
+- **`train(trainData, flags)`** needs a `cv2.ml.TrainData_create(...)` object to pass flags like `ANN_MLP_NO_INPUT_SCALE`; the simpler `train(samples, layout, responses)` overload used elsewhere in the course does not accept them.
+- **`getWeights(i)`** (Code section 3) returns, for a 3-layer network: index 0 and the last index are `(1, 2·n)` auto-scale vectors for the input/output (disabled here by the `NO_INPUT_SCALE`/`NO_OUTPUT_SCALE` flags); the middle indices are each layer's real weight matrix with the bias appended as its *last* row — confirmed here by an exact NumPy match, not merely assumed from the docs.
+
+## Where it fails
+
+- **Purely linear networks, of any depth, are no more powerful than one linear layer** — Section 5's own real, machine-precision result; this is why every real architecture (53) inserts nonlinearities between layers.
+- **`cv2.ml.ANN_MLP` is a small, classic, fully-connected (dense) network class** — it has no convolution or pooling layers (51.3, 51.4) and no GPU acceleration, so it does not scale to the large, structured networks later modules discuss; it exists in OpenCV mainly for small classical-ML-style problems (36), not production deep learning.
+- **This chapter trained nothing** — Code section 3 ran only enough backprop iterations to reach a stable, checkable state; real training, loss curves, and convergence are 51.2's own subject.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming `cv2.ml.ANN_MLP`'s `SIGMOID_SYM` is the standard logistic sigmoid** — it is not: at z = 0 the standard sigmoid gives 0.5, while `SIGMOID_SYM` gives exactly 0.0, and at z = −0.4 they give 0.4013 and −0.1974 respectively. Mixing the two formulas when hand-checking a result gives a genuinely wrong answer.
+- **Forgetting the bias term** — a neuron with w·x alone cannot represent a decision boundary that does not pass through the origin; Section 3's own worked example shows the bias contributing −0.4 − (the weighted sum alone) worth of real shift.
+- **Expecting `getWeights(0)` to be the first layer's real weights** — Code section 3's own result shows index 0 is the input auto-scale vector, not a weight matrix; the first genuine weight matrix is at index 1.
+- **Stacking many layers with no activation function and expecting extra capacity** — Section 5's own real, verified counterexample.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Rosenblatt's original perceptron
+
+F. Rosenblatt's 1958 perceptron is the historical ancestor of the single neuron in this chapter: a weighted sum compared to a threshold, trained by a simple rule that nudges weights toward correctly classifying mistakes — the direct ancestor of 51.2's own gradient-based training.
+
+### The universal approximation theorem
+
+Cybenko (1989) and Hornik et al. (1991) proved that a network with just one hidden layer, enough neurons, and a suitable nonlinear activation can approximate any continuous function on a compact domain to any desired accuracy — a real, formal reason a single hidden layer is already surprisingly powerful, though in practice deeper networks (53) are often far more efficient at reaching the same accuracy with fewer total neurons.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does one artificial neuron actually compute, per this chapter's own definition?",
+      options: [
+        "A full convolution over an image",
+        "A weighted sum of its inputs plus a bias, then one fixed nonlinear activation function",
+        "A lookup table of pre-stored answers",
+        "A sort of its input values",
+      ],
+      answer: 1,
+      explanation: "Section 1 and the chapter Definition: exactly this, and nothing more.",
+    },
+    {
+      question: "This chapter's own real check in Section 5 found what about stacking several linear (no-activation) layers?",
+      options: [
+        "Each extra linear layer adds real new computational power",
+        "Stacking any number of purely linear layers collapses, to machine precision, to one single equivalent linear layer",
+        "Linear layers cannot be stacked at all",
+        "The result depends on the order the layers are stacked in",
+      ],
+      answer: 1,
+      explanation: "Section 5: a real, measured match to 1.11e-16 between the stacked and the single combined layer.",
+    },
+    {
+      question: "This chapter's own real verification in Code section 3 found what about cv2.ml.ANN_MLP's getWeights(1)?",
+      options: [
+        "It is unrelated to the network's actual weights",
+        "It is shape (nIn+1, nHidden), with the bias appended as the LAST row -- confirmed by an exact NumPy forward-pass match to ann.predict()",
+        "It only works after calling a separate setWeights function",
+        "It returns the weights already scaled to probabilities",
+      ],
+      answer: 1,
+      explanation: "Code section 3: verified directly, not merely assumed from documentation.",
+    },
+    {
+      question: "Based on this chapter's own real numbers, is cv2.ml.ANN_MLP's SIGMOID_SYM the same function as the standard logistic sigmoid?",
+      options: [
+        "Yes, identical for all inputs",
+        "No -- at z=0 they give 0.5 and 0.0 respectively, a genuinely different function, not just a different name for the same one",
+        "Yes, but only for positive z",
+        "SIGMOID_SYM is not a real OpenCV activation option",
+      ],
+      answer: 1,
+      explanation: "Common mistakes: a real, concrete numeric difference, not a naming quirk.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Using the same weights and bias as Section 3 (w = [0.4, 0.3, −0.2], b = 0.1) but a new input x = [1.0, 1.0, 1.0], compute z by hand, then look up sigmoid(z) from Section 3's own logic (you do not need a calculator capable of exp — just set up the sum).
+
+<Solution>
+
+z = (0.4)(1.0) + (0.3)(1.0) + (−0.2)(1.0) + 0.1 = 0.4 + 0.3 − 0.2 + 0.1 = 0.6. Unlike Section 3's own z = −0.4, this is positive, so sigmoid(0.6) will be above 0.5 (mechanically: 1/(1+e^(−0.6))), the mirror-image situation of Section 3's own negative-z result landing below 0.5.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's `network` function, evaluate it at x = [1.0, 1.0, 1.0] (reusing the same `W1, b1, W2, b2`) and report the output.
+
+<Solution>
+
+```python
+x2 = np.array([1.0, 1.0, 1.0])
+print(f"network([1,1,1]) = {network(x2).round(4)}")
+```
+
+Output:
+
+```text
+network([1,1,1]) = [0.5977 0.5903]
+```
+
+A different output from Section 3's own `network(x)` result ([0.4558, 0.1924]), as expected since the input changed and the network has no memory of the earlier input.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague argues that since ReLU(z) = 0 for all z < 0, replacing every activation in a network with ReLU makes the whole network "partly linear" and therefore weaker than one using sigmoid everywhere. Is "partly linear in places" the same weakness Section 5 demonstrated for a network with no activation at all?
+
+<Solution>
+
+No. Section 5's own real result was about a network with *no* nonlinearity anywhere, which genuinely collapses to one linear layer. ReLU is still a real nonlinearity — it bends sharply at zero — so stacking ReLU layers does NOT collapse to one linear layer; ReLU networks are, in practice, one of the most common and effective choices in real deep learning (53), precisely because that one sharp bend per neuron is already enough nonlinearity to avoid Section 5's collapse.
+
+</Solution>
+
+### Exercise 4 (coding)
+
+Using Code section 3's trained `ann` and `numpy_forward`, check whether the match still holds for sample index 10 (not one of the three already checked in the chapter).
+
+<Solution>
+
+```python
+_, cv2_pred10 = ann.predict(X[10:11])
+mine10 = numpy_forward(X[10])
+print(f"sample 10: cv2={cv2_pred10[0].round(4)}, numpy={mine10.round(4)}, match={np.allclose(mine10, cv2_pred10[0], atol=1e-4)}")
+```
+
+Output:
+
+```text
+sample 10: cv2=[ 0.9999 -0.9999], numpy=[ 0.9999 -0.9999], match=True
+```
+
+Confirms the chapter's own result generalizes beyond the three samples shown in Code section 3 — the extracted weight layout and `sigmoid_sym` formula are correct for the whole trained network, not just the first few rows.
+
+</Solution>
+
+## References
+
+1. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. — neural networks and deep learning, Ch. 5.
+2. F. Rosenblatt, "The Perceptron: A Probabilistic Model for Information Storage and Organization in the Brain," *Psychological Review*, 65(6), 1958.
+3. G. Cybenko, "Approximation by Superpositions of a Sigmoidal Function," *Mathematics of Control, Signals and Systems*, 2(4), 1989; K. Hornik, M. Stinchcombe, H. White, "Multilayer Feedforward Networks are Universal Approximators," *Neural Networks*, 4(2), 1991.
+4. OpenCV 4.13.0 documentation: `cv2.ml.ANN_MLP`. https://docs.opencv.org/4.13.0/
