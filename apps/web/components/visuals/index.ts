@@ -165,3 +165,4 @@ export { OcrEngineLab } from "./OcrEngineLab";
 export { QrLab } from "./QrLab";
 export { FpsLab } from "./FpsLab";
 export { RtspLab } from "./RtspLab";
+export { BackendLab } from "./BackendLab";

@@ -1,0 +1,354 @@
+export const meta = {
+  number: "39.3",
+  title: "FFmpeg and GStreamer",
+  minutes: 24,
+  objectives: [
+    "Tell FFmpeg (a tool and library) from GStreamer (a pipeline framework) and know what each is for",
+    "Check which video backends a given OpenCV build actually has, instead of assuming",
+    "Use real FFmpeg filtergraph and concat commands to resize, re-time and join clips",
+    "Read a GStreamer pipeline string and know how OpenCV's CAP_GSTREAMER backend uses one",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 39.3 (Part G, Module 39). Continues 39.1/39.2's real, local
+  verification habit.
+  Real, local findings for this chapter:
+  - cv2.videoio_registry.getCameraBackends() lists GSTREAMER, MSMF, DSHOW, FFMPEG, UEYE as
+    *known* backend names in this build, but cv2.videoio_registry.hasBackend(...) shows FFMPEG
+    and DSHOW are actually TRUE; GSTREAMER and MSMF are both False (not actually compiled in,
+    even though cv2.getBuildInformation() contains the literal substring "GStreamer" -- as part
+    of the line "GStreamer: NO").
+  - Explicitly forcing cv2.VideoCapture(path, cv2.CAP_GSTREAMER) on a real local file returns
+    isOpened() == False, exactly as hasBackend() predicted. Forcing cv2.CAP_DSHOW on the same
+    file ALSO returns False, despite hasBackend(CAP_DSHOW) being True -- it logs "VIDEOIO(DSHOW):
+    backend is generally available but can't be used to capture by name": DSHOW is built in but
+    is a live-camera-only backend, not a file-reading one. hasBackend()==True is necessary but
+    not sufficient for "can open this particular source."
+  - A real local ffmpeg -vf "scale=200:-1,fps=5" on the 39.1 clip (400x300, 25 fps, 50 frames)
+    produced a real 200x150, 5 fps, 10-frame file (ffprobe-confirmed), 4998 bytes vs the
+    original's 16009.
+  - A real local ffmpeg -f concat -safe 0 -c copy losslessly joined the clip to itself:
+    ffprobe confirmed duration 4.000s, nb_frames 100 (exactly double).
+  - This environment has no gst-launch-1.0 binary and no GStreamer backend built into this
+    opencv-python-headless wheel, so GStreamer pipelines themselves could not be run live here;
+    the pipeline syntax quoted is taken from GStreamer's own documentation and from OpenCV's own
+    forum threads (both cited in References), not invented.
+*/}
+
+# 39.3 FFmpeg and GStreamer
+
+<Definition term="FFmpeg and GStreamer">two separate, real pieces of software that read, convert and write video: FFmpeg is a command-line tool and library built around a single long command line of flags; GStreamer is a framework for building a video pipeline out of small, swappable pieces connected end to end.</Definition>
+
+39.1 and 39.2 already used `cv2.VideoCapture`/`cv2.VideoWriter` and a real local `ffmpeg` command several times. This chapter looks at what is actually underneath those calls, and at the other major option, GStreamer, that this particular build does not have.
+
+## 1. An analogy
+
+FFmpeg is a single powerful multi-tool: one command, a long list of flags, and it does the whole job (read this, convert that, write this) in one call. GStreamer is a box of pipe segments: you choose and connect small pieces yourself — a source, a converter, an encoder, a sink — each doing exactly one job, joined with a `!` the way you'd screw pipe segments together.
+
+## 2. Two tools, one job: moving compressed video around
+
+<Flow
+  steps={[
+    { label: "cv2.VideoCapture / VideoWriter", tone: "process" },
+    { label: "apiPreference picks a backend: FFMPEG, GSTREAMER, MSMF, ...", tone: "data" },
+    { label: "the backend's own library does the real work", tone: "process" },
+    { label: "frames in, or compressed bytes out", tone: "result" },
+  ]}
+/>
+
+`cv2.VideoCapture` and `cv2.VideoWriter` do not implement video codecs themselves (39.2's Section 2 arithmetic aside) — they call out to a **backend**: FFmpeg, GStreamer, or a platform-specific one like Windows Media Foundation (MSMF). Which backends a given `opencv-python` build actually has depends entirely on how it was compiled — and, this chapter found, that is not always what you might expect.
+
+## 3. What this build actually has — checked, not assumed
+
+```python
+import cv2
+
+for b in cv2.videoio_registry.getCameraBackends():
+    name = cv2.videoio_registry.getBackendName(b)
+    print(f"{name:10s}: listed, hasBackend() = {cv2.videoio_registry.hasBackend(b)}")
+```
+
+Output:
+
+```text
+GSTREAMER : listed, hasBackend() = False
+MSMF      : listed, hasBackend() = False
+DSHOW     : listed, hasBackend() = True
+FFMPEG    : listed, hasBackend() = True
+UEYE      : listed, hasBackend() = False
+```
+
+OpenCV's API *lists* every backend it knows the name of, whether or not that backend was actually compiled into this particular build. `hasBackend()` tells the truth instead: in this `opencv-python-headless==4.13.0.92` wheel, **FFmpeg and the legacy DirectShow (DSHOW) backend are actually built in** — GStreamer and the newer Windows Media Foundation (MSMF) are not. But "built in" still is not the same as "can open this source" — confirming both backends directly, on the same real file:
+
+```python
+cap = cv2.VideoCapture("sample-ball-25fps.mp4", cv2.CAP_GSTREAMER)
+print("isOpened with explicit CAP_GSTREAMER:", cap.isOpened())
+cap.release()
+
+cap = cv2.VideoCapture("sample-ball-25fps.mp4", cv2.CAP_DSHOW)
+print("isOpened with explicit CAP_DSHOW:", cap.isOpened())
+cap.release()
+```
+
+Output:
+
+```text
+isOpened with explicit CAP_GSTREAMER: False
+isOpened with explicit CAP_DSHOW: False
+```
+
+`CAP_GSTREAMER` fails exactly as `hasBackend()` predicted (not built in at all). `CAP_DSHOW` fails for a *different* reason, despite being genuinely built in: it logged `VIDEOIO(DSHOW): backend is generally available but can't be used to capture by name` — DirectShow in OpenCV is a **live-camera** backend, not a file-reading one. `hasBackend() == True` means a backend was compiled in, not that it can open any source you hand it.
+
+<BackendLab caption="This course's own build has FFMPEG and the camera-only DSHOW backend. Compare it with two other illustrative build profiles -- the point is always to check hasBackend() on the actual machine, not assume."/>
+
+## 4. FFmpeg, the tool: real filtergraphs and real joins
+
+A real local `ffmpeg` can do far more than the simple transcode 39.1 used. Resizing and reducing the frame rate at once, on this course's own clip:
+
+```bash
+ffmpeg -i sample-ball-25fps.mp4 -vf "scale=200:-1,fps=5" small_5fps.mp4
+```
+
+```text
+$ ffprobe -show_entries stream=width,height,r_frame_rate,nb_frames small_5fps.mp4
+width=200
+height=150
+r_frame_rate=5/1
+nb_frames=10
+```
+
+`scale=200:-1` sets the width to 200 and tells FFmpeg to compute the height itself (`-1`) to keep the original 400:300 (4:3) aspect ratio — 200 × (300/400) = 150, exactly what `ffprobe` reports. `fps=5` resampled 25 fps down to 5 fps; over the clip's 2.0 seconds that is 2.0 × 5 = **10 frames**, again exactly matching `nb_frames`.
+
+FFmpeg's `concat` **demuxer** can also join clips with no re-encoding at all, when they share the same codec and parameters:
+
+```bash
+printf "file 'sample-ball-25fps.mp4'\nfile 'sample-ball-25fps.mp4'\n" > concat_list.txt
+ffmpeg -f concat -safe 0 -i concat_list.txt -c copy doubled.mp4
+```
+
+```text
+$ ffprobe -show_entries stream=nb_frames,duration doubled.mp4
+nb_frames=100
+duration=4.000000
+```
+
+`-c copy` means "don't decode and re-encode, just repackage the existing compressed packets" — real, lossless, and fast: exactly 50 + 50 = 100 frames and 2.0 + 2.0 = 4.0 seconds, double the original, bit-for-bit.
+
+## 5. GStreamer, the framework: pipelines of elements
+
+GStreamer [3] builds a pipeline from small **elements** joined by `!`, each doing one job — read from a camera, convert a pixel format, encode, send somewhere. The canonical example from GStreamer's own documentation [3]:
+
+```text
+gst-launch-1.0 videotestsrc ! videoconvert ! autovideosink
+```
+
+`videotestsrc` generates a test pattern, `videoconvert` makes sure the next element gets a pixel format it understands, `autovideosink` displays it. OpenCV's `CAP_GSTREAMER` backend, when actually built in, lets `cv2.VideoCapture` take a pipeline string directly, ending in `appsink` so OpenCV itself becomes the last element and receives frames [4]:
+
+```text
+cv2.VideoCapture(
+    "v4l2src device=/dev/video0 ! video/x-raw, width=640, height=480 ! videoconvert ! appsink",
+    cv2.CAP_GSTREAMER,
+)
+```
+
+This course's own environment has neither a `gst-launch-1.0` binary nor a GStreamer-enabled OpenCV build (Section 3), so this exact pipeline could not be run here — it is quoted from GStreamer's and OpenCV's own documentation [3, 4], not invented or guessed.
+
+## What you should remember from 39.3
+
+<Takeaways>
+<Takeaway n={1} title="Check, don't assume">`hasBackend()` is the only reliable way to know what a specific OpenCV build can actually do.</Takeaway>
+<Takeaway n={2} title="FFmpeg: one long command">Filtergraphs (`-vf`) and the `concat` demuxer do real, verifiable, lossless work.</Takeaway>
+<Takeaway n={3} title="GStreamer: small pieces, `!`-joined">A pipeline of elements; OpenCV can be the final element via `appsink`.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 10-second clip at 30 fps is resampled with `ffmpeg -vf fps=10`. How many frames will the result have?
+
+<Solution>
+
+10 seconds × 10 fps = **100 frames**.
+
+</Solution>
+
+## Code
+
+### 1. NumPy check: predicting the filtered frame count
+
+```python
+import numpy as np
+
+duration_s = 50 / 25            # frames / fps, from the original clip (39.1)
+new_fps = 5
+predicted_frames = int(np.round(duration_s * new_fps))
+print("predicted frames after fps=5:", predicted_frames)
+```
+
+Output:
+
+```text
+predicted frames after fps=5: 10
+```
+
+### 2. The real backend registry (Section 3, in full)
+
+```python
+import cv2
+
+for b in cv2.videoio_registry.getCameraBackends():
+    name = cv2.videoio_registry.getBackendName(b)
+    print(f"{name:10s}: listed, hasBackend() = {cv2.videoio_registry.hasBackend(b)}")
+cap = cv2.VideoCapture("sample-ball-25fps.mp4", cv2.CAP_GSTREAMER)
+print("isOpened with explicit CAP_GSTREAMER:", cap.isOpened())
+cap.release()
+cap = cv2.VideoCapture("sample-ball-25fps.mp4", cv2.CAP_DSHOW)
+print("isOpened with explicit CAP_DSHOW:", cap.isOpened())
+cap.release()
+```
+
+Output:
+
+```text
+GSTREAMER : listed, hasBackend() = False
+MSMF      : listed, hasBackend() = False
+DSHOW     : listed, hasBackend() = True
+FFMPEG    : listed, hasBackend() = True
+UEYE      : listed, hasBackend() = False
+isOpened with explicit CAP_GSTREAMER: False
+isOpened with explicit CAP_DSHOW: False
+```
+
+### 3. The real FFmpeg filtergraph and concat commands
+
+```bash
+ffmpeg -i sample-ball-25fps.mp4 -vf "scale=200:-1,fps=5" small_5fps.mp4
+printf "file 'sample-ball-25fps.mp4'\nfile 'sample-ball-25fps.mp4'\n" > concat_list.txt
+ffmpeg -f concat -safe 0 -i concat_list.txt -c copy doubled.mp4
+```
+
+Both commands' real `ffprobe` results are shown in Section 4 above, unedited.
+
+## OpenCV API notes
+
+- **`cv2.videoio_registry.getCameraBackends()` / `getStreamBackends()` / `getWriterBackends()`**: list backend IDs this OpenCV *API* knows the name of — not a guarantee any of them actually work.
+- **`cv2.videoio_registry.hasBackend(id)`**: the real, build-specific check — this chapter's own test shows exactly how different the two lists can be.
+- **`cv2.videoio_registry.getBackendName(id)`**: converts a backend ID (e.g. `cv2.CAP_FFMPEG`) to its readable name (`"FFMPEG"`).
+- **`cv2.VideoCapture(source, apiPreference)`**: pass a specific `CAP_*` constant to force a backend; omit it (or pass `cv2.CAP_ANY`) to let OpenCV try backends in its own built-in priority order.
+- **GStreamer pipeline strings as a `VideoCapture` source**: only recognised when `hasBackend(cv2.CAP_GSTREAMER)` is `True` for that build — a desktop `opencv-python` build, or one compiled from source with GStreamer enabled, not this headless pip wheel.
+
+## Where it fails
+
+- **Different OpenCV distributions genuinely differ**: a conda build, a Linux desktop build, a self-compiled build, and this course's pip `opencv-python-headless` wheel can each have a different set of `hasBackend()`-true backends — never hardcode an assumption about what is available.
+- **A GStreamer pipeline string with no GStreamer backend fails silently**: `isOpened()` is simply `False`, with no message pointing at the real cause (Section 3) — always check `hasBackend()` first when debugging an "it won't open" report.
+- **GStreamer's real strength — hardware-accelerated elements** (e.g. NVIDIA Jetson's `nvv4l2decoder`, `nvvidconv`) — could not be demonstrated at all in this environment, since neither the hardware nor a GStreamer-enabled build was available; 39.4 covers hardware decoding through what could be tested here instead.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Reading `getCameraBackends()`'s output as "what this build supports"** — it lists known backend *names*, not availability; always pair it with `hasBackend()` (Section 3).
+- **Treating `hasBackend() == True` as "this backend can open my source"** — this chapter's own `CAP_DSHOW` is genuinely built in, but is a live-camera-only backend; forcing it on a file logged a clear real error and returned `isOpened() == False` (Section 3).
+- **Quoting GStreamer caps the same way inside an OpenCV pipeline string as on the `gst-launch-1.0` command line** — OpenCV's own community documentation flags this directly: caps should not be single-quoted inside a `cv2.VideoCapture` pipeline string, unlike typical shell usage [4].
+- **Confusing the `ffmpeg` command-line tool with the FFmpeg *library* OpenCV links against** — this course's own `opencv-python` wheel bundles FFmpeg's libraries internally; it does not shell out to the system `ffmpeg` binary this chapter used directly from the command line.
+- **Assuming `-c copy` concat (Section 4) works on any two clips** — it only works when both inputs already share the same codec, resolution and other stream parameters; mismatched inputs need a real re-encode instead.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### GStreamer's plugin model
+
+A GStreamer **element** is one processing step (a source, a filter, a sink); elements are linked into a **pipeline**, and **pads** (an element's input/output ports) negotiate a shared data format (**caps**, short for capabilities) with their neighbours before any data flows. Elements live in **plugins**, which is why so many specialised ones exist — hardware decoders, network sources, machine-vision camera sources — without GStreamer's core itself needing to know about all of them [3].
+
+### FFmpeg's filtergraph language
+
+Section 4's `-vf "scale=200:-1,fps=5"` chains two filters with a comma; FFmpeg's filtergraph syntax also supports branching and merging multiple inputs/outputs with labelled pads (`[in]filter[out]`), used for tasks like picture-in-picture overlays or side-by-side comparisons — the same filtering engine, just a more elaborate graph than this chapter's simple linear chain.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "This chapter's own test found cv2.videoio_registry.getCameraBackends() listed GSTREAMER, but hasBackend(CAP_GSTREAMER) returned False. What does this mean?",
+      options: ["The test was broken", "GSTREAMER is a backend name OpenCV's API knows about, but it was not actually compiled into this specific build", "GStreamer is deprecated", "cv2.VideoCapture will still work with GStreamer pipelines regardless"],
+      answer: 1,
+      explanation: "Section 3: listed =/= available. hasBackend() is the real, build-specific check.",
+    },
+    {
+      question: "FFmpeg's scale=200:-1 filter, applied to a 400x300 clip, produced what real output size?",
+      options: ["200 x 300", "400 x 150", "200 x 150", "200 x 200"],
+      answer: 2,
+      explanation: "Section 4: -1 preserves the original 4:3 aspect ratio, so height = 200 x (300/400) = 150.",
+    },
+    {
+      question: "What does ffmpeg's `-c copy` do in a concat operation?",
+      options: ["Decodes and re-encodes at the same quality", "Repackages the existing compressed packets with no decode/re-encode, as long as inputs share the same parameters", "Copies only the audio stream", "Makes a duplicate file with a new name, nothing else"],
+      answer: 1,
+      explanation: "Section 4: this course's own doubled.mp4 was lossless and exact (100 frames, 4.0 s) because no re-encoding happened.",
+    },
+    {
+      question: "In a GStreamer pipeline used as an OpenCV CAP_GSTREAMER source, what is appsink for?",
+      options: ["It discards all frames", "It makes OpenCV itself the final element in the pipeline, receiving the frames", "It is only used for audio", "It forces GPU decoding"],
+      answer: 1,
+      explanation: "Section 5: appsink is where the pipeline hands frames over to the application (OpenCV) instead of a display or file.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 12-second clip at 24 fps is resampled with `ffmpeg -vf fps=8`. How many frames will the result have, and what is the new clip's duration?
+
+<Solution>
+
+Frame count = 12 s × 8 fps = **96 frames**. Duration is unchanged by an fps filter alone — still **12 seconds** — only how many frames represent each second changes.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Section 3's pattern, write a short script that checks `hasBackend()` for `cv2.CAP_FFMPEG`, `cv2.CAP_GSTREAMER` and `cv2.CAP_MSMF`, and prints a clear "safe to use" / "not available, do not rely on it" message for each.
+
+<Solution>
+
+```python
+import cv2
+
+for name, backend in [("FFMPEG", cv2.CAP_FFMPEG), ("GSTREAMER", cv2.CAP_GSTREAMER), ("MSMF", cv2.CAP_MSMF)]:
+    available = cv2.videoio_registry.hasBackend(backend)
+    print(f"{name:10s}: {'safe to use' if available else 'not available, do not rely on it'}")
+```
+
+Output:
+
+```text
+FFMPEG    : safe to use
+GSTREAMER : not available, do not rely on it
+MSMF      : not available, do not rely on it
+```
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague wants to deploy a new vision pipeline on an NVIDIA Jetson board, using GStreamer's hardware-accelerated `nvv4l2decoder` element to decode an RTSP camera stream before handing frames to their OpenCV code. Based on this chapter, what should they check on that specific device before assuming the plan will work?
+
+<Solution>
+
+Exactly what Section 3 checked here, but on the Jetson's own OpenCV build: whether `cv2.videoio_registry.hasBackend(cv2.CAP_GSTREAMER)` is actually `True` for whatever OpenCV build is installed there (many Jetson-specific OpenCV builds do enable it, but this chapter's own build did not, so it cannot be assumed). If it is available, they would then pass a GStreamer pipeline string naming `nvv4l2decoder` to `cv2.VideoCapture(..., cv2.CAP_GSTREAMER)` (Section 5); if GStreamer support is not actually built in, they would need to either rebuild OpenCV with it enabled, or fall back to a GStreamer application (outside OpenCV) that hands decoded frames to OpenCV a different way.
+
+</Solution>
+
+## References
+
+1. FFmpeg documentation: filtering (`-vf`), the `concat` demuxer. https://ffmpeg.org/ffmpeg-filters.html, https://ffmpeg.org/ffmpeg-formats.html#concat
+2. OpenCV 4.13.0 documentation: `cv2::videoio_registry`, `VideoCaptureAPIs`. https://docs.opencv.org/4.13.0/
+3. GStreamer documentation, Basic tutorial 10: GStreamer tools. https://gstreamer.freedesktop.org/documentation/tutorials/basic/gstreamer-tools.html
+4. OpenCV community forum, "How to use Gstreamer pipeline in OpenCV?" (real `CAP_GSTREAMER` pipeline string examples, including the caps-quoting gotcha). https://answers.opencv.org/question/202017/how-to-use-gstreamer-pipeline-in-opencv/
