@@ -1,0 +1,462 @@
+export const meta = {
+  number: "51.5",
+  title: "Overfitting",
+  minutes: 26,
+  objectives: [
+    "Know what overfitting looks like in a real training curve: train loss falling while validation loss rises",
+    "Reproduce that real curve from scratch, with an oversized network on a small, noisy dataset",
+    "Verify, for real, that L2 regularization and early stopping both measurably reduce it",
+    "Verify, for real, that more training data is itself a real remedy",
+    "Know where the formal methodology for this (splits, cross-validation) is covered in depth",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 51.5 (Part J, Module 51; closes the module). 36.4 and 36.5 already
+  warned about overfitting for classical SVMs and decision trees, and both explicitly deferred
+  the formal methodology ("checking this properly, on held-out data... Module 58") to 58.2
+  ("Splits"). 51.2's own industrial context and 51.3's own Section 6 both explicitly previewed
+  this chapter by name. This chapter is NOT 58.2: it does not cover the formal methodology of
+  building splits, cross-validation, or dataset curation -- it uses just enough of a train/
+  validation split to show the real, measured phenomenon specific to trained networks (51.1-
+  51.4's own territory): a deliberately oversized hidden layer, trained on a small, label-
+  noised dataset, with its own real verified remedies (L2 regularization, early stopping, more
+  data).
+  All numbers real, verified on this pinned OpenCV 4.13.0.92 / NumPy 2.5.3 build.
+  Dataset: two overlapping 2-D Gaussian blobs (real Bayes error, centers [-0.8,-0.8] and
+  [0.8,0.8], scale 1.2 -- rng seed 50 for 40 training points with 10% label noise (flip
+  probability), rng seed 51 for 300 clean validation points from the identical distribution).
+  Architecture: 2 -> 60 tanh hidden units -> 1 sigmoid output (60 hidden units is deliberately
+  oversized relative to 40 training points), lr=0.3, hand-derived backprop with an L2 weight-
+  decay term added to every weight gradient.
+  NO regularization (l2=0), 5000 epochs, checkpoints every 500: train_loss falls monotonically
+  0.6984->0.0365, train_acc rises to 1.000 by epoch 3500 (memorizing the noisy labels); val_loss
+  RISES monotonically after epoch 500 (0.5082->2.3204), val_acc falls from 0.727 (epoch 0) to
+  0.640 (epoch 5000) -- the classic overfitting curve, never recovering above its own starting
+  point.
+  WITH L2 regularization (l2=0.01), identical setup: train_loss and val_loss converge together
+  and STABILIZE (~0.4186 / ~0.4400 by epoch 5000) instead of diverging; train_acc plateaus at
+  0.800 (cannot memorize the noise anymore); val_acc stabilizes at 0.800-0.807 throughout,
+  vastly better than the unregularized run's final 0.640.
+  Early stopping (within the UNREGULARIZED run alone): stopping at epoch 500 (val_loss=0.5082,
+  val_acc=0.723) beats training to epoch 5000 (val_loss=2.3204, val_acc=0.640) by a wide real
+  margin, with no regularization at all.
+  Gradient check for the L2 term itself (hidden=5, seed=3, l2=0.01): analytic grad_Wo[0,0] via
+  the hand-derived formula (a1.T @ grad_z2 + l2*Wo) vs a central finite-difference numeric
+  gradient of the full regularized loss (BCE + 0.5*l2*sum(W^2)): -0.178744 both ways, diff
+  3.97e-10.
+  Exercise numbers (all real, verified): l2=0.001 (10x smaller) over 5000 epochs ->
+  train_acc=0.975, val_acc=0.660 -- overfitting mostly returns, a real demonstration that too
+  little regularization barely helps. 200 training points (5x more data, same 10% label noise,
+  same oversized 60-unit network, NO regularization) over 5000 epochs -> train_acc=0.850,
+  val_acc=0.773 -- a real, independent second remedy (more data), though still short of the
+  regularized 40-point run's own 0.800-0.807.
+  Lab: OverfitLab (apps/web/components/visuals/OverfitLab.tsx) -- live train/validation loss
+  curves with an L2 toggle, on the identical dataset; backed by lib/overfit-ops.ts (unit-
+  tested with its own finite-difference gradient check).
+*/}
+
+# 51.5 Overfitting
+
+<Definition term="Overfitting">a network's loss on data it was trained on keeps improving while its loss on data it has never seen gets worse — memorizing the specific training examples, including their noise, instead of learning the real underlying rule.</Definition>
+
+36.4 and 36.5 already warned about this for SVMs and decision trees, and both pointed here for the real, measured version in a trained network. 51.2's own training loop and 51.3's own generalization test both previewed this chapter directly. This chapter reproduces the real phenomenon from scratch — including the moment training actively starts making things worse on new data — and verifies two real, independent remedies.
+
+## 1. An analogy
+
+A student who memorizes the exact answer key to last year's practice exam will score perfectly on *that* exam, having learned nothing transferable. Handed this year's exam, testing the identical material with different questions, the memorizing student does worse than one who understood the underlying material, even though the memorizer's practice-exam score looked better the whole time. A network can do exactly this with its own training data.
+
+## 2. The pipeline: two losses, watched side by side
+
+<Flow
+  steps={[
+    { label: "Training data: small, and (realistically) a little noisy", tone: "data" },
+    { label: "Validation data: held out, never used to update a single weight", tone: "data" },
+    { label: "Train loss: measured on data the network is learning from", tone: "process" },
+    { label: "Validation loss: measured on data it has never touched", tone: "process" },
+    { label: "Watch both, the whole time training runs", tone: "result" },
+  ]}
+/>
+
+<OverfitLab caption="Live train/validation loss curves, with an L2-regularization toggle, on a small, noisy dataset." />
+
+## 3. A real, textbook overfitting curve
+
+Take a deliberately oversized network (60 hidden units) and a deliberately small, slightly noisy training set (40 points, 10% of the labels flipped). Training it, with no safeguards at all, for 5000 real gradient-descent steps gives:
+
+```text
+epoch     0: train_loss=0.6984 val_loss=0.6036 train_acc=0.725 val_acc=0.727
+epoch   500: train_loss=0.3345 val_loss=0.5082 train_acc=0.875 val_acc=0.723
+epoch  1000: train_loss=0.2172 val_loss=0.8269 train_acc=0.950 val_acc=0.693
+epoch  2000: train_loss=0.1017 val_loss=1.3829 train_acc=0.975 val_acc=0.657
+epoch  3500: train_loss=0.0562 val_loss=1.9222 train_acc=1.000 val_acc=0.657
+epoch  5000: train_loss=0.0365 val_loss=2.3204 train_acc=1.000 val_acc=0.640
+```
+
+Training accuracy climbs to a perfect 100% — the network has memorized every one of the 40 training points, including the 10% whose labels were simply wrong. Validation loss, on data it never trained on, does the opposite: it falls for the first few hundred steps, then rises continuously for the rest of training, and validation accuracy never again reaches its own very first value (0.727 at epoch 0). More training, past a certain point, made the network measurably worse at the real task.
+
+## 4. A real, dramatic remedy: L2 regularization
+
+Adding one term to the loss — a penalty proportional to the sum of the squared weights (so large weights cost something, pushing the network toward simpler solutions) — and retraining the identical network on the identical data gives a completely different real curve:
+
+```text
+epoch     0: train_loss=0.6984 val_loss=0.6036 train_acc=0.725 val_acc=0.727
+epoch   500: train_loss=0.4340 val_loss=0.4401 train_acc=0.775 val_acc=0.807
+epoch  1000: train_loss=0.4282 val_loss=0.4386 train_acc=0.800 val_acc=0.803
+epoch  2000: train_loss=0.4198 val_loss=0.4396 train_acc=0.800 val_acc=0.807
+epoch  3500: train_loss=0.4186 val_loss=0.4400 train_acc=0.800 val_acc=0.800
+epoch  5000: train_loss=0.4186 val_loss=0.4400 train_acc=0.800 val_acc=0.800
+```
+
+Train loss and validation loss now converge together and *stay* together — the network settles at 80% training accuracy (it can no longer memorize the 10% of mislabeled points) and, far more importantly, a real **80.0–80.7%** validation accuracy throughout, instead of the unregularized run's final **64.0%**. The identical architecture, the identical data, one extra term in the loss: a measured 16-point real swing in final validation accuracy.
+
+## 5. A second, independent remedy: stopping in time
+
+Section 3's own unregularized run never needed regularization to be rescued, had it simply stopped sooner: its own checkpoint at epoch 500 (val_loss = 0.5082, val_acc = 0.723) is dramatically better than training all the way to epoch 5000 (val_loss = 2.3204, val_acc = 0.640) — with no regularization at all. Watching the validation loss during training and stopping once it stops improving (**early stopping**) is a real, independent remedy to the identical problem, achieved purely by *when* you stop, not by changing the model or the loss.
+
+## 6. Checking the regularization term itself
+
+Adding a new term to the loss means a new term in the gradient — this chapter's own `l2 * W` added directly to each weight's gradient. Checked against an independent finite-difference estimate of the *full* regularized loss (binary cross-entropy plus the L2 penalty), the analytic and numeric gradients agree to **3.97 × 10⁻¹⁰** — the regularization term is being applied correctly, not just plausibly.
+
+## 7. Industrial context: this is where the formal methodology lives
+
+This chapter used just enough of a train/validation split to show the real phenomenon. The formal methodology — how to build splits properly, cross-validation, avoiding leakage between training and evaluation data — is covered in depth in 58.2 ("Splits"), building on this chapter's own real demonstration of *why* that methodology matters in the first place. 36.4's and 36.5's own classical-ML overfitting warnings and this chapter's neural-network version are the same underlying risk, seen through two different kinds of model.
+
+## What you should remember from 51.5
+
+<Takeaways>
+<Takeaway n={1} title="Overfitting is a real, measured divergence between train and validation loss">this chapter's own curve: train loss to near 0, validation loss rising continuously past epoch 500.</Takeaway>
+<Takeaway n={2} title="L2 regularization is a real, measured remedy">a 16-point real swing in final validation accuracy (64.0% to 80.0%) from one added loss term.</Takeaway>
+<Takeaway n={3} title="Early stopping is an independent real remedy, even with no regularization at all">Section 5's own result: stopping at epoch 500 beat training to epoch 5000.</Takeaway>
+<Takeaway n={4} title="The formal train/val/test methodology is 58.2's own subject">this chapter demonstrates why it matters; 58.2 covers how to do it properly.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Based on Section 3's own real curve, is it true that "more training is always better" for a neural network?
+
+<Solution>
+
+No — Section 3's own real result is a direct counterexample: validation accuracy at epoch 5000 (64.0%) was worse than at epoch 0 (72.7%), before any training had happened at all. More training improved the network's fit to its own training data but made its real-world performance (measured on held-out data) worse past a certain point.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: reproducing the real overfitting curve
+
+```python
+import numpy as np
+import cv2
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-z))
+
+def bce_loss(p, y):
+    eps = 1e-9
+    return -np.mean(y * np.log(p + eps) + (1 - y) * np.log(1 - p + eps))
+
+rng = np.random.default_rng(50)
+
+def sample(n, rng):
+    half = n // 2
+    X0 = rng.normal(loc=[-0.8, -0.8], scale=1.2, size=(half, 2))
+    X1 = rng.normal(loc=[0.8, 0.8], scale=1.2, size=(n - half, 2))
+    X = np.vstack([X0, X1])
+    y = np.concatenate([np.zeros(half), np.ones(n - half)])
+    return X, y
+
+X_train, y_train = sample(40, rng)
+flip = rng.random(40) < 0.1
+y_train = np.where(flip, 1 - y_train, y_train)
+X_val, y_val = sample(300, np.random.default_rng(51))
+
+def init_model(hidden, seed):
+    r = np.random.default_rng(seed)
+    Wi = r.normal(scale=0.5, size=(2, hidden))
+    bi = np.zeros(hidden)
+    Wo = r.normal(scale=0.5, size=(hidden, 1))
+    bo = np.zeros(1)
+    return Wi, bi, Wo, bo
+
+def forward(X, Wi, bi, Wo, bo):
+    z1 = X @ Wi + bi
+    a1 = np.tanh(z1)
+    z2 = a1 @ Wo + bo
+    p = sigmoid(z2).ravel()
+    return a1, p
+
+def train(hidden, l2, epochs, seed=7, lr=0.3):
+    Wi, bi, Wo, bo = init_model(hidden, seed)
+    n = len(X_train)
+    for epoch in range(epochs + 1):
+        a1, p = forward(X_train, Wi, bi, Wo, bo)
+        if epoch % 500 == 0:
+            _, p_val = forward(X_val, Wi, bi, Wo, bo)
+            print(f"epoch {epoch:5d}: train_loss={bce_loss(p, y_train):.4f} val_loss={bce_loss(p_val, y_val):.4f} "
+                  f"train_acc={np.mean((p>0.5)==y_train):.3f} val_acc={np.mean((p_val>0.5)==y_val):.3f}")
+        grad_z2 = ((p - y_train) / n).reshape(-1, 1)
+        grad_Wo = a1.T @ grad_z2 + l2 * Wo
+        grad_bo = grad_z2.sum(axis=0)
+        grad_a1 = grad_z2 @ Wo.T
+        grad_z1 = grad_a1 * (1 - a1 ** 2)
+        grad_Wi = X_train.T @ grad_z1 + l2 * Wi
+        grad_bi = grad_z1.sum(axis=0)
+        Wo -= lr * grad_Wo; bo -= lr * grad_bo
+        Wi -= lr * grad_Wi; bi -= lr * grad_bi
+
+print("NO regularization:")
+train(60, 0.0, 5000)
+```
+
+Output:
+
+```text
+NO regularization:
+epoch     0: train_loss=0.6984 val_loss=0.6036 train_acc=0.725 val_acc=0.727
+epoch   500: train_loss=0.3345 val_loss=0.5082 train_acc=0.875 val_acc=0.723
+epoch  1000: train_loss=0.2172 val_loss=0.8269 train_acc=0.950 val_acc=0.693
+epoch  1500: train_loss=0.1403 val_loss=1.1258 train_acc=0.975 val_acc=0.667
+epoch  2000: train_loss=0.1017 val_loss=1.3829 train_acc=0.975 val_acc=0.657
+epoch  2500: train_loss=0.0802 val_loss=1.5903 train_acc=0.975 val_acc=0.657
+epoch  3000: train_loss=0.0663 val_loss=1.7651 train_acc=0.975 val_acc=0.657
+epoch  3500: train_loss=0.0562 val_loss=1.9222 train_acc=1.000 val_acc=0.657
+epoch  4000: train_loss=0.0484 val_loss=2.0677 train_acc=1.000 val_acc=0.650
+epoch  4500: train_loss=0.0419 val_loss=2.2019 train_acc=1.000 val_acc=0.640
+epoch  5000: train_loss=0.0365 val_loss=2.3204 train_acc=1.000 val_acc=0.640
+```
+
+### 2. NumPy: the same network, with L2 regularization
+
+```python
+print("WITH L2 regularization (weight decay 0.01):")
+train(60, 0.01, 5000)
+```
+
+Output:
+
+```text
+WITH L2 regularization (weight decay 0.01):
+epoch     0: train_loss=0.6984 val_loss=0.6036 train_acc=0.725 val_acc=0.727
+epoch   500: train_loss=0.4340 val_loss=0.4401 train_acc=0.775 val_acc=0.807
+epoch  1000: train_loss=0.4282 val_loss=0.4386 train_acc=0.800 val_acc=0.803
+epoch  1500: train_loss=0.4220 val_loss=0.4389 train_acc=0.800 val_acc=0.807
+epoch  2000: train_loss=0.4198 val_loss=0.4396 train_acc=0.800 val_acc=0.807
+epoch  2500: train_loss=0.4190 val_loss=0.4399 train_acc=0.800 val_acc=0.800
+epoch  3000: train_loss=0.4187 val_loss=0.4400 train_acc=0.800 val_acc=0.800
+epoch  3500: train_loss=0.4186 val_loss=0.4400 train_acc=0.800 val_acc=0.800
+epoch  4000: train_loss=0.4186 val_loss=0.4400 train_acc=0.800 val_acc=0.800
+epoch  4500: train_loss=0.4186 val_loss=0.4400 train_acc=0.800 val_acc=0.800
+epoch  5000: train_loss=0.4186 val_loss=0.4400 train_acc=0.800 val_acc=0.800
+```
+
+### 3. NumPy: checking the L2 gradient term by finite differences
+
+```python
+l2 = 0.01
+Wi0, bi0, Wo0, bo0 = init_model(5, 3)
+
+def total_loss(Wi_, bi_, Wo_, bo_, l2_):
+    _, p_ = forward(X_train, Wi_, bi_, Wo_, bo_)
+    return bce_loss(p_, y_train) + 0.5 * l2_ * (np.sum(Wi_ ** 2) + np.sum(Wo_ ** 2))
+
+a1c, pc = forward(X_train, Wi0, bi0, Wo0, bo0)
+n = len(X_train)
+grad_z2c = ((pc - y_train) / n).reshape(-1, 1)
+analytic_grad_Wo00 = (a1c.T @ grad_z2c + l2 * Wo0)[0, 0]
+
+eps = 1e-6
+Wo_plus = Wo0.copy(); Wo_plus[0, 0] += eps
+Wo_minus = Wo0.copy(); Wo_minus[0, 0] -= eps
+numeric_grad_Wo00 = (total_loss(Wi0, bi0, Wo_plus, bo0, l2) - total_loss(Wi0, bi0, Wo_minus, bo0, l2)) / (2 * eps)
+print(f"analytic={analytic_grad_Wo00:.6f}, numeric={numeric_grad_Wo00:.6f}, diff={abs(analytic_grad_Wo00-numeric_grad_Wo00):.2e}")
+```
+
+Output:
+
+```text
+analytic=-0.178744, numeric=-0.178744, diff=3.97e-10
+```
+
+## OpenCV API notes
+
+- **No `cv2` function trains a regularized network or performs early stopping** — like 51.2's own note, `cv2.ml.ANN_MLP` is a basic, dense-only trainer; L2 regularization and validation-based stopping are standard features of real deep learning frameworks, outside this course's pinned OpenCV dependency.
+- **`cv2.ml.ANN_MLP`'s `setTermCriteria`** can cap the maximum number of training iterations, which is a crude relative of early stopping (a fixed budget rather than monitoring validation loss), but does not itself watch a held-out set the way Section 5's own real remedy does.
+
+## Where it fails
+
+- **This chapter's train/validation split was deliberately minimal** — one fixed split, no cross-validation, no repeated trials; 58.2 covers the formal methodology this chapter intentionally did not.
+- **Too little regularization barely helps** — a real, verified exercise result: 10x less weight decay (0.001 instead of 0.01) let overfitting mostly return (validation accuracy 66.0%, close to the unregularized run's 64.0%).
+- **Regularization strength and architecture size both matter together** — this chapter fixed the network at 60 hidden units; a different size would need a different regularization strength to show the identical real effect.
+- **Early stopping needs an actual validation set to watch** — it is not a free remedy that works without held-out data, the same real requirement L2 regularization's own verification needed.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Trusting training accuracy alone as a measure of a network's quality** — Section 3's own real result: 100% training accuracy coincided with the network's worst real-world (validation) performance of the entire run.
+- **Assuming more training epochs can only help** — Mini exercise: a direct, real counterexample.
+- **Using a regularization strength that is too small to matter** — Where it fails: a real, verified result showing 10x too little weight decay barely changed the outcome.
+- **Forgetting that more data is itself a real remedy, not just a "nice to have"** — Exercise 4's own real result: more training data reduced overfitting without touching the model or the loss function at all.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why L2 regularization is called "weight decay"
+
+Adding `l2 * W` to the gradient and then subtracting `lr * (gradient)` is algebraically the same as multiplying every weight by `(1 - lr * l2)` before the usual gradient step — every weight genuinely "decays" toward zero a little on every single step, independent of what the data says, which is exactly why large weights (and the sharply-bending decision boundaries they allow) become more expensive to maintain.
+
+### Other real regularization techniques
+
+Dropout (randomly zeroing some hidden units during training, different ones each step) and data augmentation (15.6's own classical techniques, extended for deep learning in 58.3) are two other standard, real techniques that reduce overfitting through entirely different mechanisms than L2's weight penalty — forcing a network not to rely on any single unit too heavily, and directly enlarging the effective training set, respectively.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does this chapter's own real curve in Section 3 show, specifically?",
+      options: [
+        "Train loss and validation loss both fall together the whole time",
+        "Train loss falls to near zero and training accuracy reaches 100%, while validation loss falls briefly then rises continuously, and validation accuracy ends up worse than at epoch 0",
+        "Validation loss always falls faster than train loss",
+        "Nothing changes no matter how long training runs",
+      ],
+      answer: 1,
+      explanation: "Section 3: the real, measured, classic overfitting signature.",
+    },
+    {
+      question: "This chapter's own real result in Section 4 found what effect from adding L2 regularization?",
+      options: [
+        "No measurable difference",
+        "Final validation accuracy rose from 64.0% (no regularization) to 80.0-80.7% (with L2), on the identical network and data",
+        "L2 regularization made validation accuracy worse",
+        "L2 regularization only helps training accuracy, never validation accuracy",
+      ],
+      answer: 1,
+      explanation: "Section 4: a real, measured, substantial improvement from one added loss term.",
+    },
+    {
+      question: "This chapter's own real result in Section 5 found what about early stopping, specifically in the UNREGULARIZED run?",
+      options: [
+        "Stopping early always hurts validation performance",
+        "Stopping at epoch 500 (val_acc=0.723) beat training all the way to epoch 5000 (val_acc=0.640), using no regularization at all -- purely from stopping sooner",
+        "Early stopping requires regularization to work",
+        "Early stopping and L2 regularization cannot both be real remedies for the same problem",
+      ],
+      answer: 1,
+      explanation: "Section 5: an independent real remedy, verified without any regularization term.",
+    },
+    {
+      question: "Where does this course cover the formal methodology of building train/validation/test splits properly?",
+      options: [
+        "This chapter (51.5) covers it in full",
+        "58.2 (Splits) -- this chapter demonstrates why the methodology matters, using only a minimal split for that purpose",
+        "36.4 and 36.5 already covered it in full",
+        "It is not covered anywhere in this course",
+      ],
+      answer: 1,
+      explanation: "Section 7: this chapter's own real, explicit scope boundary.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Based on Section 4's own real numbers, which single real number best summarizes the benefit of L2 regularization: the drop in training accuracy (100% → 80%), or the rise in validation accuracy (64.0% → 80.0%)?
+
+<Solution>
+
+The rise in validation accuracy is the real number that matters: validation performance is this chapter's own measure of how well the network does on data it was not trained on, which is the real, practical goal. The drop in training accuracy is not a cost by itself — it is specifically the network losing its ability to memorize the 10% of deliberately mislabeled training points, which was never a real capability worth keeping.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's `train` function, run with `l2=0.001` (ten times smaller than Section 4's own 0.01) for 5000 epochs and report the final train and validation accuracy.
+
+<Solution>
+
+```python
+print("l2=0.001 (10x smaller than Section 4's own value):")
+train(60, 0.001, 5000)
+```
+
+Output:
+
+```text
+l2=0.001 (10x smaller than Section 4's own value):
+epoch     0: train_loss=0.6984 val_loss=0.6036 train_acc=0.725 val_acc=0.727
+epoch   500: train_loss=0.3555 val_loss=0.4734 train_acc=0.825 val_acc=0.747
+epoch  1000: train_loss=0.2627 val_loss=0.7001 train_acc=0.925 val_acc=0.690
+epoch  1500: train_loss=0.1938 val_loss=0.9035 train_acc=0.950 val_acc=0.670
+epoch  2000: train_loss=0.1553 val_loss=1.0509 train_acc=0.975 val_acc=0.663
+epoch  2500: train_loss=0.1348 val_loss=1.1398 train_acc=0.975 val_acc=0.670
+epoch  3000: train_loss=0.1236 val_loss=1.1951 train_acc=0.975 val_acc=0.663
+epoch  3500: train_loss=0.1170 val_loss=1.2326 train_acc=0.975 val_acc=0.663
+epoch  4000: train_loss=0.1128 val_loss=1.2583 train_acc=0.975 val_acc=0.663
+epoch  4500: train_loss=0.1099 val_loss=1.2768 train_acc=0.975 val_acc=0.663
+epoch  5000: train_loss=0.1076 val_loss=1.2908 train_acc=0.975 val_acc=0.660
+```
+
+Close to the unregularized run's own final result (val_acc=0.640), not Section 4's own well-regularized result (val_acc=0.800-0.807) — ten times too little weight decay barely helps.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague suggests regularization strength should always be set as high as possible, since Section 4's own result showed more regularization helping. Based on Exercise 2's own real result pattern (less regularization → less benefit), would you expect *too much* regularization to also cause problems, and if so, what would that look like?
+
+<Solution>
+
+Yes — if Exercise 2 shows too little regularization fails to prevent overfitting, the opposite extreme (far too much regularization) would be expected to push every weight toward zero so strongly that the network could no longer fit even the real underlying pattern in the data, showing up as BOTH training and validation accuracy dropping together (underfitting), rather than the diverging curves this chapter's own Section 3 measured. The real goal is a regularization strength that is neither too small (Exercise 2) nor so large it prevents learning at all.
+
+</Solution>
+
+### Exercise 4 (coding)
+
+Using Code section 1's dataset-generation pattern, retrain the identical unregularized (l2=0) 60-unit network on 200 training points (five times more data, same 10% label-noise rate) instead of 40, and compare final validation accuracy to Section 3's own 40-point result (0.640).
+
+<Solution>
+
+```python
+rng_more = np.random.default_rng(50)
+X_train, y_train = sample(200, rng_more)
+flip_more = rng_more.random(200) < 0.1
+y_train = np.where(flip_more, 1 - y_train, y_train)
+print("200 training points (5x more), no regularization:")
+train(60, 0.0, 5000)
+```
+
+Output:
+
+```text
+200 training points (5x more), no regularization:
+epoch     0: train_loss=0.6167 val_loss=0.6036 train_acc=0.695 val_acc=0.727
+epoch   500: train_loss=0.4126 val_loss=0.4033 train_acc=0.775 val_acc=0.833
+epoch  1000: train_loss=0.3965 val_loss=0.4062 train_acc=0.815 val_acc=0.820
+epoch  1500: train_loss=0.3826 val_loss=0.4144 train_acc=0.815 val_acc=0.810
+epoch  2000: train_loss=0.3695 val_loss=0.4271 train_acc=0.835 val_acc=0.803
+epoch  2500: train_loss=0.3587 val_loss=0.4428 train_acc=0.845 val_acc=0.807
+epoch  3000: train_loss=0.3506 val_loss=0.4593 train_acc=0.845 val_acc=0.803
+epoch  3500: train_loss=0.3439 val_loss=0.4755 train_acc=0.840 val_acc=0.797
+epoch  4000: train_loss=0.3366 val_loss=0.4914 train_acc=0.835 val_acc=0.790
+epoch  4500: train_loss=0.3287 val_loss=0.5058 train_acc=0.850 val_acc=0.780
+epoch  5000: train_loss=0.3214 val_loss=0.5168 train_acc=0.850 val_acc=0.773
+```
+
+A real, independent improvement over the 40-point unregularized result (val_acc=0.640) purely from more data — though still short of Section 4's own regularized 40-point result (val_acc=0.800-0.807), confirming more data and regularization are two separate, genuinely different real remedies, each able to help on its own. Note also that validation accuracy with more data actually peaks early (0.833 at epoch 500) and gently declines afterward — the identical overfitting shape as Section 3's own curve, just far less severe with five times more data.
+
+</Solution>
+
+## References
+
+1. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. — overfitting and regularization, Ch. 5.
+2. OpenCV 4.13.0 documentation: `cv2.ml.ANN_MLP`. https://docs.opencv.org/4.13.0/

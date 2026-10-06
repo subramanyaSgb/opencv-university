@@ -224,3 +224,4 @@ export { NeuronLab } from "./NeuronLab";
 export { TrainLab } from "./TrainLab";
 export { ConvTrainLab } from "./ConvTrainLab";
 export { PoolLab } from "./PoolLab";
+export { OverfitLab } from "./OverfitLab";
