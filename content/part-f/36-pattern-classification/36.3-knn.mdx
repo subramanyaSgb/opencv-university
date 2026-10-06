@@ -1,0 +1,333 @@
+export const meta = {
+  number: "36.3",
+  title: "kNN",
+  minutes: 22,
+  objectives: [
+    "Classify a point by majority vote among its k nearest training points, by hand",
+    "Explain why the choice of k trades off sensitivity to noise against smoothing over real class boundaries",
+    "Watch a real prediction flip as k grows, and explain why",
+    "Use cv2.ml.KNearest and know its two search algorithms",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 36.3 (Part F, Module 36).
+  Lab: KnnLab (apps/web/components/visuals/KnnLab.tsx) — k-slider decision regions on the same 36.1/36.2
+  texture tile feature space; click a point to see its k nearest neighbours highlighted and the vote.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 36.3 kNN
+
+<Definition term="k-nearest neighbours (kNN)">a classifier with no training step at all: to classify a new point, find the k training examples closest to it (by some distance) and assign the class that most of them belong to.</Definition>
+
+36.1's nearest-centroid summarised each class down to one average point. kNN refuses to summarise at all — it keeps every training example, and for each new point, asks a small local group of them directly. It is one of the oldest, simplest classifiers in this module, and still a reasonable first thing to try on many problems.
+
+## 1. An analogy
+
+Arriving in an unfamiliar neighbourhood and asking the five nearest people you can find what language they speak, then going with whatever the majority said. You are not asking "what language does this neighbourhood's *average* resident speak" (that could be meaningless, if the neighbourhood is actually a patchwork of several communities) — you are asking your immediate, local neighbours, who are likely to be genuinely similar to you.
+
+## 2. The algorithm
+
+<Flow
+  steps={[
+    { label: "Training examples, each with a known class", tone: "data" },
+    { label: "New point: compute distance to every training example", tone: "process" },
+    { label: "Keep the k closest", tone: "process" },
+    { label: "Majority vote among those k -> predicted class", tone: "result" },
+  ]}
+/>
+
+There is nothing to "train" beyond storing the examples (kNN is sometimes called a *lazy* learner for this reason) — all the work happens at prediction time. The one real design choice is **k**:
+
+- **Small k** (e.g. 1): the prediction follows the single nearest example exactly, which can be very sensitive to one noisy or mislabelled training point, but reacts precisely to real local structure.
+- **Large k**: votes are smoothed over a bigger neighbourhood, more robust to individual noisy points, but can blur over a genuine, sharp class boundary, or get swamped by a numerically larger class far from the point in question.
+
+## 3. A worked example by hand
+
+Five training points: A at (1, 1), A at (2, 1), A at (5, 4), B at (8, 8), B at (9, 8). A new point at (6, 6):
+
+| Training point | Class | Distance to (6, 6) |
+| --- | --- | --- |
+| (5, 4) | A | √((6−5)²+(6−4)²) = √5 ≈ **2.24** |
+| (8, 8) | B | √((6−8)²+(6−8)²) = √8 ≈ **2.83** |
+| (9, 8) | B | √((6−9)²+(6−8)²) = √13 ≈ **3.61** |
+| (2, 1) | A | √((6−2)²+(6−1)²) = √41 ≈ **6.40** |
+| (1, 1) | A | √((6−1)²+(6−1)²) = √50 ≈ **7.07** |
+
+**k = 1**: the single nearest point is (5, 4), class A → predict **A**.
+**k = 3**: the three nearest are A (2.24), B (2.83), B (3.61) → 1 vote for A, 2 for B → predict **B**.
+
+Changing k from 1 to 3 flipped the prediction, on exactly the same point. Neither answer is "wrong" — they are different (and both reasonable) rules, and this is exactly the trade-off Section 2 described.
+
+## 4. A real prediction, flipping as k grows
+
+<KnnLab caption="The same texture feature space as 36.1-36.2. Drag k and watch the decision regions reshape; click the marked point near the Woven/Blotchy boundary to see its k nearest neighbours highlighted and the vote."/>
+
+Classifying the point (155, 40) — the same point where 36.1's nearest-centroid picked Woven and 36.2's Bayes picked Blotchy — by kNN, at several values of k (81 training tiles per class, 35.1's woven/smooth/blotchy):
+
+| k | Nearest neighbours' classes (by distance) | Vote | Prediction |
+| --- | --- | --- | --- |
+| 1 | Blotchy (6.06) | 1–0 | Blotchy |
+| 3 | Blotchy, Blotchy, Blotchy (6.06, 6.27, 6.70) | 3–0 | Blotchy |
+| 5 | + Woven, Woven (8.94, 9.18) | 3 Blotchy – 2 Woven | Blotchy |
+| 11 | (mixed) | 4 Blotchy – 7 Woven | **Woven** |
+| 21 | (mixed) | 5 Blotchy – 16 Woven | **Woven** |
+
+The prediction **flips from Blotchy to Woven somewhere between k = 5 and k = 11**. At small k, the handful of points genuinely closest to (155, 40) happen to be a few scattered Blotchy tiles (Blotchy's wide spread puts *some* of its points almost anywhere). At larger k, the vote increasingly reflects that Woven's whole tight cluster sits closer to this region on average than most of Blotchy's spread-out points do. kNN, Bayes (36.2) and nearest-centroid (36.1) gave **three different answers** for this one ambiguous point — a sign that it genuinely sits in contested territory between two very differently-shaped classes, not that any one method is simply broken.
+
+## 5. Industrial use
+
+- **A fast first baseline** for almost any classification task where labelled examples exist, before investing in a more complex model.
+- **Anomaly flagging**: if even the nearest neighbours are all far away (large absolute distance, not just "nearest"), the point may not resemble *any* known class well — a useful signal kNN can report alongside its vote.
+- **Small, well-separated problems**: part sorting into a handful of visually distinct grades, where the feature space genuinely does form separable neighbourhoods.
+
+## What you should remember from 36.3
+
+<Takeaways>
+<Takeaway n={1} title="No training step">kNN stores examples and does all its work at prediction time.</Takeaway>
+<Takeaway n={2} title="Majority vote">Find the k closest training points; the most common class among them wins.</Takeaway>
+<Takeaway n={3} title="k trades off noise vs blur">Small k reacts to local detail (and noise); large k smooths (and can blur real boundaries).</Takeaway>
+<Takeaway n={4} title="Different methods, different assumptions">kNN, Bayes and nearest-centroid can genuinely disagree on an ambiguous point — each makes a different, reasonable assumption.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Four training points at distances 1, 2, 3, 4 from a new point, with classes A, B, A, B respectively (in that distance order). What does kNN predict at k = 1? At k = 4?
+
+<Solution>
+
+k = 1: nearest is distance 1, class **A**. k = 4: all four vote, 2 A's and 2 B's — a **tie**. (A real implementation needs a tie-breaking rule, e.g. picking the class whose nearest single neighbour is closest, or always using an odd k to avoid ties in binary classification.)
+
+</Solution>
+
+**Q2.** Why is kNN sometimes called a "lazy" learner?
+
+<Solution>
+
+Because it does no work at training time beyond storing the examples — all the computation (measuring distances to every stored point) happens when a prediction is actually requested. Methods that build a model upfront (Bayes' means and stds, 36.2; an SVM's boundary, 36.4) do most of their work during training instead.
+
+</Solution>
+
+### Next: 36.4 SVM
+
+## Code
+
+### 1. The worked example, and a real kNN from scratch with NumPy
+
+```python
+import numpy as np
+import cv2
+
+train = [((1, 1), "A"), ((2, 1), "A"), ((5, 4), "A"), ((8, 8), "B"), ((9, 8), "B")]
+query = (6, 6)
+dists = sorted(((np.hypot(query[0] - p[0], query[1] - p[1]), label) for p, label in train))
+for d, label in dists:
+    print(f"{label}: {d:.2f}")
+
+def knn_vote(dists, k):
+    labels = [label for _, label in dists[:k]]
+    vals, counts = np.unique(labels, return_counts=True)
+    return vals[np.argmax(counts)]
+
+for k in (1, 3):
+    print(f"k={k}: predict {knn_vote(dists, k)}")
+
+TILE = 8
+def tile_features(img):
+    h, w = img.shape
+    feats = []
+    for ty in range(h // TILE):
+        for tx in range(w // TILE):
+            patch = img[ty * TILE:(ty + 1) * TILE, tx * TILE:(tx + 1) * TILE].astype(np.float64)
+            feats.append((patch.mean(), patch.std()))
+    return np.array(feats)
+
+names = ["woven", "smooth", "blotchy"]
+classes = {n: tile_features(cv2.imread(f"sample-texture-{n}.png", cv2.IMREAD_GRAYSCALE)) for n in names}
+X = np.vstack([classes[n] for n in names])
+y = np.array(sum(([n] * len(classes[n]) for n in names), []))
+
+point = (155.0, 40.0)
+d = np.hypot(X[:, 0] - point[0], X[:, 1] - point[1])
+for k in (1, 3, 5, 11, 21):
+    idx = np.argsort(d)[:k]
+    vals, counts = np.unique(y[idx], return_counts=True)
+    print(f"k={k}: {dict(zip(vals.tolist(), counts.tolist()))} -> {vals[np.argmax(counts)]}")
+```
+
+Output:
+
+```text
+A: 2.24
+B: 2.83
+B: 3.61
+A: 6.40
+A: 7.07
+k=1: predict A
+k=3: predict B
+k=1: {'blotchy': 1} -> blotchy
+k=3: {'blotchy': 3} -> blotchy
+k=5: {'blotchy': 3, 'woven': 2} -> blotchy
+k=11: {'blotchy': 4, 'woven': 7} -> woven
+k=21: {'blotchy': 5, 'woven': 16} -> woven
+```
+
+### 2. cv2.ml.KNearest
+
+```python
+Xf = X.astype(np.float32)
+yi = np.array([names.index(n) for n in y], dtype=np.int32)
+knn = cv2.ml.KNearest_create()
+knn.train(Xf, cv2.ml.ROW_SAMPLE, yi)
+
+test_point = np.array([point], dtype=np.float32)
+for k in (1, 5, 11, 21):
+    _, results, _, _ = knn.findNearest(test_point, k)
+    print(f"k={k}: {names[int(results[0, 0])]}")
+```
+
+Output:
+
+```text
+k=1: blotchy
+k=5: blotchy
+k=11: woven
+k=21: woven
+```
+
+Matches the from-scratch vote exactly (the flip happens between k=5 and k=11 either way).
+
+## OpenCV API notes
+
+- **`cv2.ml.KNearest_create()`**: `.setDefaultK(k)` (default 10), `.setIsClassifier(True)` (default `True`: majority vote; `False` gives regression, the mean of the neighbours' responses).
+- **`.train(samples, cv2.ml.ROW_SAMPLE, responses)`**: just stores the data — the "lazy" part.
+- **`.findNearest(samples, k)`** → `(retval, results, neighborResponses, dist)`: `results` is the predicted class per input row; `neighborResponses` and `dist` give the actual k neighbours' labels and distances, useful for exactly the kind of inspection in Section 4.
+- **`.setAlgorithmType(cv2.ml.KNearest_BRUTE_FORCE)`** (default) computes every distance directly — exact, fine for the dataset sizes in this course. `cv2.ml.KNearest_KDTREE` builds a k-d tree first, which can answer nearest-neighbour queries faster for large datasets in low dimensions, at some cost to build the tree and typically some approximation.
+- **Speed**: brute-force kNN prediction costs O(N) distance computations per query, N = number of training examples — fine for thousands of examples, potentially slow for millions without an index structure (a k-d tree, or approximate nearest-neighbour methods beyond OpenCV's scope).
+
+## Where it fails
+
+- **Feature scaling matters as much as for any distance-based method** (36.1's API notes) — a feature with naturally larger numbers can dominate the distance.
+- **Slow at prediction time for very large training sets**, without an index (OpenCV API notes above); this is the opposite trade-off from, say, Bayes (36.2), which does its work upfront and predicts in constant time per class.
+- **"Curse of dimensionality"** (36.1's Go deeper): in high-dimensional feature spaces, distances between points tend to become less discriminative, weakening kNN's core assumption that "nearby points are usually the same class."
+- **No single right k**: Section 4 showed a real prediction flip between k=5 and k=11 on the same data — k is usually chosen by trying several values and checking which works best on held-out data (Module 58 covers this properly).
+- **Sensitive to class imbalance in raw counts**: if one class has far more training examples scattered over a bigger region, it can win votes in a neighbourhood purely by having more points nearby, not because it's genuinely more probable there (compare with Bayes' explicit prior, 36.2).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using an even k for a 2-class problem**: ties become possible (Mini exercise Q1); prefer odd k, or a defined tie-breaking rule.
+- **Picking k=1 and being surprised by noisy predictions**: k=1 follows literally one training point, including if it happens to be mislabelled or unusual.
+- **Forgetting that kNN has no explicit model to inspect**: unlike Bayes' means/stds or an SVM's boundary (36.4), there is nothing to look at except the training data itself — "explaining" a kNN prediction means pointing at its k nearest neighbours.
+- **Re-running brute-force kNN over a huge dataset for every single query** in a latency-sensitive application without considering an index structure or precomputing anything.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Choosing k by cross-validation
+
+In practice, k is chosen by trying several values and measuring accuracy on data the model did not train on (a validation set, Module 58) — not by inspecting feature-space plots by eye as this chapter did for intuition. Small datasets often favour small-to-moderate k; the right choice genuinely depends on how noisy the labels are and how the classes are shaped.
+
+### Weighted kNN
+
+A variant weights each of the k neighbours' votes by (typically) the inverse of its distance, so a very close neighbour counts for more than a nearly-as-far one — softening the sharp in/out cutoff of plain majority voting among exactly k points.
+
+### kNN and Bayes, informally related
+
+As the number of training examples grows very large and k grows with it (but more slowly), kNN's vote fraction in a small neighbourhood approximates the true class-conditional probability there — informally, kNN can be seen as a non-parametric way of estimating the same posterior Bayes (36.2) computes from an assumed distribution shape. This is part of why both methods, despite looking very different, can agree as often as they do.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does kNN do at 'training' time?",
+      options: ["Fits a probability distribution per class", "Essentially nothing but store the examples -- the real work happens at prediction time", "Builds a decision boundary", "Computes class priors"],
+      answer: 1,
+      explanation: "Section 2: kNN is a 'lazy' learner.",
+    },
+    {
+      question: "In the worked example (Section 3), why did the prediction change between k=1 and k=3?",
+      options: ["A calculation error", "The single nearest point was class A, but among the 3 nearest, B had 2 votes to A's 1", "k must always be odd", "Distance was computed wrong"],
+      answer: 1,
+      explanation: "k=1 only sees (5,4)=A; k=3 adds (8,8)=B and (9,8)=B, giving B the majority.",
+    },
+    {
+      question: "In Section 4, what caused the real prediction for (155, 40) to flip from Blotchy to Woven as k grew?",
+      options: ["A software bug", "At small k, a few scattered Blotchy points happened to be nearest; at large k, Woven's whole tight cluster dominated the vote", "Woven always wins at large k by definition", "The point moved"],
+      answer: 1,
+      explanation: "Blotchy's wide spread puts a few points nearly anywhere; Woven's tight cluster wins the vote once enough neighbours are counted.",
+    },
+    {
+      question: "Why can brute-force kNN become slow for very large training sets?",
+      options: ["It isn't slow, ever", "Each prediction computes a distance to every stored training example (O(N) per query)", "OpenCV limits kNN to 100 examples", "kNN retrains itself before every prediction"],
+      answer: 1,
+      explanation: "OpenCV API notes: a k-d tree (cv2.ml.KNearest_KDTREE) can speed this up for large, low-dimensional datasets.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Training points: A at distance 2, A at distance 3, B at distance 4, B at distance 5, B at distance 6 from a query. What does kNN predict at k=3 and at k=5?
+
+<Solution>
+
+k=3 (nearest three: distances 2, 3, 4 → A, A, B): 2 votes A, 1 vote B → **A**.
+k=5 (all five: A, A, B, B, B): 2 votes A, 3 votes B → **B**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the Code section's data, find the smallest k (checking k = 1, 3, 5, 7, 9, 11) at which the prediction for (155, 40) first becomes "woven" rather than "blotchy".
+
+<Solution>
+
+```python
+for k in range(1, 12, 2):
+    idx = np.argsort(d)[:k]
+    vals, counts = np.unique(y[idx], return_counts=True)
+    pred = vals[np.argmax(counts)]
+    print(f"k={k}: {pred}")
+```
+
+Output:
+
+```text
+k=1: blotchy
+k=3: blotchy
+k=5: blotchy
+k=7: woven
+k=9: woven
+k=11: woven
+```
+
+**k=7** is the first value where the prediction flips — a narrower window than Section 4's table alone suggested (it only checked k=5 and k=11, and the flip happens to land right between them).
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague suggests always using k = (number of training examples), so that kNN "uses all the data, for the most reliable answer." What actually happens to the prediction in that case?
+
+<Solution>
+
+With k equal to the entire training set, *every* query point gets exactly the same k nearest neighbours — all of them — so the prediction is always just the overall majority class in the training set, regardless of where the query point actually is. This throws away all of kNN's local, point-specific information and reduces it to "always predict the most common class" — the opposite of what the colleague intended. There is a real trade-off in k (Section 2); neither extreme (k=1 or k=N) is generally sensible.
+
+</Solution>
+
+## References
+
+1. T. Cover, P. Hart, "Nearest neighbor pattern classification," *IEEE Transactions on Information Theory* 13(1), 1967, pp. 21–27.
+2. R. O. Duda, P. E. Hart, D. G. Stork, *Pattern Classification*, 2nd ed., Wiley, 2001, Section 4.5 (nearest-neighbour methods).
+3. OpenCV 4.13.0 documentation: `cv2.ml.KNearest`. https://docs.opencv.org/4.13.0/
