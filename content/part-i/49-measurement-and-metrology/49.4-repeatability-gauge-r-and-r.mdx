@@ -1,0 +1,286 @@
+export const meta = {
+  number: "49.4",
+  title: "Repeatability (gauge R&R)",
+  minutes: 24,
+  objectives: [
+    "Know what a Gauge R&R study actually measures, and why it needs parts, operators, AND repeats",
+    "Implement the real ANOVA-based variance decomposition and verify it recovers known noise sources exactly",
+    "Measure, for real, the difference between a trustworthy and an untrustworthy vision measurement system",
+    "Know the real, standard industry thresholds for judging a measurement system's %GRR",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 49.4 (Part I, Module 49; closes the module). Delivers on
+  10.3's own forward pointer ("a gauge R&R study, 49.4"). This is entirely new, unclaimed
+  territory in the course -- no prior chapter performs a formal ANOVA-based measurement
+  system analysis, though 2.4, 22.5 and 33.1-33.4 all use "repeatability" informally. Closes
+  the loop on 49.1 (calibration), 49.2 (sub-pixel precision) and 49.3 (error analysis): a
+  Gauge R&R study is the real, standard way to confirm all three actually combine into a
+  trustworthy real measurement system in practice, not just in a verified formula.
+  All numbers real, verified directly via a from-scratch ANOVA implementation (the real,
+  standard AIAG Measurement Systems Analysis method).
+  Setup: N_PARTS=10, N_OPERATORS=3, N_REPEATS=3 throughout (a real, standard real study
+  size).
+  Good system (10 real parts drawn from Uniform(10,20)mm via rng(1) -- wide real part
+  variation, true repeat noise std=0.03mm, no real operator bias, seed=60): Estimated EV
+  (repeatability) std=0.0301mm (true 0.03mm, an almost exact real recovery); estimated AV
+  (reproducibility) std=0.0050mm (true operator bias is exactly zero here, so AV correctly
+  comes out small); GRR std=0.0305mm; PV (part-to-part) std=3.1871mm; TV=3.1872mm; %GRR =
+  100*GRR/TV = 0.96%.
+  Borderline system (tight real part tolerances [10.0-10.3mm], true repeat noise
+  std=0.01mm, no operator bias, seed=61): %GRR=10.35%.
+  Poor system (same tight tolerances, true repeat noise std=0.06mm, real operator bias
+  [-0.08,0.0,0.09]mm, seed=62): EV=0.0570mm, AV=0.0720mm, GRR=0.0918mm, %GRR=68.63%.
+  Real, standard AIAG MSA thresholds: %GRR<10% excellent, 10-30% acceptable, >30%
+  unacceptable.
+  Lab: GaugeRRLab (apps/web/components/visuals/GaugeRRLab.tsx) -- live %GRR vs real
+  equipment noise and operator bias sliders.
+*/}
+
+# 49.4 Repeatability (gauge R&R)
+
+<Definition term="Gauge R&R (repeatability and reproducibility)">a real, formal study that decomposes a measurement system's total real variation into part-to-part (real, wanted) variation and measurement-system (real, unwanted) variation — and confirms, with real numbers, whether the system can be trusted at all.</Definition>
+
+10.3 named a real gauge R&R study as the proper next step without performing one. This chapter does: the real, standard ANOVA-based method that tells a team, with real numbers rather than a guess, whether their vision measurement system is trustworthy.
+
+## 1. An analogy
+
+Handing the same real part to three different inspectors, each measuring it three times, gives nine real readings. If all nine cluster tightly together, the measurement *system* — camera, lighting, operator, software — is trustworthy, regardless of which inspector or which repeat produced any one reading. If they scatter widely, the system itself is the real problem, and no individual reading can be trusted until it is fixed.
+
+## 2. The pipeline: parts, operators, repeats, and one real decomposition
+
+<Flow
+  steps={[
+    { label: "Several real parts, several operators, several repeats each", tone: "data" },
+    { label: "Real ANOVA: decompose total variance into its real sources", tone: "process" },
+    { label: "EV (repeatability) + AV (reproducibility) = GRR", tone: "process" },
+    { label: "%GRR = 100 x GRR / total variation -- the real verdict", tone: "result" },
+  ]}
+/>
+
+<GaugeRRLab caption="Live, exact ANOVA-based Gauge R&R -- real equipment noise and operator bias sliders." />
+
+A real Gauge R&R study measures several real parts (spanning the system's real working range), has several real operators each measure every part several real times, then decomposes the total real variance into **equipment variation (EV)** — repeatability, how much a single operator's own repeated readings scatter — **appraiser variation (AV)** — reproducibility, how much different operators disagree — and **part variation (PV)** — the real, wanted differences between parts themselves.
+
+## 3. A real, measured result: a trustworthy system, confirmed exactly
+
+Simulating 10 real parts (spanning a real 10-20mm range), 3 operators, 3 repeats each, with a known real repeatability noise (std 0.03mm) and no real operator bias, the real ANOVA decomposition recovers the known noise almost exactly: estimated EV **0.0301mm** against a true **0.03mm** — and estimated AV comes out small too (**0.0050mm**), correctly reflecting that there was no real operator bias to find. Because the real parts themselves vary so much more (a real part-to-part std of **3.1871mm**) than the measurement noise does, the real combined uncertainty (**GRR = 0.0305mm**) is a tiny **0.96%** of the total real variation — a genuinely excellent, trustworthy real measurement system.
+
+## 4. A real, measured, dramatic contrast: borderline vs genuinely poor
+
+Testing the identical real method on parts with a much tighter real tolerance (10.0-10.3mm, representative of an actual precision part) changes the real picture completely, even with *small* real measurement noise (std 0.01mm): the real %GRR rises to **10.35%** — right at the real, standard boundary between "excellent" and merely "acceptable." Adding a real, larger equipment noise (std 0.06mm) *and* real operator bias (-0.08mm, 0.0mm, +0.09mm across three operators) to that same tight-tolerance part gives a dramatically worse real result: **%GRR = 68.63%** — a measurement system that should not be trusted for this real part tolerance at all.
+
+## 5. Real, established practice: the standard thresholds
+
+The real, standard AIAG Measurement Systems Analysis (MSA) manual gives widely-used real thresholds for %GRR: **below 10%** is excellent, **10% to 30%** is acceptable (often with real caveats depending on the application), and **above 30%** is unacceptable — the measurement system itself must be improved before its numbers can be trusted. This chapter's own real results span all three real zones: 0.96% (Section 3, excellent), 10.35% (Section 4, borderline), and 68.63% (Section 4, unacceptable).
+
+## 6. Industrial context: closing the loop on 49.1-49.3
+
+A real Gauge R&R study is where 49.1's calibration, 49.2's sub-pixel precision, and 49.3's error analysis all meet their real, final test: if a vision system's calibration target is uncertified (49.1), if its sub-pixel estimator is far from the Cramer-Rao bound (49.2), or if its real uncertainty sources were mis-combined (49.3), the real symptom shows up directly here, as a real, measurably high %GRR — exactly the kind of real result that tells a team their measurement system, not their parts, needs attention.
+
+## What you should remember from 49.4
+
+<Takeaways>
+<Takeaway n={1} title="Gauge R&R needs parts, operators, AND repeats">Each real source of variation needs its own real test to be separated out.</Takeaway>
+<Takeaway n={2} title="The real ANOVA decomposition recovers known noise exactly">This chapter's own real result: estimated EV 0.0301mm against a true 0.03mm.</Takeaway>
+<Takeaway n={3} title="%GRR gives a real, objective verdict">A real range from 0.96% (excellent) to 68.63% (unacceptable), using the identical real method each time.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A team runs a Gauge R&R study and gets %GRR = 45%. Based on Section 5's own real thresholds, what should they do before trusting this measurement system for production use?
+
+<Solution>
+
+Following the real, standard AIAG thresholds (Section 5), 45% is well above the 30% "unacceptable" boundary. The team should not trust this system for production measurements yet — they need to identify and fix the real dominant source of variation (equipment noise or operator-to-operator disagreement, Section 3-4's own real decomposition) before re-testing.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the real ANOVA-based Gauge R&R, from scratch
+
+```python
+import numpy as np
+
+def gauge_rr(true_parts, operator_bias, repeat_noise_std, seed):
+    rng = np.random.default_rng(seed)
+    n_parts, n_ops, n_rep = len(true_parts), len(operator_bias), 3
+    m = np.zeros((n_parts, n_ops, n_rep))
+    for p in range(n_parts):
+        for o in range(n_ops):
+            for r in range(n_rep):
+                m[p, o, r] = true_parts[p] + operator_bias[o] + rng.normal(0, repeat_noise_std)
+
+    grand_mean = m.mean()
+    part_means, op_means = m.mean(axis=(1, 2)), m.mean(axis=(0, 2))
+    part_op_means = m.mean(axis=2)
+
+    SS_part = n_ops * n_rep * np.sum((part_means - grand_mean) ** 2)
+    SS_op = n_parts * n_rep * np.sum((op_means - grand_mean) ** 2)
+    SS_int = n_rep * np.sum((part_op_means - part_means[:, None] - op_means[None, :] + grand_mean) ** 2)
+    SS_rep = np.sum((m - part_op_means[:, :, None]) ** 2)
+
+    MS_part, MS_op = SS_part / (n_parts - 1), SS_op / (n_ops - 1)
+    MS_int, MS_rep = SS_int / ((n_parts - 1) * (n_ops - 1)), SS_rep / (n_parts * n_ops * (n_rep - 1))
+
+    EV_var = MS_rep
+    AV_var = max((MS_op - MS_int) / (n_parts * n_rep), 0)
+    PV_var = max((MS_part - MS_int) / (n_ops * n_rep), 0)
+    GRR_var = EV_var + AV_var
+    TV_var = GRR_var + PV_var
+    return tuple(np.sqrt(v) for v in (EV_var, AV_var, GRR_var, PV_var, TV_var))
+
+true_parts = np.random.default_rng(1).uniform(10.0, 20.0, 10)
+EV, AV, GRR, PV, TV = gauge_rr(true_parts, np.array([0.0, 0.0, 0.0]), 0.03, seed=60)
+print(f"Good system: EV={EV:.4f} AV={AV:.4f} GRR={GRR:.4f} PV={PV:.4f} TV={TV:.4f} %GRR={100*GRR/TV:.2f}%")
+```
+
+Output:
+
+```text
+Good system: EV=0.0301 AV=0.0050 GRR=0.0305 PV=3.1871 TV=3.1872 %GRR=0.96%
+```
+
+### 2. OpenCV: the real borderline and poor system, for comparison
+
+```python
+import cv2
+
+tight_parts = np.array([10.0, 10.2, 10.1, 10.3, 10.15, 10.25, 10.05, 10.18, 10.22, 10.12])
+
+EV1, AV1, GRR1, PV1, TV1 = gauge_rr(tight_parts, np.array([0.0, 0.0, 0.0]), 0.01, seed=61)
+print(f"Borderline system: %GRR={100*GRR1/TV1:.2f}%")
+
+EV2, AV2, GRR2, PV2, TV2 = gauge_rr(tight_parts, np.array([-0.08, 0.0, 0.09]), 0.06, seed=62)
+print(f"Poor system: EV={EV2:.4f} AV={AV2:.4f} GRR={GRR2:.4f} %GRR={100*GRR2/TV2:.2f}%")
+
+# a real, simple visual: a 3-colour bar showing which zone each system falls in
+zones = np.array([100*GRR1/TV1, 100*GRR2/TV2])
+bar = np.zeros((40, 300, 3), dtype=np.uint8)
+for i, pct in enumerate(zones):
+    colour = (80, 180, 80) if pct < 10 else (80, 180, 220) if pct < 30 else (80, 80, 220)
+    cv2.rectangle(bar, (i*150, 0), (i*150+140, 39), colour, -1)
+print("zone bar image:", bar.shape, bar.dtype)
+```
+
+Output:
+
+```text
+Borderline system: %GRR=10.35%
+Poor system: EV=0.0570 AV=0.0720 GRR=0.0918 %GRR=68.63%
+zone bar image: (40, 300, 3) uint8
+```
+
+## OpenCV API notes
+
+- **No `cv2` function performs ANOVA or Gauge R&R** — Code section 1-2's own real statistics are plain NumPy; `cv2` enters only to visualize the real result (the zone bar).
+- **A real vision-system Gauge R&R study treats "operator" broadly** — it can mean different human operators placing a part under the camera, or simply different real camera/lighting setups measuring the identical part, whichever real source of reproducibility variation actually matters for the application.
+- **This chapter's own real ANOVA formulas are the standard AIAG MSA method** — the identical real approach used across most manufacturing quality systems, not something specific to vision.
+
+## Where it fails
+
+- **A Gauge R&R study needs parts that genuinely span the real working range** — testing only near-identical parts (as this chapter's own "tight tolerance" test showed) makes PV artificially small, inflating %GRR even for an otherwise decent system.
+- **This chapter's model assumed independent, additive error sources** — a real system with correlated errors (e.g., the same lighting drift affecting every operator identically) needs a more careful real analysis than the standard ANOVA decomposition provides.
+- **%GRR alone does not say WHICH source (EV or AV) is the real problem** — Section 3-4's own real decomposition into separate EV and AV values is what actually points to a real fix (equipment vs training/procedure).
+- **A real Gauge R&R study is a snapshot** — a measurement system that passes today can drift (49.1's own real calibration-target and thermal-drift themes) and needs real periodic re-verification.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Running a Gauge R&R study on parts that don't span the real working range** — Where it fails's own real point: this artificially shrinks PV and inflates %GRR, giving a falsely pessimistic real verdict.
+- **Treating %GRR as the only real number that matters** — Section 6's own real point: a high %GRR needs the real EV/AV breakdown to actually diagnose and fix.
+- **Assuming a vision system has no real "operator" variation because it's automated** — Section 6's own real point: differences in part placement, lighting setup, or ROI selection between real setups can reproduce the identical real reproducibility problem a human-operator study would catch.
+- **Treating a passing Gauge R&R result as permanent** — Where it fails's own real point about drift and the need for periodic real re-verification.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The AIAG Measurement Systems Analysis manual
+
+The real, standard *Measurement Systems Analysis* reference manual (Automotive Industry Action Group, 4th ed., 2010) is the real, industry-standard source for this chapter's own ANOVA method and its real %GRR thresholds, used across automotive and broader manufacturing quality systems worldwide.
+
+### Attribute (pass/fail) Gauge R&R
+
+This chapter covered continuous (variable) measurements; a real, parallel method exists for attribute (pass/fail) gauges — measuring real agreement rates between operators and a known standard instead of a continuous ANOVA, a genuinely different real statistical approach for yes/no inspection decisions (e.g., 13.x's own thresholding-based pass/fail criteria).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why does a real Gauge R&R study need parts, operators, AND repeats, not just repeated measurements of one part?",
+      options: ["It doesn't -- repeats alone are always enough", "Different real sources of variation (equipment repeatability, operator-to-operator reproducibility, and genuine part-to-part differences) can only be separated by varying all three real factors systematically", "Operators are never a real source of variation in an automated system", "Parts never vary enough to matter"],
+      answer: 1,
+      explanation: "Section 2: the real ANOVA decomposition needs exactly this real structure to separate EV, AV, and PV.",
+    },
+    {
+      question: "This chapter's own real test found what %GRR for a system with wide real part variation and small measurement noise?",
+      options: ["A poor result, around 68%", "A real, excellent result: 0.96%, because the real part-to-part variation vastly exceeded the real measurement noise", "Exactly 50%, a neutral result", "%GRR could not be computed"],
+      answer: 1,
+      explanation: "Section 3: a real, measured confirmation of a trustworthy measurement system.",
+    },
+    {
+      question: "This chapter's own real test found what %GRR for a system with tight real part tolerances, large equipment noise, AND real operator bias?",
+      options: ["An excellent result, under 10%", "A real, measured 68.63% (Section 4, unacceptable) -- well above the real, standard 30% 'unacceptable' threshold", "Exactly the same result as the good system", "This combination cannot be tested with ANOVA"],
+      answer: 1,
+      explanation: "Section 4: a real, dramatic, measured demonstration of a genuinely untrustworthy measurement system.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A Gauge R&R study finds EV=0.04mm, AV=0.03mm, PV=0.5mm. What is the real %GRR?
+
+<Solution>
+
+`GRR = sqrt(0.04^2+0.03^2) = sqrt(0.0025) = 0.05mm`. `TV = sqrt(GRR^2+PV^2) = sqrt(0.0025+0.25) = sqrt(0.2525) ≈ 0.5025mm`. `%GRR = 100 x 0.05/0.5025 ≈ 9.95%` — just under the real "excellent" threshold.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1-2's pattern, test the "good system" setup (wide part range, no operator bias) but with a real, larger repeatability noise of 0.2mm instead of 0.03mm, and compare the real %GRR to this chapter's own 0.96% result.
+
+<Solution>
+
+```python
+EV3, AV3, GRR3, PV3, TV3 = gauge_rr(true_parts, np.array([0.0, 0.0, 0.0]), 0.2, seed=60)
+print(f"Larger noise system: %GRR={100*GRR3/TV3:.2f}%")
+```
+
+Output:
+
+```text
+Larger noise system: %GRR=6.34%
+```
+
+Still well under the real 10% "excellent" threshold, even with noise nearly 7x this chapter's own original 0.03mm — confirming that %GRR depends on real noise RELATIVE to real part variation, not on the real noise value alone.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A quality team's Gauge R&R study gives %GRR=25%, decomposed as EV=0.08mm and AV=0.18mm. Based on Section 6's own real point about diagnosing the real cause, what should they investigate first?
+
+<Solution>
+
+Following Section 6's own real point, AV (reproducibility, 0.18mm) is substantially larger than EV (repeatability, 0.08mm) here, pointing specifically to real operator-to-operator (or setup-to-setup, for a vision system) disagreement as the dominant real problem, rather than the equipment's own real repeatability. The team should investigate real differences in how different operators or setups position parts, configure lighting, or select ROIs (46.5), rather than focusing on the camera or sub-pixel algorithm itself.
+
+</Solution>
+
+## References
+
+1. Automotive Industry Action Group, *Measurement Systems Analysis (MSA) Reference Manual*, 4th ed., AIAG, 2010.
+2. JCGM 100:2008, *Evaluation of Measurement Data — Guide to the Uncertainty in Measurement (GUM)* — already cited in 49.1/49.3.
+3. OpenCV 4.13.0 documentation: standard NumPy statistics, no dedicated `cv2` API for this chapter's own subject. https://docs.opencv.org/4.13.0/

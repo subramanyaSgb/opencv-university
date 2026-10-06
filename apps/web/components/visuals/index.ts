@@ -215,3 +215,4 @@ export { ShotNoiseLab } from "./ShotNoiseLab";
 export { UncertaintyLab } from "./UncertaintyLab";
 export { CrbLab } from "./CrbLab";
 export { PropagationLab } from "./PropagationLab";
+export { GaugeRRLab } from "./GaugeRRLab";
