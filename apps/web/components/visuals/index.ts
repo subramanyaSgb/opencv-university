@@ -193,3 +193,4 @@ export { TimeOfFlightLab } from "./TimeOfFlightLab";
 export { SfmLab } from "./SfmLab";
 export { VoLab } from "./VoLab";
 export { SlamLab } from "./SlamLab";
+export { PointCloudLab } from "./PointCloudLab";

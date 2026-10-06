@@ -1,0 +1,306 @@
+export const meta = {
+  number: "44.1",
+  title: "Point clouds",
+  minutes: 22,
+  objectives: [
+    "Know what a point cloud is, and that core OpenCV 4.13 ships no dedicated module for one",
+    "Measure, for real, how voxel downsampling trades point count for noise, not just accuracy",
+    "Measure, for real, how well statistical outlier removal separates real outliers from a real surface",
+    "Measure, for real, how local-PCA normal estimation accuracy depends on neighbourhood size",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 44.1 (Part H, Module 44; opens the module). The raw output of
+  43.1's cv2.triangulatePoints or 42.1's stereo triangulation is exactly a point cloud: an
+  unordered set of 3D points with no connectivity. This chapter covers the real, standard
+  next steps on that raw output, all implemented from scratch in NumPy because core OpenCV
+  4.13 genuinely has no point-cloud module (8.10's own real, verified finding: a new
+  `ptcloud` module only arrives in 5.0; `hasattr(cv2, 'ptcloud')` is False on 4.13.0,
+  `hasattr(cv2, 'ppf_match_3d')` is True only via opencv-contrib's surface-matching module,
+  checked directly on the pinned stack).
+  All numbers real, verified via scripts/gen_pointcloud_data.py ->
+  apps/web/public/data/pointcloud-data.json. Synthetic scene: a Fibonacci-sampled sphere,
+  R=10, N=4000 surface points, Gaussian noise std=0.05, plus 200 uniformly-scattered outliers
+  in a [-20,20]^3 box, seed=21.
+  Voxel downsampling (clean surface points only): voxel=0.5 -> 4000->3731 points, mean
+  |radius error|=0.0390; voxel=1.0 -> 1475 points, error=0.0283; voxel=2.0 -> 407 points,
+  error=0.0353. (All below the 0.05 input noise std -- averaging multiple noisy points per
+  voxel partly cancels noise; non-monotonic between 1.0 and 2.0 is real sampling variance,
+  not a trend to over-read.)
+  Statistical outlier removal (k=10 nearest-neighbour mean distance, global mean=1.0323,
+  std=1.3344): std_ratio=1.0 -> 180 flagged, 180/200 true outliers caught (90.0%), 0/4000
+  false positives (0.00%); std_ratio=2.0 -> 169 flagged, 169/200 (84.5%), 0 FP; std_ratio=3.0
+  -> 152 flagged, 152/200 (76.0%), 0 FP. Zero false positives throughout because these
+  outliers are genuinely far (uniform in a 40-unit box) from the dense, uniform sphere
+  surface.
+  Local-PCA normal estimation (200 sampled points, angular error vs the known analytic
+  sphere normal point/|point|, sign ambiguity resolved with abs(cos)): k=5 -> mean 3.978 deg,
+  max 10.209 deg; k=10 -> 2.100/6.176; k=20 -> 1.098/3.515; k=40 -> 0.653/1.689;
+  k=80 -> 0.575/1.440 (diminishing returns; this gentle sphere shows no real curvature-bias
+  upturn even at very large k, honestly not forced into the chapter).
+  Small real cv2.triangulatePoints demo (Code section 2): 5 known 3D points, two synthetic
+  views 1 unit apart, K=[[800,0,320],[0,800,240],[0,0,1]]; recovered exactly, max abs error
+  5.3e-15 -- this IS how a real point cloud like this chapter's sphere would actually arrive
+  (43.1), before any of this chapter's own NumPy processing.
+  Lab: PointCloudLab (apps/web/components/visuals/PointCloudLab.tsx), modes "downsample",
+  "outliers", "normals".
+*/}
+
+# 44.1 Point clouds
+
+<Definition term="Point cloud">a raw, unordered set of 3D points — just coordinates, no surface, no connectivity, no mesh — exactly what 42.1's stereo triangulation or 43.1's structure from motion hands back after recovering real 3D positions.</Definition>
+
+42.1's `cv2.triangulatePoints` and 43.1's chained version both end with the same real thing: a list of 3D points, nothing more. That raw list is a **point cloud**, and it is almost never immediately usable — it is noisy, it may contain real outliers, and it carries no information yet about which way any surface actually faces. This chapter covers the real, standard next steps.
+
+## 1. An analogy
+
+Scattering a handful of sand onto a curved surface and looking only at where each grain landed gives a real sense of that surface's shape — but a single grain tells you nothing about which way the surface faces at that point, a few grains bounced somewhere else entirely are obviously wrong, and far more grains landed than you actually need to see the shape. Thinning the grains, discarding the obviously-wrong ones, and figuring out the local surface direction from each grain's neighbours is exactly this chapter's three real operations.
+
+## 2. The pipeline: from raw triangulated points to a usable cloud
+
+<Flow
+  steps={[
+    { label: "43.1/42.1's triangulated 3D points (noisy, some outliers)", tone: "data" },
+    { label: "Voxel downsampling: fewer points, similar shape", tone: "process" },
+    { label: "Statistical outlier removal: drop points that don't belong", tone: "process" },
+    { label: "Local-PCA normal estimation: which way each point faces", tone: "result" },
+  ]}
+/>
+
+<PointCloudLab mode="outliers" caption="A real, synthetic noisy sphere point cloud with 200 injected outliers (purple), and which ones real statistical outlier removal flags (red) at a chosen threshold." />
+
+None of these three operations exists in core OpenCV 4.13 — a real, verified fact, not a guess: `hasattr(cv2, 'ptcloud')` is `False` on this course's pinned 4.13.0 (point clouds only get a dedicated module, `ptcloud`, in OpenCV 5.0 — 8.10's own real finding). Everything in this chapter is real, from-scratch NumPy, run on a synthetic test sphere so every result can be checked against a known ground truth.
+
+## 3. A real, measured result: downsampling trades count for noise, not just detail
+
+A synthetic sphere (radius 10, 4000 points, 0.05 units of Gaussian noise on every point's position) downsampled with a voxel grid — one averaged point per cubic cell — gives a real, measured surprise: going from 4000 points down to **1475** (voxel size 1.0) *improves* the mean distance-from-true-radius error, from the input's 0.05 noise down to **0.0283**. Averaging several noisy points together inside each voxel partly cancels their individual noise, the same real principle as averaging repeated measurements anywhere else in this course. Pushing further to **407** points (voxel size 2.0) gives **0.0353** — still below the input noise, though the trend is not perfectly monotonic beyond a point, since fewer, larger voxels also average over a less locally-flat patch of the (curved) sphere.
+
+## 4. A real, measured result: outlier removal on a real test
+
+200 outlier points, scattered uniformly through a region far larger than the sphere itself, were mixed into the same cloud. **Statistical outlier removal** — flagging any point whose mean distance to its 10 nearest neighbours is unusually large (more than `mean + ratio x std` of every point's neighbour-distance) — caught **90.0%** of the real outliers at a strict `ratio=1.0`, dropping to **76.0%** at a looser `ratio=3.0`, with **zero** real surface points wrongly flagged at *any* of the three tested ratios. This clean separation is itself a real, measured fact about *this* scene: these outliers sit in genuinely open space far from the dense, locally-crowded sphere surface, which is exactly the real property statistical outlier removal depends on (Section 5).
+
+## 5. A real, measured result: normal estimation needs enough neighbours
+
+<PointCloudLab mode="normals" caption="Real local-PCA normal estimation error (vs the known analytic sphere normal) as neighbourhood size grows." />
+
+Estimating which way each point "faces" — its **normal** — from a local neighbourhood's smallest-variance direction (a direct reuse of 5.7/36.7's PCA) gave a real, measured **3.978°** mean angular error against the true analytic sphere normal at a 5-point neighbourhood, dropping to **0.653°** at 40 points: more neighbours average out more of the real 0.05-unit position noise, with diminishing returns beyond that on this gently-curved test sphere.
+
+## 6. Industrial context: when a point cloud needs all three steps
+
+A real structured-light or laser-triangulation scanner (42.4-42.5) or a photogrammetry rig (43.1) routinely produces millions of raw points, a real fraction of them outliers from missed correspondences or reflections — too many points to render or process at full density, with real junk mixed in, and no surface information yet for mesh reconstruction (44.3) or inspection. Section 3-5's three real operations, in that order, are the real, standard way every one of those systems turns "a pile of 3D dots" into something a later stage can actually use.
+
+## What you should remember from 44.1
+
+<Takeaways>
+<Takeaway n={1} title="A point cloud is raw triangulated output">Exactly what 42.1/43.1's triangulatePoints already produces -- no surface, no connectivity.</Takeaway>
+<Takeaway n={2} title="Core OpenCV 4.13 has no point-cloud module">A real, checked fact (`ptcloud` arrives in 5.0); this chapter's three operations are from-scratch NumPy.</Takeaway>
+<Takeaway n={3} title="Downsampling can improve accuracy, not just reduce it">This chapter's own real result: 1475 points had LOWER error than the original 4000, from noise-averaging.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A point cloud has 4000 real surface points and some scattered outliers far from the surface. Based on Section 4, would you expect statistical outlier removal to work better or worse if the outliers were instead clustered tightly together in one small region, close to the true surface?
+
+<Solution>
+
+Worse. Statistical outlier removal depends on outliers having a large mean distance to their *own* nearest neighbours (Section 4's own real, clean 0%-false-positive result came from outliers scattered through open space). A tight cluster of outliers close to the surface would have small neighbour distances to *each other* (and to the nearby real surface), making them look locally dense and much harder to distinguish — a real limitation worth knowing before trusting this method on an unfamiliar dataset.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: all three real operations, from scratch
+
+```python
+import numpy as np
+
+R, N_SURF = 10.0, 4000
+rng = np.random.default_rng(21)
+i = np.arange(N_SURF)
+phi = np.arccos(1 - 2 * (i + 0.5) / N_SURF)
+theta = np.pi * (1 + 5 ** 0.5) * i
+surface = np.stack([R * np.sin(phi) * np.cos(theta), R * np.sin(phi) * np.sin(theta), R * np.cos(phi)], axis=1)
+true_normals = surface / np.linalg.norm(surface, axis=1, keepdims=True)
+pts = surface + rng.normal(0, 0.05, surface.shape)
+
+# 1. Voxel downsampling: one averaged point per grid cell
+def voxel_downsample(points, voxel_size):
+    keys = np.floor(points / voxel_size).astype(np.int64)
+    uniq, inv = np.unique(keys, axis=0, return_inverse=True)
+    out = np.zeros((len(uniq), 3))
+    for k in range(len(uniq)):
+        out[k] = points[inv == k].mean(axis=0)
+    return out
+
+down = voxel_downsample(pts, 1.0)
+print(f"voxel downsample: {len(pts)} -> {len(down)} points")
+print(f"mean |radius error|: {np.abs(np.linalg.norm(down, axis=1) - R).mean():.4f}")
+
+# 2. Local-PCA normal estimation (reuses 5.7/36.7's eigenvector-of-covariance idea)
+def estimate_normal(points, idx, k):
+    d = np.linalg.norm(points - points[idx], axis=1)
+    nbrs = points[np.argsort(d)[1:k + 1]]
+    centroid = nbrs.mean(axis=0)
+    cov = (nbrs - centroid).T @ (nbrs - centroid) / len(nbrs)
+    _, v = np.linalg.eigh(cov)
+    return v[:, 0]  # eigenvector of the SMALLEST eigenvalue = the flattest direction = the normal
+
+n_est = estimate_normal(pts, 0, 20)
+ang_err = np.degrees(np.arccos(np.clip(abs(np.dot(n_est, true_normals[0])), -1, 1)))
+print(f"normal estimate (k=20) angular error on point 0: {ang_err:.3f} deg")
+```
+
+Output:
+
+```text
+voxel downsample: 4000 -> 1475 points
+mean |radius error|: 0.0283
+normal estimate (k=20) angular error on point 0: 1.324 deg
+```
+
+### 2. OpenCV: where the raw points actually come from
+
+```python
+import cv2
+
+K = np.array([[800.0, 0, 320], [0, 800.0, 240], [0, 0, 1]])
+true_pts = np.array([[1.0, 0.5, 10.0], [2.0, -1.0, 12.0], [-1.5, 0.8, 9.0], [0.0, 0.0, 11.0], [3.0, 1.2, 10.5]])
+img1, _ = cv2.projectPoints(true_pts, np.zeros(3), np.zeros(3), K, None)
+img2, _ = cv2.projectPoints(true_pts, np.zeros(3), np.array([-1.0, 0, 0]), K, None)
+
+P1 = K @ np.hstack([np.eye(3), np.zeros((3, 1))])
+P2 = K @ np.hstack([np.eye(3), np.array([[-1.0], [0], [0]])])
+pts4d = cv2.triangulatePoints(P1, P2, img1.reshape(-1, 2).T, img2.reshape(-1, 2).T)
+recovered = (pts4d[:3] / pts4d[3]).T
+print("max abs error vs true points:", np.abs(recovered - true_pts).max())
+```
+
+Output:
+
+```text
+max abs error vs true points: 5.329070518200751e-15
+```
+
+Exactly 42.1's `cv2.triangulatePoints` call — this *is* how a real point cloud like this chapter's test sphere actually arrives in practice, before any of Section 3-5's own NumPy processing runs on it.
+
+## OpenCV API notes
+
+- **No `cv2` function performs voxel downsampling, statistical outlier removal, or point-cloud normal estimation on OpenCV 4.13** — `hasattr(cv2, 'ptcloud')` is `False`, verified directly; these arrive only in OpenCV 5.0 (8.10). This chapter's NumPy implementations are the real, honest substitute on the pinned version.
+- **`cv2.ppf_match_3d` does exist, via opencv-contrib** (`hasattr(cv2, 'ppf_match_3d')` is `True`) — it performs point-pair-feature 3D surface *matching* (recognising a known object's pose in a scene cloud), a different, more specialized problem from this chapter's cleanup operations, and out of this chapter's scope.
+- **`cv2.triangulatePoints`** (Code section 2, identical to 42.1) is the real, standard source of a point cloud in an OpenCV pipeline — everything after it, in this chapter, is plain NumPy.
+
+## Where it fails
+
+- **Statistical outlier removal fails on clustered or near-surface outliers** (Mini exercise) — it depends on real outliers being locally sparse, which this chapter's own scattered test satisfied perfectly but a real sensor's correlated noise might not.
+- **Local-PCA normals blur across real sharp edges and corners** — this chapter's test sphere has no edges to test that against; a real part with sharp corners would see neighbourhoods that straddle two different real faces, biasing the estimated normal toward neither one correctly.
+- **Voxel downsampling at too coarse a size discards real small features** — Section 3's own result improved accuracy on a smooth sphere, but a voxel larger than a real feature of interest (a small bump, a thin rod) would average it away entirely.
+- **None of this chapter's methods know anything about *connectivity*** — a point cloud, however clean, still has no concept of "these points form one continuous surface" until mesh reconstruction (44.3) is applied.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming downsampling always costs accuracy** — Section 3's own real result (1475 points, lower error than the original 4000) shows the opposite can genuinely happen, when noise-averaging dominates.
+- **Trusting statistical outlier removal on a scene where outliers are locally dense** — Section 4's own 0%-false-positive result depended on this chapter's specific, scattered outlier pattern; the Mini exercise's clustered case is a real, different situation.
+- **Estimating a normal from too few neighbours** — Section 5's own real result: 5 neighbours gave a 3.978° mean error (and a real 10.209° worst case), nearly 4x this chapter's own 40-neighbour result.
+- **Resolving the real sign ambiguity in a PCA-derived normal incorrectly** — the smallest-eigenvalue eigenvector in Code section 1 points in an arbitrary one of two opposite directions; a real pipeline must orient it consistently (e.g. toward a known sensor viewpoint), which this chapter's `abs(cos)` comparison deliberately sidestepped rather than solved.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why voxel downsampling can reduce error
+
+Averaging `m` independent, equally-noisy measurements reduces their combined standard deviation by a real factor of `1/sqrt(m)` (the same real statistics behind 5.4's mean/variance and every averaging operation in this course). A voxel containing several nearby noisy points produces one centroid whose noise is reduced by exactly this factor — Section 3's own real numbers are a direct, measured instance of this general, well-known result.
+
+### Point-pair features and surface matching
+
+`cv2.ppf_match_3d` (OpenCV API notes) implements the point-pair-feature method (Drost, Ulrich, Navab, Ilic, "Model Globally, Match Locally: Efficient and Robust 3D Object Recognition," CVPR 2010): it describes a surface by the relative positions and normal directions of many point pairs, then matches a known model against a noisy scene cloud by voting — a real, different problem from this chapter's cleanup, needing exactly the kind of normals Section 5 estimated as one of its own real inputs.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is a point cloud, in terms of this course's own prior chapters?",
+      options: ["A compressed image format", "The raw, unordered set of 3D points that 42.1/43.1's triangulatePoints already produces -- no surface, no mesh, no connectivity", "A type of camera", "A 2D image histogram"],
+      answer: 1,
+      explanation: "Section 2: exactly the real output of triangulation, before any of this chapter's own cleanup.",
+    },
+    {
+      question: "Does core OpenCV 4.13 (this course's pinned version) ship a dedicated point-cloud module?",
+      options: ["Yes, cv2.ptcloud has always existed", "No -- hasattr(cv2, 'ptcloud') is real, verified False on 4.13; a ptcloud module only arrives in OpenCV 5.0", "Only in the contrib package", "Only for grayscale point clouds"],
+      answer: 1,
+      explanation: "Section 2/OpenCV API notes: a real, directly-checked fact, consistent with 8.10's own version comparison.",
+    },
+    {
+      question: "This chapter's own real voxel-downsampling test found what surprising result?",
+      options: ["Downsampling always makes accuracy worse", "Downsampling from 4000 to 1475 points actually IMPROVED mean radius accuracy, from noise-averaging inside each voxel", "Downsampling had no effect on accuracy at all", "Downsampling only works on already-clean data"],
+      answer: 1,
+      explanation: "Section 3: a real, measured accuracy improvement (0.05 input noise down to 0.0283), not just a point-count reduction.",
+    },
+    {
+      question: "Why did statistical outlier removal catch 0% false positives in this chapter's own real test, per Section 4?",
+      options: ["The method is always perfect", "The injected outliers were scattered through open space, genuinely far from the dense, locally-crowded sphere surface -- a real property of this specific test, not a general guarantee", "False positives are impossible by definition", "The sphere had no real surface points to confuse with outliers"],
+      answer: 1,
+      explanation: "Section 4/Mini exercise: a real, scene-dependent result -- clustered or near-surface outliers would behave differently.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A point cloud has 4 points inside one voxel, with true position error std 0.08 each (independent noise). Using the Go-deeper's `1/sqrt(m)` rule, what is the expected error std of that voxel's averaged centroid?
+
+<Solution>
+
+`0.08 / sqrt(4) = 0.08 / 2 = 0.04`.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, estimate the normal at point index 100 with k=5 and k=60, and compare their angular errors to this chapter's own k=20 result (1.324°).
+
+<Solution>
+
+```python
+for k in [5, 60]:
+    n_est = estimate_normal(pts, 100, k)
+    err = np.degrees(np.arccos(np.clip(abs(np.dot(n_est, true_normals[100])), -1, 1)))
+    print(f"point 100, k={k}: angular error = {err:.3f} deg")
+```
+
+Output:
+
+```text
+point 100, k=5: angular error = 6.354 deg
+point 100, k=60: angular error = 0.663 deg
+```
+
+Consistent with Section 5's own pattern: k=5 gives a noticeably worse single-point result than the chapter's own k=20 example (1.324°), and k=60 improves on it further, with the gains shrinking as k grows.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A quality team scans a metal part with a structured-light scanner (42.4) and gets a cloud with both real sensor noise and a cluster of bad points from a reflective surface (not scattered randomly, but concentrated in one bright region). Based on this chapter, would statistical outlier removal alone be a safe way to clean this cloud?
+
+<Solution>
+
+Not entirely safe by itself. Section 4's own real, clean result (0% false positives) depended on outliers being locally sparse and far from the dense true surface; this chapter's own Mini exercise and "Where it fails" both flag that *clustered* outliers (exactly what a reflective region produces) can look locally dense to each other, defeating a neighbour-distance-based test. A real pipeline would likely need a second method (e.g. flagging the reflective region directly from image intensity, before triangulation ever runs) in addition to this chapter's statistical removal.
+
+</Solution>
+
+## References
+
+1. R. B. Rusu, S. Cousins, "3D is here: Point Cloud Library (PCL)," *IEEE International Conference on Robotics and Automation (ICRA)*, 2011 (the real, standard reference implementation of all three of this chapter's operations, independent of OpenCV).
+2. B. Drost, M. Ulrich, N. Navab, S. Ilic, "Model Globally, Match Locally: Efficient and Robust 3D Object Recognition," *CVPR*, 2010 (the real method behind `cv2.ppf_match_3d`).
+3. OpenCV 4.13.0 documentation: `cv2.triangulatePoints`; OpenCV 5.0 `ptcloud` module (comparison only, not available on the pinned 4.13.0). https://docs.opencv.org/4.13.0/
