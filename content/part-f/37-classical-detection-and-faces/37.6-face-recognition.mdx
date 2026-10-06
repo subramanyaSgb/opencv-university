@@ -1,0 +1,291 @@
+export const meta = {
+  number: "37.6",
+  title: "Face recognition",
+  minutes: 24,
+  objectives: [
+    "Decide accept/reject from a set of distances and a threshold, by hand",
+    "Explain LBPH recognition as LBP histograms (35.1) compared by distance, nearest wins",
+    "Train and test a real face recognizer, including correctly rejecting an unknown person",
+    "Know the difference between detection (37.5) and recognition, and where each one's errors come from",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 37.6 (Part F, Module 37; closes the module).
+  LBPH ties directly back to 35.1 (LBP) and the histogram-distance ideas around 12.x; this chapter's new
+  content is training with a gallery of examples per identity, and open-set rejection via a threshold.
+  New assets: sample-synth-identity-{a,b,c}-{0,1,2}.png (9 training), sample-synth-identity-{a,b,c}-test.png
+  (3 held-out test), sample-synth-identity-unknown.png (1 novel identity).
+  Lab: FaceRecLab (apps/web/components/visuals/FaceRecLab.tsx) — live, illustrative LBPH-style recognizer
+  (not guaranteed bit-exact to cv2.face.LBPHFaceRecognizer); the authoritative numbers below are from the
+  real cv2.face model.
+  All numbers verified on opencv-python-headless 4.13.0.92 with opencv-contrib (cv2.face).
+*/}
+
+# 37.6 Face recognition
+
+<Definition term="Face recognition">deciding *whose* face a detected face belongs to (or that it belongs to nobody known), by comparing it against a gallery of previously seen examples, each labelled with an identity.</Definition>
+
+37.5 answered "is there a face here, and roughly where." This chapter answers the next question, and it is a genuinely different problem: given a face, which of several *known* people does it match — and just as importantly, what if it matches none of them?
+
+## 1. An analogy
+
+A bouncer with a photo album of regulars: when someone new arrives, the bouncer compares their face against every photo in the album. If one photo looks close enough, that's who it is. If every photo looks noticeably different from the person at the door, the sensible answer is "I don't recognise you" — not a forced guess at the closest-looking regular. Both parts matter: finding the best match, and knowing when even the best match isn't good enough.
+
+## 2. LBPH: histograms you've already built
+
+<Flow
+  steps={[
+    { label: "Gallery: several labelled example faces per identity", tone: "data" },
+    { label: "New face -> LBP histogram per grid region (35.1)", tone: "process" },
+    { label: "Compare to every gallery histogram (chi-squared distance)", tone: "process" },
+    { label: "Nearest match, if close enough -> that identity; else -> unknown", tone: "result" },
+  ]}
+/>
+
+`cv2.face.LBPHFaceRecognizer` (named in 35.1's OpenCV API notes) is almost entirely built from things this course has already covered: for each **training** face, compute its LBP code at every pixel (35.1), divide the face into a grid of regions (8×8 by default), build a 256-bin histogram of codes in each region, and concatenate all the regions' histograms into one long feature vector per face — stored, with its identity label, in the trained model. To **recognise** a new face: build its feature vector the same way, measure its chi-squared distance to every stored vector, and the nearest one's label is the answer — *if* that distance is below a chosen threshold. Above the threshold, there is no good match, and the honest answer is "unknown."
+
+## 3. A worked example by hand
+
+A new face's distance to three known identities' nearest gallery example: A → 15, B → 42, C → 58. With a rejection threshold of 50: the nearest is A (15), and 15 ≤ 50, so the face is **recognised as A**.
+
+Now suppose instead the distances were A → 55, B → 60, C → 58, with the same threshold of 50. The nearest is still A (55) — but 55 > 50, so even the *best* match isn't good enough: the face is **rejected as unknown**, even though "A" was technically the closest of the three.
+
+## 4. A real gallery, real recognition, and a real rejection
+
+<FaceRecLab caption="A live, illustrative LBPH-style recognizer (LBP histograms per 8x8 grid region, chi-squared distance) over the 3-identity gallery and 4 test faces below. The authoritative numbers in the text are from the real cv2.face.LBPHFaceRecognizer, verified separately."/>
+
+Training `cv2.face.LBPHFaceRecognizer` on 3 synthetic "identities" (a, b, c — distinguished by eye spacing, face width and mouth width), 3 training examples each (9 faces total), then testing on one held-out example per identity plus one entirely different, untrained identity:
+
+| Test face | Predicted | Confidence (lower = better match) |
+| --- | --- | --- |
+| a (held out) | **a** | 69.28 |
+| b (held out) | **b** | 67.91 |
+| c (held out) | **c** | 68.69 |
+| unknown (untrained identity) | **rejected** (threshold 73.0) | — |
+
+All three known test faces are correctly matched to their own identity, with confidence scores clustered tightly (67.9–69.3) — low, good matches. The untrained, novel identity, run through the *same* model with its rejection threshold set to 73.0, is correctly rejected: its real distance to the nearest stored face exceeds the threshold, and `predict()` returns label `-1` instead of forcing a guess at one of a, b or c.
+
+## 5. Industrial use
+
+- **Access control and attendance systems**, historically built on exactly LBPH or similar classical recognizers, with a tuned rejection threshold to keep "unknown person" genuinely meaningful.
+- **Any identity-matching task with a small, fixed gallery**: the same idea — compare against known examples, reject if nothing is close enough — generalises well beyond faces.
+- **A clear illustration of open-set vs closed-set classification**: 36.1–36.8's classifiers all assumed every test point belonged to one of the trained classes; recognition explicitly must handle "none of the above," a genuinely different requirement.
+
+## What you should remember from 37.6
+
+<Takeaways>
+<Takeaway n={1} title="LBPH = 35.1's histograms + distance">A grid of LBP histograms per face, compared by chi-squared distance — nothing new algorithmically, a new application.</Takeaway>
+<Takeaway n={2} title="Nearest, if close enough">The best match wins only if it beats a rejection threshold; otherwise, "unknown" is the correct answer.</Takeaway>
+<Takeaway n={3} title="A gallery, not one template">Several labelled examples per identity, the same way 36.1's classifiers trained on several examples per class.</Takeaway>
+<Takeaway n={4} title="Detection and recognition are different problems">37.5 finds a face; this chapter identifies it — separate models, separate error sources.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A new face's distances: A → 30, B → 12, C → 48. Threshold = 40. What is the result?
+
+<Solution>
+
+Nearest is B (12), and 12 ≤ 40, so the face is **recognised as B**.
+
+</Solution>
+
+**Q2.** Why is a fixed rejection threshold necessary at all — why not just always report the nearest identity, confident or not?
+
+<Solution>
+
+Without a threshold, the system would confidently claim an identity for *anyone*, including people never seen before — exactly the failure Section 1's bouncer analogy and Section 3's second example avoid. A threshold is what lets the system say "I don't know who this is" instead of forcing every input into one of a fixed, closed set of known identities.
+
+</Solution>
+
+### Next: Module 38, Markers, OCR and codes
+
+## Code
+
+### 1. The worked example, with NumPy
+
+```python
+import numpy as np
+import cv2
+
+def recognise(distances, threshold):
+    name, dist = min(distances.items(), key=lambda kv: kv[1])
+    return name if dist <= threshold else "unknown"
+
+print(recognise({"A": 15, "B": 42, "C": 58}, threshold=50))
+print(recognise({"A": 55, "B": 60, "C": 58}, threshold=50))
+```
+
+Output:
+
+```text
+A
+unknown
+```
+
+### 2. Training and testing a real LBPH recognizer
+
+```python
+# Needs opencv-contrib: cv2.face
+names = ["a", "b", "c"]
+X, y = [], []
+for i, name in enumerate(names):
+    for s in range(3):
+        X.append(cv2.imread(f"sample-synth-identity-{name}-{s}.png", cv2.IMREAD_GRAYSCALE))
+        y.append(i)
+y = np.array(y, dtype=np.int32)
+
+model = cv2.face.LBPHFaceRecognizer_create(threshold=73.0)
+model.train(X, y)
+
+for i, name in enumerate(names):
+    test = cv2.imread(f"sample-synth-identity-{name}-test.png", cv2.IMREAD_GRAYSCALE)
+    label, confidence = model.predict(test)
+    print(f"test {name}: predicted {names[label]}, confidence {confidence:.2f}")
+
+unknown = cv2.imread("sample-synth-identity-unknown.png", cv2.IMREAD_GRAYSCALE)
+label, confidence = model.predict(unknown)
+print(f"unknown identity: predicted label {label} (-1 = rejected)")
+```
+
+Typical output (needs `opencv-contrib-python-headless`, not installed by default):
+
+```text
+test a: predicted a, confidence 69.28
+test b: predicted b, confidence 67.91
+test c: predicted c, confidence 68.69
+unknown identity: predicted label -1 (-1 = rejected)
+```
+
+## OpenCV API notes
+
+- **`cv2.face.LBPHFaceRecognizer_create(radius=1, neighbors=8, grid_x=8, grid_y=8, threshold=DBL_MAX)`**: defaults match 35.1's circular LBP; `threshold` (set explicitly to 73.0 above) is the maximum acceptable distance before `predict()` returns `-1` instead of a label — by default it is unbounded (`DBL_MAX`), meaning *no* rejection happens unless a threshold is set.
+- **`.train(images, labels)`**: `images` a list of equal-sized grayscale images (all 120×120 here); `labels` a `int32` NumPy array, one per image — exactly the gallery-of-examples-per-identity structure.
+- **`.predict(image)`** → `(label, confidence)`: for LBPH, `confidence` is the chi-squared distance to the nearest stored histogram — **lower is better**, the opposite convention from, say, an SVM's margin score (36.4) or a template match's NCC score (32.1), where higher is better. Always check which convention a given confidence/score uses.
+- **`.update(images, labels)`**: adds more examples to an already-trained model without retraining from scratch — useful for adding a new identity, or more examples of an existing one, incrementally.
+- **Also available**: `cv2.face.EigenFaceRecognizer_create` and `cv2.face.FisherFaceRecognizer_create` — different classical recognizers (PCA-based, 36.7, and a supervised variant respectively), with the same `train`/`predict` interface but different internal representations and typically needing more careful preprocessing (consistent cropping/alignment) to work well.
+
+## Where it fails
+
+- **No rejection without an explicit threshold**: the default `threshold=DBL_MAX` means `predict()` will confidently return *some* label for literally anything, including a photo of a wall — always set a sensible threshold for any real open-set use.
+- **Sensitive to pose, lighting and alignment**: LBPH (like the Haar cascades and HOG+SVM earlier in this module) works on raw pixel-grid statistics; a face that isn't consistently cropped, scaled and roughly front-on across the gallery and test images will compare poorly for reasons unrelated to actual identity.
+- **A small gallery per identity is fragile**: 3 examples per identity (Section 4) worked here because the synthetic identities were deliberately quite distinct; real faces, with more subtle differences and more varied real-world conditions, generally need a larger, more varied gallery per person.
+- **Confuses "recognition failed" with "detection failed"**: a wrong or rejected recognition could stem from a bad face crop (37.5's problem) rather than anything about the recognizer itself — always check the face-detection step's own accuracy (37.5's IoU) before concluding the recognizer needs fixing.
+- Largely superseded in accuracy by deep-learning-based face embeddings (Part J) for serious deployment, though LBPH remains fast, fully classical, and genuinely workable for small, controlled galleries.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Forgetting to set a rejection threshold**, then being surprised the system "recognises" people who were never in the training gallery at all (Where it fails).
+- **Mixing up confidence conventions**: treating a *higher* LBPH confidence as a *better* match (backwards — lower is better here) will silently invert every decision.
+- **Training on inconsistent face crops** (different sizes, rough alignment) and blaming the recognizer for poor accuracy that is really a preprocessing problem.
+- **Testing a recognizer only on faces similar to its training conditions**: Section 4's clean result, with faces generated the same way as training, doesn't by itself prove robustness to real-world lighting, pose or expression variation.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Eigenfaces and Fisherfaces
+
+`EigenFaceRecognizer` represents each face as its projection onto the top principal components (36.7) of the whole training set — essentially treating every pixel as a feature and finding the directions of greatest variation across all training faces. `FisherFaceRecognizer` instead uses Linear Discriminant Analysis (mentioned in 36.7's Go deeper) to find directions that specifically separate *identities* well, rather than just capturing overall variance — often more accurate when enough examples per identity are available, at the cost of needing more data to estimate reliably.
+
+### Why chi-squared distance for histograms
+
+Chi-squared distance (used here, and already met comparing colour histograms in Module 12) weights differences in low-count bins more heavily relative to their size than a plain sum-of-squared-differences would — generally a better fit for comparing histograms, where the *relative* difference in a rarely-occurring pattern often matters as much as an absolute one in a common pattern.
+
+### Towards deep face embeddings
+
+Modern face recognition systems (Part J) typically replace this entire hand-built pipeline with a learned embedding: a neural network trained so that the same person's faces map to nearby points in a learned feature space, and different people's faces map far apart — conceptually similar to what LBPH's histogram distance approximates by hand, but learned directly from vastly more data than any classical descriptor can exploit.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is LBPH recognition, in terms of things already covered in this course?",
+      options: ["A completely new algorithm unrelated to earlier chapters", "LBP histograms (35.1) computed per grid region of a face, compared to a gallery by chi-squared distance, nearest wins", "A deep neural network", "A single fixed template comparison"],
+      answer: 1,
+      explanation: "Section 2: LBPH's novelty here is the gallery-and-rejection-threshold application, not the underlying descriptor.",
+    },
+    {
+      question: "In the worked example (Section 3), why was a face with distances (55, 60, 58) to A/B/C rejected as unknown, even though A was the closest?",
+      options: ["A calculation error", "The closest distance (55) still exceeded the rejection threshold (50) -- being the best of three options isn't the same as being a good match", "Rejection always happens with three identities", "Distances over 50 are impossible"],
+      answer: 1,
+      explanation: "This is the whole point of a threshold: the nearest match must also be good enough on its own terms.",
+    },
+    {
+      question: "In Section 4, what does a LOWER LBPH confidence value mean?",
+      options: ["A worse match", "A better match -- the opposite convention from scores like NCC or an SVM margin, where higher is better", "Nothing, confidence is not meaningful for LBPH", "It means the face was rejected"],
+      answer: 1,
+      explanation: "OpenCV API notes: LBPH's confidence is a distance, so lower means closer/better.",
+    },
+    {
+      question: "Why might a face recognizer perform badly even though the underlying recognition algorithm is working correctly?",
+      options: ["This cannot happen", "Poor face detection/cropping (37.5) upstream can feed the recognizer inconsistent or misaligned faces, which is a different problem from the recognizer itself", "LBPH never fails", "Only lighting can cause recognition errors"],
+      answer: 1,
+      explanation: "Where it fails: always check the detection step's own accuracy before blaming the recognizer.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A new face's distances to four known identities: P → 40, Q → 38, R → 65, S → 39. Threshold = 45. What is the result?
+
+<Solution>
+
+Nearest is Q (38), and 38 ≤ 45, so the face is **recognised as Q**. (Note P and S are close behind, 40 and 39 — a reminder that real recognition can have several near-tied candidates; the nearest one still wins, as long as it clears the threshold.)
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the Code section's trained `model`, lower the threshold to 68.0 (stricter) and re-test all three known faces. Which ones, if any, are now rejected?
+
+<Solution>
+
+```python
+model_strict = cv2.face.LBPHFaceRecognizer_create(threshold=68.0)
+model_strict.train(X, y)
+for i, name in enumerate(names):
+    test = cv2.imread(f"sample-synth-identity-{name}-test.png", cv2.IMREAD_GRAYSCALE)
+    label, confidence = model_strict.predict(test)
+    print(f"test {name}: label {label} ({'rejected' if label == -1 else names[label]}), confidence {confidence}")
+```
+
+Output:
+
+```text
+test a: label -1 (rejected), confidence 1.7976931348623157e+308
+test b: label 1 (b), confidence 67.91
+test c: label -1 (rejected), confidence 1.7976931348623157e+308
+```
+
+With the stricter threshold (68.0), `a` (confidence 69.28) and `c` (68.69) are now both rejected — their real distances were always just above this stricter cutoff, even though they were correctly identified at the looser threshold (73.0) in Section 4. Only `b` (67.91) still clears 68.0. This is a direct illustration of the threshold trade-off: strict enough to reject true unknowns, but not so strict it starts rejecting genuine matches too.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A security team wants "zero tolerance" for letting an unknown person through, even if it means occasionally rejecting a legitimate known person by mistake. How should they set the rejection threshold, and what is the trade-off?
+
+<Solution>
+
+They should set the threshold **lower** (stricter) — Exercise 2 showed directly that a stricter threshold rejects more borderline cases, including some genuine matches (`a` and `c` were rejected at 68.0 despite being correctly recognised at 73.0). The trade-off is exactly what "zero tolerance" implies: fewer unknown people slip through as false matches, but more legitimate known people get incorrectly rejected and need a fallback (a second attempt, a manual check) — there is no threshold that eliminates both kinds of error simultaneously; the team is choosing which kind of mistake they would rather make.
+
+</Solution>
+
+## References
+
+1. T. Ahonen, A. Hadid, M. Pietikäinen, "Face description with local binary patterns: application to face recognition," *IEEE Transactions on Pattern Analysis and Machine Intelligence* 28(12), 2006, pp. 2037–2041.
+2. M. Turk, A. Pentland, "Eigenfaces for recognition," *Journal of Cognitive Neuroscience* 3(1), 1991, pp. 71–86.
+3. P. N. Belhumeur, J. P. Hespanha, D. J. Kriegman, "Eigenfaces vs. Fisherfaces: recognition using class specific linear projection," *IEEE Transactions on Pattern Analysis and Machine Intelligence* 19(7), 1997, pp. 711–720.
+4. OpenCV 4.13.0 documentation: `cv2.face.LBPHFaceRecognizer`, `cv2.face.EigenFaceRecognizer`, `cv2.face.FisherFaceRecognizer`. https://docs.opencv.org/4.13.0/

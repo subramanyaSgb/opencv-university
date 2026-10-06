@@ -692,6 +692,39 @@ def synth_face_scene():
     canvas[140:250, 320:430] = synth_face(110, seed=11)
     return np.clip(canvas, 0, 255).astype(np.uint8)
 images["sample-synth-face-scene.png"] = synth_face_scene()
+
+# Module 37.6: three synthetic (not photographs) "identities" -- distinct eye spacing, face width and mouth
+# width -- each with 3 training samples (different seed/noise) and 1 held-out test sample, plus one
+# unrelated "unknown" identity, for real cv2.face.LBPHFaceRecognizer training and open-set rejection.
+def synth_face_id(size=120, seed=0, eye_off_ratio=0.15, face_w_ratio=0.35, mouth_w=22):
+    rng = np.random.default_rng(seed)
+    img = np.full((size, size), 180.0)
+    cx, cy = size // 2, int(size * 0.525)
+    cv2.ellipse(img, (cx, cy), (int(size * face_w_ratio), int(size * 0.45)), 0, 0, 360, 200, -1)
+    xs = np.arange(size)
+    img += 10 * np.sin(xs / 40)[None, :]
+    ex_off, ey = int(size * eye_off_ratio), int(size * 0.425)
+    for ex in (cx - ex_off, cx + ex_off):
+        cv2.ellipse(img, (ex, ey), (14, 8), 0, 0, 360, 60, -1)
+        cv2.circle(img, (ex, ey), 5, 20, -1)
+        cv2.ellipse(img, (ex, ey - int(size * 0.075)), (16, 4), 0, 180, 360, 40, 2)
+    cv2.line(img, (cx, cy - int(size * 0.075)), (cx - int(size * 0.025), cy + int(size * 0.15)), 150, 3)
+    cv2.ellipse(img, (cx, cy + int(size * 0.175)), (10, 5), 0, 0, 360, 140, 2)
+    cv2.ellipse(img, (cx, cy + int(size * 0.3)), (mouth_w, 8), 0, 0, 180, 90, 3)
+    img = cv2.GaussianBlur(img, (0, 0), size / 167)
+    img += rng.normal(0, 4, img.shape)
+    return np.clip(img, 0, 255).astype(np.uint8)
+
+IDENTITIES = {
+    "a": dict(eye_off_ratio=0.12, face_w_ratio=0.32, mouth_w=18),
+    "b": dict(eye_off_ratio=0.18, face_w_ratio=0.38, mouth_w=26),
+    "c": dict(eye_off_ratio=0.15, face_w_ratio=0.35, mouth_w=22),
+}
+for i, (name, params) in enumerate(IDENTITIES.items()):
+    for s in range(3):
+        images[f"sample-synth-identity-{name}-{s}.png"] = synth_face_id(seed=i * 10 + s, **params)
+    images[f"sample-synth-identity-{name}-test.png"] = synth_face_id(seed=1000 + i, **params)
+images["sample-synth-identity-unknown.png"] = synth_face_id(seed=2000, eye_off_ratio=0.25, face_w_ratio=0.45, mouth_w=32)
 ft_b = cv2.warpPerspective(images["sample-feat.png"].astype(np.float64), FEAT_H, (320, 200), flags=cv2.INTER_LINEAR,
                            borderMode=cv2.BORDER_CONSTANT, borderValue=110)
 images["sample-feat-b.png"] = np.clip(np.rint(ft_b * 0.8 + 20 + np.random.default_rng(34).normal(0, 3, ft_b.shape)), 0, 255).astype(np.uint8)
