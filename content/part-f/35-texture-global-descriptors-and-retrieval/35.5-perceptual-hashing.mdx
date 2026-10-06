@@ -1,0 +1,340 @@
+export const meta = {
+  number: "35.5",
+  title: "Perceptual hashing",
+  minutes: 22,
+  objectives: [
+    "Compute an average hash (aHash) of a tiny image by hand",
+    "Explain how dHash and pHash differ from aHash and from each other",
+    "Compare two images with Hamming distance between their hashes",
+    "Know what perceptual hashing is robust to, and what defeats it",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 35.5 (Part F, Module 35).
+  Lab: HashLab (apps/web/components/visuals/HashLab.tsx) — aHash/dHash/pHash of sample-scene.png vs its
+  brighter/inverted variants and a different image, with bit grids and Hamming distance, computed live.
+  All numbers verified on opencv-python-headless 4.13.0.92 (cv2.resize, cv2.dct, cv2.img_hash.PHash).
+*/}
+
+# 35.5 Perceptual hashing
+
+<Definition term="Perceptual hash">a short, fixed-length code (typically 64 bits) computed from an image so that two images that *look* similar get hashes that differ in only a few bits, while two images that look different get hashes that differ in many — unlike a cryptographic hash (MD5, SHA-256), where changing a single pixel scrambles the whole code.</Definition>
+
+Every descriptor so far in this module describes a region *in detail* — a histogram, a vector of numbers. A perceptual hash deliberately throws almost all of that detail away, keeping only a coarse summary, specifically so that near-duplicate images collapse to the same (or nearly the same) short code. It answers one question well: "have I seen an image basically like this one before?"
+
+## 1. An analogy
+
+Two people describing the same cloudy sky to a friend over the phone, in ten words or fewer, will probably use very similar words even though neither saw the exact same cloud shapes — because a short summary of something simple is naturally similar when the things are similar. A perceptual hash is that short summary, built so that similar images produce similar summaries on purpose.
+
+## 2. Three ways to build one
+
+<Flow
+  steps={[
+    { label: "Image", tone: "data" },
+    { label: "Shrink to a tiny, fixed size", tone: "process" },
+    { label: "Turn each small region into one bit", tone: "process" },
+    { label: "64 (or so) bits = the hash", tone: "result" },
+  ]}
+/>
+
+- **aHash (average hash)**: shrink to e.g. 8×8, compute the average grey level, set bit = 1 where a pixel is above the average, 0 otherwise.
+- **dHash (difference hash)**: shrink to 9×8 (one extra column), set bit = 1 where a pixel is brighter than its immediate left neighbour, 0 otherwise — 8 comparisons per row × 8 rows = 64 bits. Comparing *neighbours* rather than a single global average makes dHash less sensitive to a smooth lighting gradient across the image.
+- **pHash (DCT-based, Zauner [1])**: shrink to e.g. 32×32, take its DCT (31.1), keep the 8×8 block of lowest-frequency coefficients (the image's coarse structure, not its fine detail), drop the DC term, and threshold the rest against their own median. Lowest frequencies change the least under resizing, mild blur or compression, which is why pHash tends to be the most robust of the three.
+
+Comparing two hashes uses **Hamming distance**: the number of bit positions where they differ. Small distance (commonly ≤ 5–10 out of 64, depending on the application) means "probably a near-duplicate"; large distance means "probably unrelated."
+
+## 3. A worked example by hand: aHash of a 4×4 image
+
+```text
+40  40  220 220
+40  40  220 220
+60  180 60  180
+60  180 60  180
+```
+
+Average of all 16 values = (40+40+220+220 + 40+40+220+220 + 60+180+60+180 + 60+180+60+180) / 16 = 2000 / 16 = **125**.
+
+Compare every pixel with 125 ("≥ 125 → 1, else 0"):
+
+```text
+0  0  1  1
+0  0  1  1
+0  1  0  1
+0  1  0  1
+```
+
+Reading row by row gives the 16-bit hash `0011 0011 0101 0101`. A real aHash does exactly this on a (usually) 8×8 shrink, for a 64-bit hash.
+
+## 4. Robust to brightness, sensitive to inversion
+
+<HashLab initialA="scene" initialB="brighter" initialHash="dHash" caption="Choose two images and a hash. Compare 'scene' with 'brighter' (small distance, every hash agrees they're near-duplicates), then with 'inverted' (huge distance — hashing is not colour/tone invariant), then with 'a different image' (large distance)."/>
+
+Three hashes of `sample-scene.png` against three variants (64 bits for aHash/dHash, 63 for the from-scratch pHash below since its DC term is dropped; `cv2.img_hash.PHash`'s own 64-bit result for comparison):
+
+| Comparison | aHash | dHash | pHash (from scratch) | cv2.img_hash.PHash |
+| --- | --- | --- | --- | --- |
+| vs brighter (`cv2.add(scene, 80)`) | **0** | 2 | 8 | 5.0 |
+| vs inverted (`cv2.bitwise_not`) | 64 | 62 | 62 | 64.0 |
+| vs a different image | 33 | 45 | 34 | 33.0 |
+
+All four agree on the story: the brighter version is a near-duplicate (0–8 bits out of ~64 differ), a genuinely different image is far away (33–45 bits), and — the surprise — the **inverted** image is *further* from the original than the unrelated image is (62–64 bits, almost every bit flipped). Perceptual hashing, as built here, compares a pixel (or block) against a *local* reference (an average, a neighbour, a median), and inversion flips essentially every one of those local comparisons at once. It is robust to brightness and mild resizing; it is not robust to inverting tones, and not designed to be.
+
+## 5. Industrial and real-world use
+
+- **Duplicate and near-duplicate detection** in large image collections (product catalogues, user uploads) without comparing every pair of full images.
+- **Reverse image search and copyright/leak detection**: find re-posted or lightly edited copies of a known image.
+- **Quick "has this frame been seen before" checks** in video, as a cheap pre-filter before a more expensive comparison.
+- **Content moderation pipelines**: matching against a hash database of known images, much faster than full image comparison.
+
+## What you should remember from 35.5
+
+<Takeaways>
+<Takeaway n={1} title="Coarse by design">A perceptual hash throws away detail on purpose, keeping only a rough summary.</Takeaway>
+<Takeaway n={2} title="Three recipes">aHash (global average), dHash (neighbour comparison), pHash (low-frequency DCT).</Takeaway>
+<Takeaway n={3} title="Hamming distance">Count differing bits; small = near-duplicate, large = unrelated.</Takeaway>
+<Takeaway n={4} title="Not colour-invariant">Inverting tones defeats all three — hashing compares to a *local* reference, and inversion flips it.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 2×2 image: `100, 100, 200, 200` (row-major). What is its aHash (as 4 bits)?
+
+<Solution>
+
+Average = (100+100+200+200)/4 = 150. Compare each to 150: 100 < 150 → 0, 200 ≥ 150 → 1. Hash = **`0011`**.
+
+</Solution>
+
+**Q2.** Two images have a Hamming distance of 3 out of 64 bits. Are they more likely to be near-duplicates or unrelated images?
+
+<Solution>
+
+**Near-duplicates.** Only 3 of 64 bits differ (about 5%); unrelated images typically differ in roughly half their bits (around 32/64), since an essentially random pattern of agreement and disagreement is what "unrelated" looks like to a coarse summary like this.
+
+</Solution>
+
+### Next: 35.6 Bag of visual words and image retrieval
+
+## Code
+
+### 1. aHash and dHash from scratch with NumPy
+
+```python
+import numpy as np
+import cv2
+
+def ahash(img, size=8):
+    small = cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA).astype(np.float64)
+    avg = small.mean()
+    bits = (small > avg).flatten()
+    h = 0
+    for b in bits:
+        h = (h << 1) | int(b)
+    return h
+
+def dhash(img, size=8):
+    small = cv2.resize(img, (size + 1, size), interpolation=cv2.INTER_AREA).astype(np.float64)
+    bits = (small[:, 1:] > small[:, :-1]).flatten()      # each pixel vs its left neighbour
+    h = 0
+    for b in bits:
+        h = (h << 1) | int(b)
+    return h
+
+def hamming(a, b):
+    return bin(a ^ b).count("1")
+
+grid = np.array([[40, 40, 220, 220], [40, 40, 220, 220], [60, 180, 60, 180], [60, 180, 60, 180]], dtype=np.uint8)
+print("by-hand check, average:", grid.mean(), " aHash (4x4):", bin(ahash(grid, size=4)))
+
+scene = cv2.imread("sample-scene.png", cv2.IMREAD_GRAYSCALE)
+bright = cv2.imread("sample-scene-brighter.png", cv2.IMREAD_GRAYSCALE)
+inverted = cv2.imread("sample-scene-inverted.png", cv2.IMREAD_GRAYSCALE)
+other = cv2.imread("sample-color-gray.png", cv2.IMREAD_GRAYSCALE)
+
+for name, other_img in [("brighter", bright), ("inverted", inverted), ("a different image", other)]:
+    print(f"aHash  scene vs {name}: {hamming(ahash(scene), ahash(other_img))}")
+    print(f"dHash  scene vs {name}: {hamming(dhash(scene), dhash(other_img))}")
+```
+
+Output:
+
+```text
+by-hand check, average: 125.0  aHash (4x4): 0b11001101010101
+aHash  scene vs brighter: 0
+dHash  scene vs brighter: 2
+aHash  scene vs inverted: 64
+dHash  scene vs inverted: 62
+aHash  scene vs a different image: 33
+dHash  scene vs a different image: 45
+```
+
+(`bin(ahash(grid, size=4))` prints the 16-bit pattern without leading zeros, so `0b11001101010101` is the same bits as the worked example, `0011 0011 0101 0101`, just without the leading `0`.)
+
+### 2. pHash from scratch, and cv2.img_hash.PHash
+
+```python
+def phash(img, size=32, keep=8):
+    small = cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA).astype(np.float32)
+    d = cv2.dct(small)                                   # 31.1: the 2-D discrete cosine transform
+    block = d[:keep, :keep].flatten()[1:]                # drop the DC term (index 0)
+    bits = (block > np.median(block))
+    h = 0
+    for b in bits:
+        h = (h << 1) | int(b)
+    return h
+
+for name, other_img in [("brighter", bright), ("inverted", inverted), ("a different image", other)]:
+    print(f"pHash (scratch) scene vs {name}: {hamming(phash(scene), phash(other_img))}")
+
+# Needs opencv-contrib: cv2.img_hash
+ph = cv2.img_hash.PHash_create()
+def cv_phash(img):
+    return ph.compute(cv2.cvtColor(img, cv2.COLOR_GRAY2BGR))
+for name, other_img in [("brighter", bright), ("inverted", inverted), ("a different image", other)]:
+    print(f"cv2.img_hash.PHash scene vs {name}: {ph.compare(cv_phash(scene), cv_phash(other_img))}")
+```
+
+Output:
+
+```text
+pHash (scratch) scene vs brighter: 8
+pHash (scratch) scene vs inverted: 62
+pHash (scratch) scene vs a different image: 34
+```
+
+Typical output (needs `opencv-contrib-python-headless`, not installed by default):
+
+```text
+cv2.img_hash.PHash scene vs brighter: 5.0
+cv2.img_hash.PHash scene vs inverted: 64.0
+cv2.img_hash.PHash scene vs a different image: 33.0
+```
+
+`cv2.img_hash.PHash` does not use exactly the same 8×8-block/median-split recipe as the from-scratch version above (it is a separate implementation, not required to match bit-for-bit), but tells the same story with similar numbers.
+
+## OpenCV API notes
+
+- **`cv2.img_hash` module** (needs `opencv-contrib-python(-headless)`): `AverageHash_create()`, `PHash_create()`, `BlockMeanHash_create()`, `MarrHildrethHash_create()`, `RadialVarianceHash_create()`, `ColorMomentHash_create()` — several different perceptual hash algorithms, each with `.compute(img) -> hash` and `.compare(hash1, hash2) -> float` (the algorithm's own notion of distance; for `PHash` this is the Hamming distance, 0–64).
+- **`cv2.resize(src, dsize, interpolation=cv2.INTER_AREA)`**: `INTER_AREA` (area-weighted averaging) is the right choice for *shrinking* — it is equivalent to simple block-averaging when the scale factor is an integer, and avoids the aliasing that nearest-neighbour or even linear interpolation can introduce when shrinking a lot (16.4 covers interpolation generally).
+- **`cv2.dct(src)`**: `src` must be a single-channel `float32` (or `float64`) array; see 31.1 for the full discrete cosine transform.
+- **No single built-in function for aHash or dHash** in OpenCV core — build them from `cv2.resize` and simple comparisons, as above; `cv2.img_hash.AverageHash` is the contrib equivalent of this chapter's aHash.
+- **Speed**: every step here (resize to a tiny size, a handful of comparisons, maybe one small DCT) is negligible; perceptual hashing's whole appeal is comparing millions of images cheaply by comparing short hashes instead of full images.
+
+## Where it fails
+
+- **Not robust to tone inversion** (Section 4) or, generally, to any transformation that flips most pixels' relationship to their local reference (average, neighbour, or median).
+- **Not robust to heavy cropping, rotation, or a very different viewpoint** of the same scene — perceptual hashing targets near-duplicates (same image, lightly edited), not "the same object seen differently" (that is closer to 34.1–34.6's feature matching, or retrieval with local features, 35.6).
+- **A coarse tool**: it says "probably the same" or "probably different," not *how* two images differ or *where*.
+- **Adversarial edits**: small, deliberate pixel changes designed specifically to flip many hash bits while looking unchanged to a human can defeat a naive hash; production systems often combine several hash algorithms or add a verification step.
+- For matching the *same object* in two different photographs (different angle, scale, lighting), use local feature matching (34.1–34.6), not a global perceptual hash.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Converting to colour or RGB order without converting to grey first**: aHash/dHash/pHash as built here operate on a single grey channel; comparing colour pixel-by-pixel invites BGR/RGB mix-ups (7.3) for no benefit.
+- **Using Hamming distance thresholds from one hash algorithm with another**: aHash, dHash and pHash have different typical distance ranges for "same" vs "different" (Section 4's table); a threshold tuned for one is not automatically right for another.
+- **Expecting a perceptual hash to survive rotation or heavy cropping**: it generally does not (see Where it fails) — it is built for near-duplicates, not for object recognition under viewpoint change.
+- **Forgetting that `cv2.img_hash` needs the contrib package**: `cv2.img_hash` raises an `AttributeError` on a plain `opencv-python(-headless)` install.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### pHash's choice of frequencies
+
+Zauner's pHash [1] keeps the lowest-frequency 8×8 block of a 32×32 DCT specifically because low frequencies capture an image's coarse layout (where the bright and dark regions are) and change the least under resizing, mild blurring, or JPEG compression (which discards high frequencies first, 31.1) — so two copies of the same image at different resolutions or quality levels tend to keep very similar low-frequency DCT coefficients, and therefore very similar hashes.
+
+### Beyond 64 bits
+
+Longer hashes (more DCT coefficients, or a bigger grid for aHash/dHash) distinguish finer differences but cost more to compute and store, and are *more* sensitive to small real edits — there is a genuine trade-off between hash length and tolerance to minor, legitimate changes (recompression, small crops) versus discriminative power.
+
+### Locality-sensitive hashing (LSH)
+
+Perceptual hashing is one instance of a broader idea, locality-sensitive hashing: any hash family designed so that similar inputs are likely to hash to similar (or identical) outputs, used well beyond images (e.g. near-duplicate text detection, audio fingerprinting).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "How is a perceptual hash different from a cryptographic hash like SHA-256?",
+      options: ["It is longer", "Similar images get similar (small Hamming distance) hashes, instead of completely different ones from a single changed pixel", "It only works on grey images", "It cannot be computed quickly"],
+      answer: 1,
+      explanation: "That controlled similarity is the entire point of a perceptual hash.",
+    },
+    {
+      question: "What does dHash compare, that aHash does not?",
+      options: ["Colour channels", "Each pixel against its immediate neighbour, rather than against one global average", "Two different images", "Frequency content"],
+      answer: 1,
+      explanation: "Section 2: dHash's neighbour comparisons make it less sensitive to a smooth lighting gradient than a single global average.",
+    },
+    {
+      question: "In Section 4, why was the Hamming distance to the inverted image (62-64) larger than to a genuinely different image (33-45)?",
+      options: ["A bug in the hash", "Inversion flips nearly every pixel's relationship to its local reference (average/neighbour/median) at once", "The inverted image was a different size", "Hamming distance cannot exceed 50"],
+      answer: 1,
+      explanation: "Each hash compares pixels to a local reference; global inversion flips almost all of those comparisons.",
+    },
+    {
+      question: "A product catalogue wants to find near-duplicate photos uploaded by different sellers. Which tool fits best?",
+      options: ["Perceptual hashing (this chapter)", "Full-image pixel-by-pixel subtraction", "A single Haar feature (35.4)", "A GLCM texture comparison (35.2)"],
+      answer: 0,
+      explanation: "Near-duplicate detection across a large collection is exactly what perceptual hashing is designed for.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 2×2 image: `50, 150, 50, 150` (row-major). Compute its aHash (4 bits) and its dHash if it were instead stored as a 3×2 image `50, 150, 50, 150, 50, 150` (compare each pixel with the one to its left, 2 comparisons per row).
+
+<Solution>
+
+aHash: average = (50+150+50+150)/4 = 100. Bits: 50 < 100 → 0, 150 ≥ 100 → 1, 50 < 100 → 0, 150 ≥ 100 → 1. **aHash = `0101`**.
+dHash on `50,150,50 / 150,50,150`: row 1 comparisons (150>50→1, 50>150→0); row 2 (50>150→0, 150>50→1). **dHash = `10 01`** (4 bits, reading the two rows in order).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using `dhash` from the Code section, compute the Hamming distance between `sample-scene.png` and a horizontally flipped copy of itself (`cv2.flip(scene, 1)`). Is it small (near-duplicate) or large? Does that match what dHash actually measures?
+
+<Solution>
+
+```python
+flipped = cv2.flip(scene, 1)
+print("dHash scene vs horizontally flipped:", hamming(dhash(scene), dhash(flipped)))
+```
+
+Output:
+
+```text
+dHash scene vs horizontally flipped: 42
+```
+
+Large — nowhere near a near-duplicate by dHash's standard (compare with 2, for the brighter version). dHash compares each pixel with its *left* neighbour in a fixed left-to-right reading order; flipping the image horizontally reverses that order, so most of the "brighter than the pixel to the left" comparisons genuinely change, even though a person would recognise the flipped image instantly as "the same picture, mirrored." This is a real limitation: as built here, none of aHash/dHash/pHash are designed to be flip-invariant.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague suggests using a cryptographic hash (SHA-256) instead of a perceptual hash to detect near-duplicate product photos that have been re-saved at slightly different JPEG quality. Why would that fail?
+
+<Solution>
+
+A cryptographic hash is designed to change completely (avalanche effect) from even a single bit of difference in the input — that is a *security* requirement (so no two different inputs can be predicted to collide). Re-saving a JPEG at a different quality changes many pixel values slightly (31.1's quantization), so the file's bytes differ, and SHA-256 of the two files would be completely unrelated even though the images look identical. Perceptual hashing is built for exactly this case: it deliberately ignores small pixel-level differences and only responds to larger, structural ones.
+
+</Solution>
+
+## References
+
+1. C. Zauner, "Implementation and benchmarking of perceptual image hash functions," Master's thesis, Upper Austria University of Applied Sciences, 2010.
+2. N. Krawetz, "Looks Like It" (the `pHash`/dHash popularisation and implementation notes), Hacker Factor blog, 2011.
+3. OpenCV 4.13.0 documentation: `cv2.img_hash`, `cv2.dct`, `cv2.resize`. https://docs.opencv.org/4.13.0/

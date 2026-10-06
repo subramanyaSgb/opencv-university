@@ -143,3 +143,4 @@ export { LbpLab } from "./LbpLab";
 export { GlcmLab } from "./GlcmLab";
 export { HogLab } from "./HogLab";
 export { HaarLab } from "./HaarLab";
+export { HashLab } from "./HashLab";
