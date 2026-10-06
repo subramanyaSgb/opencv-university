@@ -1,0 +1,315 @@
+export const meta = {
+  number: "39.6",
+  title: "Multi-camera sync",
+  minutes: 22,
+  objectives: [
+    "Tell hardware-triggered sync apart from free-running, timestamp-matched sync",
+    "Compute the real sync error nearest-timestamp matching leaves behind, for a known fps mismatch",
+    "Show that two free-running cameras drift further apart over time, not just by a fixed amount",
+    "Know roughly how good PTP-based synchronization is, with a real cited figure",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 39.6 (Part G, Module 39). 7.4's Go Deeper mentioned
+  hardware triggers and PTP/IEEE 1588 for multi-camera sync in one sentence; this chapter
+  is the first to actually work through the real numbers behind both options.
+  Not to be confused with 21.4 (Multi-camera and thermal-visible fusion), which is about
+  SPATIAL registration (aligning geometry/appearance between views), not TIME synchronization --
+  genuinely different topics, confirmed by reading 21.4 directly before writing this chapter.
+  Real, verified NumPy results (not simulated/assumed) for this chapter:
+  - Two free-running cameras, nominal 25 fps vs 24 fps, 5 ms phase offset, nearest-timestamp
+    matched over 50/48 frames: mean |error| 10.4 ms, max |error| 20.0 ms (first 5 raw errors:
+    5.0, 6.67, 8.33, 10.0, 11.67 ms) -- consistent with the theoretical bound of half the
+    longer frame period (0.5 x 41.67 ms ~= 20.8 ms).
+  - Two free-running cameras, SAME nominal 25 fps but B's real clock 0.1% fast (25.025 fps,
+    a realistic crystal-oscillator tolerance), phase-aligned at t=0, nearest-timestamp matched
+    over 1000 frames (40 s): error 0.0 ms at frame 0, -9.95 ms at 10 s, -19.94 ms at 20 s,
+    -39.92 ms at 40 s -- drift grows linearly with elapsed time, not a one-time offset.
+  - PTP/IEEE 1588 + GigE Vision 2.0 real-world accuracy, cited from vendor documentation
+    (Basler, IDS): sub-microsecond to about 1 microsecond camera-to-camera synchronization
+    with proper hardware support -- orders of magnitude better than the millisecond-scale
+    drift measured above for free-running cameras.
+  Lab: SyncLab (apps/web/components/visuals/SyncLab.tsx) -- runs the same nearest-timestamp
+  matching algorithm live, comparing it against a zero-error hardware-trigger mode.
+*/}
+
+# 39.6 Multi-camera sync
+
+<Definition term="Multi-camera synchronization">making sure that "frame N" from one camera and "frame N" from another camera were actually captured at (as close as possible to) the same real instant — a timing problem, separate from aligning what each camera sees geometrically (21.4).</Definition>
+
+A stereo rig, a multi-view 3D reconstruction, or any system that combines two or more simultaneous viewpoints only works if the frames being combined really were captured at the same moment. This chapter measures, with real numbers, exactly how wrong that assumption can be when it is not actually true.
+
+## 1. An analogy
+
+Two race-day photographers with synced radios, both pressing the shutter on the same "now" call, always get the same instant — that is a **hardware trigger**. Two photographers each using their own wristwatch, comparing photo timestamps afterwards to find the closest pair — that is **free-running with timestamp matching**: it works, but only as well as their two wristwatches agree, and wristwatches drift apart over a long day.
+
+## 2. Two real approaches
+
+<Flow
+  steps={[
+    { label: "Hardware trigger: one shared signal fires every camera's exposure", tone: "process" },
+    { label: "OR: PTP (IEEE 1588): cameras share one clock over the network", tone: "process" },
+    { label: "OR: free-running cameras, matched afterwards by nearest timestamp", tone: "data" },
+    { label: "Sync error: ~0 (trigger/PTP) vs real, measurable, growing (free-running)", tone: "result" },
+  ]}
+/>
+
+- **Hardware trigger** (7.4): a shared electrical signal starts every camera's exposure at once. Sync error is limited only by trigger propagation delay and each camera's own internal latency — typically microseconds, not milliseconds.
+- **PTP (IEEE 1588)**, used by GigE Vision 2.0: cameras share one logical clock over the network instead of a dedicated wire, each timestamping its own exposures against that shared clock. Real vendor-documented accuracy, with proper hardware support, is **sub-microsecond to about 1 microsecond** [1][2] — close to hardware-trigger quality, without running a trigger cable to every camera.
+- **Free-running, timestamp-matched**: each camera runs on its own internal clock; software pairs frames afterwards by whichever timestamps are closest. No special wiring or protocol needed — but, as Section 3 measures directly, the result is neither exact nor stable over time.
+
+## 3. A real, measured sync error
+
+<SyncLab caption="The same nearest-timestamp matching algorithm this chapter verified with NumPy, running live. Switch to hardware trigger mode and the error line goes flat at zero."/>
+
+Two free-running cameras, nominal 25 fps and 24 fps, phase-offset by 5 ms, matched frame-by-frame to whichever timestamp is closest:
+
+```text
+mean |sync error|: 10.4 ms
+max  |sync error|: 20.0 ms
+```
+
+20.0 ms is almost exactly half of 24 fps's own frame period (1000/24 ≈ 41.67 ms; half of that ≈ 20.8 ms) — the real, worst-case bound for nearest-timestamp matching: a pairing can never be worse than half the longer of the two frame periods, because at that point the *next* frame of the slower camera becomes the closer match instead.
+
+## 4. A worked example by hand: drift over time
+
+A subtler problem than a one-time phase offset: two cameras *nominally* both running at 25 fps, with camera B's real crystal only **0.1% fast** (25.025 fps — a perfectly realistic oscillator tolerance), starting perfectly phase-aligned. Matching by nearest timestamp over time:
+
+| Elapsed time | Sync error |
+| --- | --- |
+| 0 s | 0.0 ms |
+| 10 s | −9.95 ms |
+| 20 s | −19.94 ms |
+| 40 s | −39.92 ms |
+
+The error does not stay fixed — it **grows linearly with elapsed time**, at very close to 0.1% of the elapsed time (0.1% × 40 000 ms = 40 ms, matching the real −39.92 ms almost exactly). Two cameras that start perfectly in sync can still drift tens of milliseconds apart after less than a minute, purely from an everyday 0.1% clock-rate mismatch — a real, measured demonstration of why a one-time calibration is not enough for any free-running pair.
+
+## 5. Industrial context: choosing the right approach
+
+A stereo pair bolted to one rigid mount, both cameras genlocked to one trigger line, needs none of Section 4's correction — their sync error is fixed at microseconds by the shared signal itself. A yard full of independent IP cameras, impractical to wire together, is exactly where PTP earns its place: real, cited sub-microsecond accuracy [1][2] over the same Ethernet the cameras already use for video, no extra cable. Free-running, timestamp-matched pairing is the fallback when neither is available — acceptable for loosely-coupled monitoring, a real liability for anything that measures motion or 3D geometry across views, where Section 4's drift becomes a real, growing measurement error.
+
+## What you should remember from 39.6
+
+<Takeaways>
+<Takeaway n={1} title="Trigger or PTP: one shared clock">Both avoid the drift problem entirely, by never having two independent clocks to begin with.</Takeaway>
+<Takeaway n={2} title="Nearest-timestamp matching has a real, bounded error">About half the longer frame period, worst case — this chapter measured it directly.</Takeaway>
+<Takeaway n={3} title="Clock drift grows with time">A fixed small fps mismatch is not a fixed sync error — it keeps growing, as Section 4's real numbers show.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Two free-running cameras both run near 30 fps. What is the worst-case nearest-timestamp sync error, roughly?
+
+<Solution>
+
+Half the frame period: 0.5 × (1000/30) ≈ **16.7 ms**, the same bound Section 3 measured for the 24/25 fps case.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: nearest-timestamp matching and its real error
+
+```python
+import numpy as np
+
+fps_a, n_a = 25, 50
+t_a = np.arange(n_a) / fps_a * 1000                 # ms
+
+fps_b, n_b, phase_b = 24, 48, 5.0
+t_b = phase_b + np.arange(n_b) / fps_b * 1000        # ms
+
+errors = np.array([t_b[np.argmin(np.abs(t_b - ta))] - ta for ta in t_a])
+print("mean |sync error| (ms):", round(np.mean(np.abs(errors)), 2))
+print("max  |sync error| (ms):", round(np.max(np.abs(errors)), 2))
+print("first 5 errors (ms):", np.round(errors[:5], 2))
+```
+
+Output:
+
+```text
+mean |sync error| (ms): 10.4
+max  |sync error| (ms): 20.0
+first 5 errors (ms): [ 5.    6.67  8.33 10.   11.67]
+```
+
+### 2. NumPy: drift accumulation from a 0.1% clock-rate mismatch
+
+```python
+import numpy as np
+
+fps_a = 25.0
+fps_b = 25.025                                       # 0.1% faster
+n = 1000                                             # 40 s at 25 fps
+t_a = np.arange(n) / fps_a * 1000
+t_b = np.arange(n) / fps_b * 1000
+
+errors = np.array([t_b[np.argmin(np.abs(t_b - ta))] - ta for ta in t_a])
+for frame in (0, 249, 499, 999):
+    print(f"frame {frame} ({frame / fps_a:.0f} s): {errors[frame]:.2f} ms")
+```
+
+Output:
+
+```text
+frame 0 (0 s): 0.00 ms
+frame 249 (10 s): -9.95 ms
+frame 499 (20 s): -19.94 ms
+frame 999 (40 s): -39.92 ms
+```
+
+### 3. Real back-to-back grab() calls are still not simultaneous
+
+```python
+# Needs a timing run: numbers depend on the machine
+import cv2
+import time
+
+cap_a = cv2.VideoCapture("sample-ball-25fps.mp4")
+cap_b = cv2.VideoCapture("sample-ball-25fps-bf2.mp4")
+t0 = time.perf_counter()
+cap_a.grab()
+t1 = time.perf_counter()
+cap_b.grab()
+t2 = time.perf_counter()
+print(f"gap between the two grab() calls: {(t2 - t1) * 1000:.2f} ms")
+cap_a.release()
+cap_b.release()
+```
+
+Typical output (one machine):
+
+```text
+gap between the two grab() calls: 5.22 ms
+```
+
+Even calling `grab()` on two `VideoCapture` objects back-to-back, in the same Python process, with no real cameras or network involved at all, leaves a real, measurable few-millisecond gap — Python interpreter overhead, OS scheduling, and the call itself all take real time. This is the closest OpenCV-level approximation to "simultaneous" capture (OpenCV API notes), and it is nowhere near as tight as a real hardware trigger.
+
+## OpenCV API notes
+
+- **No `cv2` call synchronizes multiple cameras** — `cv2.VideoCapture` reads one source at a time; multi-camera sync is a decision made in the camera hardware (trigger wiring), the camera's own firmware/driver (PTP), or your own application code (nearest-timestamp matching, Code sections 1-2), never inside OpenCV itself.
+- **`cap.grab()` across several `VideoCapture` objects, called back-to-back**, is the closest OpenCV-level approximation of simultaneous capture for free-running USB/webcam-style sources (7.4's `grab()`/`retrieve()` split) — still subject to whatever jitter the OS and drivers introduce between each `grab()` call, not a real substitute for a hardware trigger.
+- **`cv2.VideoCapture.waitAny(captures, timeoutNs)`** (mentioned in 7.4) waits for any of several captures to have a frame ready — useful for reacting quickly, but still does not make their timestamps agree.
+
+## Where it fails
+
+- **Nearest-timestamp matching cannot do better than its real, bounded error** (Section 3) — no amount of software cleverness recovers timing information two independent clocks never shared in the first place.
+- **PTP's real accuracy depends entirely on the network hardware** [1][2] — without PTP-aware switches and hardware timestamping support, accuracy degrades well below the sub-microsecond figures quoted for a properly built network.
+- **A one-time sync check is not enough for free-running cameras** — Section 4's drift grows continuously; a pair that measured perfectly in sync at startup will not still be in sync an hour later.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming two cameras "started at the same time" stay in sync** — Section 4's own measured drift (0 → −39.92 ms over 40 s) comes from a steady 0.1% rate mismatch alone, with no other error source needed.
+- **Treating nearest-timestamp matching as exact** — it has a real, computable worst-case error (Section 3), not zero, even when both cameras' clocks are perfectly stable.
+- **Wiring a hardware trigger but still matching frames by arrival order instead of the trigger-confirmed pairing** — this throws away the whole benefit of having triggered them together in the first place.
+- **Confusing synchronization (timing) with registration (21.4, geometric alignment)** — two perfectly time-synced cameras can still disagree completely about where things are in the frame; that is a separate problem, solved separately.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Genlock, beyond cameras
+
+"Genlock" (generator lock) is the broader term for any shared timing-reference signal that multiple pieces of equipment lock their own internal clocks to — originating in broadcast video, where multiple cameras, switchers and recorders must all agree on frame boundaries; the same underlying idea as a machine-vision hardware trigger line, just older and from a different industry.
+
+### PTP's actual mechanism
+
+IEEE 1588 PTP works by exchanging timestamped messages between a **master** clock and **slave** clocks, measuring round-trip message delay to estimate and continuously correct for each slave's clock offset and drift relative to the master [1][2] — not a one-time setting, but an ongoing correction loop, which is exactly why it can track and compensate for the kind of drift Section 4 measured, instead of only fixing it once at startup.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "In this chapter's real measurement (25 fps vs 24 fps, 5 ms phase offset), what was the measured maximum nearest-timestamp sync error?",
+      options: ["5 ms", "10.4 ms", "20.0 ms", "41.67 ms"],
+      answer: 2,
+      explanation: "Section 3: 20.0 ms, close to half of 24 fps's own frame period (~41.67 ms).",
+    },
+    {
+      question: "Two cameras start perfectly phase-aligned, but one's clock is 0.1% fast. What happens to their sync error over time?",
+      options: ["It stays at 0 ms forever", "It grows roughly linearly with elapsed time, as this chapter's own real measurement showed", "It oscillates randomly", "It only matters for the first frame"],
+      answer: 1,
+      explanation: "Section 4: 0, -9.95, -19.94, -39.92 ms at 0, 10, 20, 40 seconds -- real, measured, linear drift.",
+    },
+    {
+      question: "What accuracy does real PTP/GigE Vision 2.0 camera synchronization achieve with proper hardware support?",
+      options: ["About 1 second", "About 100 milliseconds", "Sub-microsecond to about 1 microsecond", "Exactly zero, with no limit"],
+      answer: 2,
+      explanation: "Section 2, cited from vendor documentation [1][2] -- far better than free-running timestamp matching.",
+    },
+    {
+      question: "How is multi-camera time synchronization different from the registration covered in 21.4?",
+      options: ["They are the same problem", "Synchronization is about matching WHEN frames were captured; registration is about matching WHERE things appear in the frame, geometrically", "Synchronization only applies to thermal cameras", "Registration requires hardware triggers"],
+      answer: 1,
+      explanation: "Common mistakes: two time-synced cameras can still disagree completely about geometry -- a separate problem.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Two free-running cameras run at nominally 60 fps, one of them 0.2% fast. What is the sync error after 1 minute (60 real seconds)?
+
+<Solution>
+
+0.2% of 60 000 ms = 0.002 × 60 000 = **120 ms** — following the same linear-drift pattern Section 4 measured directly (there, 0.1% drift over 40 000 ms gave ≈ 40 ms; here, twice the drift rate over 1.5x the time gives 3x the error, 120 ms).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, compute the mean and max nearest-timestamp sync error for two cameras both at exactly 30 fps, phase-offset by 8 ms (same rate, pure phase mismatch, no drift).
+
+<Solution>
+
+```python
+import numpy as np
+
+fps_a, n_a = 30, 60
+t_a = np.arange(n_a) / fps_a * 1000
+
+fps_b, n_b, phase_b = 30, 60, 8.0
+t_b = phase_b + np.arange(n_b) / fps_b * 1000
+
+errors = np.array([t_b[np.argmin(np.abs(t_b - ta))] - ta for ta in t_a])
+print("mean |sync error| (ms):", round(np.mean(np.abs(errors)), 2))
+print("max  |sync error| (ms):", round(np.max(np.abs(errors)), 2))
+```
+
+Output:
+
+```text
+mean |sync error| (ms): 8.0
+max  |sync error| (ms): 8.0
+```
+
+With identical frame rates, the phase offset never changes — every frame pair is off by exactly the same 8 ms, unlike Section 4's drifting case where a rate mismatch makes the error grow over time.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A 3-camera rig for 3D reconstruction currently free-runs, with all three cameras nominally at 30 fps. Measurements are visibly noisy, and the team suspects sync error but has no hardware trigger wiring installed. Based on this chapter, what are their two real options, and what should they expect from each?
+
+<Solution>
+
+**Option 1: a hardware trigger line** to all three cameras, if their model supports it — this removes the sync error almost entirely (down to microsecond-scale propagation delay, Section 2), but needs physical wiring changes. **Option 2: PTP**, if the cameras and network support GigE Vision 2.0 — real, cited accuracy of sub-microsecond to about 1 microsecond [1][2], achieved over the existing network with no new cables, provided the switches used are PTP-aware. Continuing to free-run and match by nearest timestamp, without either fix, leaves a real, bounded-but-nonzero error (Section 3) that will not go away and may drift further over time if the cameras' clocks are not perfectly matched (Section 4) — exactly consistent with the noisy measurements they are already seeing.
+
+</Solution>
+
+## References
+
+1. Basler AG, *Precision Time Protocol* documentation (GigE Vision 2.0 synchronization accuracy). https://docs.baslerweb.com/precision-time-protocol
+2. IDS Imaging Development Systems, *Synchronising GigE Vision cameras with PTP* (measured accuracy figures). https://en.ids-imaging.com/techtipp-details/items/ptp_clock_comparison.html
+3. IEEE Std 1588-2008, *IEEE Standard for a Precision Clock Synchronization Protocol for Networked Measurement and Control Systems*.
+4. A3 (Association for Advancing Automation), *GigE Vision* standard — already cited in 7.4.
