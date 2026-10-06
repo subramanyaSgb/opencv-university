@@ -1307,6 +1307,8 @@ button.nl-cell { cursor: pointer; }
 .gl-bad { background: #ffd7d5; } .gl-bad .gl-bar { background: #cf222e; }
 .gl-need { background: #cfe3ff; outline: 2px solid var(--accent); outline-offset: -2px; }
 .gl-pick { box-shadow: 0 0 0 2px var(--fg); }
+.gl-lost { outline: 2px dashed #cf222e; outline-offset: -2px; }
+.gl-lost .gl-t { color: #cf222e; }
 .gl-legend { font-size: 0.8rem; color: var(--fg-soft); display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; align-items: center; }
 .gl-key { display: inline-block; min-width: 1.2rem; text-align: center; color: #fff; border-radius: 3px; font: 700 0.7rem var(--mono); padding: 0.05rem 0.25rem; }
 @media (max-width: 600px) { .gl-strip { grid-template-columns: repeat(18, 1fr); height: 10.5rem; } }

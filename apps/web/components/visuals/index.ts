@@ -164,3 +164,4 @@ export { CharSegLab } from "./CharSegLab";
 export { OcrEngineLab } from "./OcrEngineLab";
 export { QrLab } from "./QrLab";
 export { FpsLab } from "./FpsLab";
+export { RtspLab } from "./RtspLab";

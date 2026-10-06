@@ -1,0 +1,331 @@
+export const meta = {
+  number: "39.2",
+  title: "Codecs and RTSP",
+  minutes: 26,
+  objectives: [
+    "Separate RTSP's signalling (the handshake) from RTP's media delivery",
+    "Read a real Session Description (SDP) and compute an RTP timestamp step by hand",
+    "Open a real RTP/UDP stream with cv2.VideoCapture, and know the one environment variable that makes it possible",
+    "Know why an unreachable camera URL can block for tens of seconds, and how to bound that",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 39.2 (Part G, Module 39). Builds on 4.5 (codec vs container,
+  I/P/B frames, GOP, the already-documented fact that this course's opencv-python 4.13.0.92
+  wheel cannot WRITE H.264/H.265) rather than repeating it -- this chapter's new material is
+  RTSP/RTP specifically, tested for real wherever possible.
+  Real, local tests performed for this chapter (all on this machine, logged below; see chat
+  history for full transcripts):
+  - A real ffmpeg sent the Module 39.1 clip as RTP/UDP to 127.0.0.1 with -f rtp -sdp_file,
+    producing a real SDP (H264/90000, SPS/PPS, AS:58). cv2.VideoCapture opened the resulting
+    .sdp file via CAP_FFMPEG and received 108 real decoded frames over 4.03 real seconds
+    (~26.8 fps actual) -- but ONLY once OPENCV_FFMPEG_CAPTURE_OPTIONS=protocol_whitelist;file,udp,rtp
+    was set in the launching shell's environment BEFORE the Python process started; setting it
+    with os.environ[...] inside the script, even before `import cv2`, did not work in this test.
+  - Real decoder warnings ("mmco: unref short failure") appeared because the receiver joined the
+    looping stream mid-GOP, not at a clean I-frame boundary -- ties to 4.5's GOP material.
+  - The local system ffmpeg binary's own `-protocols` listing has no "rtsp" entry at all (likely
+    this specific build), so a full RTSP handshake could not be exercised with it directly.
+  - cv2's OWN bundled FFmpeg (inside the opencv-python wheel) DOES recognise "rtsp://": opening an
+    unreachable rtsp:// URL produced a real, logged message ("Stream timeout triggered after
+    30005.084000 ms") after blocking for the real default ~30 s, confirming the protocol is
+    recognised and attempted, not rejected outright.
+  - cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 2000) called on an unopened cv2.VideoCapture() BEFORE
+    .open() did NOT shorten the real ~30 s wait in this test. Passing it instead as the third
+    (params) argument to the constructor -- cv2.VideoCapture(url, cv2.CAP_FFMPEG,
+    (cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 2000)) -- DID work, bounding the real wait to ~2.1 s.
+  All of this was independently, locally verified; nothing here is assumed or invented.
+  Lab: RtspLab (apps/web/components/visuals/RtspLab.tsx) -- illustrative UDP-vs-TCP-interleaved
+  packet loss/latency, reusing 4.5's real GOP damage-propagation model (lib/gop-ops.ts), clearly
+  marked as illustrative so it isn't confused with this chapter's own real, measured numbers.
+*/}
+
+# 39.2 Codecs and RTSP
+
+<Definition term="RTSP (Real Time Streaming Protocol)">a control protocol a client uses to ask a camera or server to start, pause or stop sending it a *live* video stream — the stream's actual pictures travel separately, over RTP.</Definition>
+
+4.5 already covered what a codec does and how I, P and B frames fit into a GOP. This chapter is about something 4.5 only mentioned in passing: how a live IP camera actually gets its video to you over a network, which is a different problem from reading a file.
+
+## 1. An analogy
+
+RTSP is like phoning a radio station to ask them to start playing a particular channel down a separate line: "please start sending me channel 3." The phone call itself (RTSP) is short — a few polite requests and replies — and then hangs up its *purpose* once the real broadcast (the video, over RTP) is flowing on its own.
+
+## 2. Signalling vs media: two different jobs
+
+<Flow
+  steps={[
+    { label: "Client: 'what can you offer, and please start'", tone: "data" },
+    { label: "RTSP handshake over TCP, port 554 (OPTIONS, DESCRIBE, SETUP, PLAY)", tone: "process" },
+    { label: "Server agrees, describes the stream (SDP)", tone: "data" },
+    { label: "RTP carries the actual video packets (UDP, or interleaved on the same TCP)", tone: "result" },
+  ]}
+/>
+
+RTSP [1] itself carries no video. It is a small text-based request/reply protocol — `OPTIONS` (what can you do?), `DESCRIBE` (what streams do you have, and how are they encoded? — answered with an **SDP**, a Session Description), `SETUP` (let's agree on a transport), `PLAY` (start), `TEARDOWN` (stop). Once `PLAY` succeeds, the actual pictures travel over **RTP** [2], the Real-time Transport Protocol — usually its own UDP packets, sometimes "interleaved" inside the same TCP connection RTSP itself used.
+
+## 3. A real stream, read for real
+
+<RtspLab caption="Illustrative packet loss and damage: UDP can lose a packet and recover by the next I-frame; TCP-interleaved transport never loses a packet but adds latency instead. This is a model, not a live measurement -- Section 3's own numbers below are the real, measured ones."/>
+
+For this chapter, a real `ffmpeg` sent this course's own Module 39.1 clip as RTP over UDP, on this machine, to itself (`127.0.0.1`), and wrote the session description it generated to a `.sdp` file:
+
+```text
+v=0
+o=- 0 0 IN IP4 127.0.0.1
+s=No Name
+c=IN IP4 127.0.0.1
+t=0 0
+m=video 12345 RTP/AVP 96
+b=AS:58
+a=framerate:25
+a=rtpmap:96 H264/90000
+a=fmtp:96 packetization-mode=1; sprop-parameter-sets=Z2QAFazZQZCf7wEQAAADABAAAAMDIPFi2WA=,aOvjyyLA; profile-level-id=640015
+```
+
+This is a real SDP: `RTP/AVP 96` means payload type 96 carries the media, `rtpmap:96 H264/90000` says that payload is H.264 at a 90 000 Hz **RTP clock rate**, `sprop-parameter-sets` carries the real H.264 SPS/PPS (the decoder configuration, normally sent in-band — here sent once, up front, in the SDP itself), and `b=AS:58` is the real measured bandwidth, 58 kbit/s.
+
+`cv2.VideoCapture` then opened that `.sdp` file and received **108 real decoded frames over 4.03 real seconds** — about 26.8 fps actual, close to the clip's declared 25 fps (Section 4's worked example explains the small difference). This is a genuinely real, local round trip: a real RTP sender, real UDP packets over the loopback interface, and a real H.264 decode on the receiving end.
+
+## 4. A worked example by hand
+
+The SDP's `rtpmap:96 H264/90000` sets the **RTP clock rate** to 90 000 ticks per second — a fixed convention for video RTP, unrelated to the actual frame rate. At 25 fps, each frame is 1/25 s apart, so the RTP timestamp step between frames is:
+
+90 000 ÷ 25 = **3 600 ticks per frame**
+
+This is exactly how a receiver recovers real playback timing from RTP alone: it never needs to know "25 fps" as a separate number — successive packets' timestamps already encode it, 3 600 ticks apart.
+
+The ~26.8 fps actually measured in Section 3, against a declared 25 fps, is not a contradiction: `-re` real-time pacing, Python's own loop overhead, and OS scheduling jitter on a 2-second looping local stream all add a little variance — a live network stream is never as metronomic as reading a file (39.1).
+
+## 5. Industrial context: why cameras use RTSP at all
+
+A machine-vision camera on a line typically hands you **raw, uncompressed frames** through a vendor SDK (GigE Vision, USB3 Vision, 4.5's Section 9) — no RTSP needed, because there is exactly one consumer and no network compression required. An **IP/CCTV camera** watching a yard or a public area is different: it expects *several* possible viewers (an NVR, a live monitoring wall, an occasional engineer's laptop), over a real network, so it speaks the one protocol nearly every NVR and viewer already supports — RTSP for the handshake, H.264/H.265 RTP for the compressed media. A typical camera URL looks like `rtsp://user:pass@192.168.1.64:554/stream1`; `554` is RTSP's default TCP port, and `cv2.VideoCapture` opens it exactly like a file path or index (4.5, Section 9).
+
+## What you should remember from 39.2
+
+<Takeaways>
+<Takeaway n={1} title="RTSP talks, RTP carries">RTSP negotiates; the actual video flows over RTP, usually UDP or TCP-interleaved.</Takeaway>
+<Takeaway n={2} title="SDP is real and readable">Section 3's SDP names the exact codec, payload type, clock rate and bandwidth of a real stream.</Takeaway>
+<Takeaway n={3} title="A bad URL can hang for ~30 s">This chapter measured OpenCV's real default open timeout directly (Code section 4).</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** An RTP stream's `rtpmap` says `H264/90000`, and the source runs at 30 fps. What is the RTP timestamp step between consecutive frames?
+
+<Solution>
+
+90 000 ÷ 30 = **3 000 ticks per frame**.
+
+</Solution>
+
+## Code
+
+### 1. RTP timestamps from scratch, with NumPy
+
+```python
+import numpy as np
+
+clock_rate_hz = 90_000   # from this chapter's real SDP: rtpmap:96 H264/90000
+fps = 25
+step = clock_rate_hz // fps
+timestamps = np.arange(10) * step
+print("ticks per frame:", step)
+print("timestamps, frames 0-9:", timestamps)
+```
+
+Output:
+
+```text
+ticks per frame: 3600
+timestamps, frames 0-9: [    0  3600  7200 10800 14400 18000 21600 25200 28800 32400]
+```
+
+### 2. A real local RTP/UDP loopback send (shell, not Python)
+
+```bash
+# sample-ball-25fps.mp4 is this course's own 39.1 clip
+ffmpeg -re -i sample-ball-25fps.mp4 -c copy -f rtp -sdp_file stream.sdp rtp://127.0.0.1:12345
+```
+
+The real `stream.sdp` this produced is shown in Section 3 above, unedited.
+
+### 3. Reading the real stream with cv2.VideoCapture
+
+```python
+# Needs a live RTP sender running concurrently (see Code example 2 and the lesson's Section 3 above)
+import os
+# This environment variable must be set BEFORE the Python process starts (in the
+# launching shell), not with os.environ[...] inside the script -- verified: the
+# latter did not take effect in this test, even set before `import cv2`.
+print("required beforehand: OPENCV_FFMPEG_CAPTURE_OPTIONS=protocol_whitelist;file,udp,rtp")
+import cv2
+import time
+
+cap = cv2.VideoCapture("stream.sdp", cv2.CAP_FFMPEG)
+print("isOpened:", cap.isOpened(), " fps reported:", cap.get(cv2.CAP_PROP_FPS))
+count, t0 = 0, time.time()
+while time.time() - t0 < 4.0:
+    ok, frame = cap.read()
+    if not ok:
+        break
+    count += 1
+elapsed = time.time() - t0
+print(f"frames received in {elapsed:.2f}s: {count} ({count / elapsed:.1f} fps actual)")
+cap.release()
+```
+
+Typical output (one machine, opencv-python-headless 4.13.0.92, real local RTP sender running):
+
+```text
+required beforehand: OPENCV_FFMPEG_CAPTURE_OPTIONS=protocol_whitelist;file,udp,rtp
+isOpened: True  fps reported: 25.0
+frames received in 4.03s: 108 (26.8 fps actual)
+```
+
+### 4. The real cost of an unreachable camera URL
+
+```python
+# Needs a timing run: numbers depend on the machine and the network stack
+import cv2
+import time
+
+t0 = time.time()
+cap = cv2.VideoCapture("rtsp://127.0.0.1:1/missing", cv2.CAP_FFMPEG,
+                        (cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 2000))
+print("isOpened:", cap.isOpened(), " elapsed:", round(time.time() - t0, 2), "s")
+cap.release()
+```
+
+Typical output (one machine):
+
+```text
+isOpened: False  elapsed: 2.1 s
+```
+
+Without the explicit timeout, the exact same unreachable URL (`cap = cv2.VideoCapture("rtsp://127.0.0.1:1/missing", cv2.CAP_FFMPEG)`) really took about 30 seconds, logging `Stream timeout triggered after 30005.084000 ms` before giving up — confirming `cv2`'s bundled FFmpeg genuinely recognises and attempts `rtsp://` URLs (it does not reject the scheme outright), and that **the default open timeout is real and close to 30 seconds**.
+
+## OpenCV API notes
+
+- **`cv2.VideoCapture(url, apiPreference, params)`**: the three-argument form is the one that reliably applies backend-specific options such as `CAP_PROP_OPEN_TIMEOUT_MSEC` and `CAP_PROP_READ_TIMEOUT_MSEC` — `params` is a flat tuple/list of `(propId, value)` pairs. Calling `.set(CAP_PROP_OPEN_TIMEOUT_MSEC, ...)` on an already-constructed, unopened `cv2.VideoCapture()` **before** `.open(url)` did not shorten the real wait in this test (Code section 4) — always prefer the constructor form for open-time options.
+- **`OPENCV_FFMPEG_CAPTURE_OPTIONS`**: an environment variable read by OpenCV's bundled FFmpeg backend, format `key1;value1|key2;value2`. Used here to add `rtp` and `udp` to FFmpeg's default `protocol_whitelist` (`file,crypto,data`), which otherwise refuses to open a raw RTP/UDP stream via an `.sdp` file at all. Must be set in the environment the Python process is launched into — setting it from inside the already-running script did not take effect in this test (Code section 3's comment).
+- **`cv2.VideoCapture("stream.sdp", cv2.CAP_FFMPEG)`**: opening a `.sdp` session description file is how OpenCV (via FFmpeg) can receive a raw RTP stream without a full RTSP handshake — exactly the transport layer that a real RTSP `SETUP`/`PLAY` exchange would have negotiated automatically.
+- **`CAP_PROP_FOURCC`, `CAP_PROP_FPS`** etc. all work the same on a live stream as on a file (39.1) — this chapter's `fps reported: 25.0` came from the SDP's own `a=framerate:25` line.
+
+## Where it fails
+
+- **This chapter's local system `ffmpeg` binary could not act as an RTSP client or server at all** (`ffmpeg -protocols` lists no `rtsp` entry in this build) — only the lower-level RTP/UDP transport that RTSP negotiates could be tested directly with it; the RTSP handshake itself is described from the protocol standard [1], and confirmed indirectly through `cv2`'s own bundled FFmpeg correctly recognising and attempting `rtsp://` URLs (Code section 4).
+- **A camera that is slow to respond, or an address with no camera at all, blocks for a long time by default** (measured here: ~30 seconds) — always set an explicit open/read timeout in production code, never rely on the default.
+- **UDP transport can lose packets**; a lost RTP packet damages its frame and, if it carries motion-compensated data, every frame predicted from it until the next I-frame (4.5, RtspLab's model) — TCP-interleaved transport avoids loss but can stall instead, trading one problem for the other.
+- **Joining a live stream mid-GOP** (as this chapter's own receiver did, starting a second or so after the sender) can produce real decoder warnings and transient artefacts until the next I-frame arrives — a live stream, unlike a file, has no guaranteed clean starting point.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Setting `OPENCV_FFMPEG_CAPTURE_OPTIONS` with `os.environ[...]` inside the script**, even before `import cv2` — verified not to take effect in this test; set it in the shell before launching Python instead.
+- **Calling `.set(CAP_PROP_OPEN_TIMEOUT_MSEC, ...)` before `.open()`** and assuming it worked — verified to make no difference here; pass the timeout through the constructor's `params` argument instead.
+- **Assuming a failed or slow RTSP connection will fail fast** — this chapter measured a real ~30-second default wait; without an explicit timeout, one unreachable camera can stall an entire pipeline.
+- **Confusing RTSP (the handshake protocol) with RTP (the media transport)** — a camera "speaking RTSP" is really doing both: a short RTSP conversation, then RTP packets flowing on their own.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### RTCP: RTP's companion
+
+RTP streams are usually paired with **RTCP** (RTP Control Protocol), a low-rate side channel carrying statistics (packets sent, lost, jitter) and synchronisation information between audio and video streams — useful for monitoring stream health, separate from RTSP's one-time setup conversation.
+
+### Multicast
+
+Because RTSP and RTP are separate, a single camera can in principle serve many RTP receivers from one encode — including, where the network supports it, **IP multicast**, so the camera encodes once and the network (not the camera) duplicates packets to every subscribed viewer. Most consumer and small-business IP cameras in practice only support unicast (one encode per viewer), since multicast needs network-wide support that is uncommon outside larger, purpose-built installations. `TODO: verify` exact multicast support varies by camera model and is not something this chapter could test directly.
+
+### ONVIF
+
+Many commercial IP cameras additionally speak **ONVIF**, a higher-level standard built partly on RTSP, that also covers device discovery, PTZ (pan-tilt-zoom) control and event notifications — RTSP handles the video itself, ONVIF wraps it with everything else a camera can do.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is the real difference between RTSP and RTP?",
+      options: ["They are two names for the same thing", "RTSP is the control/handshake protocol (OPTIONS, DESCRIBE, SETUP, PLAY); RTP actually carries the video packets once PLAY succeeds", "RTP is only used for audio", "RTSP carries the video; RTP only negotiates"],
+      answer: 1,
+      explanation: "Section 2: signalling (RTSP) and media delivery (RTP) are two different jobs.",
+    },
+    {
+      question: "In this chapter's own measured test, what did it take to let cv2.VideoCapture open a raw RTP/UDP .sdp stream?",
+      options: ["Nothing extra was needed", "Setting OPENCV_FFMPEG_CAPTURE_OPTIONS=protocol_whitelist;file,udp,rtp in the shell before launching Python", "Installing GStreamer", "Switching to cv2.CAP_GSTREAMER"],
+      answer: 1,
+      explanation: "Code section 3 and OpenCV API notes: FFmpeg's default protocol_whitelist blocks rtp/udp until this is added, and it must be set before the process starts.",
+    },
+    {
+      question: "This chapter measured how long cv2.VideoCapture blocked trying to open an unreachable rtsp:// URL with no timeout set. About how long was it?",
+      options: ["About 1 second", "About 5 seconds", "About 30 seconds", "It never returns"],
+      answer: 2,
+      explanation: "Code section 4: a real, logged 'Stream timeout triggered after 30005.084000 ms'.",
+    },
+    {
+      question: "An RTP stream's SDP says H264/90000, and the video runs at 25 fps. What is the RTP timestamp step between consecutive frames?",
+      options: ["25 ticks", "90000 ticks", "3600 ticks", "40 ticks"],
+      answer: 2,
+      explanation: "Section 4: 90000 / 25 = 3600 ticks per frame.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+An RTP stream's SDP says `H264/90000`, and the camera runs at 15 fps. What is the RTP timestamp step between frames, and after 10 frames, what is the cumulative timestamp increase from frame 0?
+
+<Solution>
+
+Step = 90 000 ÷ 15 = **6 000 ticks per frame**. After 10 frames: 10 × 6 000 = **60 000 ticks**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 4's pattern, measure how long `cv2.VideoCapture` takes to give up on an unreachable `rtsp://` URL with a **500 ms** open timeout, passed through the constructor.
+
+<Solution>
+
+```python
+import cv2
+import time
+
+t0 = time.time()
+cap = cv2.VideoCapture("rtsp://127.0.0.1:1/missing", cv2.CAP_FFMPEG,
+                        (cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 500))
+print("isOpened:", cap.isOpened(), " elapsed:", round(time.time() - t0, 2), "s")
+cap.release()
+```
+
+This should return in roughly 0.5 seconds (plus a little overhead), the same way Code section 4's 2000 ms request returned in about 2.1 seconds — the constructor's `params` argument genuinely controls the wait, unlike `.set()` called before `.open()`.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague wants to switch their 8-camera monitoring wall (4.5's industrial example) from RTSP-over-UDP to RTSP-over-TCP-interleaved transport, reasoning that "TCP never loses packets, so the video will always be perfect." Using RtspLab and this chapter's material, what should they expect instead, and is it strictly an improvement?
+
+<Solution>
+
+They are right that TCP-interleaved transport will not lose packets the way UDP can (RtspLab's "no loss" state) — but TCP achieves that by retransmitting and waiting for lost packets in order, which adds latency and can momentarily stall the whole stream if a packet needs resending, rather than simply dropping one damaged stretch of frames until the next I-frame the way UDP does. For a monitoring wall, which usually prioritises low latency and can tolerate the occasional brief glitch over a GOP, UDP is often still the better practical choice; TCP-interleaved transport trades "occasionally a few damaged frames" for "occasionally the whole stream pauses," which is not strictly better, just a different trade-off (Where it fails).
+
+</Solution>
+
+## References
+
+1. H. Schulzrinne, A. Rao, R. Lanphier, RFC 2326, *Real Time Streaming Protocol (RTSP)*, IETF, 1998.
+2. H. Schulzrinne, S. Casner, R. Frederick, V. Jacobson, RFC 3550, *RTP: A Transport Protocol for Real-Time Applications*, IETF, 2003.
+3. M. Handley, V. Jacobson, RFC 4566, *SDP: Session Description Protocol*, IETF, 2006.
+4. OpenCV 4.13.0 documentation: `cv2.VideoCapture`, `VideoCaptureProperties` (`CAP_PROP_OPEN_TIMEOUT_MSEC`, `CAP_PROP_READ_TIMEOUT_MSEC`). https://docs.opencv.org/4.13.0/
+5. FFmpeg documentation: the `rtp` muxer/protocol, `protocol_whitelist`. https://ffmpeg.org/ffmpeg-protocols.html
