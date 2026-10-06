@@ -1,0 +1,272 @@
+export const meta = {
+  number: "40.7",
+  title: "Counting and line crossing",
+  minutes: 20,
+  objectives: [
+    "Tell counting presence apart from counting events, with a real measured consequence",
+    "Measure, for real, how much noise makes a naive crossing counter overcount",
+    "Fix it with hysteresis, and confirm the real corrected count",
+    "Know how this closes the loop on everything the rest of Module 40 built",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 40.7 (Part G, Module 40; closes the module). First dedicated
+  counting/line-crossing chapter (checked: no existing content; Module 25's LabelLab counting
+  mode is static-image particle counting, a different problem entirely).
+  Real, verified numbers (scripts/gen_count_data.py): a synthetic object crossing a counting
+  line exactly once, real measurement noise (std 3 px) added:
+  - Presence counting (count every frame the measured position is past the line): 29
+    (true crossings: 1) -- the object simply spends 29 frames on the far side.
+  - Naive event counting (count every time the noisy measurement's side of the line flips,
+    no hysteresis): 5 (true: 1) -- noise near the line causes repeated false flips.
+  - Hysteresis event counting (require moving 5 px past the line before re-arming): 1
+    (true: 1) -- the real fix, confirmed exactly.
+  Lab: CountLab (apps/web/components/visuals/CountLab.tsx) -- the real precomputed running
+  counts for all three strategies, frame by frame, on the identical real trajectory.
+*/}
+
+# 40.7 Counting and line crossing
+
+<Definition term="Line-crossing counting">counting real crossing events — an object actually passing a defined line, once per real pass — not counting how many frames an object happens to be on one particular side of that line.</Definition>
+
+This chapter is where detection (40.1, 40.2), tracking (40.3–40.6) and a genuinely simple-looking final question — "how many went past?" — meet. Measured directly, the simplest possible approach to that question is wrong by a very large factor, and the fix needs exactly the tracking ideas the rest of this module built.
+
+## 1. An analogy
+
+A turnstile that clicks once per person walking through, versus a sensor that reports "someone is standing in the gate" every single second they take to walk through. The second sensor's own raw count is not "how many people" at all — it is "how many seconds of occupancy," a completely different, much larger number that happens to look like a count if you don't think about it.
+
+## 2. Presence, event, and the event's own noise
+
+<Flow
+  steps={[
+    { label: "A tracked position, every frame (40.3-40.6)", tone: "data" },
+    { label: "WRONG: count every frame past the line (presence)", tone: "process" },
+    { label: "BETTER: count every time the side changes (an event)", tone: "process" },
+    { label: "CORRECT: only count a side change past a hysteresis margin", tone: "result" },
+  ]}
+/>
+
+Three ways to turn the same tracked position into a count, tested on identical real data in Section 3: counting *presence* (is the object currently past the line?) confuses "how long" with "how many"; counting every *event* (a raw side-flip) is closer, but noise right at the line boundary can flip the side back and forth several times for a single real pass; counting an event only once the position has moved a real margin past the line (**hysteresis**) — and not counting again until it has moved back past a margin on the *other* side — is the real, measured fix.
+
+## 3. A real, measured comparison
+
+<CountLab caption="Real counting on the same noisy real trajectory, three ways. Drag to the final frame and compare all three running counts against the true answer, 1."/>
+
+A synthetic object crossing a counting line exactly once, with real measurement noise (std 3 px) added every frame:
+
+| Counting method | Final count | True crossings |
+| --- | --- | --- |
+| Presence (frames past the line) | 29 | 1 |
+| Naive event (any side flip) | 5 | 1 |
+| Hysteresis event (5 px margin) | **1** | 1 |
+
+Presence counting is wrong by nearly 30×, for a reason that has nothing to do with noise — it is simply answering a different question. Naive event counting is wrong by 5×, purely from measurement noise making the position flip sides repeatedly right near the line. Only the hysteresis method gives the real, correct answer.
+
+## 4. Why hysteresis specifically fixes it
+
+A hysteresis margin means the counter must see the position move a real distance (5 px here) past the line before it "arms" the *next* count, and the same real distance past the line on the *other* side before re-arming again. Measurement noise of a few pixels (std 3 px here) can easily flip which exact side of the line a noisy reading falls on, but it would need to grow far larger before it could reliably flip which side of a 5-px-wide dead zone a reading falls on — exactly why the naive method (margin of zero) was so much more sensitive to the identical noise than the hysteresis method was.
+
+## 5. Industrial context: the real system this closes
+
+A production counting station — parts off the end of a conveyor, people through a gate, vehicles past a sensor — needs the real count from Section 3's last row, not the first two. The whole rest of this module feeds into this one number correctly: a real detector (40.1, 40.2) that does not double- or under-detect a single object, a real tracker (40.3–40.6) that keeps that single object's identity and position stable frame to frame, and now a real hysteresis-based event counter that turns that stable position into the one number a shift report actually needs.
+
+## What you should remember from 40.7
+
+<Takeaways>
+<Takeaway n={1} title="Presence is not a count">Counting "currently past the line" measures occupancy, not events — a real, measured ~30x error here.</Takeaway>
+<Takeaway n={2} title="Raw events are noise-sensitive">A zero-margin event counter overcounted by 5x from ordinary measurement noise alone.</Takeaway>
+<Takeaway n={3} title="Hysteresis is the real fix">A real margin, confirmed directly, brought the count back to exactly the true answer.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** An object genuinely crosses a line twice (there and back). With a correctly working hysteresis counter, what should the final count be?
+
+<Solution>
+
+**2** — one event for crossing in the first direction, one more for crossing back, exactly as Section 2's state-machine design (armed again only after moving past the margin on the *other* side) intends.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the three counting methods, from scratch
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(9)
+true_x = np.linspace(60, 140, 60)
+measured_x = true_x + rng.normal(0, 3.0, 60)
+LINE_X, HYSTERESIS = 100.0, 5.0
+
+presence_count = int(np.sum(measured_x > LINE_X))
+
+naive_count = 0
+prev_side = measured_x[0] > LINE_X
+for x in measured_x[1:]:
+    side = x > LINE_X
+    if side != prev_side:
+        naive_count += 1
+    prev_side = side
+
+hyst_count, state = 0, "left" if measured_x[0] < LINE_X else "right"
+for x in measured_x[1:]:
+    if state == "left" and x > LINE_X + HYSTERESIS:
+        hyst_count += 1
+        state = "right"
+    elif state == "right" and x < LINE_X - HYSTERESIS:
+        hyst_count += 1
+        state = "left"
+
+print("presence:", presence_count, " naive event:", naive_count, " hysteresis event:", hyst_count)
+```
+
+Output:
+
+```text
+presence: 29  naive event: 5  hysteresis event: 1
+```
+
+### 2. OpenCV: drawing the counting line for a human operator
+
+```python
+import cv2
+
+canvas = np.full((120, 200, 3), 255, np.uint8)
+cv2.line(canvas, (int(LINE_X / 2), 0), (int(LINE_X / 2), 120), (0, 0, 255), 2)   # scaled to fit the canvas
+cv2.putText(canvas, f"count: {hyst_count}", (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+print("canvas shape:", canvas.shape)
+```
+
+Output:
+
+```text
+canvas shape: (120, 200, 3)
+```
+
+## OpenCV API notes
+
+- **No dedicated `cv2` counting function exists** — a counting line is just a comparison against the tracked position's own coordinate (Code section 1), built on whatever detector/tracker (40.1–40.6) already produced that position.
+- **`cv2.line`/`cv2.circle`** (Module 15) are the natural way to actually draw the counting line and the current tracked position on a frame for a human operator to see the count's own basis, not just a trusted number.
+- **This chapter's hysteresis state machine is plain Python/NumPy logic**, not a `cv2` call — exactly the same "simple, explainable logic on top of a real detector/tracker" pattern as 14.5's threshold-based differencing.
+
+## Where it fails
+
+- **A hysteresis margin that is too small for the real noise level** reduces, but does not eliminate, false repeat counts — the margin must be chosen relative to the real, measured position noise (14.5's own noise-estimation method applies directly here).
+- **A margin that is too large** can fail to register a real, genuine back-and-forth crossing that happens to stay within the dead zone — the same kind of trade-off 40.2's `varThreshold` tuning (Section 4 there) already illustrated for a different parameter.
+- **Multiple objects crossing close together in time** need the tracker's own identity (40.4–40.6) to attribute each crossing to a distinct object; a position-only counter with no identity cannot tell "one object crossed twice" apart from "two different objects each crossed once."
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Counting presence instead of events** — Section 3's own real ~30x discrepancy is not a rare edge case, it is the default, structural result of confusing the two questions.
+- **Using a zero-margin (naive) event counter near real, noisy measurements** — Section 3's real 5x overcount is a direct, measured consequence, not a hypothetical risk.
+- **Choosing a hysteresis margin without reference to the real measurement noise level** — Where it fails: too small does not fix the problem, too large creates a different one.
+- **Counting crossings without any per-object identity** when more than one object can be near the line at once — Where it fails: the count can no longer be trusted to mean "how many distinct objects."
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Debouncing, more generally
+
+Hysteresis-based event counting is a specific case of a much more general pattern called **debouncing** — used anywhere a genuinely noisy or bouncing signal (a mechanical switch's contacts, a sensor right at its threshold) needs to be turned into one clean event instead of several spurious ones. The same core idea (require a real, sustained change before accepting a state transition) shows up identically in electronics and software far beyond computer vision.
+
+### Counting with direction
+
+A real installation often needs separate in/out counts, not just a total — the same hysteresis state machine (Section 2) already tracks *which* transition happened (left-to-right vs right-to-left), so a real system usually keeps two running totals from the same one state machine, rather than building a second, separate counter.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "In this chapter's own real test, how many frames did presence counting report an object past the line, for one true crossing?",
+      options: ["1", "5", "29", "0"],
+      answer: 2,
+      explanation: "Section 3: presence counting measures occupancy (29 frames), a completely different question from counting events.",
+    },
+    {
+      question: "Why did naive event counting (no hysteresis margin) overcount this chapter's real, single crossing?",
+      options: ["It didn't -- it counted correctly", "Real measurement noise near the line flipped which side a reading fell on several times, each flip counted as a separate event", "The object actually crossed 5 times", "Naive counting always overcounts by exactly 5x"],
+      answer: 1,
+      explanation: "Section 4: noise can easily flip a zero-margin side test; a real margin requires a far larger, less likely change to flip.",
+    },
+    {
+      question: "What does a hysteresis margin require before counting the next crossing event?",
+      options: ["Nothing -- any side change counts immediately", "The position must move a real distance past the line, and the same real distance past the other side before re-arming", "A fixed number of frames must pass, regardless of position", "The object must stop moving"],
+      answer: 1,
+      explanation: "Section 2/4: a real, position-based dead zone, not a time-based one.",
+    },
+    {
+      question: "Why can't a position-only counter with no object identity reliably count multiple simultaneous crossings?",
+      options: ["It can -- identity is never needed", "It cannot tell 'one object crossed twice' apart from 'two different objects each crossed once'", "Multiple objects never cross at the same time in practice", "This only matters for colour video"],
+      answer: 1,
+      explanation: "Where it fails: without the tracker's own identity (40.4-40.6), the count's real meaning becomes ambiguous.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A hysteresis counter uses a 4 px margin around a line at x=50. The real position noise has std 2 px. Using this chapter's own reasoning (Section 4), would you expect this margin to be comfortably safe, marginal, or clearly too small?
+
+<Solution>
+
+**Comfortably safe** — a 4 px margin is 2 standard deviations of the real noise; following this chapter's own working example (a 5 px margin against 3 px std noise, roughly 1.67 standard deviations, already proved sufficient in Section 3's real test), a slightly more generous ratio here should be at least as robust.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, rerun the naive (zero-margin) event counter with the noise standard deviation doubled to 6.0, and predict whether the overcount gets better or worse before running it.
+
+<Solution>
+
+```python
+rng2 = np.random.default_rng(9)
+measured_x_more_noise = true_x + rng2.normal(0, 6.0, 60)
+naive_count_2 = 0
+prev_side = measured_x_more_noise[0] > LINE_X
+for x in measured_x_more_noise[1:]:
+    side = x > LINE_X
+    if side != prev_side:
+        naive_count_2 += 1
+    prev_side = side
+print("naive event count, doubled noise:", naive_count_2)
+```
+
+Output:
+
+```text
+naive event count, doubled noise: 11
+```
+
+Worse, as expected — doubling the real noise standard deviation (from 3 to 6 px) makes the measured position flip sides even more often near the line (11 vs the original 5), following directly from Section 4's own explanation of why the naive method is noise-sensitive in the first place.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A line manager asks why the automated people-counter at a doorway reports a much higher count than the known, correct headcount for the shift. Using this chapter, what is the first thing you would check?
+
+<Solution>
+
+Following Section 3's own real finding, the first and most likely real cause is that the counter is using presence or a zero-margin event check rather than a properly hysteresis-tuned event counter — exactly the kind of mistake that produced a real ~5-30x overcount in this chapter's own test, for no reason other than normal measurement noise or simply occupancy time near the line. Checking the counter's actual logic (and, if it does use hysteresis, whether the margin is large enough for the real measurement noise, Exercise 1's reasoning) should come before suspecting the camera, the detector, or the tracker itself.
+
+</Solution>
+
+## References
+
+1. 14.5 Frame differencing (this course) — estimating real measurement noise from footage, reused directly for choosing a real hysteresis margin.
+2. 40.1-40.6 (this course) — the detection and tracking methods whose output this chapter's counting logic is built on top of.
+3. OpenCV 4.13.0 documentation: `cv2.line`, drawing functions used to visualise a counting line in practice. https://docs.opencv.org/4.13.0/

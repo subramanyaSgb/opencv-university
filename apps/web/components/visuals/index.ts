@@ -176,3 +176,4 @@ export { FlowLab } from "./FlowLab";
 export { CamShiftLab } from "./CamShiftLab";
 export { KalmanLab } from "./KalmanLab";
 export { ParticleLab } from "./ParticleLab";
+export { CountLab } from "./CountLab";
