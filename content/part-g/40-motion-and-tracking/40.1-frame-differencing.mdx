@@ -1,0 +1,228 @@
+export const meta = {
+  number: "40.1",
+  title: "Frame differencing",
+  minutes: 18,
+  objectives: [
+    "Turn a frame-differencing motion mask into real, countable blob detections",
+    "Measure, with real numbers, how many detected blobs one real moving object actually produces",
+    "Explain why that number motivates background subtraction, the next chapter",
+    "Know this chapter builds directly on 14.5, not a repeat of it",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 40.1 (Part G, Module 40; opens "Motion and tracking").
+  14.5 (Masks and arithmetic) already covers frame differencing in full depth: two-frame,
+  three-frame, empty-reference and running-average methods, ghosts, the foreground-aperture
+  problem, threshold selection from noise, Toyama/Stauffer-Grimson/Zivkovic citations, and even
+  explicitly says "Better background models ... follow in the video module" (= this module).
+  This chapter does NOT repeat any of that -- it is deliberately short, and picks up exactly
+  where 14.5 left a thread hanging: 14.5 measured motion at the PIXEL level (% of the object
+  found, false pixel counts); this chapter is the first to turn a motion mask into actual
+  countable BLOB detections (cv2.connectedComponentsWithStats, already covered in 25.1 -- API
+  basics not repeated here either), which every tracking method from 40.4 onward needs as its
+  input, and which 40.7 (counting) needs to be correct.
+  Real, verified numbers (scripts/gen_blobcount_data.py): a synthetic two-object video (one
+  light object moving right, one dark object moving left, textured background, real cv2
+  VideoWriter/VideoCapture round trip), two-frame differencing + connectedComponentsWithStats
+  (area >= 20 px, after a 5x5 MORPH_CLOSE): 2 true objects every frame, but 4 detected blobs
+  at frame 5 and frame 20 alike -- each uniform object's motion produces two separate blobs
+  (its leading and trailing edge, exactly 14.5's "ghost"/edge-only finding), so a naive blob
+  count over-counts real objects by about 2x here.
+  Lab: BlobCountLab (apps/web/components/visuals/BlobCountLab.tsx) -- the real precomputed
+  true-object-boxes vs detected-blob-boxes, frame by frame.
+*/}
+
+# 40.1 Frame differencing
+
+<Definition term="Frame differencing">finding change between two frames by subtracting them and thresholding — covered in full in 14.5. This chapter's new question: what happens when you count the resulting blobs as if they were objects?</Definition>
+
+14.5 already showed that two-frame differencing marks mainly a moving uniform object's *edges*, not its whole body, and leaves a "ghost" where the object just was. This module is about tracking real objects across frames — which means the very first real question is: does one moving object produce one detected blob, or more?
+
+## 1. From a motion mask to real detections
+
+<Flow
+  steps={[
+    { label: "Two consecutive frames (14.5)", tone: "data" },
+    { label: "absdiff + threshold: a motion mask", tone: "process" },
+    { label: "connectedComponentsWithStats (25.1): label the mask's blobs", tone: "process" },
+    { label: "Real detections: how many, and where", tone: "result" },
+  ]}
+/>
+
+14.5 measured motion in percent of pixels found. Tracking needs something more concrete: a list of detections — bounding boxes or centroids — one per real object, ideally. `cv2.connectedComponentsWithStats` (25.1) turns a binary mask into exactly that: a label, a bounding box and an area for every separate connected region.
+
+## 2. A real, measured surprise
+
+<BlobCountLab caption="Real cv2.absdiff + connectedComponentsWithStats on a synthetic two-object video. Step through the frames and compare the true object count with the detected blob count."/>
+
+Two real uniform objects — one light, moving right; one dark, moving left — on a textured background, run through a real `cv2.VideoWriter` → `cv2.VideoCapture` round trip, with two-frame differencing and connected-components counting on every frame:
+
+```text
+true objects:    2 (every frame)
+detected blobs:  4 (frame 5, frame 20 -- and nearly every other frame)
+```
+
+**Two real objects produce four detected blobs.** This is exactly 14.5's edge/ghost finding, now at the level that matters for tracking: each uniform object's own motion shows up as *two* separate connected regions (its leading edge and its trailing edge), not one. A naive "count the blobs" approach would report twice the real number of objects.
+
+## 3. Why this matters for the rest of the module
+
+Every tracking method from 40.4 onward (MeanShift/CamShift, Kalman, particle filters) needs *detections* to track — and 40.7's counting needs those detections to correspond to real objects, not edges. Section 2's real 2-for-1 over-count is not a one-off: it is the direct, structural consequence of differencing a *uniform* object against *itself* one frame later, which 14.5 already explained at the pixel level. Fixing it needs a detector that marks the object's whole body, not just where it changed — which is exactly what background subtraction (40.2) does differently.
+
+## What you should remember from 40.1
+
+<Takeaways>
+<Takeaway n={1} title="This is new material, not a repeat">14.5 covers the differencing math in full; this chapter turns its mask into countable detections.</Takeaway>
+<Takeaway n={2} title="One object, two blobs">This chapter's own real test: 2 true objects, 4 detected blobs, every frame.</Takeaway>
+<Takeaway n={3} title="Sets up 40.2">A whole-body detector (background subtraction) is the real fix for this specific over-count.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A uniform moving square produces one leading-edge blob and one trailing-edge blob under two-frame differencing. If a scene has 3 such squares moving independently, roughly how many blobs would a naive connected-components count report?
+
+<Solution>
+
+About **6** (2 per object, following Section 2's own measured pattern) — assuming the edge-blobs of different objects do not overlap or merge into each other.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: predicting the over-count
+
+```python
+import numpy as np
+
+true_objects = 2
+blobs_per_object = 2                     # leading edge + trailing edge, Section 2
+predicted_blobs = true_objects * blobs_per_object
+print("predicted detected blobs:", predicted_blobs)
+```
+
+Output:
+
+```text
+predicted detected blobs: 4
+```
+
+### 2. OpenCV: a real video round trip, differencing, and blob counting
+
+```python
+# Needs the two_obj.mp4 test file generated by this chapter's own setup (see the text)
+import cv2
+
+cap = cv2.VideoCapture("two_obj.mp4")
+prev = None
+detected_counts = []
+while True:
+    ok, frame = cap.read()
+    if not ok:
+        break
+    gray = frame[:, :, 0] if frame.ndim == 3 else frame
+    if prev is not None:
+        mask = (cv2.absdiff(gray, prev) > 25).astype(np.uint8) * 255
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+        n, labels, stats, centroids = cv2.connectedComponentsWithStats(mask)
+        blobs = [s for s in stats[1:] if s[4] >= 20]       # area >= 20 px
+        detected_counts.append(len(blobs))
+    prev = gray
+cap.release()
+print("detected blobs, frames 5 and 20:", detected_counts[4], detected_counts[19])
+```
+
+Typical output (one machine, matching Section 2's real precomputed result):
+
+```text
+detected blobs, frames 5 and 20: 4 4
+```
+
+## OpenCV API notes
+
+- **`cv2.connectedComponentsWithStats(mask)`** (25.1): returns `(n, labels, stats, centroids)`; `stats[i] = [x, y, w, h, area]` for label `i` (label 0 is the background). Filtering by `area` (Code section 2) removes single-pixel noise before counting.
+- **`cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)`**: closes small gaps inside a blob before labelling — without it, a noisy edge can fragment into several tiny components instead of one clean blob (Module 16).
+- **No new `cv2` call is needed for "turn a mask into detections"** — this chapter combines two calls already covered elsewhere (`absdiff`, 14.5; `connectedComponentsWithStats`, 25.1) in a new order, for a new purpose.
+
+## Where it fails
+
+- **The 2-blobs-per-object pattern breaks down further when objects are close together** — two nearby objects' edge-blobs can merge into one connected region, or a single object's own two edges can merge if it is small relative to its own motion per frame, making even "divide by 2" an unreliable correction.
+- **Three-frame differencing (14.5) removes the ghost but can remove the whole uniform object too** — not a free fix for this chapter's over-count, as 14.5 already measured directly (0% found on the same kind of object).
+- **This chapter's fix is diagnostic, not corrective** — it measures and explains the over-count; actually avoiding it needs a different detector (background subtraction, 40.2), not a cleverer way to post-process two-frame differencing's blobs.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Treating "number of connected components" as "number of objects"** without checking, as this chapter's own real test shows a 2x discrepancy for the simplest possible case (two separate uniform objects, no occlusion).
+- **Skipping the area filter** before counting components — a handful of few-pixel noise specks easily doubles or triples a naive blob count on real, noisy footage.
+- **Assuming the over-count is always exactly 2x** — Where it fails: merging and occlusion make the real relationship between blobs and objects scene-dependent, not a fixed ratio.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why background subtraction (next chapter) does not have this problem
+
+Two-frame differencing compares a frame only to its *immediate predecessor*, so a uniform object's unchanged interior always looks identical across that one-frame gap. Background subtraction instead compares each frame to a *model of the empty background* (14.5's "empty reference" and "running average" methods were simple versions of this) — against a background that never contains the object at all, the object's whole body differs from the background, not just its edges, so one real object produces one real foreground blob. 40.2 measures this directly.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "In this chapter's own real test, two true objects produced how many detected blobs with two-frame differencing?",
+      options: ["2", "4", "0", "It varies randomly every frame"],
+      answer: 1,
+      explanation: "Section 2: a real, measured, consistent 4 blobs for 2 real objects.",
+    },
+    {
+      question: "Why does one uniform moving object produce two separate detected blobs under two-frame differencing?",
+      options: ["A software bug in connectedComponentsWithStats", "Its leading edge and trailing edge are the only parts that actually changed between the two frames (14.5)", "The object was moving too fast for the camera", "Two-frame differencing always doubles every count"],
+      answer: 1,
+      explanation: "The object's uniform interior is unchanged frame to frame; only its edges differ.",
+    },
+    {
+      question: "What does this chapter suggest as the real fix for the 2-blobs-per-object over-count?",
+      options: ["Always divide the blob count by 2", "Use three-frame differencing instead", "Use a detector that compares each frame to a background model instead of the previous frame (background subtraction, 40.2)", "Increase the differencing threshold"],
+      answer: 2,
+      explanation: "Go deeper: comparing to an empty background makes the whole object differ, not just its edges.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A scene has 4 separate uniform moving objects, none close enough to merge edge-blobs. Using this chapter's own measured pattern, roughly how many blobs would a naive two-frame-differencing + connected-components count report?
+
+<Solution>
+
+About **8** (2 per object × 4 objects), following the same 2-for-1 pattern Section 2 measured directly for 2 objects → 4 blobs.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, modify the area filter threshold from 20 to 5 pixels, and explain what you would expect to happen to the detected blob count on noisy real footage (not this chapter's clean synthetic test).
+
+<Solution>
+
+```python
+# Needs the full loop from Code section 2 (this line alone is illustrative)
+blobs = [s for s in stats[1:] if s[4] >= 5]        # lowered from 20 to 5
+```
+
+On this chapter's own clean synthetic test the count would likely stay the same (the real edge-blobs are well above 5 pixels already) — but on noisy real footage, a threshold this low would let through small noise specks as extra "blobs", making the over-count problem described in Section 2 even worse, for a completely different reason (noise, not edge/ghost splitting).
+
+</Solution>
+
+## References
+
+1. 14.5 Frame differencing (this course) — the full treatment of two-frame, three-frame, empty-reference and running-average methods, ghosts and the foreground-aperture problem.
+2. 25.1 Labelling (this course) — `cv2.connectedComponentsWithStats` API basics, used here without repeating them.
+3. OpenCV 4.13.0 documentation: `connectedComponentsWithStats`, `morphologyEx`. https://docs.opencv.org/4.13.0/

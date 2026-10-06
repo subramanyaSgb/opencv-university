@@ -170,3 +170,4 @@ export { HwDecodeLab } from "./HwDecodeLab";
 export { LatencyBudgetLab } from "./LatencyBudgetLab";
 export { SyncLab } from "./SyncLab";
 export { StabilizeLab } from "./StabilizeLab";
+export { BlobCountLab } from "./BlobCountLab";
