@@ -1,0 +1,283 @@
+export const meta = {
+  number: "37.5",
+  title: "Face detection",
+  minutes: 22,
+  objectives: [
+    "Estimate how many scale levels a face detector needs to cover a given size range",
+    "Run a complete face-detection pipeline: multi-scale search, grouping, and a verification step",
+    "Check a real detection's accuracy against ground truth with IoU",
+    "Know the practical parameters (scaleFactor, minNeighbors, minSize) and what they trade off",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 37.5 (Part F, Module 37). The application chapter: puts 37.1 (search),
+  37.2 (cascade), 37.4 (grouping/IoU) together on a complete, multi-face, multi-scale real example.
+  New asset: sample-synth-face-scene.png (two 37.2 faces at different sizes/positions, known ground
+  truth). Lab: FaceDetectLab (apps/web/components/visuals/FaceDetectLab.tsx) — real detections, eye
+  verification within each face, ground truth, IoU; precomputed by scripts/gen_facedetect_data.py.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 37.5 Face detection
+
+<Definition term="Face detection">finding the location and size of every face in an image — not identifying whose face it is (37.6), just that a face is there and roughly where its boundary is.</Definition>
+
+Everything needed for this is already built: 37.1's multi-scale sliding-window search, 37.2's cascade classifier doing the actual yes/no decision at speed, and 37.4's grouping turning a cluster of raw hits into one clean box. Face detection, as a *task*, is simply running that whole pipeline well — choosing sensible parameters for the size range and image actually being searched, and optionally adding a cheap verification step.
+
+## 1. An analogy
+
+Scanning a classroom photo for faces is not one lookup — it's checking many candidate window sizes and positions, because a face near the camera and a face at the back of the room look nothing alike in pixel size, even though both are, in every meaningful sense, "a face." The detector doesn't know in advance how big any given face will be; it has to check a whole range of plausible sizes to find them all.
+
+## 2. Choosing the search range
+
+<Flow
+  steps={[
+    { label: "Expected face size range in this image", tone: "data" },
+    { label: "scaleFactor sets how many levels cover that range", tone: "process" },
+    { label: "detectMultiScale: search + classify + group (37.1, 37.2, 37.4)", tone: "process" },
+    { label: "Optional: verify with a second cascade (eyes) inside each box", tone: "result" },
+  ]}
+/>
+
+- **`minSize`/`maxSize`** bound the search to plausible face sizes for the image at hand — tighter bounds mean fewer scales to check (37.1's cost), and fewer false positives at implausible sizes.
+- **`scaleFactor`** controls how finely those sizes are sampled: the number of scale levels needed to cover a size ratio `R` (biggest expected face ÷ smallest) is roughly `log(R) / log(scaleFactor)`.
+- **`minNeighbors`** (37.2, 37.4) still needs tuning: too low leaves raw, overlapping duplicate boxes; too high can discard a real but weakly-detected face.
+- **A verification step** (running a second, different cascade — classically the eye cascade — inside each candidate face box) catches some false positives: a true face should contain plausible eye-like regions; many false positives won't.
+
+## 3. A worked example by hand
+
+Faces in a particular camera setup are expected to range from 80 px to 200 px tall (a size ratio of 2.5). With `scaleFactor = 1.05`, how many scale levels does the search need to cover this range?
+
+Levels ≈ log(200/80) / log(1.05) = log(2.5) / log(1.05) = 0.9163 / 0.0488 ≈ **18.8**, so **19 levels** (rounding up to be sure the largest size is covered). A coarser `scaleFactor` of 1.2 would need only log(2.5)/log(1.2) ≈ 5.03 → **6 levels** — far fewer scales, but each one covers a wider range of sizes, so a face whose true size falls between two tested levels is matched less precisely (37.1, 37.2's Exercise 2 showed exactly this trade-off in practice).
+
+## 4. A complete, real pipeline
+
+<FaceDetectLab caption="Two synthetic faces (different sizes, different positions) detected in one multi-scale search. Toggle ground truth (green) to compare against the real detections (red), and detected eyes (blue) -- a verification step inside each face box."/>
+
+Running `detectMultiScale` (scaleFactor 1.05, minNeighbors 4, minSize 50×50) on one 500×300 scene containing two synthetic faces — one 160 px, one 110 px, at different positions — correctly finds **both**, at the right rough sizes and positions:
+
+| Face | Ground truth | Detected | IoU |
+| --- | --- | --- | --- |
+| 1 (larger) | (30, 20, 160, 160) | (29, 21, 169, 169) | **0.886** |
+| 2 (smaller) | (320, 140, 110, 110) | (324, 145, 103, 103) | **0.877** |
+
+Both detections overlap their true placement by roughly 88% IoU (37.4) — a single multi-scale search correctly found two faces of noticeably different sizes in one pass, which is the entire point of searching several scales (Section 2–3) rather than just one. Running the eye cascade inside each detected face box as a verification step: the larger face (169×169, large enough for the eye cascade's own minimum size requirements) yields **2** plausible eye detections, roughly symmetric about the face's centre; the smaller face (103×103) yields **0** — its eyes are simply too small for the eye cascade (itself trained at its own fixed window size, 37.2) to resolve reliably at this scale.
+
+## 5. Industrial use
+
+- **Access control, attendance, and photo-organisation tools** historically built on exactly this pipeline, before CNN-based face detectors (Part J) became standard.
+- **A pre-filter before a more expensive step**: detect the face cheaply first, then run identity recognition (37.6) or another analysis only on the cropped face region, not the whole image.
+- **Choosing `minSize` from the actual deployment setup** (a fixed camera at a known distance, say) rather than leaving it at a generic default — directly cuts search cost (Section 2–3) and false positives at implausible sizes.
+
+## What you should remember from 37.5
+
+<Takeaways>
+<Takeaway n={1} title="It's the whole pipeline">Face detection is 37.1 + 37.2 + 37.4, applied with sensible parameters for the task.</Takeaway>
+<Takeaway n={2} title="Size range sets scale levels">log(size ratio) / log(scaleFactor) estimates how many scales a search needs.</Takeaway>
+<Takeaway n={3} title="IoU checks real accuracy">Comparing detections against known ground truth, not just "did it find something."</Takeaway>
+<Takeaway n={4} title="Verification has its own limits">An eye-in-face check helps, but only within that second cascade's own size constraints.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Faces are expected from 40 px to 160 px (ratio 4). With `scaleFactor = 1.1`, roughly how many scale levels are needed?
+
+<Solution>
+
+log(4) / log(1.1) = 1.386 / 0.0953 ≈ **14.5**, so **15 levels**.
+
+</Solution>
+
+**Q2.** A detection has IoU 0.95 against ground truth; another has IoU 0.4. Both were "found" — what's the practical difference?
+
+<Solution>
+
+The first box tightly matches the true face location and size — very usable for anything downstream that needs an accurate crop (37.6's recognition, for instance). The second technically overlaps the true face enough to count as a "hit" in some evaluation schemes, but is a loose, inaccurate box — cropping it might cut off part of the face or include a lot of background, which could hurt whatever comes next in the pipeline.
+
+</Solution>
+
+### Next: 37.6 Face recognition
+
+## Code
+
+### 1. Scale-level estimate, and the full pipeline with NumPy
+
+```python
+import numpy as np
+import cv2
+
+def scale_levels(size_ratio, scale_factor):
+    return int(np.ceil(np.log(size_ratio) / np.log(scale_factor)))
+
+print("80-200px range, scaleFactor 1.05:", scale_levels(200 / 80, 1.05), "levels")
+print("80-200px range, scaleFactor 1.2:", scale_levels(200 / 80, 1.2), "levels")
+
+img = cv2.imread("sample-synth-face-scene.png", cv2.IMREAD_GRAYSCALE)
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+faces = sorted(face_cascade.detectMultiScale(img, scaleFactor=1.05, minNeighbors=4, minSize=(50, 50)).tolist())
+print("faces found:", faces)
+
+def iou(a, b):
+    ax0, ay0, ax1, ay1 = a[0], a[1], a[0] + a[2], a[1] + a[3]
+    bx0, by0, bx1, by1 = b[0], b[1], b[0] + b[2], b[1] + b[3]
+    ix0, iy0 = max(ax0, bx0), max(ay0, by0)
+    ix1, iy1 = min(ax1, bx1), min(ay1, by1)
+    inter = max(0, ix1 - ix0) * max(0, iy1 - iy0)
+    union = a[2] * a[3] + b[2] * b[3] - inter
+    return inter / union
+
+ground_truth = [(30, 20, 160, 160), (320, 140, 110, 110)]
+for gt, det in zip(ground_truth, faces):
+    print(f"ground truth {gt} vs detected {det}: IoU = {iou(gt, det):.4f}")
+```
+
+Output:
+
+```text
+80-200px range, scaleFactor 1.05: 19 levels
+80-200px range, scaleFactor 1.2: 6 levels
+faces found: [[29, 21, 169, 169], [324, 145, 103, 103]]
+ground truth (30, 20, 160, 160) vs detected (29, 21, 169, 169): IoU = 0.8858
+ground truth (320, 140, 110, 110) vs detected (324, 145, 103, 103): IoU = 0.8768
+```
+
+### 2. Verification: eyes within each detected face
+
+```python
+eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
+for (x, y, w, h) in faces:
+    roi = img[y:y + h, x:x + w]
+    eyes = eye_cascade.detectMultiScale(roi, scaleFactor=1.05, minNeighbors=5, minSize=(20, 20), maxSize=(60, 60))
+    print(f"face at ({x},{y}), size {w}x{h}: {len(eyes)} eye(s) found")
+```
+
+Output:
+
+```text
+face at (29,21), size 169x169: 2 eye(s) found
+face at (324,145), size 103x103: 0 eye(s) found
+```
+
+## OpenCV API notes
+
+- **`cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")`**: a second pretrained cascade, used here inside each detected face's region of interest (ROI), not on the whole image — a direct, cheap way to narrow the eye search and avoid false eye detections elsewhere in the scene.
+- **`minSize`/`maxSize` on the eye cascade must be set relative to the face's own scale**: an eye cascade run with face-scale `minSize` values will find nothing (Section 4's smaller face is itself evidence of this: its eyes are smaller than the eye cascade's own practical minimum).
+- **Running detection on a cropped ROI (`img[y:y+h, x:x+w]`)** rather than the whole image is both faster (smaller search area) and more reliable (far fewer places for a false positive to hide) — a standard pattern whenever one detector's output defines a reasonable search region for a second.
+- **No built-in IoU-against-ground-truth function**: checking detection accuracy this way (Section 4) is ordinary application code, the same `iou` function as 37.4.
+
+## Where it fails
+
+- **Every limitation already covered applies directly**: fixed viewing angle (37.2), texture/shape sensitivity (37.3's lesson applies conceptually here too — this cascade needed real photographic-style shading, not just the right shape, 37.2's own test confirmed that), and search cost growing with scale range (Section 2–3).
+- **A verification step inherits its own classifier's limits**: Section 4's eye check failed on the smaller face purely from scale, not because that face was wrongly detected.
+- **No notion of "whose face"**: detection only localises; identity (37.6) is a separate problem requiring a separate model.
+- **Ground-truth IoU checking (Section 4) requires knowing the true answer** — only possible here because this is a synthetic scene built with known placements; real-world evaluation needs a labelled dataset (Module 58).
+- Largely superseded in accuracy by CNN-based face detectors (Part J) for real-world deployment, though this pipeline remains fast and fully explainable.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Leaving `minSize`/`maxSize` at generic defaults** instead of setting them from the actual expected face sizes in the deployment — wastes search cost and invites spurious detections at implausible sizes.
+- **Setting a verification cascade's size parameters at the wrong scale** (Section 4, OpenCV API notes) — a classic, easy-to-miss bug when chaining two cascades.
+- **Treating any non-zero IoU as "a correct detection"** without a sensible threshold — Mini exercise Q2's 0.4-IoU example is a weak, low-quality match, not equivalent to the 0.95 one.
+- **Running the verification cascade on the whole image instead of the cropped face ROI** — slower, and far more prone to false positives from unrelated image regions.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Facial landmark detection
+
+Beyond a bounding box, many pipelines locate specific points (eye corners, nose tip, mouth corners — "landmarks") within a detected face, both for verification (as Section 4's simple eye check does, crudely) and for **alignment**: warping the face to a standard pose before recognition (37.6), which substantially improves recognition accuracy for faces that aren't perfectly front-on.
+
+### Multi-cascade pipelines in practice
+
+Real systems often chain several cascades or models: a fast, loose first pass to find candidate regions, progressively more specific checks (eyes, nose, mouth) to confirm and refine each one — the same "cheap first, expensive later" principle from 37.2's cascade *within* each stage, now applied *across* several whole classifiers.
+
+### Evaluating a detector properly
+
+Section 4's two IoU numbers are a glimpse of real detector evaluation; a full evaluation (precision, recall, mean average precision across many images and a range of IoU thresholds) is covered properly once Module 54 introduces object detection metrics in depth.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What three things from earlier in this module does face detection combine?",
+      options: ["Nothing new, it is a separate algorithm", "Multi-scale sliding-window search (37.1), a cascade classifier (37.2), and grouping/IoU evaluation (37.4)", "Only HOG and SVM (37.3)", "Only the eye cascade"],
+      answer: 1,
+      explanation: "Section 1-2: face detection is this whole pipeline, run with sensible parameters.",
+    },
+    {
+      question: "In Section 3, why did scaleFactor=1.2 need far fewer levels (5) than scaleFactor=1.05 (19) to cover the same size range?",
+      options: ["1.2 is simply wrong", "A larger scaleFactor jumps further between tested sizes, covering the same ratio in fewer, coarser steps", "Levels don't depend on scaleFactor", "19 and 5 are actually the same"],
+      answer: 1,
+      explanation: "Levels = log(size ratio) / log(scaleFactor) -- a bigger scaleFactor gives a bigger log(scaleFactor), so the same ratio needs fewer levels.",
+    },
+    {
+      question: "In Section 4, why did the eye-verification step find 0 eyes on the smaller detected face?",
+      options: ["The smaller face has no eyes", "The face's eyes were simply too small for the eye cascade's own minimum detectable size at that scale", "The face was not actually detected", "A bug in cv2.CascadeClassifier"],
+      answer: 1,
+      explanation: "The larger face, with proportionally bigger eyes, found exactly 2 under the same eye-cascade parameters.",
+    },
+    {
+      question: "Why run the eye cascade on the cropped face ROI rather than the whole scene?",
+      options: ["It makes no difference", "It is faster (smaller search area) and avoids false eye detections from unrelated parts of the image", "cv2.CascadeClassifier cannot run on a full image", "ROIs are required by OpenCV"],
+      answer: 1,
+      explanation: "OpenCV API notes: a standard pattern whenever one detection reasonably bounds where a second search should happen.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A security camera expects faces between 60 px and 300 px tall (as people approach from a distance). With `scaleFactor = 1.1`, estimate the number of scale levels needed.
+
+<Solution>
+
+Ratio = 300/60 = 5. Levels = log(5) / log(1.1) = 1.609 / 0.0953 ≈ 16.9 → **17 levels**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the Code section's `faces` and `iou`, compute the IoU between the two *detected* boxes themselves (not against ground truth). Confirm they don't overlap at all, as expected for two clearly separate faces.
+
+<Solution>
+
+```python
+print("IoU between the two detected faces:", round(iou(faces[0], faces[1]), 4))
+```
+
+Output:
+
+```text
+IoU between the two detected faces: 0.0
+```
+
+Zero, as expected — the two faces are far apart in the scene (one near the top-left, one lower-right), so their boxes share no pixels at all.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague's face-detection pipeline reports many detections with IoU around 0.3-0.4 against a hand-labelled test set, and asks whether to lower `minNeighbors` to "catch more faces." Based on this chapter, is that the right fix?
+
+<Solution>
+
+Probably not directly. Low IoU means the boxes that *are* found are poorly located or sized (loose, inaccurate), which is a different problem from *missing* faces entirely — lowering `minNeighbors` mainly affects how aggressively raw overlapping windows are merged (37.2, 37.4), not how tightly a kept box fits the true face. Poor IoU is more often a sign that `scaleFactor`/`minSize`/`maxSize` don't match the actual face sizes in the data (Section 2-3), or that the detector itself (cascade parameters, training) isn't well suited to these images — worth checking before touching `minNeighbors`.
+
+</Solution>
+
+## References
+
+1. P. Viola, M. Jones, "Robust real-time face detection," *International Journal of Computer Vision* 57(2), 2004, pp. 137–154.
+2. P. N. Belhumeur, D. J. Jacobs, D. W. Jacobs, N. Kumar, "Localizing parts of faces using a consensus of exemplars," *CVPR*, 2011 (a classical approach to facial landmark localisation).
+3. OpenCV 4.13.0 documentation: `cv2.CascadeClassifier`, `cv2.data.haarcascades`. https://docs.opencv.org/4.13.0/

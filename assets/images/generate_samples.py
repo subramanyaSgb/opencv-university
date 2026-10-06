@@ -682,6 +682,16 @@ def synth_pedestrian(w=160, h=320, seed=3):
     img += rng.normal(0, 5, img.shape)
     return np.clip(img, 0, 255).astype(np.uint8)
 images["sample-synth-pedestrian.png"] = synth_pedestrian()
+
+# Module 37.5: two sample-synth-face.png faces at different sizes/positions in one scene, for multi-scale,
+# multi-face detectMultiScale. Ground-truth boxes (used to check IoU against the real detections):
+# face 1 (30, 20, 160, 160), face 2 (320, 140, 110, 110).
+def synth_face_scene():
+    canvas = np.full((300, 500), 190.0)
+    canvas[20:180, 30:190] = synth_face(160, seed=7)
+    canvas[140:250, 320:430] = synth_face(110, seed=11)
+    return np.clip(canvas, 0, 255).astype(np.uint8)
+images["sample-synth-face-scene.png"] = synth_face_scene()
 ft_b = cv2.warpPerspective(images["sample-feat.png"].astype(np.float64), FEAT_H, (320, 200), flags=cv2.INTER_LINEAR,
                            borderMode=cv2.BORDER_CONSTANT, borderValue=110)
 images["sample-feat-b.png"] = np.clip(np.rint(ft_b * 0.8 + 20 + np.random.default_rng(34).normal(0, 3, ft_b.shape)), 0, 255).astype(np.uint8)
