@@ -1,0 +1,333 @@
+export const meta = {
+  number: "44.2",
+  title: "Photometric stereo",
+  minutes: 24,
+  objectives: [
+    "Recover real per-pixel surface normals from several images under known, different lighting -- not from geometry at all",
+    "Measure, for real, how self-shadowing alone (not noise) limits a 3-light recovery",
+    "Measure a real, genuine surprise: more lights make a naive solve WORSE, not better",
+    "Fix that real surprise with shadow-aware least squares, and measure the real improvement",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 44.2 (Part H, Module 44). A completely different route to a
+  surface's shape than 44.1's point clouds: instead of many 3D points from geometry
+  (triangulation), photometric stereo recovers a dense per-PIXEL normal field from several
+  images of the SAME fixed view under different KNOWN lighting directions, using the
+  Lambertian reflectance model I = albedo * dot(N, L) (Woodham, 1980).
+  All numbers real, verified via scripts/gen_photostereo_data.py ->
+  apps/web/public/data/photostereo-data.json. Synthetic scene: a rendered Lambertian sphere,
+  radius 49px in a 101x101 frame, true albedo 0.8, 7525 masked (on-sphere) pixels.
+  Baseline (Code section 1, no self-shadowing, clip disabled): 3 lights at elevation 45deg,
+  mean angular error vs true analytic sphere normal = 0.00000007 deg -- the linear solve
+  itself is exact.
+  WITH real self-shadowing (clip enabled, intensity clamped to >=0 when a light is behind
+  the surface at that point): 3 lights, naive solve: mean error 5.4855 deg, max 45.0000 deg;
+  40.0% of masked pixels are shadowed in at least one of the 3 lights; mean recovered albedo
+  0.7647 vs true 0.8.
+  Real, measured surprise (naive solve, NO shadow exclusion): MORE lights made it WORSE --
+  6 lights: mean error 7.1105 deg (54.6% shadowed in >=1 light); 12 lights: mean error 8.4329
+  deg (67.6% shadowed in >=1 light). More lights means more chances some are shadowed, and a
+  naive least-squares solve treats each shadowed zero reading as real (negative) evidence.
+  Shadow-aware fix (exclude any per-pixel reading below a near-zero threshold before
+  solving): 3 lights -> mean error 36.1316 deg, max 90 deg, WORSE than naive (losing even one
+  of exactly 3 equations leaves an unsolvable, underdetermined pixel -- 3021/7525 pixels
+  failed outright); 6 lights -> mean error 0.0239 deg, max 90 deg, only 2/7525 pixels failed
+  (rare near-limb cases with <3 valid lights); 12 lights -> mean error 0.0000 deg, max 0.0000
+  deg, 0/7525 pixels failed -- essentially exact.
+  Lab: PhotoStereoLab (apps/web/components/visuals/PhotoStereoLab.tsx).
+*/}
+
+# 44.2 Photometric stereo
+
+<Definition term="Photometric stereo">recovering a dense, per-pixel surface normal field from several images of the SAME fixed view, lit from several different KNOWN directions — shape from shading changes, not from geometry or triangulation at all.</Definition>
+
+44.1's point clouds come from geometry: several *views* of a moving camera or a calibrated stereo rig, triangulated into 3D points. Photometric stereo is the real opposite: one fixed camera, one fixed object, and *light* that moves between shots instead. The real, surprising part is how much shape information that alone reveals — and how badly a careless implementation of it can fail.
+
+## 1. An analogy
+
+A sculptor working on a clay bust turns a single lamp around it, watching the shadows shift across the same unmoved surface. A flat patch looks the same from every lamp angle; a bump brightens as the lamp swings toward it and darkens as the lamp swings away. The *pattern* of brightening and darkening across several lamp positions is, by itself, enough to read off the real local slope of the clay at every point — exactly what this chapter computes, per pixel, from several real photographs instead of an eye.
+
+## 2. The pipeline: known light, one equation per image, three unknowns per pixel
+
+<Flow
+  steps={[
+    { label: "Same fixed camera, same fixed object", tone: "world" },
+    { label: "Several images, each under a different KNOWN light direction", tone: "data" },
+    { label: "Lambertian model: I = albedo . dot(normal, light)", tone: "process" },
+    { label: "Solve per pixel for albedo x normal, then normalize", tone: "result" },
+  ]}
+/>
+
+Each image gives one real linear equation per pixel: its measured brightness `I` equals the point's albedo (how reflective it is) times the dot product of its unit surface normal with that image's known light direction. Three unknowns — the normal's three components, scaled by the unknown albedo — need at least three such equations, so at least three images under three different, known light directions. Solving that small linear system per pixel (`np.linalg.solve` or `np.linalg.lstsq`) recovers `albedo x normal` directly; normalizing it gives the real unit normal, and its length gives the real albedo.
+
+## 3. A real, measured result: the linear algebra is exact, but shadows are not
+
+<PhotoStereoLab caption="Real, from-scratch NumPy photometric stereo results (precomputed), including the real surprise that more lights can make a naive solve worse." />
+
+On a synthetic rendered sphere (true albedo 0.8), solving the exact linear system with three known lights recovers every normal to **0.00000007°** of the true analytic value — the linear algebra itself is exact, given exact measurements. But real cameras cannot measure a negative brightness: when a light sits behind the local surface at a given point, that point's *real* brightness there is genuinely zero, not negative — a real optical fact, not noise. Re-solving the identical system with this real clamping in place (3 lights, no special handling) gives a real mean error of **5.49°** and a worst case of **45°**, because a full **40.0%** of the sphere's visible pixels are shadowed from at least one of the three lights.
+
+## 4. A real, measured surprise: more lights made it worse
+
+Adding more lights sounds like it should only help — more real measurements, more redundancy. Solving the same way (treating every image equally, with no special handling for shadows) gives the opposite real result: **6** lights raised the mean error to **7.11°**, and **12** lights raised it further, to **8.43°**. More lights means more *chances* that at least one is shadowed at any given pixel (40.0% at 3 lights, rising to 54.6% at 6, and 67.6% at 12) — and a naive least-squares solve treats every shadowed zero reading as genuine evidence that the surface faces *away* from that light, actively pulling the fitted normal in a wrong direction.
+
+The real fix is **shadow-aware** least squares: before solving each pixel, drop any image whose measured brightness is at or near zero for that pixel, and solve using only the lights that actually illuminated it. Applied to the identical 6- and 12-light data, this flips the result completely: 6 lights now gives a mean error of **0.0239°** (only 2 of 7525 pixels, at the sphere's grazing limb, had too few valid lights left to solve at all), and 12 lights gives **0.0000°** — essentially exact, because with enough lights spread around, almost every pixel always has at least three genuinely unshadowed measurements. The same fix applied to only **3** lights, by contrast, makes things *worse* (**36.13°** mean, **3021 of 7525 pixels** failing outright) — with no redundancy to spare, losing even one of exactly three equations to a shadow leaves that pixel unsolvable.
+
+## 5. Industrial context: dome and ring-light inspection rigs
+
+A real industrial photometric-stereo rig — a ring or dome of LEDs around a fixed camera, used for inspecting coins, embossed logos, PCB solder joints, or machined metal surfaces — exists specifically to exploit Section 4's own real result: enough lights, spread widely enough, to guarantee every point on the inspected surface sees at least three genuinely unshadowed ones. The recovered normal map often reveals tiny real dents, scratches, or incomplete solder fillets that are nearly invisible in any single ordinarily-lit photograph, because a single photograph conflates a point's albedo with its orientation — exactly the two quantities Section 2's per-pixel solve separates back out.
+
+## What you should remember from 44.2
+
+<Takeaways>
+<Takeaway n={1} title="Shape from shading, not geometry">Photometric stereo needs one fixed view and moving KNOWN light, the real opposite of 44.1's many-view point clouds.</Takeaway>
+<Takeaway n={2} title="Self-shadowing, not noise, is the real limit">This chapter's own real result: 5.49deg mean error from clamping alone, with a perfect, noise-free linear solve underneath it.</Takeaway>
+<Takeaway n={3} title="More lights can make things worse -- unless you account for shadows">A real, measured reversal: naive error rose from 5.49deg (3 lights) to 8.43deg (12), while shadow-aware error fell to 0.0000deg at 12 lights.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A photometric stereo rig has exactly 3 lights, and one of them is shadowed for a particular pixel. Based on Section 4, can a shadow-aware solve still recover that pixel's normal?
+
+<Solution>
+
+No. With exactly 3 lights and 3 unknowns, losing even one equation to a detected shadow leaves only 2 real equations for 3 unknowns — underdetermined, with no unique solution. This chapter's own real result (36.13° mean error, 3021/7525 pixels failing outright at 3 lights) is exactly this case; shadow-awareness only helps when there is real redundancy (more lights than the bare minimum) to fall back on.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the exact linear solve, and the real cost of self-shadowing
+
+```python
+import numpy as np
+
+SIZE, RADIUS, ALBEDO = 101, 49, 0.8
+cx, cy = SIZE // 2, SIZE // 2
+yy, xx = np.mgrid[0:SIZE, 0:SIZE]
+dx, dy = (xx - cx).astype(float), (yy - cy).astype(float)
+mask = (dx**2 + dy**2) <= RADIUS**2
+dz = np.zeros_like(dx)
+dz[mask] = np.sqrt(np.maximum(RADIUS**2 - (dx**2 + dy**2)[mask], 0))
+normals = np.zeros((SIZE, SIZE, 3))
+normals[..., 0], normals[..., 1], normals[..., 2] = dx / RADIUS, dy / RADIUS, dz / RADIUS
+normals[mask] /= np.linalg.norm(normals, axis=2)[mask][:, None]
+
+def light_dir(az_deg, el_deg):
+    az, el = np.radians(az_deg), np.radians(el_deg)
+    return np.array([np.cos(el) * np.cos(az), np.cos(el) * np.sin(az), np.sin(el)])
+
+def render(light, clip=True):
+    I = ALBEDO * np.einsum('ijk,k->ij', normals, light / np.linalg.norm(light))
+    if clip:
+        I = np.clip(I, 0, None)  # a real camera can't see negative brightness
+    I[~mask] = 0
+    return I
+
+def angular_error(N_est):
+    tf, ef, mf = normals.reshape(-1, 3), N_est.reshape(-1, 3), mask.reshape(-1)
+    return np.degrees(np.arccos(np.clip(np.sum(tf * ef, axis=1), -1, 1)))[mf]
+
+lights3 = [light_dir(0, 45), light_dir(120, 45), light_dir(240, 45)]
+L_mat = np.array(lights3)
+
+def solve(images):
+    I_stack = np.stack(images, axis=0).reshape(3, -1)
+    rhoN = np.linalg.solve(L_mat, I_stack)
+    rho = np.linalg.norm(rhoN, axis=0)
+    N_est = np.zeros_like(rhoN)
+    N_est[:, rho > 1e-6] = rhoN[:, rho > 1e-6] / rho[rho > 1e-6]
+    return N_est.T.reshape(SIZE, SIZE, 3), rho
+
+N_noclip, _ = solve([render(l, clip=False) for l in lights3])
+print(f"no self-shadowing: mean angular error = {angular_error(N_noclip).mean():.8f} deg")
+
+N_clip, rho_clip = solve([render(l, clip=True) for l in lights3])
+err = angular_error(N_clip)
+shadow_any = np.zeros(mask.shape, dtype=bool)
+for l in lights3:
+    shadow_any |= (np.einsum('ijk,k->ij', normals, l / np.linalg.norm(l)) < 0) & mask
+print(f"with real self-shadowing: mean error = {err.mean():.4f} deg, max = {err.max():.4f} deg")
+print(f"fraction shadowed in >=1 light: {shadow_any[mask].mean()*100:.1f}%")
+print(f"mean recovered albedo: {rho_clip.reshape(-1)[mask.reshape(-1)].mean():.4f} (true {ALBEDO})")
+```
+
+Output:
+
+```text
+no self-shadowing: mean angular error = 0.00000007 deg
+with real self-shadowing: mean error = 5.4855 deg, max = 45.0000 deg
+fraction shadowed in >=1 light: 40.0%
+mean recovered albedo: 0.7647 (true 0.8)
+```
+
+### 2. OpenCV: more lights, shadow-aware, and a real normal-map image
+
+```python
+import cv2
+
+def solve_shadow_aware(images, lights, thresh=1e-3):
+    L2 = np.array(lights)
+    I_stack = np.stack(images, axis=0).reshape(len(lights), -1)
+    rhoN = np.zeros((3, I_stack.shape[1]))
+    for p in range(I_stack.shape[1]):
+        obs = I_stack[:, p]
+        valid = obs > thresh
+        if valid.sum() < 3:
+            continue
+        rhoN[:, p], *_ = np.linalg.lstsq(L2[valid], obs[valid], rcond=None)
+    rho = np.linalg.norm(rhoN, axis=0)
+    N_est = np.zeros_like(rhoN)
+    v = rho > 1e-6
+    N_est[:, v] = rhoN[:, v] / rho[v]
+    return N_est.T.reshape(SIZE, SIZE, 3)
+
+for n_lights, els in [(6, [30, 30, 30, 60, 60, 60]), (12, [20, 20, 20, 20, 45, 45, 45, 45, 70, 70, 70, 70])]:
+    azs = np.linspace(0, 360, n_lights, endpoint=False)
+    lights_n = [light_dir(az, el) for az, el in zip(azs, els)]
+    images_n = [render(l, clip=True) for l in lights_n]
+    N_naive, _ = (lambda L, I: (np.linalg.lstsq(L, I, rcond=None)[0], None))(np.array(lights_n), np.stack(images_n).reshape(n_lights, -1))
+    N_naive = (N_naive / np.linalg.norm(N_naive, axis=0)).T.reshape(SIZE, SIZE, 3)
+    N_sa = solve_shadow_aware(images_n, lights_n)
+    print(f"n_lights={n_lights}: naive mean error={angular_error(N_naive).mean():.4f} deg | shadow-aware mean error={angular_error(N_sa).mean():.4f} deg")
+
+# OpenCV convention: encode the recovered normal field as a standard 8-bit BGR normal-map image
+normal_map_rgb = ((N_sa + 1) / 2 * 255).astype(np.uint8)
+normal_map_bgr = cv2.cvtColor(normal_map_rgb, cv2.COLOR_RGB2BGR)
+print("normal map:", normal_map_bgr.dtype, normal_map_bgr.shape, "centre pixel (B,G,R):", normal_map_bgr[SIZE // 2, SIZE // 2])
+```
+
+Output:
+
+```text
+n_lights=6: naive mean error=7.1105 deg | shadow-aware mean error=0.0239 deg
+n_lights=12: naive mean error=8.4329 deg | shadow-aware mean error=0.0000 deg
+normal map: uint8 (101, 101, 3) centre pixel (B,G,R): [255 127 127]
+```
+
+## OpenCV API notes
+
+- **No `cv2` function performs photometric stereo on OpenCV 4.13** — checked directly: no `photometric`-named symbol exists in core or contrib (`cv2.xphoto` covers white balance and tonemapping, a different real problem). This chapter's solve is entirely NumPy's `linalg.solve`/`linalg.lstsq`.
+- **`cv2.cvtColor(..., cv2.COLOR_RGB2BGR)`** (Code section 2) is the one real, standard OpenCV touch here: encoding a recovered normal field as a conventional 8-bit normal-map image (`(N+1)/2 x 255`, BGR channel order) for saving or display, exactly as a real industrial inspection tool would output it.
+- **The light directions themselves must be known precisely** — this chapter assumed exact, calibrated light directions throughout; a real rig calibrates them once (e.g. from a reflective sphere's own specular highlight positions), a real, separate calibration step not covered here.
+
+## Where it fails
+
+- **Specular highlights violate the Lambertian model entirely** — a shiny or wet surface reflects light in a narrow mirror-like direction rather than Woodham's diffuse `albedo x dot(N, L)` model; those pixels' measured brightness has nothing to do with this chapter's equation, and get the wrong normal with high confidence, not a graceful degradation.
+- **Too few lights with no redundancy fails catastrophically under shadows** (Section 4's own real 3-light result: 3021 of 7525 pixels unsolvable) — the real minimum of 3 lights only works when *none* of them happen to be shadowed, which Section 3 showed fails on 40% of a simple sphere's own surface.
+- **The camera and object must not move between shots** — any real motion between the several images breaks the fundamental "same pixel, same real 3D point, every image" assumption this chapter's whole linear system depends on.
+- **Interreflection (light bouncing off one part of the object onto another) adds real extra brightness this chapter's model does not account for** — most severe in concave real parts, not tested on this chapter's convex sphere.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming more lights always helps** — this chapter's own real, measured reversal (naive error rising from 5.49° to 8.43° as lights went from 3 to 12) is the direct opposite, unless shadows are explicitly excluded.
+- **Treating a clamped-to-zero (shadowed) reading as a real, informative measurement** — Section 4's naive solve did exactly this, and it is precisely what made adding lights backfire.
+- **Using the bare minimum of 3 lights "to keep it simple"** — Section 3's own real 40%-shadowed finding on a simple convex sphere shows even a gentle, convex real part self-shadows enough of its own surface to make 3 lights a genuinely fragile choice.
+- **Forgetting the sign ambiguity-free nature of this method** — unlike 44.1's point-cloud PCA normals (which have a real two-way sign ambiguity), photometric stereo's `albedo x normal` always comes out with the correct, unambiguous sign, because albedo itself is never negative; no extra orientation step is needed here.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Woodham's original method
+
+R. J. Woodham, "Photometric Method for Determining Surface Orientation from Multiple Images" (*Optical Engineering*, 1980) introduced exactly this chapter's real linear model for Lambertian surfaces under known lighting — the foundational real method every later refinement (shadow handling, specular rejection, uncalibrated photometric stereo) builds on.
+
+### Uncalibrated photometric stereo
+
+A real, harder version of this problem recovers normals even when the light directions themselves are *not* known in advance, using the fact that the recovered normal field is only ambiguous up to a real linear transformation (the "generalized bas-relief ambiguity," Belhumeur, Kriegman, Yuille, "The Bas-Relief Ambiguity," IJCV, 1999) — a real, structural limit on how much shape can ever be recovered from shading alone, without some additional real constraint (known object class, integrability of the normal field into a real surface).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "How does photometric stereo recover shape, compared to 44.1's point clouds?",
+      options: ["The same way -- triangulation from multiple camera positions", "From several images of ONE fixed view under different KNOWN lighting directions, using the Lambertian brightness equation", "By measuring time of flight", "It cannot recover shape, only colour"],
+      answer: 1,
+      explanation: "Section 2: the real opposite of 44.1's many-view, fixed-light geometry -- one view, moving light.",
+    },
+    {
+      question: "This chapter's own real test found the linear solve itself (ignoring self-shadowing) recovered normals to what accuracy?",
+      options: ["Only within 10-20 degrees", "0.00000007 degrees -- essentially exact, given exact measurements", "It failed completely", "50% accuracy"],
+      answer: 1,
+      explanation: "Section 3: the real limiting factor is NOT the linear algebra -- it's the real optical fact of self-shadowing.",
+    },
+    {
+      question: "What real, measured surprise did this chapter find when going from 3 to 12 lights with a NAIVE (non-shadow-aware) solve?",
+      options: ["Error stayed exactly the same", "Mean error got WORSE (5.49 deg to 8.43 deg), because more lights means more chances some are shadowed, and shadows get treated as real evidence", "Error dropped to zero immediately", "The camera stopped working"],
+      answer: 1,
+      explanation: "Section 4: a real, counterintuitive result -- more data made things worse without the right handling.",
+    },
+    {
+      question: "Why did the shadow-aware fix make results WORSE, not better, at only 3 lights?",
+      options: ["The fix has a bug", "With exactly 3 unknowns, dropping even one of exactly 3 equations to a detected shadow leaves an unsolvable, underdetermined pixel -- this chapter's own real result: 3021/7525 pixels failed outright", "3 lights is always better than 12", "Shadows don't occur with only 3 lights"],
+      answer: 1,
+      explanation: "Section 4/Mini exercise: shadow-awareness only helps where real redundancy exists to fall back on.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A photometric stereo pixel has true normal-times-albedo vector `(0.3, 0.0, 0.4)`. What is its recovered albedo, and its unit normal?
+
+<Solution>
+
+Albedo = `sqrt(0.3^2 + 0.0^2 + 0.4^2) = sqrt(0.09+0+0.16) = sqrt(0.25) = 0.5`. Unit normal = `(0.3, 0.0, 0.4) / 0.5 = (0.6, 0.0, 0.8)`.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, test an 8-light configuration (all at 45° elevation, evenly spread in azimuth) with the naive solve and compare its mean error to this chapter's own 6-light (7.1105°) and 12-light (8.4329°) naive results.
+
+<Solution>
+
+```python
+azs8 = np.linspace(0, 360, 8, endpoint=False)
+lights8 = [light_dir(az, 45) for az in azs8]
+images8 = [render(l, clip=True) for l in lights8]
+I_stack8 = np.stack(images8, axis=0).reshape(8, -1)
+rhoN8 = np.linalg.lstsq(np.array(lights8), I_stack8, rcond=None)[0]
+rho8 = np.linalg.norm(rhoN8, axis=0)
+N8 = np.zeros_like(rhoN8)
+N8[:, rho8 > 1e-6] = rhoN8[:, rho8 > 1e-6] / rho8[rho8 > 1e-6]
+N8 = N8.T.reshape(SIZE, SIZE, 3)
+print(f"n_lights=8 (naive): mean error = {angular_error(N8).mean():.4f} deg")
+```
+
+Output:
+
+```text
+n_lights=8 (naive): mean error = 4.7948 deg
+```
+
+Lower than this chapter's own 6-light (7.1105°) result here — a reminder that the real pattern depends on more than light *count* alone; this configuration's single elevation (45°, matching Section 3's 3-light case) happens to shadow fewer pixels than the 6-light configuration's mixed 30°/60° elevations. Light *placement*, not just quantity, genuinely matters.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+An inspection engineer proposes using exactly 3 lights "to keep the rig simple and cheap," reasoning that photometric stereo's own minimum requirement is 3 lights. Based on this chapter, what real risk should they expect?
+
+<Solution>
+
+Following Section 3's own real result, even a simple convex sphere self-shadows 40% of its own visible surface from at least one of just 3 lights — and with no redundancy, a single shadowed light at any pixel (Mini exercise) makes that pixel's normal unrecoverable, not just noisier. A real inspected part, with actual bumps, edges, or recesses, would likely self-shadow even more than this chapter's gentle sphere. The real, measured fix (Section 4) is more lights *combined with* shadow-aware exclusion — 12 lights reached 0.0000° mean error in this chapter's own test, essentially solving the problem that 3 lights alone cannot.
+
+</Solution>
+
+## References
+
+1. R. J. Woodham, "Photometric Method for Determining Surface Orientation from Multiple Images," *Optical Engineering*, 19(1), 1980.
+2. P. N. Belhumeur, D. J. Kriegman, A. L. Yuille, "The Bas-Relief Ambiguity," *International Journal of Computer Vision*, 35(1), 1999.
+3. OpenCV 4.13.0 documentation: `cv2.cvtColor`. https://docs.opencv.org/4.13.0/
