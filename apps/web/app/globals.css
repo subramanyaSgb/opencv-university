@@ -28,7 +28,7 @@
   --font: var(--font-inter), system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: var(--font-jetbrains-mono), ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   --measure: 46rem;
-  --sidebar-w: 280px;
+  --sidebar-w: 300px;
   --rail-w: 240px;
   --topbar-h: 3.25rem;
   color-scheme: light;
@@ -112,11 +112,12 @@ body {
   background: var(--bg);
   color: var(--fg);
   font: clamp(16px, 0.95vw + 0.4rem, 18px) / 1.7 var(--font);
-  font-variant-numeric: tabular-nums;
 }
 a { color: var(--accent); text-underline-offset: 2px; }
 img { max-width: 100%; }
-code, pre { font-family: var(--mono); font-size: 0.88em; font-variant-numeric: tabular-nums; }
+code, pre { font-family: var(--mono); font-size: 0.88em; }
+/* Tabular digits for numeric UI only (lesson numbers, nav, progress) -- never on body prose: see /styleguide. */
+.tabular-nums { font-variant-numeric: tabular-nums; }
 :not(pre) > code {
   background: var(--code-bg);
   border: 1px solid var(--line);
@@ -125,6 +126,15 @@ code, pre { font-family: var(--mono); font-size: 0.88em; font-variant-numeric: t
   overflow-wrap: anywhere;
 }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Thin scrollbars everywhere: page, sidebar, any overflow container. No arrow buttons. */
+html, .sidebar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+html::-webkit-scrollbar, .sidebar::-webkit-scrollbar { width: 10px; height: 10px; }
+html::-webkit-scrollbar-track, .sidebar::-webkit-scrollbar-track { background: transparent; }
+html::-webkit-scrollbar-thumb, .sidebar::-webkit-scrollbar-thumb { background: var(--line); border-radius: 999px; border: 2px solid var(--bg); }
+html::-webkit-scrollbar-button, .sidebar::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 .skip { position: absolute; left: -999px; }
 .skip:focus { left: 1rem; top: 1rem; z-index: 20; background: var(--bg); padding: 0.5rem; border-radius: var(--radius-sm); }
 @media (prefers-reduced-motion: no-preference) {
@@ -158,12 +168,15 @@ code, pre { font-family: var(--mono); font-size: 0.88em; font-variant-numeric: t
   background: linear-gradient(90deg, #000 0 25%, #555 25% 50%, #aaa 50% 75%, #fff 75%);
   border: 1px solid var(--line);
 }
+.topbar-divider { flex: none; width: 1px; height: 1.4rem; background: var(--line); margin: 0 0.2rem; }
 .topbar-breadcrumb {
   display: flex; align-items: center; gap: 0.4rem; flex: 1; min-width: 0; overflow: hidden;
   font-size: 0.85rem; color: var(--fg-faint); white-space: nowrap;
 }
-.tb-part-group { display: flex; align-items: center; gap: 0.4rem; min-width: 0; flex: 0 1 auto; }
+.tb-part-group, .tb-module-group { display: flex; align-items: center; gap: 0.4rem; min-width: 0; flex: 0 1 auto; }
 .tb-crumb { overflow: hidden; text-overflow: ellipsis; }
+.tb-crumb-course { color: var(--fg-faint); text-decoration: none; flex: none; }
+.tb-crumb-course:hover { color: var(--fg); }
 .tb-crumb-chapter { color: var(--fg-soft); flex: 1 1 auto; min-width: 3rem; }
 .tb-sep { flex: none; }
 .topbar-spacer { flex: 1; }
@@ -175,12 +188,16 @@ code, pre { font-family: var(--mono); font-size: 0.88em; font-variant-numeric: t
 @media (max-width: 1023px) {
   .topbar-menu { display: inline-flex; }
 }
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   .tb-part-group { display: none; }
+}
+@media (max-width: 720px) {
+  .tb-module-group { display: none; }
 }
 @media (max-width: 480px) {
   .badge-preview { display: none; }
   .brand-text { display: none; }
+  .tb-crumb-course { display: none; }
 }
 
 /* ---- Sidebar (course tree): drawer under 1024px, fixed column from 1024px ---- */
@@ -211,22 +228,36 @@ code, pre { font-family: var(--mono); font-size: 0.88em; font-variant-numeric: t
 .ct-module-btn:hover { background: var(--bg-soft); }
 .ct-chevron { flex: none; color: var(--fg-faint); transform: rotate(0deg); }
 .ct-chevron.is-open { transform: rotate(90deg); }
-.ct-module-num { flex: none; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
-.ct-module-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-module-num { flex: none; color: var(--fg-faint); }
+.ct-module-title { overflow-wrap: break-word; }
 .ct-chapters { list-style: none; margin: 0; padding: 0 0 0.4rem; }
 .ct-chapter {
-  display: flex; align-items: center; gap: 0.5rem; min-height: 2.1rem;
-  padding: 0.2rem 0.5rem 0.2rem 1.9rem; border-radius: var(--radius-sm);
+  display: flex; align-items: flex-start; gap: 0.5rem; min-height: 2.1rem;
+  padding: 0.3rem 0.5rem 0.3rem 1.9rem; border-radius: var(--radius-sm);
   color: var(--fg-soft); text-decoration: none;
 }
 a.ct-chapter:hover { background: var(--bg-soft); color: var(--fg); }
 a.ct-chapter[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .ct-chapter.is-soon { color: var(--fg-faint); }
-.ct-status { flex: none; color: var(--fg-faint); }
+.ct-status { flex: none; color: var(--fg-faint); margin-top: 0.2rem; }
 .ct-status.is-done { color: var(--ok); }
 .ct-status.is-muted { opacity: 0.5; }
-.ct-chapter-num { flex: none; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
-.ct-chapter-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-chapter-num { flex: none; color: var(--fg-faint); margin-top: 0.05em; }
+.ct-chapter-title { overflow-wrap: break-word; }
+
+/* ---- Styleguide (internal reference, not a lesson) ---- */
+.styleguide { max-width: var(--measure); margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+.styleguide h1 { margin: 0 0 0.5rem; }
+.styleguide section { margin-top: 2.5rem; }
+.styleguide section h2 { font-size: 1.1rem; margin: 0 0 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--line); }
+.sg-note { color: var(--fg-faint); font-size: 0.9rem; }
+.sg-test-para { background: var(--bg-soft); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem 1.25rem; font-size: 1.05rem; }
+.sg-type-row { display: flex; align-items: baseline; gap: 1rem; margin: 0.75rem 0; }
+.sg-type-label { flex: none; width: 3rem; font-size: 0.75rem; color: var(--fg-faint); text-transform: uppercase; letter-spacing: 0.06em; }
+.sg-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: 0.75rem; }
+.sg-swatch { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; font-size: 0.8rem; }
+.sg-swatch-color { height: 3rem; border-bottom: 1px solid var(--line); }
+.sg-swatch code { display: block; padding: 0.4rem 0.5rem; }
 
 /* ---- Home ---- */
 .home { max-width: 64rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }

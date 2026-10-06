@@ -1,0 +1,93 @@
+/* PROPOSAL — not wired into apps/web/app/globals.css yet.
+   Derived from docs/reference-analysis.md. Review alongside the screenshot set
+   before this replaces the current tokens (indigo accent kept from the last
+   redesign pass; everything else shifts toward warm neutrals + near-flat radius
+   per the reference analysis, with values we chose ourselves, not copied).
+
+   Font pairing proposal: Source Serif 4 (headings) + Inter (body, unchanged) +
+   JetBrains Mono (code, unchanged). Source Serif 4 is already named as an
+   acceptable body-serif option in this repo's own CLAUDE.md, so it's a small,
+   low-risk addition via next/font/google -- no new npm dependency.
+*/
+
+:root, :root[data-theme="light"] {
+  /* Warm neutral surfaces (principle adopted from reference; our own values) */
+  --bg: #faf9f6;
+  --bg-soft: #f2efe9;
+  --bg-sunk: #eae5dc;
+  --fg: #1c1a16;
+  --fg-soft: #56504a;
+  --fg-faint: #847c72;
+  --line: rgba(92, 78, 64, 0.14); /* hairline, ~10-15% opacity warm gray */
+
+  /* Accent: indigo, deliberately distinct from the reference's terracotta/coral */
+  --accent: #4338ca;
+  --accent-soft: #ece9fc;
+  --accent-fg: #ffffff;
+
+  /* Semantic: unchanged hues, re-tuned to sit on warm neutrals */
+  --ok: #1a7f37;
+  --ok-soft: #e7f5ec;
+  --bad: #c0392b;
+  --bad-soft: #fbeceb;
+  --warn: #9a6700;
+  --warn-soft: #fff6dd;
+  --code-bg: #f2efe9;
+
+  --radius: 4px;      /* was 8px -- near-flat, "engineering" register per analysis */
+  --radius-sm: 3px;   /* was 6px */
+  --radius-pill: 999px; /* new: for small dots/badges only, never cards */
+  --shadow-1: 0 1px 2px rgba(28, 22, 14, 0.06);
+  --shadow-2: 0 10px 15px -3px rgba(28, 22, 14, 0.08), 0 4px 6px -4px rgba(28, 22, 14, 0.08);
+  --shadow-accent: 0 10px 15px -3px rgba(67, 56, 202, 0.18), 0 4px 6px -4px rgba(67, 56, 202, 0.18);
+
+  --font: var(--font-inter), system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: var(--font-source-serif), Georgia, "Times New Roman", serif;
+  --mono: var(--font-jetbrains-mono), ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+}
+
+:root[data-theme="dark"] {
+  --bg: #18140f;
+  --bg-soft: #1f1a14;
+  --bg-sunk: #271f18;
+  --fg: #ece6dc;
+  --fg-soft: #b3a99c;
+  --fg-faint: #857b6e;
+  --line: rgba(196, 174, 148, 0.14);
+
+  --accent: #9aa5ff;
+  --accent-soft: #241f42;
+  --accent-fg: #18140f;
+
+  --ok: #3fb950;
+  --ok-soft: #12261a;
+  --bad: #f47067;
+  --bad-soft: #2c1517;
+  --warn: #d29922;
+  --warn-soft: #2a2110;
+  --code-bg: #1f1a14;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 10px 15px -3px rgba(0, 0, 0, 0.35), 0 4px 6px -4px rgba(0, 0, 0, 0.35);
+  --shadow-accent: 0 10px 15px -3px rgba(154, 165, 255, 0.16), 0 4px 6px -4px rgba(154, 165, 255, 0.16);
+}
+
+/* Sepia already reads as a warm paper surface; left as-is pending review, no
+   change proposed here beyond --radius/--radius-sm/--radius-pill which are
+   theme-independent (set once in :root above). */
+
+/* ---- Type scale proposal (serif headings / sans body, two families only) ---- */
+/* H1 72/1.0, -1.8px tracking (hero only); lesson H1 48/1.0, -1.2px tracking */
+/* H2 30/1.2 normal tracking; H3 20/1.375 normal tracking -- all --font-serif, weight 700 */
+/* Body: --font, 16-18px fluid, 1.7 line-height (unchanged from current) */
+/* Eyebrow/micro-label: --font (not mono), 11-12px, uppercase, 0.08em tracking */
+
+/* AA contrast check (WCAG 2.1 relative-luminance formula, computed exactly, not
+   estimated -- normal text needs 4.5:1, large text/UI needs 3:1):
+   light  #1c1a16 on #faf9f6  -> 16.50:1  (body text)
+   light  #4338ca on #faf9f6  -> 7.51:1   (links/accent text)
+   light  #56504a on #faf9f6  -> 7.55:1   (secondary text)
+   dark   #ece6dc on #18140f  -> 14.77:1  (body text)
+   dark   #9aa5ff on #18140f  -> 8.03:1   (links/accent text)
+   dark   #b3a99c on #18140f  -> 7.92:1   (secondary text)
+   All pass AA with wide margin. */

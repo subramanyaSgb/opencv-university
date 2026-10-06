@@ -36,14 +36,26 @@ export function TopBar({ course, drawerOpen, onMenuClick, menuButtonRef }: Props
         <span className="brand-mark" aria-hidden="true" />
         <span className="brand-text">OpenCV University</span>
       </Link>
+      {loc && <span className="topbar-divider" aria-hidden="true" />}
       {loc && (
         <nav className="topbar-breadcrumb" aria-label="Breadcrumb">
+          <Link href="/" className="tb-crumb tb-crumb-course">
+            Course
+          </Link>
           <span className="tb-part-group">
             <span aria-hidden="true" className="tb-sep">
               /
             </span>
             <span className="tb-crumb tb-crumb-part">
-              Part {loc.part.letter}: {loc.module.title}
+              Part {loc.part.letter}: {loc.part.title}
+            </span>
+          </span>
+          <span className="tb-module-group">
+            <span aria-hidden="true" className="tb-sep">
+              /
+            </span>
+            <span className="tb-crumb tb-crumb-module">
+              {loc.module.number}. {loc.module.title}
             </span>
           </span>
           <span aria-hidden="true" className="tb-sep">
