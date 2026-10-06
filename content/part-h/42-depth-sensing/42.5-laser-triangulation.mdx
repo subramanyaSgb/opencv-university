@@ -1,0 +1,262 @@
+export const meta = {
+  number: "42.5",
+  title: "Laser triangulation",
+  minutes: 20,
+  objectives: [
+    "Recover real height from a laser line's image position, exactly",
+    "Measure, for real, how baseline affects laser-triangulation precision",
+    "Measure, for real, how laser angle creates real shadow regions",
+    "Know what a laser line trades for not needing a second camera or several patterns",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 42.5 (Part H, Module 42). A third real way to get depth,
+  alongside 42.1-42.3's passive stereo and 42.4's structured light: a known-geometry laser
+  instead of a second camera or multiple patterns.
+  Real, verified numbers: K fx=800px, cx=320px, laser-camera baseline B=150mm, laser plane
+  angle theta=20deg, reference distance Z0=500mm. Laser plane equation X = B - Z.tan(theta).
+  For height offsets -30/-15/0/15/30/60mm (true Z = 470/485/500/515/530/560mm): real projected
+  pixel u = 284.14/276.25/268.82/261.83/255.24/243.11 px (via cv2.projectPoints).
+  Real inverse recovery, Z = B/(x_norm + tan(theta)) where x_norm=(u-cx)/fx: recovered every
+  true Z to within 0/1.14e-13 mm -- exact.
+  Real baseline-sensitivity sweep (height error from a fixed 1px pixel-measurement error, at
+  Z0=500mm, theta=20deg): B=50mm -> 6.250mm, B=100mm -> 3.125mm, B=150mm -> 2.083mm,
+  B=300mm -> 1.042mm -- shrinking proportionally with baseline, the same real relationship
+  as 42.1's stereo baseline.
+  Real shadow-length-from-a-step sweep (shadow = step_height / tan(theta)): theta=10deg,
+  5mm step -> 28.36mm shadow; theta=70deg, 5mm step -> 1.82mm shadow -- a real, large,
+  verified trade-off between laser angle and occlusion.
+  Lab: LaserTriangulationLab (apps/web/components/visuals/LaserTriangulationLab.tsx) -- all
+  three real formulas, live.
+*/}
+
+# 42.5 Laser triangulation
+
+<Definition term="Laser triangulation">recovering real height from where a laser line (projected at a known, fixed angle) appears in a camera's image — a third real way to get depth, using one known-geometry light source instead of a second camera (42.1) or several sequential patterns (42.4).</Definition>
+
+42.1 used two cameras; 42.4 used one camera and several projected patterns. This chapter uses one camera and a single, continuously-on laser line, at a known fixed angle — a different real trade-off, common in high-speed industrial profile measurement.
+
+## 1. An analogy
+
+Shining a flashlight at a fixed, known angle across a table and watching where its bright line lands tells you exactly how high the table's surface is at every point the line crosses — raise an object under the beam, and the bright line visibly shifts, by an amount that depends only on the known beam angle and how far it moved. A laser triangulation sensor is exactly this, with a real camera reading the shift precisely instead of an eye estimating it.
+
+## 2. The real triangulation geometry
+
+<Flow
+  steps={[
+    { label: "A laser at a known angle theta, offset B from the camera", tone: "data" },
+    { label: "The laser plane: X = B - Z.tan(theta)", tone: "process" },
+    { label: "The camera sees the laser spot's pixel position u", tone: "data" },
+    { label: "Z = B / (x_norm + tan(theta)), exactly", tone: "result" },
+  ]}
+/>
+
+For a real laser-camera baseline `B = 150 mm` and laser angle `theta = 20°`, a surface at height offsets from −30 mm to +60 mm (true `Z` from 470 to 560 mm) produces real pixel positions from **284.14 px down to 243.11 px** — the laser spot moves steadily across the image as height changes. Inverting the formula, `Z = B / (x_norm + tan(theta))` where `x_norm = (u − cx)/fx`, recovered every one of those true heights to within **10⁻¹³ mm** — exact, given the known geometry.
+
+## 3. A real, measured baseline-sensitivity relationship
+
+<LaserTriangulationLab caption="The real laser triangulation formula, baseline-sensitivity, and shadow-length relationships, all live and exact."/>
+
+Exactly like 42.1's stereo baseline, a wider laser-camera baseline makes laser triangulation more precise for the identical pixel measurement error:
+
+| Baseline | Height error from a 1 px measurement error |
+| --- | --- |
+| 50 mm | 6.250 mm |
+| 100 mm | 3.125 mm |
+| 150 mm | 2.083 mm |
+| 300 mm | 1.042 mm |
+
+Doubling the baseline exactly halves the real error — the identical geometric trade-off 42.1 measured for stereo, because both methods are, at their core, the same triangulation idea, just using a known angle instead of a second camera's own image.
+
+## 4. A real, measured cost: shadows
+
+A laser at a shallow angle casts a real, long shadow behind any step or ridge on the surface — a region the laser line simply cannot reach, and therefore cannot measure:
+
+| Laser angle | Shadow behind a 5mm step |
+| --- | --- |
+| 10° | 28.36 mm |
+| 20° | 13.74 mm |
+| 45° | 5.00 mm |
+| 70° | 1.82 mm |
+
+A shallow 10° angle casts a shadow over **5.6× longer** than the step itself; a steep 70° angle shrinks it to barely a third of the step's own height. This is a real, geometric trade-off against Section 3's baseline-sensitivity relationship — a real system cannot simply maximise both baseline and angle freely without consequence.
+
+## 5. Industrial context: why laser triangulation earns its place
+
+A fast-moving conveyor needing a continuous height profile, line after line, benefits from laser triangulation's single, always-on measurement — no multi-frame pattern sequence (42.4) to stay synchronised with a moving part, and no second camera's own calibration (41.8) and matching cost (42.3) to maintain. The real cost, measured directly in Sections 3–4, is a genuine trade-off between precision (wider baseline, steeper angle) and real coverage (shallower angle sees around more obstructions, but a wider baseline and steeper angle both increase self-occlusion risk on a complex part shape) — a real engineering choice, not a free upgrade over the other two methods.
+
+## What you should remember from 42.5
+
+<Takeaways>
+<Takeaway n={1} title="One known-angle laser, exact triangulation">Z = B/(x_norm + tan(theta)), verified exact against real projection.</Takeaway>
+<Takeaway n={2} title="Baseline sensitivity, same as stereo">Doubling B exactly halved the real height error in this chapter's own test.</Takeaway>
+<Takeaway n={3} title="A real, measured shadow cost">A shallow 10 deg angle cast a shadow 5.6x the step height; 70 deg shrank it to a third.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A laser triangulation sensor with baseline 200mm needs to halve its height error from a fixed pixel-measurement noise. What new baseline would achieve that?
+
+<Solution>
+
+Following this chapter's own measured relationship (error inversely proportional to baseline), halving the error needs **doubling the baseline to 400mm** — the same relationship 42.1's stereo baseline showed.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: exact triangulation and its inverse, verified
+
+```python
+import numpy as np
+
+B, theta_deg, Z0 = 150.0, 20.0, 500.0
+theta = np.deg2rad(theta_deg)
+fx, cx = 800.0, 320.0
+
+for delta_h in [-30, 0, 60]:
+    Z_true = Z0 + delta_h
+    X_laser = B - Z_true * np.tan(theta)
+    u = fx * X_laser / Z_true + cx                 # forward: real projection
+    x_norm = (u - cx) / fx
+    Z_recovered = B / (x_norm + np.tan(theta))      # inverse: real triangulation
+    print(f"Z_true={Z_true}, u={u:.2f}px, Z_recovered={Z_recovered:.6f}")
+```
+
+Output:
+
+```text
+Z_true=470.0, u=284.14px, Z_recovered=470.000000
+Z_true=500.0, u=268.82px, Z_recovered=500.000000
+Z_true=560.0, u=243.11px, Z_recovered=560.000000
+```
+
+### 2. OpenCV: the same forward projection, verified independently
+
+```python
+import cv2
+
+pt3d = np.array([[X_laser, 0.0, Z_true]])          # X_laser, Z_true: this chapter's own last test case
+img, _ = cv2.projectPoints(pt3d, np.zeros(3), np.zeros(3),
+                            np.array([[fx, 0, cx], [0, fx, cx], [0, 0, 1]]), None)
+print("cv2.projectPoints pixel:", img.reshape(-1)[0])
+```
+
+Output:
+
+```text
+cv2.projectPoints pixel: 243.1095268727524
+```
+
+## OpenCV API notes
+
+- **No dedicated `cv2` function performs laser-line triangulation directly** — the real geometry (Code section 1) is plain trigonometry built on the same `K`, `cv2.projectPoints` primitives 41.1–42.1 already established.
+- **Finding the real laser line's pixel position in a real image** typically uses a simple brightness-weighted centroid per row/column (the laser line is usually by far the brightest feature when the right optical filter and exposure are used) — a different, simpler problem from 42.3's full block-matching search.
+- **`cv2.triangulatePoints`** (42.1) still applies conceptually once the laser's own known geometry is expressed as a second "camera" — some real systems do implement laser triangulation exactly this way, reusing stereo infrastructure with one "camera" replaced by the laser's known projection geometry.
+
+## Where it fails
+
+- **Shadows behind steps or ridges** (Section 4) are a real, geometric blind spot, not a measurement-noise problem — no amount of signal processing recovers a surface the laser line never actually reached.
+- **A shiny or very dark surface** can fail to produce a clean, detectable laser line at all, the same real physical problem 42.4's structured light faces with reflective or absorbent surfaces.
+- **Ambient light or a second reflective surface** can introduce a spurious, bright line the real detector might mistake for the true laser line — real systems often use a narrow optical bandpass filter matched to the laser's own wavelength to reject this.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Maximising baseline or angle without checking the real shadow/occlusion cost** — Section 4's own measured trade-off shows a real, physical limit, not just a tuning preference.
+- **Assuming a steeper angle is always better** — it reduces shadowing (Section 4) but is not free; a real system's complete trade-off includes self-occlusion from the part's own shape at steep angles too, not modelled in this chapter's simplified flat-surface test.
+- **Measuring the laser line's position with less than real sub-pixel precision** — Section 3's own real sensitivity numbers (2-6mm of height error per pixel of measurement error) assume whatever real detection precision is actually achieved; a cruder, whole-pixel-only detector inherits the full real error this chapter measured.
+- **Forgetting that this chapter's formula assumes a perfectly flat reference geometry** — a real laser plane's actual shape (and any real lens distortion, 41.3) needs its own calibration for true industrial accuracy.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Laser line scanners in practice
+
+A real industrial laser profile sensor sweeps (or the part itself moves under a fixed line) to build up a full 2D height map, one 1D profile line at a time — exactly 2.10's line-scan camera idea (an earlier module), combined with this chapter's real triangulation, to turn a moving part into a complete 3D surface measurement without ever needing a second camera.
+
+### Comparing the three real depth methods of this module
+
+Passive stereo (42.1–42.3) needs real scene texture but only ambient light; structured light (42.4) needs an active projector and several patterns but works on featureless surfaces; laser triangulation (this chapter) needs only one active, known-angle light source and one camera, trading real coverage (shadows) for simplicity and speed. None of the three is universally best — each solves a genuinely different combination of real constraints.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "In this chapter's own real test, what happened to height error when the laser-camera baseline was doubled?",
+      options: ["No change", "The error was exactly halved, the same relationship as 42.1's stereo baseline", "The error doubled", "The relationship depends on the laser's colour"],
+      answer: 1,
+      explanation: "Section 3: a real, measured, inversely-proportional relationship.",
+    },
+    {
+      question: "Why does a shallow laser angle cast a longer real shadow behind a step than a steep angle?",
+      options: ["It doesn't -- shadow length is unrelated to angle", "shadow = step_height / tan(angle); a smaller angle gives a smaller tan(angle), making the shadow longer for the same step height", "Shallow angles always see through solid objects", "This only applies to very tall steps"],
+      answer: 1,
+      explanation: "Section 4: a real, measured, verified geometric relationship -- 10deg gave a 5.6x-step-height shadow, 70deg gave about a third.",
+    },
+    {
+      question: "What does laser triangulation need that passive stereo (42.1-42.3) does not?",
+      options: ["Nothing extra", "An active, known-angle light source -- it does not need a second camera or scene texture", "A second camera, just like stereo", "Several sequential patterns like structured light"],
+      answer: 1,
+      explanation: "Section 5: a genuinely different real trade-off among the module's three depth methods.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A laser triangulation setup has baseline 120mm. Using this chapter's own measured relationship, what height error would you expect from a 1px measurement error, given that 150mm baseline gave 2.083mm?
+
+<Solution>
+
+Error scales inversely with baseline: 2.083 x (150/120) = **2.604 mm**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, compute the shadow length for a 15mm step at theta=30deg, and compare it to this chapter's own 45deg result (5.00mm for a 5mm step).
+
+<Solution>
+
+```python
+theta_30 = np.deg2rad(30)
+shadow_30 = 15.0 / np.tan(theta_30)
+print(f"theta=30deg, 15mm step: shadow={shadow_30:.2f}mm")
+```
+
+Output:
+
+```text
+theta=30deg, 15mm step: shadow=25.98mm
+```
+
+Scaling up proportionally with step height (15mm vs the earlier 5mm) and reflecting the shallower 30° angle (vs 45°) giving a real, larger shadow-to-height ratio.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A line is inspecting parts with deep, narrow slots. A colleague suggests a very steep laser angle (close to 90°) "to avoid shadows entirely." Based on Section 4-5, is that achievable, and what else should they check?
+
+<Solution>
+
+A steeper angle does reduce shadow length (Section 4's own real, verified trend: shadow shrinks toward zero as theta approaches 90°) but a 90° angle itself would mean the laser plane is parallel to the camera's view direction, geometrically degenerate for triangulation (no real baseline-like leverage left to measure depth from, an extreme case this chapter's formula does not handle gracefully). Beyond that geometric limit, Section 5 notes a real, separate concern at steep angles: self-occlusion from the part's own shape (a deep, narrow slot can block the camera's view of the laser line even without a shadow, simply because the slot's own walls are in the way) — the colleague should check real line-of-sight geometry for their specific slot shape and camera position, not just the shadow-length formula alone.
+
+</Solution>
+
+## References
+
+1. F. Blais, "Review of 20 years of range sensor development," *Journal of Electronic Imaging*, 13(1), 231–243, 2004 (a real survey covering laser triangulation among other range-sensing methods).
+2. R. Hartley, A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004 — already cited in 42.1-42.2 (the same triangulation principle).
+3. OpenCV 4.13.0 documentation: `cv2.projectPoints`. https://docs.opencv.org/4.13.0/
