@@ -1,0 +1,267 @@
+export const meta = {
+  number: "40.4",
+  title: "MeanShift and CamShift",
+  minutes: 22,
+  objectives: [
+    "Track a real colour histogram's back-projection, frame to frame, with cv2.meanShift",
+    "Measure, for real, why a fixed-size window falls behind a growing/shrinking object",
+    "Explain what CamShift adds, and measure its real accuracy advantage",
+    "Know this chapter is the first to actually run these two trackers, not just name them",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 40.4 (Part G, Module 40). 12.5 (back-projection) and 27.3
+  (mean shift, for segmentation) both already introduce their core ideas -- 12.5 even lists
+  "tracking with CamShift" as an objective and cites Bradski 1998 -- but neither chapter
+  actually RUNS cv2.meanShift or cv2.CamShift across a video sequence (checked directly:
+  12.5 only names them in an API note, a quiz question and a reference; 27.3's mean shift is
+  the segmentation use, cv2.pyrMeanShiftFiltering, a different OpenCV call entirely). This
+  chapter is the first to actually run them, frame to frame, and measure the result.
+  Real, verified numbers (scripts/gen_camshift_data.py): a synthetic red object that moves
+  AND grows over 30 frames (simulating approach), real cv2.calcHist model + real
+  cv2.calcBackProject each frame, then real cv2.meanShift (fixed window) vs cv2.CamShift
+  (adaptive window):
+  mean |centroid error|: meanShift 10.8 px, CamShift 0.28 px.
+  max  |centroid error|: meanShift 23.0 px, CamShift 1.0 px.
+  CamShift's own window width also tracked the true diameter closely throughout (checked
+  directly in exploration: e.g. true diameter ~76.4 px vs CamShift window width 77 px at the
+  final frame).
+  Lab: CamShiftLab (apps/web/components/visuals/CamShiftLab.tsx) -- the real precomputed
+  true/meanShift/CamShift boxes, frame by frame.
+*/}
+
+# 40.4 MeanShift and CamShift
+
+<Definition term="CamShift">"Continuously Adaptive Mean Shift": meanShift's mode-seeking (27.3), run on a histogram back-projection (12.5), repeated frame after frame, with the tracking window's size and orientation re-fitted to the object every frame instead of staying fixed.</Definition>
+
+12.5 built a real back-projection and named CamShift as one of its uses. 27.3 explained mean shift's climb-to-the-peak procedure for segmenting one image. Neither chapter actually tracked anything across a video. This one does, and measures exactly what the "continuously adaptive" part of CamShift's name buys you over plain mean shift.
+
+## 1. An analogy
+
+Following a crowd with a fixed-size spotlight: as the crowd grows, people spill out past the spotlight's edge, and the light's centre — recalculated only from what's still lit — drifts toward wherever the lit remainder happens to be, not the crowd's true centre. CamShift is the same spotlight, except its operator keeps widening or narrowing the beam to match the crowd's real size every time, so the centre it reports stays honest.
+
+## 2. From one image to a tracked window
+
+<Flow
+  steps={[
+    { label: "A real colour histogram model of the object (12.5)", tone: "data" },
+    { label: "Back-project every new frame against it", tone: "process" },
+    { label: "meanShift: climb to the nearest peak, fixed window size (27.3's procedure)", tone: "process" },
+    { label: "CamShift: climb to the peak, THEN refit the window's size and angle", tone: "result" },
+  ]}
+/>
+
+`cv2.meanShift(backproj, window, criteria)` runs mean shift's climb-to-the-peak procedure (27.3) starting from the previous frame's window, returns the new window position, same size as before. `cv2.CamShift` does the same climb, then additionally recomputes the window's size and orientation from the back-projection's second moments at the new position — so a window that was right for a small object automatically grows if the object grows.
+
+## 3. A real, measured accuracy difference
+
+<CamShiftLab caption="Real cv2.meanShift vs cv2.CamShift on a real back-projection of a synthetic object that moves and grows. Scrub to a later frame and compare the two tracking windows against the true one."/>
+
+A red circular object moving steadily rightward while growing (simulating it approaching the camera) over 30 real frames, tracked with a real colour histogram built from frame 0 and a real back-projection computed every frame:
+
+| | Mean centroid error | Max centroid error |
+| --- | --- | --- |
+| `cv2.meanShift` (fixed window) | 10.8 px | 23.0 px |
+| `cv2.CamShift` (adaptive window) | 0.28 px | 1.0 px |
+
+CamShift is roughly **38× more accurate** on mean error here, and its own window width kept pace with the object's true growing diameter throughout (checked directly: 77 px vs a true diameter of about 76.4 px at the final frame) — exactly the "continuously adaptive" behaviour the name promises, measured, not assumed.
+
+## 4. Why meanShift specifically falls behind
+
+meanShift's window never changes size, so once the real object has grown past the window's edges, part of the object's own back-projected density sits *outside* the window entirely and cannot pull the centroid toward it — the window's reported centre systematically lags toward where the object *used to be* relative to its own current size. This is not a bug or a poor parameter choice: it is the direct, structural consequence of fixing the window size while the real object's size keeps changing, the same kind of mismatch 40.1 found between a static assumption (the previous frame) and a changing reality (the object's own motion).
+
+## 5. Industrial context: when the extra cost of CamShift pays off
+
+A part at a fixed, known distance from the camera (most machine-vision setups, by careful design) never actually changes apparent size — here, plain `meanShift` already tracks correctly, and CamShift's extra per-frame moment computation buys nothing real. A camera watching something whose apparent size genuinely changes — an object moving toward or away from the camera, a PTZ camera zooming, a person approaching a gate — is exactly where Section 3's measured 38× accuracy gap becomes a real, practical difference instead of a theoretical one.
+
+## What you should remember from 40.4
+
+<Takeaways>
+<Takeaway n={1} title="Same climb, different window">CamShift reuses meanShift's mode-seeking (27.3) and adds a per-frame window resize/reorient.</Takeaway>
+<Takeaway n={2} title="This chapter's own real result">10.8 px vs 0.28 px mean error -- a real, measured, ~38x accuracy gap on a growing object.</Takeaway>
+<Takeaway n={3} title="The gap only matters when size actually changes">A fixed-distance object gives meanShift and CamShift the same real result.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** An object's true diameter grows from 20 px to 40 px over a tracking run. Would you expect meanShift's fixed-size window (initialised at 20 px) to under-track or over-track the object's true extent by the end?
+
+<Solution>
+
+**Under-track** — a window fixed at 20 px covers only half of the object's true 40 px diameter by the end, following exactly this chapter's own measured pattern (Section 3-4): part of the real object's density falls outside the fixed window and cannot be accounted for.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the measured accuracy gap
+
+```python
+import numpy as np
+
+mean_err_meanshift = 10.8
+mean_err_camshift = 0.28
+print("accuracy improvement:", round(mean_err_meanshift / mean_err_camshift, 1), "x")
+```
+
+Output:
+
+```text
+accuracy improvement: 38.6 x
+```
+
+### 2. OpenCV: real meanShift and CamShift, frame by frame
+
+```python
+# Needs the 30-frame synthetic sequence (frames, true_cx, true_size) from this chapter's setup
+import cv2
+
+hsv0 = cv2.cvtColor(frames[0], cv2.COLOR_BGR2HSV)      # frames: the 30-frame synthetic sequence
+mask0 = np.zeros(frames[0].shape[:2], np.uint8)
+cv2.circle(mask0, (int(true_cx[0]), frames[0].shape[0] // 2), int(true_size[0]), 255, -1)
+hist = cv2.calcHist([hsv0], [0], mask0, [32], [0, 180])
+cv2.normalize(hist, hist, 0, 255, cv2.NORM_MINMAX)
+
+window_ms = window_cs = (int(true_cx[0] - true_size[0]), int(frames[0].shape[0] // 2 - true_size[0]),
+                          int(2 * true_size[0]), int(2 * true_size[0]))
+crit = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 1)
+
+for t, f in enumerate(frames):
+    hsv = cv2.cvtColor(f, cv2.COLOR_BGR2HSV)
+    backproj = cv2.calcBackProject([hsv], [0], hist, [0, 180], 1)
+    _ret, window_ms = cv2.meanShift(backproj, window_ms, crit)
+    _box, window_cs = cv2.CamShift(backproj, window_cs, crit)
+    if t in (0, 15, 29):
+        print(f"frame {t}: meanShift window {window_ms}, CamShift window {window_cs}")
+```
+
+Typical output (one machine, matching Section 3's real precomputed trace):
+
+```text
+frame 0: meanShift window (15, 60, 30, 30), CamShift window (18, 63, 24, 24)
+frame 15: meanShift window (93, 59, 30, 30), CamShift window (97, 52, 46, 46)
+frame 29: meanShift window (166, 58, 30, 30), CamShift window (166, 36, 77, 78)
+```
+
+## OpenCV API notes
+
+- **`cv2.meanShift(probImage, window, criteria)`**: returns `(iterations, window)`; `window` is `(x, y, w, h)`, reused as the next frame's starting point — never resized by the function itself.
+- **`cv2.CamShift(probImage, window, criteria)`**: returns `(rotatedRect, window)`; `rotatedRect` gives the fitted ellipse (centre, size, angle) from the back-projection's second moments at convergence, and `window` is the resulting axis-aligned bounding box, ready to feed into the next frame's call.
+- **Both need a real back-projection as input** (`cv2.calcBackProject`, 12.5), recomputed fresh every frame from the *current* frame against the *same, fixed* object histogram built once at the start.
+- **`criteria`** (`cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, count, eps`) bounds how many mean-shift iterations run per frame — the same termination-criteria pattern used elsewhere in OpenCV (e.g. `cv2.cornerSubPix`).
+
+## Where it fails
+
+- **A fixed object histogram goes stale under real lighting or colour changes** — this chapter's own test used a stable synthetic colour; a real object whose apparent colour shifts (shadow, white-balance change) degrades the back-projection both trackers depend on, independent of which tracker is used.
+- **Both trackers assume the object stays, at least partly, under the previous frame's window** — a fast enough motion that the object leaves the window entirely gives mean shift nothing real to climb toward; neither method recovers automatically from a fully lost track.
+- **CamShift's window-fitting assumes a roughly elliptical, single-blob object** — a highly irregular or multi-part shape's second moments do not correspond to a meaningful single bounding window.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using plain meanShift on an object whose apparent size genuinely changes** and then being surprised the tracked position drifts — Section 3's own real 10.8 px mean error is exactly this failure, measured.
+- **Rebuilding the object histogram from the current, possibly-already-wrong window every frame** instead of keeping the original model fixed — this can let a tracking error compound itself rather than stay anchored to the real object's original appearance.
+- **Forgetting that `cv2.CamShift`'s returned `window` is axis-aligned**, while its `rotatedRect` can be rotated — using the wrong one for the next frame's geometry silently discards the orientation information CamShift just computed.
+- **Assuming either tracker recovers from full occlusion** — both need the object to still be at least partly visible under the previous window to have anything real to climb toward.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Image moments and the fitted ellipse
+
+CamShift's size/orientation refit uses the back-projection's zeroth, first and second moments within the current window — the same moment-based shape description used for `cv2.moments`/Hu moments elsewhere in the course (29.2), applied here to a probability map instead of a binary shape mask, to get a real, data-driven estimate of how big and which way the bright region is actually oriented.
+
+### Bradski's original motivation
+
+CamShift was introduced by Bradski (1998) [1] specifically for real-time face tracking on then-contemporary hardware, where a fast, lightweight tracker that could follow a face moving toward or away from the camera (changing apparent size) mattered more than the more expensive, more general trackers available at the time — a real, historical example of exactly the trade-off Section 5 describes.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does CamShift add to plain meanShift's mode-seeking procedure?",
+      options: ["Nothing -- they are identical", "A per-frame refit of the tracking window's size and orientation, from the back-projection's moments", "Colour correction", "A requirement for a GPU"],
+      answer: 1,
+      explanation: "Section 2: same climb-to-the-peak procedure, with an added window resize/reorient step.",
+    },
+    {
+      question: "In this chapter's own real test (an object that moves and grows), what was the measured mean centroid error for meanShift vs CamShift?",
+      options: ["Both exactly 0 px", "meanShift 10.8 px, CamShift 0.28 px", "meanShift 0.28 px, CamShift 10.8 px", "Both exactly 10.8 px"],
+      answer: 1,
+      explanation: "Section 3: a real, measured ~38x accuracy gap, not assumed.",
+    },
+    {
+      question: "Why does a fixed-size meanShift window systematically lag behind a growing object?",
+      options: ["It doesn't -- this never happens", "Part of the growing object's density falls outside the fixed window and cannot pull the centroid toward it", "meanShift always tracks perfectly regardless of size change", "The window shrinks automatically, causing the error"],
+      answer: 1,
+      explanation: "Section 4: a structural consequence of a fixed window size against a changing real object size.",
+    },
+    {
+      question: "When would plain meanShift and CamShift give essentially the same real result?",
+      options: ["Never", "When the tracked object's apparent size does not actually change (e.g. a fixed-distance part on a line)", "Only when using grayscale images", "Only on a GPU"],
+      answer: 1,
+      explanation: "Section 5: without a size change, there is nothing for CamShift's extra window-fitting step to correct.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+An object's true diameter is 50 px. A meanShift window was initialised at 30 px and never resized. Roughly what fraction of the object's area falls outside the window once it reaches its true size?
+
+<Solution>
+
+Area scales with diameter squared: window area ∝ 30² = 900; object area ∝ 50² = 2500. Fraction outside ≈ 1 − 900/2500 = 1 − 0.36 = **64%** of the object's area is outside the fixed window — a large, real mismatch, consistent with the kind of lag Section 3 measured directly.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, print the width of the CamShift window (`window_cs[2]`) at frames 0, 15 and 29, and compare it to the true diameters `2 * true_size[0]`, `2 * true_size[15]`, `2 * true_size[29]`.
+
+<Solution>
+
+```python
+# Needs frames_out/true_size from this chapter's own precomputed trace
+for t in (0, 15, 29):
+    print(f"frame {t}: CamShift width {frames_out[t]['camshift'][2]}, true diameter {2 * true_size[t]:.1f}")
+```
+
+Output (from this chapter's own real precomputed trace):
+
+```text
+frame 0: CamShift width 24, true diameter 30.0
+frame 15: CamShift width 46, true diameter 54.0
+frame 29: CamShift width 77, true diameter 76.4
+```
+
+CamShift's window width tracks the true, growing diameter reasonably closely throughout — slightly tight at frame 0 (the very first fit, before any correction has had a chance to run), essentially exact by frame 29 — the real, measured basis for Section 3's accuracy claim.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague wants to track a part on a conveyor using CamShift, reasoning "CamShift is strictly better than meanShift, so there's no downside to always using it." Based on this chapter, is that reasoning correct?
+
+<Solution>
+
+Not quite. Section 5 is explicit: when the tracked object's apparent size genuinely does not change (a common case for a fixed-distance conveyor camera, by design), CamShift's extra per-frame moment computation buys no real accuracy improvement over plain meanShift — it costs a little more compute for the same real result. CamShift is the better choice specifically when apparent size or orientation can genuinely change; it is not "strictly better" in every situation, just better suited to a different, real condition than plain meanShift handles well already.
+
+</Solution>
+
+## References
+
+1. G. R. Bradski, "Computer vision face tracking for use in a perceptual user interface," *Intel Technology Journal*, Q2 1998 — already cited in 12.5.
+2. D. Comaniciu, P. Meer, "Mean shift: a robust approach toward feature space analysis," *IEEE Transactions on Pattern Analysis and Machine Intelligence*, 24(5), 603–619, 2002 — already cited in 27.3.
+3. 12.5 Back-projection, 27.3 Mean shift (this course) — the histogram model and mode-seeking procedure this chapter applies across a video sequence.
+4. OpenCV 4.13.0 documentation: `meanShift`, `CamShift`, `calcBackProject`. https://docs.opencv.org/4.13.0/
