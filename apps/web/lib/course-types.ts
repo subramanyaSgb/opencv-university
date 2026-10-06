@@ -4,6 +4,8 @@ export interface ChapterRef {
   title: string;
   href: string;
   available: boolean;
+  /** Minutes to complete, read from the chapter's own `meta.minutes`. Absent if unavailable. */
+  minutes?: number;
 }
 
 export interface ModuleRef {
@@ -32,4 +34,13 @@ export interface ChapterMeta {
   title: string;
   minutes: number;
   objectives: string[];
+}
+
+/** One `<Definition term="...">...</Definition>` pulled from its chapter at build time. */
+export interface GlossaryEntry {
+  term: string;
+  definition: string;
+  chapterNumber: string;
+  chapterTitle: string;
+  chapterHref: string;
 }

@@ -35,17 +35,18 @@ export default function StyleguidePage() {
 
       <section>
         <h2>Type scale</h2>
+        <p className="sg-note">Headings: Source Serif 4. Body: Inter. Two families only.</p>
         <div className="sg-type-row">
           <span className="sg-type-label">H1</span>
-          <h1 style={{ margin: 0 }}>The quick brown fox jumps over the lazy dog</h1>
+          <p className="sg-sample-h1">The quick brown fox jumps over the lazy dog</p>
         </div>
         <div className="sg-type-row">
           <span className="sg-type-label">H2</span>
-          <h2 style={{ margin: 0, padding: 0, border: 0 }}>The quick brown fox jumps over the lazy dog</h2>
+          <p className="sg-sample-h2">The quick brown fox jumps over the lazy dog</p>
         </div>
         <div className="sg-type-row">
           <span className="sg-type-label">H3</span>
-          <h3 style={{ margin: 0 }}>The quick brown fox jumps over the lazy dog</h3>
+          <p className="sg-sample-h3">The quick brown fox jumps over the lazy dog</p>
         </div>
         <div className="sg-type-row">
           <span className="sg-type-label">Body</span>
