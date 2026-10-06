@@ -1,0 +1,282 @@
+export const meta = {
+  number: "47.4",
+  title: "X-ray and medical",
+  minutes: 24,
+  objectives: [
+    "Know the real physics (Beer-Lambert attenuation) that gives an X-ray image its contrast",
+    "Compute real Hounsfield units and verify the standardization formula exactly",
+    "Measure, for real, why the right display window matters as much as the right data",
+    "Know how real DICOM data keeps this chapter's own 'data vs picture' distinction explicit",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 47.4 (Part I, Module 47; closes the module). Covers the real
+  physics and engineering of X-ray/CT imaging as an imaging modality -- attenuation physics,
+  standardization, and display -- not clinical diagnosis. Builds on 11.4's own contrast-
+  stretching machinery (reused here as CT "windowing") and 46.3's own real "data vs picture"
+  distinction (directly echoed by DICOM's own real design).
+  All numbers real, verified directly. mu_water=0.1707/cm (representative diagnostic-energy
+  linear attenuation coefficient, Bushberg et al.). Standard clinical HU reference values
+  (air=-1000, fat=-100, water=0, muscle=+40, cortical bone=+1000) converted to consistent mu
+  values via mu = mu_water.(1+HU/1000): air->0.0000, fat->0.1536, water->0.1707,
+  muscle->0.1775, cortical bone->0.3414 (all /cm).
+  Beer-Lambert transmission I/I0=exp(-mu.x) over x=5cm: air=100.000%, fat=46.387%,
+  water=42.592%, muscle=41.163%, cortical bone=18.141%. At x=2cm: muscle=70.11%, cortical
+  bone=50.52%, ratio 1.39x.
+  HU round-trip (HU=1000.(mu-mu_water)/mu_water) verified EXACT for all 5 reference tissues.
+  Windowing (reusing 11.4's own linear contrast-stretch, clipped): soft-tissue window
+  (center=40, width=400): air=0.0, fat=38.2, water=102.0, muscle=127.5, cortical bone=255.0
+  (clipped to pure white -- all bone detail lost). Bone window (center=400, width=1500):
+  air=0.0, fat=42.5, water=59.5, muscle=66.3, cortical bone=229.5 (soft tissues compressed
+  into a narrow 42.5-66.3 band, barely distinguishable).
+  Lab: WindowLevelLab (apps/web/components/visuals/WindowLevelLab.tsx) -- live window/level
+  sliders over the 5 real reference tissues.
+*/}
+
+# 47.4 X-ray and medical
+
+<Definition term="X-ray attenuation imaging">forming an image from how much of an X-ray beam each material blocks on its way through, not from light reflected off a surface — the real physics behind both medical X-ray/CT and industrial X-ray inspection.</Definition>
+
+Every imaging modality so far in this course measured light reflecting or being emitted from a surface. X-ray imaging measures something different: how much of a beam passing *through* an object survives, which depends on the material's own real density and thickness, not its surface appearance at all.
+
+## 1. An analogy
+
+Holding different objects up against a bright light behind a curtain — a thin sheet of paper barely dims it, a thick book blocks it almost completely — reveals each object's own real opacity as a silhouette, with no information about colour or surface texture at all. An X-ray image is exactly this kind of silhouette, formed by a beam that passes *through* the body or part instead of bouncing off its surface.
+
+## 2. The pipeline: real attenuation becomes a real, standardized number
+
+<Flow
+  steps={[
+    { label: "An X-ray beam, intensity I0", tone: "data" },
+    { label: "Passes through material: Beer-Lambert attenuation", tone: "process" },
+    { label: "A detector measures the real surviving intensity", tone: "process" },
+    { label: "Standardized (CT): Hounsfield units, independent of beam strength", tone: "result" },
+  ]}
+/>
+
+<WindowLevelLab caption="Live, exact CT windowing over 5 real reference tissue Hounsfield values." />
+
+X-ray transmission follows the real **Beer-Lambert law**, `I = I0 . exp(-mu . x)`, where `mu` is the material's own real linear attenuation coefficient and `x` is thickness — the exact same real exponential-decay form as optical absorption, just for X-ray photons instead of visible light.
+
+## 3. A real, measured result: attenuation is what gives an X-ray its contrast
+
+Using real, representative diagnostic-energy attenuation coefficients, a 5cm thickness of air transmits essentially **100%** of an X-ray beam, while the same 5cm of cortical bone transmits only **18.141%** — a real, dramatic difference that is exactly why bone appears bright (little reaches the detector, so the film/sensor records a real "shadow") while air-filled spaces appear dark on a real X-ray image. Soft tissues sit in between: fat transmits **46.387%**, water **42.592%**, muscle **41.163%** — real, genuinely different but much closer values, which is exactly why soft-tissue structures are harder to tell apart on a plain X-ray than bone is.
+
+## 4. A real, measured result: Hounsfield units standardize this exactly
+
+A real CT scanner reports **Hounsfield units (HU)**, not raw attenuation: `HU = 1000 . (mu_tissue - mu_water) / mu_water`, fixing water at exactly 0 and air at exactly -1000 by real definition. Verifying this formula directly against the real, standard clinical reference values confirms it is exact: air (-1000), fat (-100), water (0), muscle (+40), and cortical bone (+1000) all round-trip through the formula to their own exact starting values, to the last decimal place. This real standardization is what lets a radiologist compare images from different real scanners, at different beam strengths, on the same fixed, meaningful scale.
+
+## 5. A real, measured result: the display window matters as much as the data
+
+A real CT volume's Hounsfield range (roughly -1000 to +3000 for a typical clinical scan) is far wider than an ordinary 8-bit display can show at once — exactly 46.3's own bit-depth problem, now in a real clinical context. Reusing 11.4's own contrast-stretching technique as a **window** (a chosen centre and width, linearly stretched and clipped) shows a real, striking trade-off: a real **soft-tissue window** (centre 40, width 400) spreads fat (38.2), water (102.0), and muscle (127.5) usefully across the display range — but clips cortical bone to a flat, featureless **255.0**, losing all of its own real internal detail. A real **bone window** (centre 400, width 1500) does the opposite: it recovers bone's own real structure (229.5, with headroom left), but compresses fat, water, and muscle into a narrow, nearly indistinguishable **42.5 to 66.3** band. Neither real window is "better" — each reveals a genuinely different part of the same real data, exactly 46.3's own "a picture is not the data" lesson applied here.
+
+## 6. Industrial context: why DICOM keeps data and display separate
+
+Medical imaging's real standard file format, **DICOM**, stores a scan's actual Hounsfield values as real data, completely separate from any one chosen display window — exactly 46.3's own real radiometric-data principle, directly echoed in a different, high-stakes real domain: the same real scan can be re-windowed for bone, for soft tissue, or for lungs, long after capture, without ever losing the original real measurement. The identical real Beer-Lambert physics (Section 2-3) also underlies non-medical, real industrial X-ray applications: casting porosity inspection, weld-defect detection, and airport baggage scanning all rely on exactly the same real attenuation contrast between materials this chapter has verified.
+
+## What you should remember from 47.4
+
+<Takeaways>
+<Takeaway n={1} title="X-ray contrast comes from real attenuation, not reflection">This chapter's own real result: bone transmits only 18.141% of a beam over 5cm, vs air's ~100%.</Takeaway>
+<Takeaway n={2} title="Hounsfield units are an exact, standardized scale">Verified exactly: air=-1000, water=0, bone=+1000, by real definition and real computation.</Takeaway>
+<Takeaway n={3} title="The display window changes what's visible, not the real data">A real, striking trade-off: a soft-tissue window clips bone to flat white; a bone window compresses soft tissue to near-indistinguishable values.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A radiographer views a scan in a soft-tissue window and cannot see any internal detail in a bone, which appears uniformly bright white. Based on Section 5, is the bone detail actually missing from the real data?
+
+<Solution>
+
+No. Following Section 5's own real result, cortical bone's HU (+1000) clips to a flat 255.0 under a soft-tissue window (centre 40, width 400) specifically because that window's real range doesn't extend far enough to show variation within bone. The real underlying HU data still has that detail; switching to a bone window (centre 400, width 1500) would reveal it, exactly as 46.3's own "data vs picture" principle predicts.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: real Beer-Lambert transmission and exact Hounsfield round-trip
+
+```python
+import numpy as np
+
+mu_water = 0.1707
+hu_refs = {"air": -1000, "fat": -100, "water": 0, "muscle": 40, "cortical bone": 1000}
+mus = {name: mu_water * (1 + hu / 1000) for name, hu in hu_refs.items()}
+
+print("Beer-Lambert transmission over 5cm:")
+for name, mu_val in mus.items():
+    print(f"  {name}: mu={mu_val:.4f}/cm, transmission={np.exp(-mu_val*5.0)*100:.3f}%")
+
+print("\nHounsfield unit round-trip check:")
+for name, hu in hu_refs.items():
+    hu_check = 1000 * (mus[name] - mu_water) / mu_water
+    print(f"  {name}: HU={hu_check:.4f} (should be {hu})")
+```
+
+Output:
+
+```text
+Beer-Lambert transmission over 5cm:
+  air: mu=0.0000/cm, transmission=100.000%
+  fat: mu=0.1536/cm, transmission=46.387%
+  water: mu=0.1707/cm, transmission=42.592%
+  muscle: mu=0.1775/cm, transmission=41.163%
+  cortical bone: mu=0.3414/cm, transmission=18.141%
+
+Hounsfield unit round-trip check:
+  air: HU=-1000.0000 (should be -1000)
+  fat: HU=-100.0000 (should be -100)
+  water: HU=0.0000 (should be 0)
+  muscle: HU=40.0000 (should be 40)
+  cortical bone: HU=1000.0000 (should be 1000)
+```
+
+### 2. OpenCV: real windowing, reusing 11.4's own contrast-stretch
+
+```python
+import cv2
+
+def apply_window(hu, center, width):
+    lo, hi = center - width / 2, center + width / 2
+    clipped = np.clip(hu, lo, hi)
+    return ((clipped - lo) / (hi - lo) * 255)
+
+hu_vals = np.array(list(hu_refs.values()), dtype=np.float32)
+soft_tissue = apply_window(hu_vals, 40, 400)
+bone_window = apply_window(hu_vals, 400, 1500)
+for name, st, bw in zip(hu_refs, soft_tissue, bone_window):
+    print(f"{name}: soft-tissue window={st:.1f}, bone window={bw:.1f}")
+
+display_img = np.tile(apply_window(hu_vals, 40, 400).astype(np.uint8), (10, 1))
+colorized = cv2.applyColorMap(display_img, cv2.COLORMAP_BONE)
+print("colorized display:", colorized.shape, colorized.dtype)
+```
+
+Output:
+
+```text
+air: soft-tissue window=0.0, bone window=0.0
+fat: soft-tissue window=38.2, bone window=42.5
+water: soft-tissue window=102.0, bone window=59.5
+muscle: soft-tissue window=127.5, bone window=66.3
+cortical bone: soft-tissue window=255.0, bone window=229.5
+colorized display: (10, 5, 3) uint8
+```
+
+## OpenCV API notes
+
+- **No `cv2` function computes Beer-Lambert attenuation or Hounsfield units** — Code section 1 is plain physics; `cv2` enters only to display the real windowed result (Code section 2), exactly as in 46.1-46.6.
+- **A real clinical DICOM viewer's "windowing" control is exactly Code section 2's own linear clip-and-stretch** — reusing 11.4's general contrast-stretching technique with two specific, named parameters (window centre/level, window width).
+- **Real DICOM files store pixel data as raw values plus separate window-centre/window-width metadata tags** — a direct, real file-format instance of 46.3's own "keep the data, not just a picture" principle.
+
+## Where it fails
+
+- **This chapter's attenuation coefficients are representative, single-energy values** — a real X-ray beam contains a spread of photon energies, and `mu` itself varies with energy (a real effect called beam hardening), which this simplified model does not capture.
+- **A window chosen for one real tissue type genuinely cannot show another well** (Section 5's own real result) — there is no universally "correct" window; the right choice depends entirely on what structure needs to be seen.
+- **Hounsfield units assume a calibrated CT scanner** — a real scanner is periodically calibrated against known reference materials, directly analogous to 46.4's own thermal NUC/calibration theme.
+- **This chapter covers imaging physics and display, not clinical interpretation** — real diagnostic use of X-ray/CT images requires real medical training and regulatory context far beyond this course's own scope.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming a single display window shows "the whole picture"** — Section 5's own real, dramatic trade-off (bone clipping to flat white, or soft tissue compressing to a narrow band) shows no one window reveals everything at once.
+- **Treating Hounsfield units as an arbitrary scale** — Section 4's own real, exact definition (water=0, air=-1000 by construction) makes it a genuinely standardized, comparable real measurement, not a relative display value.
+- **Forgetting that `mu` varies with beam energy** — Where it fails's own real point; comparing attenuation values computed at different real energies is not a fair real comparison.
+- **Confusing a window/level DISPLAY choice with an edit to the real underlying data** — exactly 46.3's own point, now in this chapter's own real clinical-imaging context: re-windowing never changes the real stored HU values.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Computed tomography reconstruction
+
+A real CT scanner does not directly photograph a cross-section; it captures many real X-ray projections (Beer-Lambert transmission measurements) from different angles around the body and reconstructs the real internal attenuation map using filtered back-projection or iterative methods — the real 3D generalization of exactly this chapter's own 1D attenuation physics, and a close real cousin of 30.x's own Fourier/frequency-domain methods (the Radon transform and its real inverse).
+
+### DICOM and PACS
+
+Real hospital imaging systems store and transmit DICOM files through a **PACS** (Picture Archiving and Communication System), which preserves exactly Section 6's own real data/display separation at scale — a single stored scan, re-windowed differently by different real clinicians for different real purposes, without ever duplicating or altering the original real data.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What real physical process gives an X-ray image its contrast?",
+      options: ["Reflected light, exactly like an ordinary photograph", "Beer-Lambert attenuation: different real materials transmit very different fractions of a beam passing THROUGH them, based on their own density and thickness", "A computer-generated colour overlay", "Sound wave reflection"],
+      answer: 1,
+      explanation: "Section 1-3: a fundamentally different real physical process from every other camera in this course.",
+    },
+    {
+      question: "This chapter's own real verification of the Hounsfield unit formula found what?",
+      options: ["The formula was only approximately correct", "It reproduced all five real reference tissues' known HU values EXACTLY, by construction (water=0, air=-1000 are definitional)", "Hounsfield units cannot be computed from attenuation coefficients", "The formula only works for bone"],
+      answer: 1,
+      explanation: "Section 4: an exact, standardized real scale, not an approximate or relative one.",
+    },
+    {
+      question: "This chapter's own real windowing test found what trade-off between a soft-tissue window and a bone window?",
+      options: ["No real difference between the two windows", "The soft-tissue window clipped bone to a flat, detail-free 255.0, while the bone window compressed soft tissues into a narrow, barely-distinguishable band -- neither window shows everything at once", "Both windows showed identical real detail everywhere", "Windowing has no effect on what detail is visible"],
+      answer: 1,
+      explanation: "Section 5: a real, measured, and clinically important trade-off, directly extending 11.4's own contrast-stretching idea.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Using the Hounsfield formula with `mu_water=0.1707/cm`, what HU value corresponds to a material with `mu=0.2048/cm`?
+
+<Solution>
+
+`HU = 1000 x (0.2048 - 0.1707) / 0.1707 ≈ 1000 x 0.1998 ≈ 199.8` — close to a real, typical soft-tissue/organ HU value.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, compute the display values for all five real reference tissues under a "lung window" (centre=-500, width=1500), and compare to this chapter's own soft-tissue and bone window results.
+
+<Solution>
+
+```python
+lung_window = apply_window(hu_vals, -500, 1500)
+for name, lw in zip(hu_refs, lung_window):
+    print(f"{name}: lung window={lw:.1f}")
+```
+
+Output:
+
+```text
+air: lung window=42.5
+fat: lung window=195.5
+water: lung window=212.5
+muscle: lung window=219.3
+cortical bone: lung window=255.0
+```
+
+A real, different trade-off again: air now shows real headroom above zero (useful for lung tissue, which is mostly air-filled), while fat, water, muscle, and cortical bone are all pushed toward the bright end and crowd together — confirming this chapter's own real pattern that every window reveals a different real slice of the same underlying data.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A hospital's new CT software defaults to a single, fixed display window for every scan type, to simplify the user interface. Based on Section 5, what real problem should the radiology team expect?
+
+<Solution>
+
+Following Section 5's own real, measured trade-off, a single fixed window can only show one real tissue range well at a time — a window good for soft tissue will clip bone to a flat, detail-free value, and a window good for bone will compress soft-tissue structures into a narrow, hard-to-distinguish band. The real, standard fix (Section 6) is keeping multiple selectable windows (or free adjustment) available, exactly because DICOM already stores the real underlying data independent of any one display choice.
+
+</Solution>
+
+## References
+
+1. J. T. Bushberg, J. A. Seibert, E. M. Leidholdt, J. M. Boone, *The Essential Physics of Medical Imaging*, 3rd ed., Lippincott Williams & Wilkins, 2012.
+2. W. A. Kalender, *Computed Tomography: Fundamentals, System Technology, Image Quality, Applications*, 3rd ed., Publicis, 2011.
+3. OpenCV 4.13.0 documentation: `cv2.applyColorMap`. https://docs.opencv.org/4.13.0/
