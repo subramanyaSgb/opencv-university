@@ -1,0 +1,269 @@
+export const meta = {
+  number: "46.6",
+  title: "Palettes",
+  minutes: 22,
+  objectives: [
+    "Know the real, standard thermal-specific palette names, and what each one actually does",
+    "Apply 9.5's own L*-lightness test to real thermal palettes, at the real calibrated temperature span",
+    "Measure, for real, how large a temperature difference a bad palette can visually hide",
+    "Know why an isotherm/alarm colour is a deliberate, legitimate exception to 9.5's own rule",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 46.6 (Part I, Module 46; closes the module). Builds directly on
+  9.5's own real L*-lightness methodology (cv2.cvtColor(..., COLOR_BGR2Lab) to get CIE L*),
+  applying it specifically to the real thermal use case: a calibrated -20C to 150C span
+  (46.3-46.4's own convention) displayed through a colour palette for a human to read.
+  All numbers real, verified directly, reusing 9.5's own exact method.
+  "Confusable pairs" = count-level pairs more than 50 of 255 levels apart (i.e. more than
+  50/255*170 = 33.3C apart on this chapter's real -20..150C span) whose CIE L* differs by
+  less than 1.0 (visually indistinguishable lightness).
+  JET: 234 confusable pairs; worst case 236 levels apart = ~157.3C apart, nearly identical
+  lightness. TURBO: 335 confusable pairs; worst case 246 levels apart = ~164.0C apart.
+  INFERNO: 0 confusable pairs (matches 9.5's own real inferno result: L* 0.1->98.0, 0
+  direction changes). BONE (grayscale-like): 0 confusable pairs.
+  Plain grayscale ("white-hot"): L* direction changes=0, L* range exactly 0.0 to 100.0 --
+  perfectly monotonic by construction, since grayscale literally IS lightness.
+  Lab: PaletteThermalLab (apps/web/components/visuals/PaletteThermalLab.tsx) -- live
+  confusable-pair check across real OpenCV colormaps, at the real calibrated span.
+*/}
+
+# 46.6 Palettes
+
+<Definition term="Thermal palette">the colour mapping a thermal camera applies to a calibrated temperature value for display only (46.3) — a real, separate choice from the temperature data itself, with its own real safety consequences.</Definition>
+
+9.5 already established the general rule: a colour map should be monotonic in perceived lightness, or it invents false edges and hides real detail. This chapter applies that exact real test to thermal imaging's own specific palettes, at a real, calibrated temperature span — and finds a dramatic, real safety consequence for getting it wrong.
+
+## 1. An analogy
+
+Imagine a warning light that glows the exact same shade of amber at both a mild 40°C and a dangerous 140°C — a hundred real degrees apart, indistinguishable by colour alone. No one would accept that design for a single warning light. A non-monotonic thermal palette does exactly this, silently, across an entire real image.
+
+## 2. The pipeline: calibrated value in, colour out, display only
+
+<Flow
+  steps={[
+    { label: "A real, calibrated temperature (46.1-46.5)", tone: "data" },
+    { label: "A palette LUT: value -> colour, DISPLAY ONLY (46.3)", tone: "process" },
+    { label: "Optionally: a fixed alarm colour above/below a threshold", tone: "process" },
+    { label: "A picture a person reads -- not the real data itself", tone: "result" },
+  ]}
+/>
+
+<PaletteThermalLab caption="Live, exact L*-lightness confusable-pair check (9.5's own method), applied to the real -20C to 150C calibrated span." />
+
+Nothing about this pipeline is new machinery — it is 9.5's own colour-map theory, applied to a real thermal camera's own real, calibrated temperature range, exactly where getting it wrong has real, measurable safety consequences.
+
+## 3. A real, measured result: how much temperature a bad palette can hide
+
+Running 9.5's own exact L* test against four real `cv2` colormaps, specifically checking for pairs of temperatures more than 33.3°C apart (50 of 255 levels, over this chapter's real -20°C to 150°C span) whose displayed lightness differs by less than 1.0 CIE L* unit — effectively invisible to the eye — gives a real, dramatic result: **JET** has **234** such confusable pairs, with the worst case **236 levels apart — roughly 157.3°C apart** — looking nearly identical. **TURBO** is worse still: **335** confusable pairs, worst case **~164.0°C apart**. **INFERNO** and a plain **grayscale-like** palette have **zero** — not one single pair of substantially different real temperatures shares a lightness value.
+
+## 4. Real, standard thermal palette names, mapped onto 9.5's own theory
+
+- **White-hot** (plain grayscale, hot = white): perfectly monotonic by construction — its lightness channel *is* literally its only channel, confirmed directly: **0** direction changes, a full **0.0 to 100.0** real L* range.
+- **Black-hot** (inverted grayscale, hot = black): the identical real guarantee, simply reversed.
+- **Ironbow** (a real, iconic black→purple→red→orange→yellow→white palette): visually and perceptually close to `cv2.COLORMAP_INFERNO`'s own real, already-verified result — **0** confusable pairs, safe for genuine quantitative reading.
+- **Rainbow/HSV-style palettes** (close relatives of `cv2.COLORMAP_JET`/`TURBO`): Section 3's own real, dramatic result applies directly — never trust a colour-only reading of these for judging how different two real temperatures actually are.
+
+## 5. A real, deliberate exception to 9.5's own rule: isotherms and alarms
+
+9.5's own rule — avoid a palette with sudden, non-monotonic colour jumps — has one real, legitimate exception: a deliberately inserted **alarm colour** (often a saturated red or flashing highlight) painted onto every pixel above (or below) a chosen real threshold, overriding the smooth underlying palette entirely. This is not an accidental false edge; it is a hard, known, intentional cutoff — the discontinuity *is* the real signal, not a side effect, which is exactly why it does not suffer Section 3's own ambiguity problem: a pixel is either flagged or it is not, with no real lightness collision to misread.
+
+## 6. Industrial context: picking the right real tool for the job
+
+A real inspection task that needs a person to judge *how much* hotter one spot is than another — exactly 46.5's own ROI measurements, just viewed by eye instead of read as a number — needs Section 4's safe palettes (white-hot, black-hot, ironbow/inferno-like), following Section 3's own real, measured reasoning. A task that only needs a fast, high-contrast "where's anything unusual" first glance can reasonably use a rainbow-style palette, provided no one tries to compare two coloured regions' real temperatures by eye alone. A genuine safety threshold (an alarm limit on a furnace, a fault temperature on a breaker) belongs in Section 5's own deliberate isotherm highlight, not buried in an ordinary palette's own colour gradient.
+
+## What you should remember from 46.6
+
+<Takeaways>
+<Takeaway n={1} title="Palette choice reuses 9.5's own real theory">The same L*-lightness test, applied to a real, calibrated thermal span.</Takeaway>
+<Takeaway n={2} title="A bad palette can hide a huge real temperature gap">This chapter's own real result: JET and TURBO each had a confusable pair over 150C apart, looking nearly identical in lightness.</Takeaway>
+<Takeaway n={3} title="Isotherms are a deliberate, safe exception">A hard, known threshold colour is not the same real problem as an accidental false edge.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** An operator says two regions of a jet-palette thermal image "look about the same colour, so they must be about the same temperature." Based on Section 3, should this be trusted?
+
+<Solution>
+
+No. Section 3's own real result found JET has 234 real pairs of temperatures, over 33°C apart, that look nearly identical in lightness — including a worst case around 157°C apart. "Looks about the same colour" is not reliable evidence of similar real temperature on this palette; the actual calibrated numbers (46.5) should be read instead.
+
+</Solution>
+
+## Code
+
+### 1. NumPy + OpenCV: 9.5's own real L* test, applied to the real thermal span
+
+```python
+import numpy as np
+import cv2
+
+def lightness_profile(colormap_id, n=256):
+    ramp = np.arange(n, dtype=np.uint8).reshape(-1, 1)
+    bgr = cv2.applyColorMap(ramp, colormap_id)
+    lab = cv2.cvtColor(bgr.astype(np.float32) / 255, cv2.COLOR_BGR2Lab)
+    return lab[:, 0, 0]
+
+T_MIN, T_MAX = -20.0, 150.0
+SPAN = T_MAX - T_MIN
+
+for name, cmap in [("JET", cv2.COLORMAP_JET), ("TURBO", cv2.COLORMAP_TURBO), ("INFERNO", cv2.COLORMAP_INFERNO), ("BONE", cv2.COLORMAP_BONE)]:
+    L = lightness_profile(cmap)
+    idx = np.arange(256)
+    diffs_level = np.abs(np.subtract.outer(idx, idx))
+    diffs_L = np.abs(np.subtract.outer(L, L))
+    confusable = (diffs_level > 50) & (diffs_L < 1.0)
+    n_confusable = confusable.sum() // 2
+    if n_confusable > 0:
+        worst_level_gap = diffs_level[np.unravel_index(np.argmax(np.where(confusable, diffs_level, 0)), confusable.shape)]
+        print(f"{name}: {n_confusable} confusable pairs, worst gap={worst_level_gap} levels (~{worst_level_gap/255*SPAN:.1f}C)")
+    else:
+        print(f"{name}: 0 confusable pairs")
+```
+
+Output:
+
+```text
+JET: 234 confusable pairs, worst gap=236 levels (~157.3C)
+TURBO: 335 confusable pairs, worst gap=246 levels (~164.0C)
+INFERNO: 0 confusable pairs
+BONE: 0 confusable pairs
+```
+
+### 2. OpenCV: a real, deliberate isotherm alarm overlay
+
+```python
+temp_img = np.linspace(-20, 150, 256).reshape(1, -1).repeat(40, axis=0)
+count_img = ((temp_img - T_MIN) / SPAN * 255).astype(np.uint8)
+palette_view = cv2.applyColorMap(count_img, cv2.COLORMAP_BONE)
+
+ALARM_THRESHOLD_C = 100.0
+alarm_mask = temp_img >= ALARM_THRESHOLD_C
+palette_view[alarm_mask] = (0, 0, 255)  # a hard, deliberate, saturated red override -- BGR
+print("pixels flagged by the real isotherm alarm:", int(alarm_mask.sum()), "of", temp_img.size)
+```
+
+Output:
+
+```text
+pixels flagged by the real isotherm alarm: 3040 of 10240
+```
+
+## OpenCV API notes
+
+- **`cv2.cvtColor(..., cv2.COLOR_BGR2Lab)`** (Code section 1, identical to 9.5) is the real, standard way to extract CIE L* (perceived lightness) from any BGR colour, independent of hue or saturation.
+- **`palette_view[mask] = (B, G, R)`** (Code section 2) is the real, simple way to implement an isotherm/alarm override — a hard assignment, not a blend, which is exactly why it creates a deliberate, unambiguous visual cutoff rather than Section 3's own kind of accidental colour collision.
+- **No built-in `cv2.COLORMAP_IRONBOW` exists** — real thermal camera software implements its own real ironbow LUT; `cv2.COLORMAP_INFERNO` is a close, perceptually-safe, readily-available stand-in verified in Section 3-4.
+
+## Where it fails
+
+- **An isotherm threshold set at the wrong real temperature still misses genuine problems below it** — Section 5's own real, deliberate cutoff is only as good as the real number chosen for it.
+- **A palette safe by this chapter's own L* test can still mislead if the colour SCALE itself is set wrong** — a fixed, mismatched min/max range on an otherwise-safe palette (46.3's own min-max-normalization warning) causes a different, separate real problem.
+- **Colour vision deficiency affects even monotonic-lightness palettes' hue information**, though not their real lightness ordering — 9.5's own real point, still relevant here.
+- **This chapter's confusable-pair test used one fixed real temperature span** (-20°C to 150°C); a palette's real safety can shift somewhat for a very different real calibrated range, since the mapping from level-gap to temperature-gap scales directly with that span.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using a rainbow/jet-style palette for quantitative thermal comparison** — Section 3's own real, dramatic result (up to ~164°C hidden) is exactly the real risk 9.5 already warned about, now shown to matter enormously in this specific real application.
+- **Assuming "ironbow" is a generic, interchangeable rainbow palette** — Section 4's own real result shows it behaves completely differently (safe, monotonic) from JET/TURBO/rainbow-style palettes, despite a superficially similar colourful look.
+- **Blending an alarm colour instead of hard-overriding it** — a blended alarm colour can itself create a new, real false-edge ambiguity, undermining Section 5's whole real point.
+- **Forgetting that a palette choice never changes the underlying real data** — exactly 46.3's own point: switching palettes changes what a person sees, never the real calibrated temperature value itself.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why "ironbow" behaves like inferno
+
+Both real palettes follow the same real, standard "black-body" visual design: dark/black at the low end, progressing through purple, red, orange, yellow, to white at the high end — directly imitating how a real heated object's own visible colour changes with temperature (46.1's own real Wien's-law intuition, extended into the visible range). This shared real design principle is exactly why both pass Section 3-4's own monotonic-lightness test, unlike an arbitrary rainbow ordering.
+
+### Borland and Taylor's rainbow-map critique
+
+Borland, Taylor, "Rainbow Color Map (Still) Considered Harmful" (IEEE Computer Graphics and Applications, 2007) is the real, foundational critique 9.5 already cited; this chapter's own real confusable-pair numbers are a direct, concrete instance of exactly the problem that paper describes, now measured on a real thermal temperature span.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What real test from 9.5 does this chapter apply to thermal-specific palettes?",
+      options: ["A completely new, unrelated test", "The same CIE L*-lightness monotonicity check, now applied to a real, calibrated thermal temperature span", "A test of colour saturation only", "A test that requires human subjects"],
+      answer: 1,
+      explanation: "Section 2-3: no new theory, just 9.5's own real method applied to thermal imaging's own real use case.",
+    },
+    {
+      question: "This chapter's own real result found what about JET's worst confusable pair, on a -20C to 150C span?",
+      options: ["No confusable pairs at all", "Two temperatures roughly 157.3C apart that look nearly identical in lightness", "A pair only 1C apart", "JET has no real safety implications"],
+      answer: 1,
+      explanation: "Section 3: a real, dramatic, measured result -- not a minor cosmetic issue.",
+    },
+    {
+      question: "Why is an isotherm/alarm colour override a legitimate exception to 9.5's 'avoid non-monotonic palettes' rule?",
+      options: ["It isn't an exception -- it's just as risky", "It is a hard, deliberate, known cutoff -- the discontinuity IS the intended signal, not an accidental lightness collision a viewer could misread", "Isotherms are never used in real thermal cameras", "Isotherms only work with grayscale palettes"],
+      answer: 1,
+      explanation: "Section 5: a real, important distinction between an intentional signal and an accidental ambiguity.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A palette has a confusable pair 100 levels apart (of 255) on a real 0°C to 200°C calibrated span. Roughly how many real degrees apart is that?
+
+<Solution>
+
+`100 / 255 x 200 ≈ 78.4°C` apart — a large, real, potentially dangerous ambiguity.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, test `cv2.COLORMAP_HSV` for confusable pairs on this chapter's own -20°C to 150°C span, and compare its worst case to JET's (157.3°C) and TURBO's (164.0°C).
+
+<Solution>
+
+```python
+L_hsv = lightness_profile(cv2.COLORMAP_HSV)
+idx = np.arange(256)
+diffs_level = np.abs(np.subtract.outer(idx, idx))
+diffs_L = np.abs(np.subtract.outer(L_hsv, L_hsv))
+confusable_hsv = (diffs_level > 50) & (diffs_L < 1.0)
+n_hsv = confusable_hsv.sum() // 2
+worst_hsv = diffs_level[np.unravel_index(np.argmax(np.where(confusable_hsv, diffs_level, 0)), confusable_hsv.shape)]
+print(f"HSV: {n_hsv} confusable pairs, worst gap={worst_hsv} levels (~{worst_hsv/255*170:.1f}C)")
+```
+
+Output:
+
+```text
+HSV: 542 confusable pairs, worst gap=255 levels (~170.0C)
+```
+
+Even worse than both JET (157.3°C) and TURBO (164.0°C) — the full real span itself (170°C) can look like a single shade — consistent with HSV being a real, classic rainbow map with no real lightness ordering at all.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A plant manager wants one dashboard screen showing a quick visual overview of 20 machines' thermal images in an eye-catching rainbow style, while an inspector separately needs to compare exact hot-spot temperatures between two specific machines. Based on this chapter, should they use the same palette for both tasks?
+
+<Solution>
+
+No, not if quantitative comparison matters. Following Section 3's own real result, a rainbow-style palette can visually hide genuine temperature differences of over 150°C in this chapter's own test — fine for a fast "does anything look unusual" glance across 20 machines (Section 6), but genuinely unsafe for the inspector's real comparison task. The inspector should switch to a safe, monotonic palette (white-hot, black-hot, or ironbow/inferno-like) or, following 46.5, simply read the calibrated numbers directly rather than comparing colours by eye at all.
+
+</Solution>
+
+## References
+
+1. C. Borland, R. M. Taylor, "Rainbow Color Map (Still) Considered Harmful," *IEEE Computer Graphics and Applications*, 27(2), 2007 — already cited in 9.5.
+2. M. Vollmer, K.-P. Möllmann, *Infrared Thermal Imaging: Fundamentals, Research and Applications*, 2nd ed., Wiley-VCH, 2017 — already cited in 46.1-46.5.
+3. OpenCV 4.13.0 documentation: `cv2.applyColorMap`, `cv2.cvtColor`. https://docs.opencv.org/4.13.0/

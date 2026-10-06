@@ -203,3 +203,4 @@ export { EmissivityLab } from "./EmissivityLab";
 export { InfraRecLab } from "./InfraRecLab";
 export { NucLab } from "./NucLab";
 export { RoiThermalLab } from "./RoiThermalLab";
+export { PaletteThermalLab } from "./PaletteThermalLab";
