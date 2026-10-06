@@ -1,0 +1,356 @@
+export const meta = {
+  number: "33.3",
+  title: "Shi–Tomasi",
+  minutes: 20,
+  objectives: [
+    "Explain the Shi–Tomasi score min(λ1, λ2) and how it differs from Harris",
+    "Use cv2.goodFeaturesToTrack: maxCorners, qualityLevel, minDistance, blockSize, Harris option",
+    "Carry out the greedy minimum-distance selection by hand",
+    "Compare Shi–Tomasi and Harris by repeatability and know when each is better",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 33.3 (Part F, Module 33).
+  Lab: FeatureLab mode "shitomasi" (cv2.goodFeaturesToTrack-exact).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 33.3 Shi–Tomasi
+
+<Definition term="Shi–Tomasi corner (good feature to track)">a pixel whose structure tensor has a large smaller eigenvalue: score = min(λ1, λ2). Shi and Tomasi (1994) showed that this is exactly the condition for a window to be trackable reliably from frame to frame; OpenCV's goodFeaturesToTrack selects such points with a quality threshold and a minimum spacing.</Definition>
+
+Harris (33.2) avoids eigenvalues with a clever formula. Shi and Tomasi asked a more direct question: "Will the tracker be able to follow this window?" The answer is "yes, if the smaller eigenvalue is large enough", so they use λ1 itself as the score.
+
+## 1. An analogy
+
+A chain is only as strong as its weakest link. A corner is only as well located as its weakest direction. Harris mixes the two directions into one number; Shi–Tomasi simply asks for the weakest one.
+
+## 2. The score and the selection
+
+<Flow
+  steps={[
+    { label: "Grey image", tone: "data" },
+    { label: "Structure tensor M per pixel (blockSize window)", tone: "process" },
+    { label: "Score = λmin(M)", tone: "process" },
+    { label: "Keep > qualityLevel · max score; 3 × 3 local maxima", tone: "process" },
+    { label: "Sort strongest first; accept if ≥ minDistance from accepted ones; stop at maxCorners", tone: "result" },
+  ]}
+/>
+
+The smaller eigenvalue in closed form, from M = [[A, B], [B, C]]:
+
+```text
+λmin = (A + C)/2 − √( ((A − C)/2)² + B² )
+```
+
+Measured (Sobel, 3 × 3 sums):
+
+| Point | λmin | Harris R |
+| --- | --- | --- |
+| flat | 335 | 2.0 × 10⁵ |
+| straight edge | 372 | −7.4 × 10⁹ |
+| corner of the box | 103 640 | 2.7 × 10¹⁰ |
+| checkerboard crossing | **693 220** | **4.4 × 10¹¹** |
+
+Both scores agree on what is a corner. The difference is in borderline cases: λmin falls only linearly with the weaker direction, Harris's R also punishes a strong λ2 through −k·trace². **Curved edges** (the disc) have a moderate λmin, so with a low quality level Shi–Tomasi accepts them; Harris does not.
+
+## 3. A worked example by hand
+
+**Scores.** M = [[200, 100], [100, 200]]: (A + C)/2 = 200, √(0 + 100²) = 100 → λmin = **100** (and λmax = 300).
+
+**Selection.** qualityLevel 0.5, minDistance 5, maxCorners 0 (all). Four local maxima:
+
+| Point | Score | Above 0.5 × 9 = 4.5? | Distance to accepted | Result |
+| --- | --- | --- | --- | --- |
+| P1 (10, 10) | 9 | yes | none yet | **accept** |
+| P2 (14, 10) | 8 | yes | 4 to P1 | reject (< 5) |
+| P3 (30, 10) | 7 | yes | 20 to P1 | **accept** |
+| P4 (12, 30) | 5 | yes | √(4 + 400) ≈ 20.1 to P1 | **accept** |
+
+The strongest point always wins; weaker points too close to it are dropped, even when they are good (P2 scores 8). With maxCorners = 2, only P1 and P3 remain.
+
+## 4. On the feature scene
+
+`cv2.goodFeaturesToTrack(img, maxCorners, qualityLevel, minDistance)`:
+
+| maxCorners | qualityLevel | minDistance | Corners |
+| --- | --- | --- | --- |
+| 0 (all) | 0.01 | 10 | 61 |
+| 0 | 0.01 | 1 | 103 |
+| 0 | 0.05 | 10 | 48 |
+| 25 | 0.01 | 10 | 25 |
+
+The five strongest are all checkerboard crossings, where four high-contrast squares meet.
+
+**Repeatability** between the two views (quality 0.01, within 2 px):
+
+| Score | minDistance 1 | minDistance 5 | minDistance 10 |
+| --- | --- | --- | --- |
+| Shi–Tomasi (λmin) | 78 of 101 (77 %) | 60 of 77 (78 %) | 36 of 59 (61 %) |
+| Harris (k 0.04) | 57 of 59 (97 %) | 51 of 54 (94 %) | 36 of 48 (75 %) |
+
+Two lessons. First, on this scene Shi–Tomasi picks 16 points along the disc's edge (minDistance 5); they slide along the curve between views and are not found again. Harris picks none there. Second, a large **minDistance lowers repeatability**: the greedy choice depends on which neighbour happens to be strongest, which can differ between views. minDistance is for spreading points, not for quality.
+
+<FeatureLab mode="shitomasi" caption="cv2.goodFeaturesToTrack on the feature scene. Lower qualityLevel to see the disc edge fill with points; switch the score to Harris and they disappear. Raise minDistance to spread the points, and watch the repeatability; limit maxCorners to keep only the strongest."/>
+
+## 5. Which one to use
+
+| Situation | Choice |
+| --- | --- |
+| Tracking with optical flow (Lucas–Kanade, 40.3) | Shi–Tomasi: designed for it, the default in most trackers |
+| Sharp man-made corners, curved edges in the scene | Harris, or Shi–Tomasi with a higher qualityLevel |
+| Need N well-spread points | goodFeaturesToTrack with maxCorners and minDistance (either score) |
+| Need matching across views with scale change | neither: use SIFT, ORB or AKAZE (Module 34) |
+
+## 6. Industrial use
+
+- **Point tracking** on moving belts, webs and vehicles: Shi–Tomasi + Lucas–Kanade optical flow (Module 40).
+- **Video stabilisation** (39.7): track Shi–Tomasi corners, estimate camera motion, warp the frames.
+- **Visual odometry** on AGVs (Module 43) with well-spread corners.
+
+## What you should remember from 33.3
+
+<Takeaways>
+<Takeaway n={1} title="Score">λmin(M): the weakest direction decides.</Takeaway>
+<Takeaway n={2} title="goodFeaturesToTrack">qualityLevel (relative to max), 3 × 3 maxima, strongest first, minDistance, maxCorners.</Takeaway>
+<Takeaway n={3} title="vs Harris">Same idea; Shi–Tomasi also accepts curved edges at low quality levels.</Takeaway>
+<Takeaway n={4} title="minDistance">Spreads points but lowers repeatability.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** M = [[500, 0], [0, 20]]. Shi–Tomasi score?
+
+<Solution>
+
+B = 0, so the eigenvalues are 500 and 20: score **20** (a weak, edge-like point).
+
+</Solution>
+
+**Q2.** goodFeaturesToTrack returns an array of shape (25, 1, 2) and dtype float32. What are the two numbers per point?
+
+<Solution>
+
+**(x, y)**: column, then row. Integer-valued here, but float32 so they can be refined with cornerSubPix or passed to optical flow.
+
+</Solution>
+
+### Next: 33.4 FAST
+
+## Code
+
+### 1. The smaller eigenvalue from scratch
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-feat.png", cv2.IMREAD_GRAYSCALE)
+f = img.astype(np.float64)
+gx = cv2.Sobel(f, cv2.CV_64F, 1, 0, ksize=3)
+gy = cv2.Sobel(f, cv2.CV_64F, 0, 1, ksize=3)
+S = lambda a: cv2.boxFilter(a, -1, (3, 3), normalize=False)
+A, B, C = S(gx * gx), S(gx * gy), S(gy * gy)
+lam_min = (A + C) / 2 - np.sqrt(((A - C) / 2) ** 2 + B ** 2)     # smaller eigenvalue, closed form
+harris = A * C - B * B - 0.04 * (A + C) ** 2
+pts = {"flat": (250, 120), "edge": (55, 20), "box corner": (20, 20), "checker X": (132, 122)}
+for name, (x, y) in pts.items():
+    print(f"{name:10s} min eigenvalue {lam_min[y, x]:10.0f}   Harris R {harris[y, x]:10.3e}")
+ref = cv2.cornerMinEigenVal(img, 3, 3).astype(np.float64)
+print("max relative difference to cv2.cornerMinEigenVal:", round(float(np.abs(lam_min / (4 * 3 * 255) ** 2 - ref).max() / ref.max()), 8))
+```
+
+Output:
+
+```text
+flat       min eigenvalue        335   Harris R  2.016e+05
+edge       min eigenvalue        372   Harris R -7.397e+09
+box corner min eigenvalue     103640   Harris R  2.724e+10
+checker X  min eigenvalue     693220   Harris R  4.425e+11
+max relative difference to cv2.cornerMinEigenVal: 1.8e-07
+```
+
+### 2. cv2.goodFeaturesToTrack
+
+```python
+for max_c, q, md in [(0, 0.01, 10), (0, 0.01, 1), (0, 0.05, 10), (25, 0.01, 10)]:
+    c = cv2.goodFeaturesToTrack(img, maxCorners=max_c, qualityLevel=q, minDistance=md)
+    print(f"maxCorners {max_c:2d}, qualityLevel {q}, minDistance {md:2d}: {len(c)} corners")
+c = cv2.goodFeaturesToTrack(img, 5, 0.01, 10)
+print("five strongest:", c.reshape(-1, 2).astype(int).tolist(), c.dtype, c.shape)
+```
+
+Output:
+
+```text
+maxCorners  0, qualityLevel 0.01, minDistance 10: 61 corners
+maxCorners  0, qualityLevel 0.01, minDistance  1: 103 corners
+maxCorners  0, qualityLevel 0.05, minDistance 10: 48 corners
+maxCorners 25, qualityLevel 0.01, minDistance 10: 25 corners
+five strongest: [[143, 121], [144, 146], [132, 133], [156, 145], [131, 122]] float32 (5, 1, 2)
+```
+
+### 3. Repeatability: Shi–Tomasi vs Harris
+
+```python
+b = cv2.imread("sample-feat-b.png", cv2.IMREAD_GRAYSCALE)
+c, s = 0.9 * np.cos(np.radians(15)), 0.9 * np.sin(np.radians(15))
+H = np.array([[c, -s, 40], [s, c, -25], [0.0002, 0.0001, 1.0]])
+H_inv = np.linalg.inv(H)
+
+def inside_b(p):
+    """Inside view B with a 7 px margin, and its source in view A too."""
+    if not (7 <= p[0] <= 312 and 7 <= p[1] <= 192):
+        return False
+    u = cv2.perspectiveTransform(p.reshape(1, 1, 2), H_inv).ravel()
+    return 7 <= u[0] <= 312 and 7 <= u[1] <= 192
+
+def repeatability(pa, pb, tol=2.0):
+    mapped = cv2.perspectiveTransform(pa.reshape(-1, 1, 2), H).reshape(-1, 2)
+    keep = [p for p in mapped if inside_b(p)]
+    return int(sum(np.hypot(*(pb - p).T).min() <= tol for p in keep)), len(keep)
+
+for use_harris in (False, True):
+    for md in (1, 5, 10):
+        detect = lambda im: cv2.goodFeaturesToTrack(im, 0, 0.01, md, useHarrisDetector=use_harris).reshape(-1, 2)
+        hit, n = repeatability(detect(img), detect(b))
+        print(f"{'Harris     ' if use_harris else 'Shi-Tomasi '} minDistance {md:2d}: {hit} of {n}")
+```
+
+Output:
+
+```text
+Shi-Tomasi  minDistance  1: 78 of 101
+Shi-Tomasi  minDistance  5: 60 of 77
+Shi-Tomasi  minDistance 10: 36 of 59
+Harris      minDistance  1: 57 of 59
+Harris      minDistance  5: 51 of 54
+Harris      minDistance 10: 36 of 48
+```
+
+## OpenCV API notes
+
+- **`cv2.goodFeaturesToTrack(image, maxCorners, qualityLevel, minDistance[, corners[, mask[, blockSize[, useHarrisDetector[, k]]]]])`**: 8-bit or float32 single channel. Returns float32 (N, 1, 2) of (x, y), strongest first, or `None` if nothing is found.
+  - `maxCorners` ≤ 0: no limit. `qualityLevel`: fraction of the best score (0.01 typical). `minDistance`: Euclidean, in pixels.
+  - `mask`: 8-bit, non-zero where corners may be found (e.g. a region of interest). `blockSize` default 3. `useHarrisDetector=False` (Shi–Tomasi) by default; `k` 0.04.
+  - There is also an overload with `gradientSize` (the Sobel aperture, default 3).
+- **`cv2.cornerMinEigenVal(src, blockSize, ksize=3)`**: the score map itself (float32), scaled like cornerHarris.
+- **`cv2.GFTTDetector_create(...)`**: the same detector as a `cv2.Feature2D` object, returning `cv2.KeyPoint`s; it plugs into descriptor pipelines (Module 34).
+
+## Where it fails
+
+- Same scale limitation as Harris: one window size.
+- **Curved edges and blobs** at low quality levels give points that slide.
+- **qualityLevel is relative**: one very strong corner (a reflection, a checkerboard) raises the bar and removes weaker but useful corners elsewhere. Use a mask, or detect per image tile.
+- **minDistance** is greedy and order-dependent: different views can keep different neighbours.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Not checking for `None`**: goodFeaturesToTrack returns `None` on a blank image; `len(None)` crashes.
+- **Assuming integer coordinates**: the result is float32 (x, y); cast before indexing, and index as `img[y, x]`.
+- **Using a huge minDistance for "quality"**: it only spreads points.
+- **Detecting once and forgetting**: in tracking, re-detect when too many points are lost.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why λmin means trackable
+
+Shi and Tomasi [1] considered tracking a window by solving the linear system M·d = e for the displacement d (the Lucas–Kanade step, 40.3). The system is well conditioned only if both eigenvalues of M are well above the noise level; λmin is the bottleneck. They also proposed checking the window's dissimilarity over time under an affine model, to reject features that change appearance.
+
+### Spreading features evenly
+
+Greedy minDistance is simple but not optimal. Alternatives: detect per grid cell (as ORB-SLAM does with FAST), or adaptive non-maximal suppression (ANMS, Brown, Szeliski and Winder [2]), which keeps points that are the strongest within the largest radius and gives a much more even spread.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The Shi–Tomasi score is…",
+      options: ["λ1 + λ2", "λ1 · λ2", "min(λ1, λ2)", "det − k·trace²"],
+      answer: 2,
+      explanation: "The smaller eigenvalue of the structure tensor.",
+    },
+    {
+      question: "qualityLevel = 0.05 and the best score is 2 000. Which scores pass?",
+      options: ["> 0.05", "> 100", "> 1 900", "> 2 000"],
+      answer: 1,
+      explanation: "0.05 × 2 000 = 100.",
+    },
+    {
+      question: "Why did Shi–Tomasi have lower repeatability than Harris on the feature scene?",
+      options: ["It is slower", "It picked points on the curved disc edge that slide between views", "It needs colour", "Its coordinates are rounded"],
+      answer: 1,
+      explanation: "16 points on the disc edge at minDistance 5; Harris picked none there.",
+    },
+    {
+      question: "Raising minDistance from 1 to 10…",
+      options: ["improves repeatability", "spreads points but lowered repeatability here", "has no effect", "adds points"],
+      answer: 1,
+      explanation: "77 % → 61 % for Shi–Tomasi, 97 % → 75 % for Harris.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Points with scores: P1 (0, 0) 10, P2 (3, 4) 9, P3 (8, 0) 6, P4 (8, 3) 5, P5 (20, 20) 0.8. qualityLevel 0.1, minDistance 5, maxCorners 0. Which points are returned, in which order?
+
+<Solution>
+
+Threshold 0.1 × 10 = 1: P5 is dropped. P1 accepted. P2 at distance 5 from P1: OpenCV rejects only distances **below** minDistance, so P2 is accepted. P3: 8 from P1, √(25 + 16) ≈ 6.4 from P2 → accepted. P4: 3 from P3 → rejected. Result: **P1, P2, P3**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Detect at most 30 Shi–Tomasi corners only in the lower half of the image (rows 100 and below), using a mask. How many are on the checkerboard (x 120–167, y 110–157)?
+
+<Solution>
+
+```python
+mask = np.zeros_like(img)
+mask[100:, :] = 255
+c = cv2.goodFeaturesToTrack(img, 30, 0.01, 5, mask=mask).reshape(-1, 2)
+on_board = ((c[:, 0] >= 120) & (c[:, 0] <= 167) & (c[:, 1] >= 110) & (c[:, 1] <= 157)).sum()
+print(len(c), "corners,", int(on_board), "on the checkerboard, topmost row", int(c[:, 1].min()))
+```
+
+Output:
+
+```text
+30 corners, 23 on the checkerboard, topmost row 110
+```
+
+The checkerboard's crossings are the strongest points, so with maxCorners 30 they take most of the budget.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+You track corners on a moving web. The only strong structure is a printed logo at the left edge, and goodFeaturesToTrack returns all points there. What do you change?
+
+<Solution>
+
+The relative threshold is dominated by the logo. Detect per tile (a grid of masks with a few corners each), or lower qualityLevel and use minDistance plus maxCorners per tile, so the tracked points cover the whole web.
+
+</Solution>
+
+## References
+
+1. J. Shi, C. Tomasi, "Good features to track," *Proc. IEEE CVPR*, 1994, pp. 593–600.
+2. M. Brown, R. Szeliski, S. Winder, "Multi-image matching using multi-scale oriented patches," *Proc. IEEE CVPR*, 2005, pp. 510–517.
+3. C. Harris, M. Stephens, "A combined corner and edge detector," *Proc. 4th Alvey Vision Conference*, 1988, pp. 147–151.
+4. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022, Section 7.1.1.
+5. OpenCV 4.13.0 documentation: `goodFeaturesToTrack`, `cornerMinEigenVal`, `GFTTDetector`; tutorial "Shi-Tomasi corner detector & Good Features to Track". https://docs.opencv.org/4.13.0/

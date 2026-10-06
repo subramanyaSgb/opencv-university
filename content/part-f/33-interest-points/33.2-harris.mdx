@@ -1,0 +1,375 @@
+export const meta = {
+  number: "33.2",
+  title: "Harris",
+  minutes: 22,
+  objectives: [
+    "Compute the Harris response R = det(M) − k·trace(M)² and read its sign",
+    "Use cv2.cornerHarris with blockSize, ksize and k, then threshold and non-max suppress",
+    "Refine corners to sub-pixel accuracy with cv2.cornerSubPix",
+    "Choose parameters by measuring repeatability",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 33.2 (Part F, Module 33).
+  Lab: FeatureLab mode "harris" (cv2.cornerHarris-exact response).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 33.2 Harris
+
+<Definition term="Harris corner detector">a detector that scores every pixel with R = det(M) − k·trace(M)², where M is the structure tensor of the surrounding window: R is large and positive at corners, negative along edges and near zero in flat areas. Corners are the local maxima of R above a threshold.</Definition>
+
+Chapter 33.1 showed that a corner is a point where the structure tensor M has two large eigenvalues. Harris and Stephens (1988) found a way to test this without computing the eigenvalues at all, using only the determinant and the trace of M. It is still one of the most used corner detectors.
+
+## 1. An analogy
+
+A table on four legs. Push it in one direction and it slides; push it into a corner of the room and it cannot move in any direction. Harris asks: "Is this pixel locked in, like the table in the corner, or can the window slide along something?"
+
+## 2. The Harris score
+
+<Flow
+  steps={[
+    { label: "Grey image", tone: "data" },
+    { label: "Sobel gx, gy", tone: "process" },
+    { label: "Products gx², gx·gy, gy² summed over blockSize × blockSize", tone: "process" },
+    { label: "R = det(M) − k·trace(M)²", tone: "process" },
+    { label: "Threshold + 3 × 3 local maxima → corners", tone: "result" },
+  ]}
+/>
+
+With M = [[A, B], [B, C]] and its eigenvalues λ1, λ2:
+
+```text
+det(M)   = A·C − B²  = λ1 · λ2
+trace(M) = A + C     = λ1 + λ2
+R        = det(M) − k · trace(M)²          k ≈ 0.04 … 0.06
+```
+
+- **Corner**: both λ large → the product dominates → **R large positive**.
+- **Edge**: one λ ≈ 0 → product ≈ 0, the trace term wins → **R negative**.
+- **Flat**: both λ small → **R ≈ 0**.
+
+No square roots, no eigen-decomposition: in 1988 that mattered, and it still makes Harris cheap.
+
+Measured on the feature scene (blockSize 3, k 0.04, plain Sobel sums):
+
+| Point | R |
+| --- | --- |
+| flat background | 2.0 × 10⁵ (≈ 0 on this scale) |
+| edge of the box | **−7.4 × 10⁹** |
+| corner of the box | **+2.7 × 10¹⁰** |
+
+## 3. A worked example by hand
+
+Use the windows of 33.1 and k = 0.04:
+
+| Window | M | det | trace | R |
+| --- | --- | --- | --- | --- |
+| flat | [[5, 0], [0, 5]] | 25 | 10 | 25 − 0.04 × 100 = **21** |
+| edge | [[0, 0], [0, 300]] | 0 | 300 | 0 − 0.04 × 90 000 = **−3 600** |
+| corner | [[300, 0], [0, 300]] | 90 000 | 600 | 90 000 − 0.04 × 360 000 = **75 600** |
+
+What does k do? For an edge with eigenvalues 0 and λ, R = −k·λ². For a "weak corner" with eigenvalues λ1 = a·λ2, R > 0 only if a / (1 + a)² > k. With k = 0.04 that needs a > 0.043 (the smaller eigenvalue at least about 4 % of the larger); with k = 0.15, a > 0.23. **Larger k rejects more edge-like points**; smaller k accepts more corners, including rounded and weak ones.
+
+## 4. From the response map to corner points
+
+R is a map: one value per pixel. Around each corner, several neighbouring pixels have a high R. Two steps turn the map into points:
+
+1. **Threshold**: keep pixels with R > q · max(R), typically q = 0.01. Relative to the maximum, because R's absolute scale depends on contrast and on OpenCV's scaling.
+2. **Non-maximum suppression**: keep a pixel only if it is the largest in its 3 × 3 neighbourhood (compare R with `cv2.dilate(R)`).
+
+On the feature scene: 751 pixels are above 1 % of the maximum, and 61 survive non-max suppression. The bright box gives exactly 8: its 4 outer corners and the 4 corners of the dark hole. The disc gives none, and the long line gives none in its middle (only at its ends).
+
+<FeatureLab mode="harris" caption="Harris corners on the feature scene. Switch the view to B (rotated 15°, scaled 0.9, darker) and compare. Turn off non-max suppression to see the clusters of strong pixels; show the score map to see R. Change blockSize and k and watch the repeatability at the bottom."/>
+
+## 5. Choosing the parameters
+
+Measured on the two views (threshold 1 % of max, 3 × 3 non-max, found again within 2 px):
+
+| blockSize | Corners in A | Found again in B |
+| --- | --- | --- |
+| 2 | 92 | 91 of 91 (100 %) |
+| 3 | 61 | 57 of 59 (97 %) |
+| 5 | 83 | 62 of 81 (77 %) |
+| 7 | 72 | 53 of 70 (76 %) |
+
+On this sharp, synthetic scene small windows work best; larger windows merge neighbouring structures (checker squares, letter strokes) and their maxima move more between views. Real, noisier images usually need a somewhat larger window or a slight blur first.
+
+k changed less: 61 to 71 corners and 87–97 % repeatability for k from 0.04 to 0.15. Because the threshold is relative to max(R), changing k also changes the threshold, so the number of corners does not simply fall as k rises.
+
+## 6. Sub-pixel accuracy
+
+Detected corners are whole pixels. For measurement and calibration (Module 41) that is not enough. `cv2.cornerSubPix` refines each corner iteratively: at the true corner, every gradient in the window is perpendicular to the vector from the corner to that pixel, and it solves for the point that best satisfies this.
+
+The box was drawn with pixel columns 20 to 90 and rows 20 to 70, so its true outer corners lie on pixel boundaries: (19.5, 19.5), (90.5, 19.5), (19.5, 70.5), (90.5, 70.5).
+
+| Detected | Refined | True |
+| --- | --- | --- |
+| (20, 20) | (19.60, 19.60) | (19.5, 19.5) |
+| (90, 20) | (90.25, 19.61) | (90.5, 19.5) |
+| (21, 70) | (19.60, 70.38) | (19.5, 70.5) |
+| (90, 70) | (90.32, 70.39) | (90.5, 70.5) |
+
+From up to 1.5 px off to within about 0.25 px.
+
+## 7. Industrial use
+
+- **Calibration targets**: checkerboard corners are found with Harris-like detectors and refined with `cornerSubPix` (`cv2.findChessboardCorners` + `cornerSubPix`, 41.4).
+- **Alignment of parts and sheets** by their corners (sheet metal, glass, PCBs).
+- **Tracking**: Harris or Shi–Tomasi corners fed to optical flow (Module 40).
+
+## What you should remember from 33.2
+
+<Takeaways>
+<Takeaway n={1} title="Score">R = det(M) − k·trace(M)²: positive at corners, negative at edges, ≈ 0 when flat.</Takeaway>
+<Takeaway n={2} title="Points">Threshold relative to max(R), then 3 × 3 non-max suppression.</Takeaway>
+<Takeaway n={3} title="Parameters">blockSize = window, ksize = Sobel size, k ≈ 0.04–0.06 (larger rejects edge-like points).</Takeaway>
+<Takeaway n={4} title="Sub-pixel">cornerSubPix brings corners to about 0.1–0.3 px.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** M = [[400, 0], [0, 10]], k = 0.05. Compute R. Corner or edge?
+
+<Solution>
+
+det = 4 000, trace = 410, R = 4 000 − 0.05 × 168 100 = 4 000 − 8 405 = **−4 405**. Negative: an **edge**.
+
+</Solution>
+
+**Q2.** Why threshold at a fraction of max(R) and not at a fixed number?
+
+<Solution>
+
+R grows with the fourth power of contrast (it is a product of two squared-gradient sums), and OpenCV scales it. A fixed number would fail as soon as the lighting or the image changes.
+
+</Solution>
+
+### Next: 33.3 Shi–Tomasi
+
+## Code
+
+### 1. Harris from scratch (NumPy + Sobel)
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-feat.png", cv2.IMREAD_GRAYSCALE)
+f = img.astype(np.float64)
+gx = cv2.Sobel(f, cv2.CV_64F, 1, 0, ksize=3)
+gy = cv2.Sobel(f, cv2.CV_64F, 0, 1, ksize=3)
+S = lambda a: cv2.boxFilter(a, -1, (3, 3), normalize=False)
+A, B, C = S(gx * gx), S(gx * gy), S(gy * gy)
+k = 0.04
+R = A * C - B * B - k * (A + C) ** 2
+for name, (x, y) in {"flat": (250, 120), "edge": (55, 20), "corner": (20, 20)}.items():
+    print(f"{name:6s} R = {R[y, x]:.3e}")
+ref = cv2.cornerHarris(img, 3, 3, k).astype(np.float64)
+scale = (4 * 3 * 255) ** 4                                       # OpenCV scales each derivative by 1/(4·3·255)
+print("max relative difference to cv2.cornerHarris:", round(float(np.abs(R / scale - ref).max() / np.abs(ref).max()), 8))
+```
+
+Output:
+
+```text
+flat   R = 2.016e+05
+edge   R = -7.397e+09
+corner R = 2.724e+10
+max relative difference to cv2.cornerHarris: 3.1e-07
+```
+
+The only difference is OpenCV's scaling: for 8-bit input each derivative is divided by 2^(ksize−1) · blockSize · 255 = 4 · 3 · 255, and R contains products of four derivatives.
+
+### 2. cv2.cornerHarris, threshold and non-max suppression
+
+```python
+R = cv2.cornerHarris(img, blockSize=3, ksize=3, k=0.04)
+print("R: dtype", R.dtype, "min", f"{R.min():.2e}", "max", f"{R.max():.2e}")
+strong = R > 0.01 * R.max()
+peaks = strong & (R == cv2.dilate(R, None))                      # 3 × 3 non-maximum suppression
+print("pixels above 1 % of max:", int(strong.sum()), " after non-max suppression:", int(peaks.sum()))
+ys, xs = np.nonzero(peaks)
+box = [(x, y) for x, y in zip(xs, ys) if 10 <= x <= 100 and 10 <= y <= 80]
+print("corners on the bright box:", sorted((int(x), int(y)) for x, y in box))
+```
+
+Output:
+
+```text
+R: dtype float32 min -2.27e-03 max 5.36e-03
+pixels above 1 % of max: 751  after non-max suppression: 61
+corners on the bright box: [(20, 20), (21, 70), (40, 54), (41, 36), (70, 35), (70, 55), (90, 20), (90, 70)]
+```
+
+### 3. Sub-pixel refinement
+
+- `winSize=(5, 5)`: half the search window (the window is 11 × 11).
+- `zeroZone=(-1, -1)`: no dead zone in the middle.
+- `criteria`: stop after 40 iterations or when the point moves less than 0.001 px.
+
+```python
+pts = np.array([[20, 20], [90, 20], [21, 70], [90, 70]], np.float32).reshape(-1, 1, 2)
+crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 40, 0.001)
+ref = cv2.cornerSubPix(img, pts.copy(), winSize=(5, 5), zeroZone=(-1, -1), criteria=crit)
+for p, q in zip(pts.reshape(-1, 2), ref.reshape(-1, 2)):
+    print(f"({p[0]:.0f}, {p[1]:.0f}) -> ({q[0]:.2f}, {q[1]:.2f})")
+```
+
+Output:
+
+```text
+(20, 20) -> (19.60, 19.60)
+(90, 20) -> (90.25, 19.61)
+(21, 70) -> (19.60, 70.38)
+(90, 70) -> (90.32, 70.39)
+```
+
+`cornerSubPix` writes into the array it is given, hence `pts.copy()`.
+
+## OpenCV API notes
+
+- **`cv2.cornerHarris(src, blockSize, ksize, k[, dst[, borderType]])`**: `src` 8-bit or float32, single channel. Returns float32 R of the same size. `blockSize`: neighbourhood for M; `ksize`: Sobel aperture (3, 5, 7; −1 = Scharr); `k`: Harris free parameter. Border: `BORDER_DEFAULT` (reflect-101).
+- **Scaling**: derivatives are divided by 2^(ksize−1) · blockSize, and additionally by 255 for 8-bit input. Use relative thresholds.
+- **`cv2.goodFeaturesToTrack(..., useHarrisDetector=True, k=0.04)`** does threshold, non-max suppression, minimum distance and sorting for you (33.3).
+- **`cv2.cornerSubPix(image, corners, winSize, zeroZone, criteria)`**: corners float32 N × 1 × 2, refined in place and returned.
+- **Speed**: about the cost of three box filters plus two Sobels: fine for video at VGA on a CPU.
+
+## Where it fails
+
+- **Scale**: Harris is not scale invariant; a corner seen at a different zoom may lose its maximum or split into two. Use multi-scale detection (Harris–Laplace, SIFT 34.1).
+- **Rounded corners** of radius larger than the window: no clear maximum.
+- **Noise and texture**: many weak, unstable corners; raise the threshold, blur slightly, or use minDistance (33.3).
+- **Clusters**: several strong corners close together (text, checkerboards) without a minimum distance.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Forgetting non-max suppression**: hundreds of "corners" in clumps instead of one per corner.
+- **A fixed absolute threshold** (e.g. R > 1000): R's scale depends on contrast and OpenCV's normalisation.
+- **Passing a colour image**: convert to grey first.
+- **Swapping x and y**: `np.argwhere` and `np.nonzero` return (row, column) = (y, x).
+- **Calling cornerSubPix on int arrays or without copying**: it needs float32 and modifies its input.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why det − k·trace²
+
+Harris and Stephens [1] wanted a measure that is large only when both eigenvalues are large, without computing them. det = λ1λ2 and trace = λ1 + λ2 are invariant to rotation of the image. With λ1 = a·λ2: R = λ2²·(a − k(1 + a)²), positive only for a above a k-dependent limit. Noble [2] proposed det / (trace + ε) instead, which needs no k.
+
+### Rotation, lighting and scale
+
+R is computed from rotation-invariant quantities of M, so Harris corners are rotation invariant up to discretisation. An additive brightness change does not change gradients; a gain g multiplies R by g⁴, which the relative threshold absorbs. Scale is the weak point: Mikolajczyk and Schmid's Harris–Laplace [3] detects Harris corners at several scales and keeps those where the normalised Laplacian is maximal over scale.
+
+### How cornerSubPix works
+
+For the true corner q and any pixel p in the window with gradient ∇I(p), either p lies in a flat area (∇I = 0) or on an edge through q, so ∇I(p) · (p − q) = 0. Summing over the window gives the linear system (Σ ∇I∇Iᵀ) q = Σ ∇I∇Iᵀ p, which is solved and iterated with the window re-centred on the new q. It is the same idea as Förstner's operator [4].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "At an edge, the Harris response is…",
+      options: ["large positive", "negative", "exactly zero", "undefined"],
+      answer: 1,
+      explanation: "det ≈ 0, so −k·trace² dominates: −7.4 × 10⁹ in the measurement.",
+    },
+    {
+      question: "Increasing k from 0.04 to 0.15…",
+      options: ["accepts more edge-like points", "rejects more edge-like points (needs a larger λ1/λ2)", "changes nothing", "makes Harris scale invariant"],
+      answer: 1,
+      explanation: "R > 0 needs a/(1 + a)² > k with a = λ1/λ2.",
+    },
+    {
+      question: "Why compare R with cv2.dilate(R)?",
+      options: ["To remove noise", "To keep only 3 × 3 local maxima (non-max suppression)", "To enlarge corners", "To threshold"],
+      answer: 1,
+      explanation: "A pixel equal to the dilated value is the largest in its neighbourhood.",
+    },
+    {
+      question: "The box's true corner is at (19.5, 19.5). Harris gives (20, 20); cornerSubPix gives…",
+      options: ["(20, 20)", "(19.60, 19.60)", "(18, 18)", "(21, 21)"],
+      answer: 1,
+      explanation: "About 0.1 px from the true corner.",
+    },
+    {
+      question: "Harris is NOT invariant to…",
+      options: ["rotation", "brightness offset", "scale", "translation"],
+      answer: 2,
+      explanation: "A fixed window size sees different structure at different zooms.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+For which ratio a = λ1/λ2 is R exactly zero when k = 0.06?
+
+<Solution>
+
+Solve a = 0.06·(1 + a)²: 0.06a² − 0.88a + 0.06 = 0 → a = (0.88 − √(0.7744 − 0.0144)) / 0.12 = (0.88 − 0.8718) / 0.12 ≈ **0.068**. Corners need λ1 above about 7 % of λ2.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Count the Harris corners (threshold 1 % of max, 3 × 3 non-max) for k = 0.04, 0.06, 0.1 and 0.15, and for blockSize 2, 3, 5 and 7.
+
+<Solution>
+
+```python
+def harris_points(im, block=3, k=0.04, q=0.01):
+    R = cv2.cornerHarris(im, block, 3, k)
+    return np.argwhere((R > q * R.max()) & (R == cv2.dilate(R, None)))
+for k in (0.04, 0.06, 0.1, 0.15):
+    print(f"k = {k:4}: {len(harris_points(img, k=k))} corners")
+for block in (2, 3, 5, 7):
+    print(f"blockSize {block}: {len(harris_points(img, block=block))} corners")
+```
+
+Output:
+
+```text
+k = 0.04: 61 corners
+k = 0.06: 71 corners
+k =  0.1: 68 corners
+k = 0.15: 66 corners
+blockSize 2: 92 corners
+blockSize 3: 61 corners
+blockSize 5: 83 corners
+blockSize 7: 72 corners
+```
+
+The counts do not change monotonically: the threshold follows max(R), which itself changes with k and blockSize. Judge parameters by repeatability, not by count.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A camera inspects punched sheet-metal parts whose corners have a 3 mm radius at 0.2 mm per pixel. Will Harris with blockSize 3 find the corners reliably?
+
+<Solution>
+
+The radius is 15 px, much larger than a 3 × 3 window: along the arc the window sees an almost straight edge, so R stays low or negative. Use a larger window (or a downscaled image), or fit lines to the straight sides and intersect them (Module 26).
+
+</Solution>
+
+## References
+
+1. C. Harris, M. Stephens, "A combined corner and edge detector," *Proc. 4th Alvey Vision Conference*, 1988, pp. 147–151.
+2. J. A. Noble, "Finding corners," *Image and Vision Computing* 6(2), 1988, pp. 121–128.
+3. K. Mikolajczyk, C. Schmid, "Scale & affine invariant interest point detectors," *International Journal of Computer Vision* 60(1), 2004, pp. 63–86.
+4. W. Förstner, E. Gülch, "A fast operator for detection and precise location of distinct points, corners and centres of circular features," *ISPRS Intercommission Workshop*, Interlaken, 1987.
+5. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022, Section 7.1.1.
+6. OpenCV 4.13.0 documentation: `cornerHarris`, `cornerSubPix`, `dilate`; tutorials "Harris corner detector" and "Detecting corners location in subpixels". https://docs.opencv.org/4.13.0/

@@ -30,6 +30,12 @@
       "letter": "E",
       "title": "Frequency domain",
       "modules": ["30-fourier-transform", "31-other-transforms", "32-template-matching"]
+    },
+    {
+      "id": "part-f",
+      "letter": "F",
+      "title": "Features and recognition",
+      "modules": ["33-interest-points"]
     }
   ]
 }

@@ -1926,3 +1926,18 @@ button.nl-cell { cursor: pointer; }
 .matchlab .tm-bar i { display: block; width: 100%; background: #2f7de1; border-radius: 2px 2px 0 0; }
 .matchlab .tm-bar.is-best i { background: #e0a800; }
 .matchlab .tm-bar b { font-weight: 500; color: var(--fg-soft); }
+
+/* lab-kit (shared by the image labs from Module 33 on; the figure carries class "lklab") */
+.lklab .sc-ctl { display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.lklab .seg { flex-wrap: wrap; }
+.lklab .seg button { white-space: normal; }
+.lklab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.lklab .lk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 0.6rem; align-items: start; }
+.lklab .lk-view { margin: 0; min-width: 0; }
+.lklab .lk-img { display: block; width: 100%; max-width: 44rem; height: auto; image-rendering: pixelated; border-radius: 3px; border: 1px solid var(--line); }
+.lklab .lk-view figcaption { font-size: 0.75rem; color: var(--fg-soft); margin-top: 0.2rem; }
+.lklab .lk-read { font-size: 0.82rem; margin: 0.5rem 0 0; font-variant-numeric: tabular-nums; }
+.lklab .lk-check { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; margin-right: 1rem; }
+.lklab .lk-table { font-size: 0.8rem; border-collapse: collapse; margin-top: 0.5rem; font-variant-numeric: tabular-nums; }
+.lklab .lk-table td, .lklab .lk-table th { border: 1px solid var(--line); padding: 0.15rem 0.45rem; text-align: right; }
+.lklab .lk-wrap { overflow-x: auto; max-width: 100%; }

@@ -604,6 +604,35 @@ def board():
     return np.clip(np.rint(img), 0, 255).astype(np.uint8)
 images["sample-board.png"] = board()
 
+# Module 33-34: feature scene (corners, edges, a disc, a checkerboard, text) and a second view of it
+# under a known homography (rotation 15 deg, scale 0.9, slight perspective), darker and with new noise.
+def feat_scene():
+    rng = np.random.default_rng(33)
+    img = np.full((200, 320), 120.0)
+    img += np.linspace(-15, 15, 320)[None, :]
+    cv2.rectangle(img, (20, 20), (90, 70), 200, -1)
+    cv2.rectangle(img, (40, 35), (70, 55), 60, -1)
+    cv2.fillPoly(img, [np.array([[120, 25], [175, 25], [175, 45], [140, 45], [140, 80], [120, 80]], np.int32)], 40)
+    cv2.fillPoly(img, [np.array([[220, 80], [260, 15], [300, 80]], np.int32)], 210)
+    cv2.circle(img, (60, 140), 32, 190, -1, cv2.LINE_AA)
+    for i in range(4):
+        for j in range(4):
+            cv2.rectangle(img, (120 + 12 * j, 110 + 12 * i), (131 + 12 * j, 121 + 12 * i), 230 if (i + j) % 2 == 0 else 30, -1)
+    cv2.putText(img, "A7", (200, 170), cv2.FONT_HERSHEY_SIMPLEX, 1.4, 25, 3, cv2.LINE_AA)
+    cv2.line(img, (20, 190), (300, 190), 200, 3)
+    img = cv2.GaussianBlur(img, (0, 0), 0.8)
+    img += rng.normal(0, 3, img.shape)
+    return np.clip(np.rint(img), 0, 255).astype(np.uint8)
+
+
+FEAT_H = np.array([[0.9 * np.cos(np.radians(15)), -0.9 * np.sin(np.radians(15)), 40],
+                   [0.9 * np.sin(np.radians(15)), 0.9 * np.cos(np.radians(15)), -25],
+                   [0.0002, 0.0001, 1.0]])
+images["sample-feat.png"] = feat_scene()
+ft_b = cv2.warpPerspective(images["sample-feat.png"].astype(np.float64), FEAT_H, (320, 200), flags=cv2.INTER_LINEAR,
+                           borderMode=cv2.BORDER_CONSTANT, borderValue=110)
+images["sample-feat-b.png"] = np.clip(np.rint(ft_b * 0.8 + 20 + np.random.default_rng(34).normal(0, 3, ft_b.shape)), 0, 255).astype(np.uint8)
+
 for name, img in images.items():
     ok = cv2.imwrite(str(OUT / name), img)
     assert ok, f"could not write {name}"

@@ -1,0 +1,390 @@
+export const meta = {
+  number: "33.1",
+  title: "What a good feature is",
+  minutes: 20,
+  objectives: [
+    "Explain why corners can be found again and edges and flat areas cannot",
+    "Measure how a window changes when it is shifted (SSD) and relate it to the structure tensor",
+    "Read the two eigenvalues of the structure tensor: flat, edge, corner",
+    "Define repeatability and measure it with a known homography",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 33.1 (Part F, Module 33).
+  New lab: FeatureLab (lib/feature-ops.ts; Harris, min eigenvalue, goodFeaturesToTrack and FAST equal OpenCV).
+  New samples: sample-feat.png and sample-feat-b.png (second view under the known homography FEAT_H).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 33.1 What a good feature is
+
+<Definition term="Interest point (feature point, keypoint)">a pixel position whose neighbourhood is so distinctive that the same physical point can be found again, precisely, in another image of the scene: after the camera or the object has moved, turned, or the light has changed.</Definition>
+
+Template matching (Module 32) needs the whole object to look the same. Feature-based methods instead pick a few dozen to a few thousand small, distinctive spots, describe each one, and match them between images. Stitching, tracking, visual odometry, 3D reconstruction and object recognition all start here. The first question is: which spots are worth picking?
+
+## 1. An analogy
+
+You have to tell a friend where to meet in a large car park. "Next to a grey car" is useless: there are hundreds (a flat area). "Somewhere along the white line" is better but still ambiguous along the line (an edge). "At the corner where the white line meets the kerb" is a single place (a corner). Good features are the corners of an image.
+
+## 2. The window test
+
+Put a small window on the image and shift it a few pixels. How much does the content under the window change?
+
+<Flow
+  steps={[
+    { label: "Window at (x, y)", tone: "data" },
+    { label: "Shift it by (u, v) in every direction", tone: "process" },
+    { label: "SSD between original and shifted window", tone: "process" },
+    { label: "Small in some direction → ambiguous; large in all → good feature", tone: "result" },
+  ]}
+/>
+
+- **Flat area**: shifting changes almost nothing in any direction. The position cannot be fixed at all.
+- **Edge**: shifting **across** the edge changes a lot, shifting **along** it changes nothing. The position is fixed in one direction only (the "aperture problem").
+- **Corner**: every shift changes the content. The position is fixed in both directions.
+
+Measured on the feature scene with a 9 × 9 window, smallest SSD over the eight 3-pixel moves:
+
+| Point | Smallest SSD for a 3 px move |
+| --- | --- |
+| flat background (250, 120) | 1 121 (noise only) |
+| edge of the bright box (55, 20) | 1 470 (moving along the edge) |
+| edge of the disc (92, 140) | 3 056 (curved, so slightly better) |
+| corner of the box (20, 20) | **87 447** |
+
+The corner is about 60 times more distinctive than the straight edge.
+
+## 3. From shifts to gradients: the structure tensor
+
+Testing every shift is slow. For small shifts the change can be predicted from the image gradients gx, gy (Module 22). Summed over the window, the squared change for a shift (u, v) is approximately
+
+```text
+E(u, v) ≈ [u v] · M · [u v]ᵀ        M = Σ over the window of  [ gx·gx  gx·gy ]
+                                                              [ gx·gy  gy·gy ]
+```
+
+M is the **structure tensor** (or second-moment matrix). Its two **eigenvalues** λ1 ≤ λ2 say how fast E grows in the slowest and in the fastest direction:
+
+| λ1 | λ2 | Meaning |
+| --- | --- | --- |
+| small | small | flat |
+| small | large | edge (slow along it) |
+| large | large | **corner** |
+
+Measured (Sobel gradients summed over 5 × 5):
+
+| Point | λ1 | λ2 |
+| --- | --- | --- |
+| flat | 852 | 3 058 |
+| straight edge | 1 831 | 760 503 |
+| disc edge | 16 069 | 488 413 |
+| box corner | **270 994** | 524 664 |
+
+Only the corner has a large **smaller** eigenvalue. Harris (33.2) and Shi–Tomasi (33.3) are two ways of turning λ1, λ2 into one score.
+
+<FeatureLab mode="window" caption="Click anywhere, or use the buttons. Left: the 9 × 9 window. Right: its SSD against shifted copies for shifts −5 … 5 (dark = similar). A flat area is dark everywhere, an edge gives a dark valley along the edge, a corner gives a single dark dot in the centre. The readout gives the eigenvalues of the structure tensor."/>
+
+## 4. A worked example by hand
+
+A 3 × 3 window, with the gradients already computed. Window 1 lies on a horizontal edge: three pixels have gy = 10, all others have zero gradient:
+
+```text
+A = Σ gx² = 0      B = Σ gx·gy = 0      C = Σ gy² = 3 × 100 = 300
+M = [[0, 0], [0, 300]]   →   λ1 = 0,  λ2 = 300   → edge
+```
+
+Window 2 lies on a corner: three pixels with gx = 10 (the vertical side), three others with gy = 10 (the horizontal side):
+
+```text
+A = 3 × 100 = 300      B = 0      C = 300
+M = [[300, 0], [0, 300]]   →   λ1 = 300,  λ2 = 300   → corner
+```
+
+What makes window 2 a corner is not the amount of gradient but that the gradients inside it point in **two different directions**. A window on a strong edge can have far more gradient energy and still only one large eigenvalue.
+
+## 5. What else makes a feature good
+
+1. **Repeatable**: found again in the other image, at the same physical point, despite rotation, scale, viewpoint and lighting changes.
+2. **Accurate**: the position is precise, ideally to sub-pixel level.
+3. **Distinctive**: its neighbourhood differs from other features, so it can be matched (Module 34).
+4. **Plentiful and spread out**: enough points over the whole image for robust geometry.
+5. **Fast** to detect, if it runs on every video frame (FAST, 33.4).
+
+**Repeatability** is measured with two images whose geometric relation is known. Our sample has a second view, sample-feat-b.png: the same scene rotated by 15°, scaled by 0.9, slightly in perspective, darker (gain 0.8, offset +20) and with new noise. Its homography H is known exactly, so every point of view A can be mapped into view B:
+
+```text
+repeatability = (points of A whose mapped position has a point of B within 2 px) / (points of A that land inside B)
+```
+
+Picking the 40 strongest local maxima of two different scores and checking them in view B:
+
+| Score | Found again |
+| --- | --- |
+| gradient magnitude (edge strength) | 26 of 40 (65 %) |
+| smaller eigenvalue λ1 (cornerness) | 33 of 39 (85 %) |
+
+Edge points slide along their edges between views; corners stay put.
+
+## 6. Industrial use
+
+- **Image stitching** of large parts or webs from several camera shots (34.6).
+- **Visual alignment** of a part when its pose varies too much for template matching (34.5).
+- **Tracking points** on moving objects with optical flow (Module 40), and **visual odometry** for robots and AGVs (Module 43).
+- **Measuring deformation**: tracking natural texture points on a surface (digital image correlation uses the same idea).
+
+## What you should remember from 33.1
+
+<Takeaways>
+<Takeaway n={1} title="Corners">A good feature changes under every small shift: corners, not edges or flat areas.</Takeaway>
+<Takeaway n={2} title="Structure tensor">M = Σ [gx², gx·gy; gx·gy, gy²] over a window.</Takeaway>
+<Takeaway n={3} title="Eigenvalues">Both small: flat. One large: edge. Both large: corner.</Takeaway>
+<Takeaway n={4} title="Repeatability">Fraction of points found again in another view; measured with a known homography.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** M has eigenvalues 5 and 90 000. Flat, edge or corner?
+
+<Solution>
+
+An **edge**: one large, one small eigenvalue.
+
+</Solution>
+
+**Q2.** Why is a point in the middle of a long straight line a bad feature, even though the gradient there is strong?
+
+<Solution>
+
+Moving along the line does not change the window: the position along the line is undetermined (aperture problem). λ1 is small.
+
+</Solution>
+
+### Next: 33.2 Harris
+
+## Code
+
+### 1. The window test from scratch (NumPy)
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-feat.png", cv2.IMREAD_GRAYSCALE).astype(np.float64)
+points = {"flat": (250, 120), "edge": (55, 20), "corner": (20, 20), "disc edge": (92, 140)}
+
+def min_ssd(x, y, r=4, d=3):
+    """Smallest SSD between the (2r+1)² window at (x, y) and the window moved by d px in 8 directions."""
+    w = img[y - r:y + r + 1, x - r:x + r + 1]
+    best = np.inf
+    for dy in (-d, 0, d):
+        for dx in (-d, 0, d):
+            if dx == 0 and dy == 0:
+                continue
+            moved = img[y + dy - r:y + dy + r + 1, x + dx - r:x + dx + r + 1]
+            best = min(best, ((moved - w) ** 2).sum())
+    return int(best)
+
+for name, (x, y) in points.items():
+    print(f"{name:9s} smallest SSD for a 3 px move: {min_ssd(x, y)}")
+```
+
+Output:
+
+```text
+flat      smallest SSD for a 3 px move: 1121
+edge      smallest SSD for a 3 px move: 1470
+corner    smallest SSD for a 3 px move: 87447
+disc edge smallest SSD for a 3 px move: 3056
+```
+
+### 2. Structure tensor and eigenvalues (OpenCV gradients)
+
+`cv2.Sobel` gives gx and gy; `cv2.boxFilter(..., normalize=False)` sums the products over a 5 × 5 window.
+
+```python
+gx = cv2.Sobel(img, cv2.CV_64F, 1, 0, ksize=3)
+gy = cv2.Sobel(img, cv2.CV_64F, 0, 1, ksize=3)
+S = lambda a: cv2.boxFilter(a, -1, (5, 5), normalize=False)      # sum over a 5 × 5 window
+A, B, C = S(gx * gx), S(gx * gy), S(gy * gy)
+for name, (x, y) in points.items():
+    M = np.array([[A[y, x], B[y, x]], [B[y, x], C[y, x]]])
+    l1, l2 = np.linalg.eigvalsh(M)                                # ascending
+    print(f"{name:9s} lambda1 = {l1:9.0f}  lambda2 = {l2:9.0f}  ratio = {l1 / l2:.3f}")
+```
+
+Output:
+
+```text
+flat      lambda1 =       852  lambda2 =      3058  ratio = 0.279
+edge      lambda1 =      1831  lambda2 =    760503  ratio = 0.002
+corner    lambda1 =    270994  lambda2 =    524664  ratio = 0.517
+disc edge lambda1 =     16069  lambda2 =    488413  ratio = 0.033
+```
+
+The flat point has a high ratio but tiny values: both eigenvalues must be large, not only similar.
+
+### 3. Repeatability with a known homography
+
+```python
+a = cv2.imread("sample-feat.png", cv2.IMREAD_GRAYSCALE)
+b = cv2.imread("sample-feat-b.png", cv2.IMREAD_GRAYSCALE)
+c, s = 0.9 * np.cos(np.radians(15)), 0.9 * np.sin(np.radians(15))
+H = np.array([[c, -s, 40], [s, c, -25], [0.0002, 0.0001, 1.0]])   # known: view B = H · view A
+
+def strongest(score, n=40):
+    """The n strongest 7 × 7 local maxima of a score map, at least 10 px from the border."""
+    peak = (score == cv2.dilate(score, np.ones((7, 7), np.uint8))) & (score > 0)
+    peak[:10, :] = peak[-10:, :] = peak[:, :10] = peak[:, -10:] = False
+    ys, xs = np.nonzero(peak)
+    order = np.argsort(-score[ys, xs])[:n]
+    return np.c_[xs[order], ys[order]].astype(np.float64)
+
+def repeatability(pa, pb, tol=2.0):
+    m = cv2.perspectiveTransform(pa.reshape(-1, 1, 2), H).reshape(-1, 2)
+    inside = (m[:, 0] > 10) & (m[:, 0] < 310) & (m[:, 1] > 10) & (m[:, 1] < 190)
+    hits = [np.hypot(*(pb - p).T).min() <= tol for p in m[inside]]
+    return int(sum(hits)), int(inside.sum())
+
+def grad_mag(img):
+    f = img.astype(np.float32)
+    return cv2.magnitude(cv2.Sobel(f, cv2.CV_32F, 1, 0), cv2.Sobel(f, cv2.CV_32F, 0, 1))
+
+for name, score in [("edge strength", grad_mag), ("min eigenvalue", lambda im: cv2.cornerMinEigenVal(im, 5, 3))]:
+    hit, n = repeatability(strongest(score(a)), strongest(score(b)))
+    print(f"{name:15s}: {hit} of {n} points found again in view B")
+```
+
+Output:
+
+```text
+edge strength  : 26 of 40 points found again in view B
+min eigenvalue : 33 of 39 points found again in view B
+```
+
+## OpenCV API notes
+
+- **`cv2.cornerEigenValsAndVecs(src, blockSize, ksize)`**: per pixel λ1, λ2 and both eigenvectors (6 channels, float32). Use it when you need the eigenvalues themselves.
+- **`cv2.cornerMinEigenVal(src, blockSize, ksize=3)`**: only the smaller eigenvalue (33.3). **`cv2.cornerHarris`**: the Harris score (33.2).
+- **Scaling**: for 8-bit input these functions scale the Sobel derivatives by 1 / (2^(ksize−1) · blockSize · 255), so their values are much smaller than the plain sums computed above. Compare scores relative to the image maximum, not as absolute numbers.
+- **`cv2.perspectiveTransform(pts, H)`**: maps points (shape N × 1 × 2, float) through a homography; used for repeatability tests.
+
+## Where it fails
+
+- **Textureless parts** (polished metal, painted panels): very few corners at all. Add texture (markers, projected patterns) or use edges and shapes.
+- **Repetitive patterns** (grids, fabrics, checkerboards): corners are repeatable but not distinctive; matching (Module 34) gets confused.
+- **Strong scale changes**: a corner at one scale is a blob or nothing at another; scale-space detectors (SIFT, 34.1) handle this.
+- **Specular highlights and shadows** create corners that move with the light, not with the object.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Taking the strongest gradients as features**: they are mostly edge points, which slide between views.
+- **Judging by the eigenvalue ratio alone**: a flat area can have similar (tiny) eigenvalues; both must be large.
+- **Comparing raw scores between images** or between OpenCV and your own code without the same scaling.
+- **Measuring repeatability without a ground-truth transformation**: counting "points found in both images" without checking that they are the same physical points.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Where the structure tensor comes from
+
+Shift the window by (u, v) and expand the shifted image to first order: I(x + u, y + v) ≈ I(x, y) + u·gx + v·gy. The SSD becomes Σ (u·gx + v·gy)², which is the quadratic form [u v] M [u v]ᵀ. Its level sets are ellipses whose axes point along the eigenvectors of M with half-lengths proportional to 1/√λ: a corner gives a small round ellipse, an edge a long thin one. In practice the window is often Gaussian-weighted rather than a box (Harris and Stephens [1]).
+
+### Förstner's view
+
+Förstner and Gülch [2] derived the same matrix as the inverse covariance of the position estimate: the uncertainty ellipse of a point is proportional to M⁻¹. A good feature has a small, round uncertainty ellipse: their measures are det(M)/trace(M) (precision) and 4·det(M)/trace(M)² (roundness, between 0 and 1).
+
+### Repeatability as a benchmark
+
+Schmid, Mohr and Bauckhage [3] defined repeatability with known homographies, as here, and compared detectors under rotation, scale, lighting and viewpoint. Mikolajczyk and Schmid's later benchmark with real image sequences (graffiti, boat, bikes) remains a standard test [4].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Shifting a window along a straight edge…",
+      options: ["changes it a lot", "changes it almost not at all", "removes the edge", "doubles the gradient"],
+      answer: 1,
+      explanation: "Along the edge the content is the same: SSD 1 470 vs 87 447 at a corner.",
+    },
+    {
+      question: "The structure tensor's eigenvalues are 270 994 and 524 664. The point is…",
+      options: ["flat", "an edge", "a corner", "noise"],
+      answer: 2,
+      explanation: "Both eigenvalues are large.",
+    },
+    {
+      question: "Why do edge points have lower repeatability than corners?",
+      options: ["They are darker", "Their position along the edge is not fixed, so the detected point slides", "Edges disappear under rotation", "They have more noise"],
+      answer: 1,
+      explanation: "26 of 40 vs 33 of 39 in the measurement.",
+    },
+    {
+      question: "What do you need to measure repeatability properly?",
+      options: ["Two identical images", "The known geometric transformation between the two views", "A neural network", "A colour image"],
+      answer: 1,
+      explanation: "Only with the true mapping can you check that the points are the same physical points.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 3 × 3 window has gx = 20 at two pixels, gy = 20 at two other pixels and gx = gy = 10 at one pixel (all others zero). Compute M and its eigenvalues.
+
+<Solution>
+
+A = 2 × 400 + 100 = 900, C = 2 × 400 + 100 = 900, B = 10 × 10 = 100. M = [[900, 100], [100, 900]]: eigenvalues 900 ± 100 = **800 and 1 000**. Both large: a corner.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+With `min_ssd` from Code example 1, compare a corner of the checkerboard (132, 122) with the middle of the long line (160, 190).
+
+<Solution>
+
+```python
+for name, (x, y) in {"checker corner": (132, 122), "line middle": (160, 190)}.items():
+    print(f"{name}: {min_ssd(x, y)}")
+```
+
+Output:
+
+```text
+checker corner: 640078
+line middle: 998
+```
+
+The checkerboard corner, where four high-contrast squares meet, is extremely distinctive. The line is a ridge, distinctive across it but not along it.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+You track points on a conveyor belt with a uniform grey surface and a few bolts. Where will a corner detector find features, and what problem does that create?
+
+<Solution>
+
+Only at the bolts and the belt edges (or dirt). The bolts are few and look alike (not distinctive), and the belt edges are edges, not corners. Add texture or markers, or track the bolts as objects.
+
+</Solution>
+
+## References
+
+1. C. Harris, M. Stephens, "A combined corner and edge detector," *Proc. 4th Alvey Vision Conference*, 1988, pp. 147–151.
+2. W. Förstner, E. Gülch, "A fast operator for detection and precise location of distinct points, corners and centres of circular features," *ISPRS Intercommission Workshop*, Interlaken, 1987.
+3. C. Schmid, R. Mohr, C. Bauckhage, "Evaluation of interest point detectors," *International Journal of Computer Vision* 37(2), 2000, pp. 151–172.
+4. K. Mikolajczyk, C. Schmid, "A performance evaluation of local descriptors," *IEEE Trans. PAMI* 27(10), 2005, pp. 1615–1630.
+5. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022, Section 7.1.
+6. OpenCV 4.13.0 documentation: `cornerEigenValsAndVecs`, `cornerMinEigenVal`, `perspectiveTransform`; tutorial "Understanding Features". https://docs.opencv.org/4.13.0/

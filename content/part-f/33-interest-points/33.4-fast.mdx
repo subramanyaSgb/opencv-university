@@ -1,0 +1,361 @@
+export const meta = {
+  number: "33.4",
+  title: "FAST",
+  minutes: 20,
+  objectives: [
+    "Carry out the FAST segment test on a circle of 16 pixels by hand",
+    "Explain the threshold, the contiguous-arc length n, the score and non-max suppression",
+    "Use cv2.FastFeatureDetector and read its keypoints",
+    "Compare FAST with Harris in speed and repeatability",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 33.4 (Part F, Module 33).
+  Lab: FeatureLab mode "fast" (FAST-9 exact to cv2.FastFeatureDetector, incl. score and non-max suppression).
+  Reference tail: deterministic examples compared automatically; the timing block is labelled typical output.
+*/}
+
+# 33.4 FAST
+
+<Definition term="FAST (Features from Accelerated Segment Test)">a corner detector that looks only at the 16 pixels on a circle of radius 3 around a candidate pixel p: p is a corner if at least n contiguous circle pixels (n = 9 in OpenCV's default) are all brighter than p + t or all darker than p − t. No gradients, no filtering: just comparisons, so it is very fast.</Definition>
+
+Harris and Shi–Tomasi compute gradients and window sums at every pixel. Rosten and Drummond (2006) asked how little work could still find corners, for real-time tracking on the CPUs of the time. Their answer, FAST, rejects most pixels after a few comparisons. It is the detector inside ORB (34.2) and many SLAM systems.
+
+## 1. An analogy
+
+Stand at a spot and look around you in a circle. In the middle of a field, everything around you looks the same as where you stand. On a straight road edge, half the circle is road and half grass, but each half is an arc of only about 8 of 16 directions. At the tip of a corner, a long, unbroken stretch of the circle, more than half, is different from your spot.
+
+## 2. The segment test
+
+<Flow
+  steps={[
+    { label: "Candidate pixel p, threshold t", tone: "data" },
+    { label: "Read the 16 pixels on the radius-3 circle", tone: "process" },
+    { label: "Mark each: brighter (> p + t), darker (< p − t) or similar", tone: "process" },
+    { label: "≥ 9 contiguous brighter, or ≥ 9 contiguous darker?", tone: "process" },
+    { label: "Corner → score → non-max suppression", tone: "result" },
+  ]}
+/>
+
+The circle is the 16 pixels at distance about 3 from p (a Bresenham circle), numbered clockwise from the pixel straight above p. Here it is on the real 7 × 7 neighbourhood of the box corner used in Section 3 (circle pixels highlighted, p in the centre = 165):
+
+<PixelMatrix values={[[104, 111, 109, 106, 106, 109, 109], [107, 104, 110, 106, 105, 112, 105], [102, 108, 114, 123, 134, 130, 134], [107, 112, 127, 165, 174, 174, 178], [104, 105, 132, 175, 194, 199, 195], [108, 110, 132, 177, 197, 200, 206], [108, 109, 126, 175, 198, 199, 200]]} highlight={[[0, 3], [0, 4], [1, 5], [2, 6], [3, 6], [4, 6], [5, 5], [6, 4], [6, 3], [6, 2], [5, 1], [4, 0], [3, 0], [2, 0], [1, 1], [0, 2]]} />
+
+- **Edge**: about half the circle is different, but the arc is ≈ 8 long: not enough for 9.
+- **Flat**: nothing is more than t different.
+- **Corner** (inside angle < 180°, seen from the inside): more than half the circle differs.
+
+Why 9? An arc of 9 of 16 (more than half the circle) rules out straight edges. OpenCV also offers n = 7 of 12 (radius 2) and n = 5 of 8 (radius 1).
+
+## 3. A worked example by hand
+
+The outer corner of the bright box at (20, 20), p = 165, t = 20 (so "darker" means < 145, "brighter" means > 185). The 16 circle values, starting at the top and going clockwise:
+
+| # | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| value | 106 | 106 | 112 | 134 | 178 | 195 | 200 | 198 | 175 | 126 | 110 | 104 | 107 | 102 | 104 | 109 |
+| mark | D | D | D | D | s | B | B | B | s | D | D | D | D | D | D | D |
+
+The darker arc runs from #10 to #16 and wraps on to #1 … #4: **11 contiguous darker pixels** ≥ 9, so p is a corner. (p itself sits on the box's blurred rim; the box interior, at #6–#8, is brighter, the background around it is darker.)
+
+**Score**: for non-max suppression, OpenCV gives each corner the **largest t at which it would still pass**. Neighbouring pixels of the same corner also pass; only the one with the highest score is kept.
+
+## 4. On the feature scene
+
+| Threshold t | Corners (no suppression) | After non-max suppression |
+| --- | --- | --- |
+| 10 | 1 267 | 126 |
+| 20 | 952 | 105 |
+| 40 | 532 | 101 |
+
+Non-max suppression matters even more than for Harris: about 9 raw detections per corner.
+
+| Detector (t = 20, non-max) | Keypoints |
+| --- | --- |
+| TYPE_9_16 (radius 3) | 105 |
+| TYPE_7_12 (radius 2) | 87 |
+| TYPE_5_8 (radius 1) | 0 |
+
+The radius-1 ring sits inside the blurred rim of every edge, where neighbours differ by less than 20 grey levels: on slightly blurred images the smallest ring finds nothing.
+
+**Repeatability** (non-max, within 2 px): t = 10: 97 of 123 (79 %); t = 20: 93 of 103 (90 %); t = 40: 92 of 99 (93 %). Harris with blockSize 3 reached 97 % on the same pair.
+
+<FeatureLab mode="fast" caption="FAST-9 on the feature scene, identical to cv2.FastFeatureDetector. Click any pixel to see its segment test: the 7 × 7 neighbourhood with the 16 circle pixels marked red (brighter than p + t), blue (darker than p − t) or grey. Try a box corner, the middle of an edge and the disc. Turn off non-max suppression to see the clusters."/>
+
+## 5. Speed
+
+FAST is fast because most pixels fail early: OpenCV first checks a few circle pixels and skips the rest if they cannot form an arc of 9. On one machine (2-core Xeon at 2.1 GHz, OpenCV 4.13, a 1920 × 1080 version of the scene):
+
+| Detector | Time per image |
+| --- | --- |
+| FAST, t = 20 | 0.45 ms |
+| cornerHarris (map only) | 27.0 ms |
+| goodFeaturesToTrack | 27.0 ms |
+
+This enlarged image is mostly smooth, so FAST is at its best here; on textured images the gap is smaller but still large.
+
+## 6. Industrial use
+
+- **ORB features** (34.2) use FAST to find keypoints, then add orientation and a binary descriptor: the standard choice on embedded CPUs.
+- **Visual SLAM and odometry** (ORB-SLAM, Module 43) run FAST on every frame.
+- **High-frame-rate tracking** where every millisecond counts.
+
+## What you should remember from 33.4
+
+<Takeaways>
+<Takeaway n={1} title="Segment test">≥ 9 contiguous of 16 circle pixels all brighter than p + t or all darker than p − t.</Takeaway>
+<Takeaway n={2} title="Threshold">t decides what "different" means; raise it on noisy images.</Takeaway>
+<Takeaway n={3} title="Non-max">Score = largest passing t; keep the highest score in 3 × 3. Always switch it on.</Takeaway>
+<Takeaway n={4} title="Trade-off">Much faster than Harris; somewhat less repeatable, not scale invariant, no sub-pixel position.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** p = 100, t = 15. The circle has 8 contiguous pixels at 130 and 8 at 100. Corner?
+
+<Solution>
+
+Only 8 contiguous brighter pixels: **no** (an edge). FAST-9 needs 9.
+
+</Solution>
+
+**Q2.** A single bright 2 × 2 dot on a dark background. Does FAST fire on it?
+
+<Solution>
+
+**Yes.** For a dot pixel, all 16 circle pixels are darker than p − t: a closed arc of 16 ≥ 9. FAST detects small dots and blobs too, not only corners.
+
+</Solution>
+
+### Next: 34.1 SIFT
+
+## Code
+
+### 1. The segment test from scratch
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-feat.png", cv2.IMREAD_GRAYSCALE).astype(np.int32)
+CIRCLE = [(0, -3), (1, -3), (2, -2), (3, -1), (3, 0), (3, 1), (2, 2), (1, 3),
+          (0, 3), (-1, 3), (-2, 2), (-3, 1), (-3, 0), (-3, -1), (-2, -2), (-1, -3)]
+
+def segment_test(x, y, t, n=9):
+    """+1: n contiguous circle pixels brighter than p + t; -1: darker than p - t; 0: no corner."""
+    p = img[y, x]
+    ring = [img[y + dy, x + dx] for dx, dy in CIRCLE]
+    for sign in (1, -1):
+        run = 0
+        for v in ring + ring:                                      # twice round: arcs may wrap
+            run = run + 1 if sign * (v - p) > t else 0
+            if run >= n:
+                return sign
+    return 0
+
+x, y = 20, 20
+print("p =", img[y, x], "circle:", [int(img[y + dy, x + dx]) for dx, dy in CIRCLE])
+print("segment test at (20, 20), t = 20:", segment_test(x, y, 20))
+count = sum(segment_test(x, y, 20) != 0 for y in range(3, img.shape[0] - 3) for x in range(3, img.shape[1] - 3))
+fast = cv2.FastFeatureDetector_create(threshold=20, nonmaxSuppression=False)
+print("from scratch:", count, " cv2.FastFeatureDetector:", len(fast.detect(img.astype(np.uint8))))
+```
+
+Output:
+
+```text
+p = 165 circle: [106, 106, 112, 134, 178, 195, 200, 198, 175, 126, 110, 104, 107, 102, 104, 109]
+segment test at (20, 20), t = 20: -1
+from scratch: 952  cv2.FastFeatureDetector: 952
+```
+
+The plain Python loop over 60 000 pixels takes seconds; OpenCV's takes well under a millisecond.
+
+### 2. cv2.FastFeatureDetector
+
+```python
+img = cv2.imread("sample-feat.png", cv2.IMREAD_GRAYSCALE)
+for t in (10, 20, 40):
+    for nms in (False, True):
+        kp = cv2.FastFeatureDetector_create(threshold=t, nonmaxSuppression=nms).detect(img)
+        print(f"t = {t}, non-max {str(nms):5s}: {len(kp)} keypoints")
+fast = cv2.FastFeatureDetector_create(20)
+kp = sorted(fast.detect(img), key=lambda k: -k.response)
+print("strongest:", [(round(k.pt[0]), round(k.pt[1]), int(k.response)) for k in kp[:4]], "size", kp[0].size, "angle", kp[0].angle)
+for name, typ in [("TYPE_9_16", cv2.FAST_FEATURE_DETECTOR_TYPE_9_16), ("TYPE_7_12", cv2.FAST_FEATURE_DETECTOR_TYPE_7_12), ("TYPE_5_8", cv2.FAST_FEATURE_DETECTOR_TYPE_5_8)]:
+    print(name, len(cv2.FastFeatureDetector_create(20, True, typ).detect(img)))
+```
+
+Output:
+
+```text
+t = 10, non-max False: 1267 keypoints
+t = 10, non-max True : 126 keypoints
+t = 20, non-max False: 952 keypoints
+t = 20, non-max True : 105 keypoints
+t = 40, non-max False: 532 keypoints
+t = 40, non-max True : 101 keypoints
+strongest: [(69, 54, 106), (69, 36, 99), (41, 54, 99), (41, 36, 92)] size 7.0 angle -1.0
+TYPE_9_16 105
+TYPE_7_12 87
+TYPE_5_8 0
+```
+
+The strongest are the four corners of the dark hole in the box (high contrast on both sides). Each `cv2.KeyPoint` has `pt` (x, y), `response` (the score), `size` 7 (the circle's diameter) and `angle` −1 (FAST computes no orientation; ORB adds it).
+
+### 3. Timing (needs a timer, not compared)
+
+```python
+# Needs a timing run: numbers depend on the machine
+import time
+big = cv2.resize(img, (1920, 1080), interpolation=cv2.INTER_LINEAR)
+fast = cv2.FastFeatureDetector_create(20)
+def ms(fn, n=20):
+    fn(); t0 = time.perf_counter()
+    for _ in range(n):
+        fn()
+    return (time.perf_counter() - t0) / n * 1000
+print("FAST", round(ms(lambda: fast.detect(big)), 2), "ms")
+print("cornerHarris", round(ms(lambda: cv2.cornerHarris(big, 3, 3, 0.04)), 2), "ms")
+print("goodFeaturesToTrack", round(ms(lambda: cv2.goodFeaturesToTrack(big, 0, 0.01, 5)), 2), "ms")
+```
+
+Typical output (one machine: 2-core Xeon at 2.1 GHz):
+
+```text
+FAST 0.45 ms
+cornerHarris 26.99 ms
+goodFeaturesToTrack 26.98 ms
+```
+
+## OpenCV API notes
+
+- **`cv2.FastFeatureDetector_create(threshold=10, nonmaxSuppression=True, type=cv2.FAST_FEATURE_DETECTOR_TYPE_9_16)`**: returns a `Feature2D`; `.detect(image, mask=None)` returns a list of `cv2.KeyPoint`. 8-bit single-channel input.
+- **Getters/setters**: `setThreshold`, `setNonmaxSuppression`, `setType`.
+- **`cv2.FAST(image, threshold, nonmaxSuppression)`** does not exist in the Python bindings; use the detector object.
+- **Border**: pixels within 3 of the border are never tested (4 with non-max suppression).
+- **`cv2.AgastFeatureDetector_create`**: AGAST, an adaptive variant with a faster decision tree, same idea.
+- **Converting keypoints**: `cv2.KeyPoint_convert(kp)` → N × 2 float32 array of (x, y).
+
+## Where it fails
+
+- **Noise**: single noisy pixels pass the test at low t; raise t or blur first.
+- **Blobs and dots** also pass (they are "different from a long arc"); FAST is a "distinctive point" detector rather than a pure corner detector.
+- **No scale invariance**, no orientation, integer positions only. ORB adds a pyramid and orientation (34.2).
+- **Edges in blurred images**: blur widens the transition so small rings (TYPE_5_8) fail.
+- **Fixed t across lighting**: a darker image needs a lower t; ORB-SLAM, for example, retries cells with a lower threshold when too few points are found.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Leaving non-max suppression off**: ten times the points, all clustered.
+- **Using one t for all lighting conditions**: count keypoints per frame and adapt t if it drops.
+- **Expecting `angle` and `size` to mean something**: FAST sets size 7 and angle −1.
+- **Feeding colour images**: convert to grey.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Learning the decision tree
+
+Rosten and Drummond [1] used machine learning (ID3 decision trees) to choose the order in which circle pixels are tested, so that the average number of comparisons is minimal for the training images; the learned tree is compiled into code. The original "high-speed test" for n = 12 first checks pixels 1, 9, 5 and 13: a corner needs at least three of them to be brighter or darker.
+
+### FAST-ER and AGAST
+
+FAST-ER [2] optimised the detector itself for repeatability with simulated annealing, using a larger set of pixels. AGAST [3] (Mair et al., 2010) builds an adaptive, generic decision tree that switches between trees for different image structure, avoiding retraining for each environment.
+
+### Scale and orientation
+
+FAST has neither. ORB (34.2) runs FAST on an image pyramid, ranks the points by Harris score, and gives each an orientation from the intensity centroid of the patch. BRISK (Leutenegger et al., 2011) uses AGAST in scale space.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "FAST-9 declares p a corner when…",
+      options: ["the gradient is large", "≥ 9 contiguous circle pixels are all brighter than p + t or all darker than p − t", "9 pixels anywhere on the circle differ", "the Harris score exceeds 9"],
+      answer: 1,
+      explanation: "Contiguous arc of at least 9 of 16.",
+    },
+    {
+      question: "Why is a straight edge not a FAST corner?",
+      options: ["Its contrast is low", "The differing arc covers only about half the circle (≈ 8 pixels)", "Edges are blurred", "FAST ignores edges explicitly"],
+      answer: 1,
+      explanation: "More than half (9 of 16) is needed.",
+    },
+    {
+      question: "What does OpenCV use as the FAST score for non-max suppression?",
+      options: ["The number of brighter pixels", "The largest threshold at which the pixel still passes", "The Harris response", "The distance to the border"],
+      answer: 1,
+      explanation: "Response 106 for the strongest corner.",
+    },
+    {
+      question: "TYPE_5_8 found 0 keypoints at t = 20 on the feature scene. Why?",
+      options: ["It is broken", "Its radius-1 ring lies on the blurred rim of each edge, where differences stay below 20", "It needs colour", "It works only without non-max suppression"],
+      answer: 1,
+      explanation: "The blur (σ 0.8) spreads each edge over a few pixels.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+p = 50, t = 10. Circle values from #1: 48, 52, 70, 75, 72, 71, 69, 73, 74, 70, 66, 49, 51, 47, 52, 50. Corner? Bright or dark?
+
+<Solution>
+
+Brighter means > 60: #3 to #11 are 70, 75, 72, 71, 69, 73, 74, 70, 66, all > 60: **9 contiguous**, a corner with a **bright arc**. No pixel is below 40, so there is no dark arc.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Keep only the 20 strongest FAST keypoints (t = 20, non-max) and print how many of them lie in the left half of the image.
+
+<Solution>
+
+```python
+kp = cv2.FastFeatureDetector_create(20).detect(img)
+top = sorted(kp, key=lambda k: -k.response)[:20]
+left = sum(k.pt[0] < img.shape[1] / 2 for k in top)
+print(len(top), "strongest,", left, "in the left half, weakest response", int(top[-1].response))
+```
+
+Output:
+
+```text
+20 strongest, 13 in the left half, weakest response 74
+```
+
+The high-contrast box, L-shape and checkerboard lie mostly in the left half.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A tracker on an AGV runs FAST with t = 20. In a dark corridor it finds almost no points. What two things can you do?
+
+<Solution>
+
+Lower t adaptively (per frame or per image cell) until a target number of points is reached, and/or improve the image: longer exposure, more gain, added light. Equalising the image before detection also helps, at the price of more noise points.
+
+</Solution>
+
+## References
+
+1. E. Rosten, T. Drummond, "Machine learning for high-speed corner detection," *Proc. ECCV*, 2006, pp. 430–443.
+2. E. Rosten, R. Porter, T. Drummond, "Faster and better: a machine learning approach to corner detection," *IEEE Trans. PAMI* 32(1), 2010, pp. 105–119.
+3. E. Mair, G. D. Hager, D. Burschka, M. Suppa, G. Hirzinger, "Adaptive and generic corner detection based on the accelerated segment test," *Proc. ECCV*, 2010, pp. 183–196.
+4. E. Rublee, V. Rabaud, K. Konolige, G. Bradski, "ORB: an efficient alternative to SIFT or SURF," *Proc. IEEE ICCV*, 2011, pp. 2564–2571.
+5. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022, Section 7.1.1.
+6. OpenCV 4.13.0 documentation: `FastFeatureDetector`, `AgastFeatureDetector`, `KeyPoint`; tutorial "FAST Algorithm for Corner Detection". https://docs.opencv.org/4.13.0/

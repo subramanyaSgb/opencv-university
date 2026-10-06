@@ -1,0 +1,11 @@
+{
+  "number": 33,
+  "title": "Interest points",
+  "summary": "Points that can be found again: what makes a good feature, Harris, Shi–Tomasi and FAST corners, and how to measure repeatability.",
+  "chapters": [
+    { "number": "33.1", "slug": "33.1-what-a-good-feature-is", "title": "What a good feature is" },
+    { "number": "33.2", "slug": "33.2-harris", "title": "Harris" },
+    { "number": "33.3", "slug": "33.3-shi-tomasi", "title": "Shi–Tomasi" },
+    { "number": "33.4", "slug": "33.4-fast", "title": "FAST" }
+  ]
+}
