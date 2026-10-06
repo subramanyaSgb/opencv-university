@@ -219,3 +219,4 @@ export { GaugeRRLab } from "./GaugeRRLab";
 export { SsimLab } from "./SsimLab";
 export { PtcLab } from "./PtcLab";
 export { FocusMetricLab } from "./FocusMetricLab";
+export { MtfLab } from "./MtfLab";

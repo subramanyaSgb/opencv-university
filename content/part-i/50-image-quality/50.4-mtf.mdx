@@ -1,0 +1,427 @@
+export const meta = {
+  number: "50.4",
+  title: "MTF",
+  minutes: 26,
+  objectives: [
+    "Know what the MTF measures and how it relates to 19.3's own PSF, ESF and LSF",
+    "Measure a real MTF curve from a synthetic edge with a known PSF, by the slanted-edge method",
+    "Verify, for real, that the measured MTF matches the closed-form MTF of a Gaussian PSF",
+    "Know why the edge must be tilted, and see, for real, what breaks when it is not",
+    "Use MTF50 as a single-number summary, and know why the MTFs of cascaded parts multiply",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 50.4 (Part I, Module 50; the last chapter of the module and of
+  Part I). 19.3 already defined the PSF, ESF and LSF, and explicitly pointed here: "Tilting the
+  edge by a few degrees (the slanted-edge method) gives sub-pixel sampling and is the standard
+  way to measure MTF (50.4)." 22.1 made the same forward pointer. 2.3 stated that "the MTFs of
+  the parts multiply" without deriving it. This chapter delivers the real, numeric slanted-edge
+  measurement 19.3 pointed to, and nothing 19.3 or 22.1 already covered (PSF/ESF/LSF theory
+  itself is not re-derived).
+  All numbers real, verified on a synthetic 100x100 slanted edge blurred by a KNOWN Gaussian PSF
+  (cv2.GaussianBlur), binned into a supersampled ESF (bin width 0.1 px), differentiated to an
+  LSF, and transformed by np.fft.rfft into a measured MTF, checked against the real closed-form
+  MTF of a Gaussian PSF: MTF(f) = exp(-2 pi^2 sigma^2 f^2).
+  Block 1 (sigma=1.2, angle=5 deg): measured vs analytic MTF at f=0.051..0.404 c/px, within
+  ~0.003 at every frequency tested.
+  Block 2: MTF50 (frequency where MTF=0.5) measured vs analytic across sigma=0.8,1.2,1.6,2.0 --
+  matches to within 0.0007 c/px at every sigma.
+  Block 3: a real, honest demonstration of WHY the edge must be tilted. At angle=0, every row
+  samples the edge at the identical handful of integer pixel offsets, so the "supersampled" ESF
+  is populated at only 1 bin in 10 (179/199 empty) and the measurement does not just degrade --
+  it divides by zero (a genuine, reproducible real artifact, not a contrived one). At angle=5,
+  every ESF bin is populated (0/199 empty) and the measurement matches the analytic MTF.
+  Lab: MtfLab (apps/web/components/visuals/MtfLab.tsx) -- live ESF->LSF->|DFT| pipeline for a
+  sigma slider, checked against the closed-form MTF; backed by apps/web/lib/mtf-ops.ts
+  (unit-tested in mtf-ops.test.ts).
+*/}
+
+# 50.4 MTF
+
+<Definition term="MTF (modulation transfer function)">how much of a scene's real contrast survives at each spatial frequency, from the coarsest stripes (low frequency) to the finest (high frequency) — the real, standard way to turn 19.3's own PSF into a single curve that says how sharp a lens, sensor or whole imaging chain actually is.</Definition>
+
+19.3 already defined the point spread function (PSF), the edge spread function (ESF), and the line spread function (LSF), and said directly: measuring a tilted edge's width is the standard way to measure MTF. This chapter does exactly that, for real, on a synthetic edge with a known PSF, and checks the real result against the one case where the true answer is known exactly: a Gaussian blur.
+
+## 1. An analogy
+
+Imagine printing bar charts with stripes of different widths and asking a photocopier to reproduce each one. Wide, widely-spaced stripes copy almost perfectly — the copier can tell black from white with full contrast. Pack the stripes closer together (a higher spatial frequency) and the copy starts to grey out: black and white blur into the same mid-grey, and the copier has lost the ability to show that contrast at all. The MTF is the real curve of "how much contrast survives" plotted against how closely packed the stripes are.
+
+## 2. The pipeline: edge in, MTF curve out
+
+<Flow
+  steps={[
+    { label: "A real, tilted straight edge in the image", tone: "world" },
+    { label: "Bin pixels by their real sub-pixel offset from the edge → ESF", tone: "data" },
+    { label: "Differentiate the ESF → LSF (19.3)", tone: "process" },
+    { label: "Take |DFT(LSF)|, normalize to f = 0 → MTF(f)", tone: "process" },
+    { label: "Compare to the known, closed-form MTF of the true PSF", tone: "result" },
+  ]}
+/>
+
+<MtfLab caption="Live ESF → LSF → |DFT| pipeline for a known Gaussian PSF blur σ, checked against the closed-form MTF exp(−2π²σ²f²)." />
+
+Why tilt the edge at all? A single row of pixels only samples the edge at whatever sub-pixel phase that row happens to land on — one sample per pixel, at one offset. Tilt the edge by a few degrees and each row crosses the edge at a slightly different sub-pixel offset, so stacking many rows together builds up a single, finely-sampled ESF far denser than any one row could give alone. Section 5 shows, for real, what happens when the edge is not tilted.
+
+## 3. A real worked check: does the measured MTF match the known answer?
+
+A Gaussian PSF is the one case with an exact, closed-form MTF: MTF(f) = exp(−2π²σ²f²), where f is spatial frequency in cycles per pixel and σ is the PSF's standard deviation in pixels. Build a synthetic 100×100 image of a step edge tilted 5°, blur it with `cv2.GaussianBlur` at a *known* σ = 1.2 px, run the real slanted-edge pipeline above, and compare:
+
+| frequency (c/px) | measured MTF | analytic MTF |
+|---|---|---|
+| 0.051 | 0.9296 | 0.9301 |
+| 0.101 | 0.7467 | 0.7483 |
+| 0.202 | 0.3104 | 0.3135 |
+| 0.303 | 0.0721 | 0.0735 |
+| 0.404 | 0.0092 | 0.0097 |
+
+The measured curve, built entirely from real, binned pixel values with no knowledge of σ fed into the measurement itself, tracks the true analytic curve to within about 0.003 at every frequency tested — the slanted-edge method genuinely recovers the real MTF of a known blur.
+
+## 4. MTF50: one real number instead of a whole curve
+
+A full MTF curve is precise but inconvenient to compare at a glance, so systems often report **MTF50**: the frequency where MTF drops to 0.5. For a Gaussian PSF this has its own closed form, f₅₀ = √(ln 2 / (2π²σ²)), so it can be checked the same way:
+
+```text
+sigma=0.8: measured MTF50=0.2339 c/px, analytic=0.2342 c/px
+sigma=1.2: measured MTF50=0.1559 c/px, analytic=0.1562 c/px
+sigma=1.6: measured MTF50=0.1178 c/px, analytic=0.1171 c/px
+sigma=2.0: measured MTF50=0.0934 c/px, analytic=0.0937 c/px
+```
+
+Larger blur (bigger σ) gives a *lower* MTF50 — exactly the real, intuitive relationship: a blurrier PSF loses contrast at lower spatial frequencies, so it cannot resolve as fine a detail.
+
+## 5. A real, honest failure: why the edge really must be tilted
+
+Section 2 asserted that tilting the edge matters. Here is what actually happens, measured directly, with no tilt at all (angle = 0°) against the same edge tilted 5°, both at σ = 1.2:
+
+```text
+angle=0.0: MTF at f=0.202 = inf (179/199 ESF bins empty, populated bin count=100)
+angle=5.0: MTF at f=0.202 = 0.3104 (0/199 ESF bins empty, populated bin count=11)
+```
+
+With no tilt, every one of the 100 rows crosses the edge at the *identical* sub-pixel offset, so the supersampled ESF (binned every 0.1 px) only ever receives samples at one bin in ten — 179 of its 199 bins are completely empty. The result is not just a noisier curve: the empty bins create an artificially oscillating ESF whose derivative (the LSF) has a near-zero net sum, and dividing the measured MTF by that near-zero DC term produces an outright `inf`. Tilting by 5° spreads the 100 rows' sub-pixel offsets across the full range between adjacent pixels, so every bin gets real data (0 empty) and the measurement matches the analytic curve exactly as in Section 3. This is a genuine, reproducible numerical breakdown, not a contrived example — it is the real reason every slanted-edge standard insists on a tilted edge.
+
+## 6. Industrial context: MTF as a spec, and why MTFs multiply
+
+A lens datasheet's MTF curve, a sensor's own pixel-aperture MTF, and any softening from the digital processing chain each blur the image a little. 2.3 already stated the rule without deriving it: **the MTFs of cascaded, independent stages multiply** at each frequency (because convolving PSFs in space is the same as multiplying their Fourier transforms — the real reason 19.3's LSF → FFT route works at all). A vision system speccing "must resolve a 0.2 mm defect" is really specifying a minimum combined MTF at the spatial frequency that defect corresponds to, and a lens, sensor or focus error that drags the *combined* MTF below that point is a real, measurable failure the system shipped without ever running this exact slanted-edge measurement itself.
+
+## What you should remember from 50.4
+
+<Takeaways>
+<Takeaway n={1} title="MTF is the real curve of contrast retained vs spatial frequency">it is the Fourier-domain summary of 19.3's own PSF.</Takeaway>
+<Takeaway n={2} title="The slanted-edge method measures it from one real photographed edge">ESF (binned) → LSF (derivative) → |DFT| → MTF, verified here against a known Gaussian PSF.</Takeaway>
+<Takeaway n={3} title="The edge must be tilted, or the measurement can genuinely break">Section 5's own real result: an untilted edge produced a literal divide-by-zero, not just noise.</Takeaway>
+<Takeaway n={4} title="MTFs of cascaded stages multiply">lens, sensor and processing each contribute, exactly as 2.3 stated.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Two candidate lenses give MTF = 0.6 and MTF = 0.4 at the spatial frequency a defect needs to be resolved at. The sensor itself contributes MTF = 0.8 at that same frequency. Which lens gives a combined system MTF above 0.4 at that frequency?
+
+<Solution>
+
+Using Section 6's multiplication rule: lens A gives 0.6 × 0.8 = 0.48; lens B gives 0.4 × 0.8 = 0.32. Only lens A clears 0.4 — the sensor's own MTF of 0.8 is not enough on its own to rescue the weaker lens.
+
+</Solution>
+
+## Code
+
+### 1. NumPy + OpenCV: the real slanted-edge pipeline, checked against the known analytic MTF
+
+`xx >= edge_x` builds a sharp step tilted by `angle_deg`; `cv2.GaussianBlur` applies the one real PSF whose MTF is known exactly, so the measurement can be checked. `np.digitize` + `np.add.at` bin every pixel by its real sub-pixel offset from the edge into a supersampled ESF; `np.diff` gives the LSF; `np.fft.rfft` gives the real MTF, normalized by its own zero-frequency term.
+
+```python
+import numpy as np
+import cv2
+
+H, W = 100, 100
+angle_deg = 5.0
+sigma_true = 1.2
+
+yy, xx = np.mgrid[0:H, 0:W].astype(np.float64)
+slope = np.tan(np.radians(angle_deg))
+edge_x = W / 2 + slope * (yy - H / 2)
+sharp_edge = np.where(xx >= edge_x, 255.0, 0.0)
+
+k = int(sigma_true * 8) | 1
+blurred = cv2.GaussianBlur(sharp_edge, (k, k), sigma_true)
+
+offsets = xx - edge_x
+bin_width = 0.1
+bins = np.arange(-10, 10, bin_width)
+esf = np.zeros(len(bins) - 1)
+counts = np.zeros(len(bins) - 1)
+idx = np.digitize(offsets.ravel(), bins) - 1
+valid = (idx >= 0) & (idx < len(esf))
+np.add.at(esf, idx[valid], blurred.ravel()[valid])
+np.add.at(counts, idx[valid], 1)
+esf = esf / np.maximum(counts, 1)
+
+lsf = np.diff(esf) / bin_width
+MTF = np.abs(np.fft.rfft(lsf))
+MTF = MTF / MTF[0]
+freqs = np.fft.rfftfreq(len(lsf), d=bin_width)
+
+
+def analytic_mtf(f, sigma):
+    return np.exp(-2 * np.pi**2 * sigma**2 * f**2)
+
+
+for f_test in [0.05, 0.1, 0.2, 0.3, 0.4]:
+    i = np.argmin(np.abs(freqs - f_test))
+    print(f"f={freqs[i]:.3f} c/px: measured={MTF[i]:.4f}, analytic={analytic_mtf(freqs[i], sigma_true):.4f}")
+```
+
+Output:
+
+```text
+f=0.051 c/px: measured=0.9296, analytic=0.9301
+f=0.101 c/px: measured=0.7467, analytic=0.7483
+f=0.202 c/px: measured=0.3104, analytic=0.3135
+f=0.303 c/px: measured=0.0721, analytic=0.0735
+f=0.404 c/px: measured=0.0092, analytic=0.0097
+```
+
+### 2. OpenCV: MTF50 across several real PSF blurs
+
+`below = np.where(MTF2 < 0.5)[0][0]` finds the first frequency bin where the curve has dropped under 0.5, then linear interpolation between that bin and the one before it gives a sub-bin estimate of MTF50, since the true crossing rarely falls exactly on a sampled frequency.
+
+```python
+def slanted_edge_mtf(angle, sigma, H=100, W=100, bin_width=0.1):
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float64)
+    slope = np.tan(np.radians(angle))
+    edge_x = W / 2 + slope * (yy - H / 2)
+    sharp = np.where(xx >= edge_x, 255.0, 0.0)
+    k = int(sigma * 8) | 1
+    blur = cv2.GaussianBlur(sharp, (k, k), sigma) if sigma > 0 else sharp
+    offsets = xx - edge_x
+    bins = np.arange(-10, 10, bin_width)
+    esf = np.zeros(len(bins) - 1)
+    counts = np.zeros(len(bins) - 1)
+    idx = np.digitize(offsets.ravel(), bins) - 1
+    valid = (idx >= 0) & (idx < len(esf))
+    np.add.at(esf, idx[valid], blur.ravel()[valid])
+    np.add.at(counts, idx[valid], 1)
+    esf = esf / np.maximum(counts, 1)
+    lsf = np.diff(esf) / bin_width
+    mtf = np.abs(np.fft.rfft(lsf))
+    mtf = mtf / mtf[0]
+    freqs = np.fft.rfftfreq(len(lsf), d=bin_width)
+    return freqs, mtf, counts
+
+
+def mtf50_freq(sigma):
+    return np.sqrt(np.log(2) / (2 * np.pi**2 * sigma**2))
+
+
+for sigma in [0.8, 1.2, 1.6, 2.0]:
+    freqs, MTF2, _ = slanted_edge_mtf(5.0, sigma)
+    below = np.where(MTF2 < 0.5)[0][0]
+    f1, f2 = freqs[below - 1], freqs[below]
+    m1, m2 = MTF2[below - 1], MTF2[below]
+    f_measured = f1 + (0.5 - m1) * (f2 - f1) / (m2 - m1)
+    print(f"sigma={sigma}: measured MTF50={f_measured:.4f} c/px, analytic={mtf50_freq(sigma):.4f} c/px")
+```
+
+Output:
+
+```text
+sigma=0.8: measured MTF50=0.2339 c/px, analytic=0.2342 c/px
+sigma=1.2: measured MTF50=0.1559 c/px, analytic=0.1562 c/px
+sigma=1.6: measured MTF50=0.1178 c/px, analytic=0.1171 c/px
+sigma=2.0: measured MTF50=0.0934 c/px, analytic=0.0937 c/px
+```
+
+### 3. Why the edge must be tilted: a real, measured breakdown at angle = 0
+
+`np.errstate` only silences the warning printed to stderr; the real division by (near) zero still happens and the result is still `inf`, exactly as it would in production code that was not watching for this failure mode.
+
+```python
+with np.errstate(divide="ignore", invalid="ignore"):
+    for angle in [0.0, 5.0]:
+        freqs, MTF3, counts = slanted_edge_mtf(angle, 1.2)
+        i = np.argmin(np.abs(freqs - 0.2))
+        populated = counts[counts > 0]
+        print(f"angle={angle}: MTF at f={freqs[i]:.3f} = {MTF3[i]:.4f} "
+              f"({int((counts == 0).sum())}/{len(counts)} ESF bins empty, "
+              f"populated bin count={int(populated[0])})")
+```
+
+Output:
+
+```text
+angle=0.0: MTF at f=0.202 = inf (179/199 ESF bins empty, populated bin count=100)
+angle=5.0: MTF at f=0.202 = 0.3104 (0/199 ESF bins empty, populated bin count=11)
+```
+
+## OpenCV API notes
+
+- **`cv2.GaussianBlur(img, (k, k), sigma)`** (already covered in earlier modules) is used here only as a *known* PSF to blur a synthetic sharp edge with, so the slanted-edge measurement has a real, exact answer to be checked against.
+- **`np.digitize`** (Code sections 1–2) assigns each real pixel offset to a bin index; combined with `np.add.at` it builds the supersampled ESF histogram without an explicit Python loop over pixels.
+- **`np.fft.rfft`** (Code sections 1–2) is the real one-sided FFT for a real-valued signal (the LSF); dividing by its own zero-frequency term, `MTF[0]`, normalizes the curve to 1.0 at f = 0, as an MTF curve must be.
+- No dedicated `cv2` function computes MTF or the slanted-edge method directly in this OpenCV build; the pipeline above (binning, `np.diff`, `np.fft.rfft`) is the real, standard way to get it from NumPy and OpenCV's own blur/image primitives.
+
+## Where it fails
+
+- **An untilted (or too-weakly-tilted) edge can break the measurement outright** — Section 5's own real result, a genuine divide-by-zero from an aliased, under-sampled ESF, not merely extra noise.
+- **Real sensor noise was not modelled in this chapter's synthetic edge** — a real photographed edge has shot and read noise (48.4, 49.1–49.3) on top of the PSF blur, which a real MTF measurement must average over many edge samples to suppress.
+- **The method measures MTF along one direction only** (perpendicular to the edge) — a real lens or sensor can have a different MTF horizontally and vertically (astigmatism, rolling shutter, Bayer demosaicing artifacts), so a full characterization needs edges in more than one orientation.
+- **A Gaussian PSF has a convenient closed form; most real PSFs do not** — real lens PSFs (diffraction, aberrations) have no simple analytic MTF, which is precisely why the slanted-edge method is used on real hardware instead of trusting a formula.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Photographing an edge with no tilt at all** — Section 5's own real, measured breakdown; ISO 12233 (Go deeper) specifies a tilt range for exactly this reason.
+- **Forgetting to normalize the MTF curve to 1.0 at f = 0** — an unnormalized `|DFT(LSF)|` curve cannot be compared to another measurement or to a datasheet value.
+- **Confusing MTF with the sharpness metrics of 50.3** — 50.3's focus metrics are single numbers meant to *rank* images by sharpness for autofocus; MTF is a full curve describing *how much contrast survives at each spatial frequency*, a fundamentally different, more complete characterization.
+- **Multiplying MTF curves that are not actually independent** — Section 6's cascading rule assumes the stages' blurs are statistically independent; a lens and a sensor usually are, but two stages sharing the same underlying cause (e.g., the same motion blur appearing in two processing steps) are not, and must not be multiplied as if they were.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### ISO 12233:2017 and the real slanted-edge standard
+
+ISO 12233:2017 (already cited in 19.3) is the real, standard specification for the slanted-edge method used across the photographic and machine-vision industries: it specifies the edge tilt range, the minimum number of edge rows, and how to report the resulting spatial frequency response (SFR) curve — of which this chapter's own measurement is a simplified, directly verified implementation of the core idea.
+
+### MTF is the magnitude of the OTF
+
+The full, complex-valued Fourier transform of the PSF is the optical transfer function (OTF); its magnitude is the MTF, and its phase (the phase transfer function, PTF) describes any real spatial shift the system introduces at each frequency — not measured in this chapter, which (like most practical slanted-edge work) reports only the magnitude.
+
+### Why MTFs really do multiply
+
+Convolving two PSFs in the spatial domain (what happens when light passes through a lens and then a sensor's own pixel aperture) corresponds, by the real convolution theorem, to multiplying their Fourier transforms — which is exactly 2.3's own "MTFs of the parts multiply" rule, and the same real theorem that lets 19.3's LSF → FFT route recover the MTF directly from one edge.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What did this chapter's own real check in Section 3 verify?",
+      options: [
+        "That cv2.GaussianBlur is slow",
+        "That the measured MTF (from a real, binned ESF → LSF → |DFT| pipeline) matches the known closed-form MTF of a Gaussian PSF to within about 0.003 at every tested frequency",
+        "That MTF cannot be measured from a single edge",
+        "That blur always increases MTF",
+      ],
+      answer: 1,
+      explanation: "Section 3: a genuine numeric match between the measured pipeline and the known analytic answer.",
+    },
+    {
+      question: "This chapter's own real result in Section 5 found what about an untilted (angle = 0°) edge?",
+      options: [
+        "Nothing changed versus a tilted edge",
+        "The measurement became slightly noisier but still worked",
+        "179 of 199 ESF bins were left completely empty, and the resulting MTF measurement was an outright divide-by-zero (inf), a genuine breakdown, not just extra noise",
+        "The edge needed to be tilted by exactly 45 degrees",
+      ],
+      answer: 2,
+      explanation: "Section 5: a real, reproducible numerical failure from under-sampling, not a contrived example.",
+    },
+    {
+      question: "How does MTF50 change as the PSF blur sigma increases, based on this chapter's own measured table?",
+      options: [
+        "MTF50 increases with sigma",
+        "MTF50 decreases with sigma (e.g. 0.2339 c/px at sigma=0.8 down to 0.0934 c/px at sigma=2.0) — a blurrier PSF loses contrast at a lower spatial frequency",
+        "MTF50 is independent of sigma",
+        "MTF50 is only defined for sigma = 0",
+      ],
+      answer: 1,
+      explanation: "Section 4: the real, measured and analytic MTF50 both fall as the blur gets worse.",
+    },
+    {
+      question: "Per Section 6 (and 2.3's own stated rule), how do you combine the MTF of a lens and the MTF of a sensor at the same spatial frequency?",
+      options: [
+        "Add them",
+        "Subtract the smaller from the larger",
+        "Multiply them",
+        "Take whichever one is larger",
+      ],
+      answer: 2,
+      explanation: "Section 6: MTFs of independent, cascaded stages multiply at each frequency, a direct consequence of the convolution theorem.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A lens has MTF = 0.7 at the spatial frequency a particular defect requires, and the sensor contributes MTF = 0.75 at that same frequency. What is the combined system MTF at that frequency?
+
+<Solution>
+
+Using Section 6's multiplication rule: 0.7 × 0.75 = 0.525.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's `slanted_edge_mtf` function, measure MTF50 for σ = 1.0 (between this chapter's own tested 0.8 and 1.2) and compare it to the analytic value from `mtf50_freq`.
+
+<Solution>
+
+```python
+freqs, MTF4, _ = slanted_edge_mtf(5.0, 1.0)
+below = np.where(MTF4 < 0.5)[0][0]
+f1, f2 = freqs[below - 1], freqs[below]
+m1, m2 = MTF4[below - 1], MTF4[below]
+f_measured = f1 + (0.5 - m1) * (f2 - f1) / (m2 - m1)
+print(f"sigma=1.0: measured MTF50={f_measured:.4f} c/px, analytic={mtf50_freq(1.0):.4f} c/px")
+```
+
+Output:
+
+```text
+sigma=1.0: measured MTF50=0.1870 c/px, analytic=0.1874 c/px
+```
+
+Falls between the chapter's own σ = 0.8 result (0.2339–0.2342 c/px) and σ = 1.2 result (0.1559–0.1562 c/px), continuing the same real, monotonic pattern.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Based on Section 5's own real result, would a 1° tilt (instead of 5°) be safer or riskier than no tilt at all, and why?
+
+<Solution>
+
+Safer than zero tilt, but still risky. Any nonzero tilt spreads the rows' sub-pixel offsets across more of the gap between pixels than zero tilt does (which repeats the identical offset on every row), so it would avoid the complete, bin-starved breakdown Section 5 measured. But a 1° tilt spreads those offsets far less evenly than 5° does, so many ESF bins would still be thinly populated or empty, giving a measurement that is noisier and less reliable than the chapter's own 5° result — which is exactly why ISO 12233 (Go deeper) specifies a real, practical tilt range rather than leaving it arbitrary.
+
+</Solution>
+
+### Exercise 4 (coding)
+
+Using Code section 1's pipeline, measure the MTF at f ≈ 0.15 c/px for σ = 1.2 and σ = 2.4 (double the blur), and check whether doubling sigma roughly squares the MTF value at that frequency (since the analytic form has sigma squared inside the exponent).
+
+<Solution>
+
+```python
+for sig in [1.2, 2.4]:
+    freqs5, MTF5, _ = slanted_edge_mtf(5.0, sig)
+    i = np.argmin(np.abs(freqs5 - 0.15))
+    print(f"sigma={sig}: MTF at f={freqs5[i]:.3f} = {MTF5[i]:.4f}")
+```
+
+Output:
+
+```text
+sigma=1.2: MTF at f=0.152 = 0.5180
+sigma=2.4: MTF at f=0.152 = 0.0721
+```
+
+0.5180² = 0.2683, not 0.0721 — doubling sigma does *not* roughly square the MTF value. The real reason is in the exponent: MTF(f, 2σ) = exp(−2π²(2σ)²f²) = exp(−2π²σ²f²)⁴ = MTF(f, σ)⁴, a *fourth* power, not a square, since σ appears squared inside the exponent and doubling it multiplies that squared term by 4. Checking: 0.5180⁴ = 0.0720, matching the measured 0.0721 almost exactly — doubling the blur sigma collapses the MTF at a fixed frequency far faster than a simple square would suggest.
+
+</Solution>
+
+## References
+
+1. Gonzalez & Woods, *Digital Image Processing*, 4th ed. — frequency-domain system response, Ch. 4.
+2. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed. — point spread functions and transfer functions, Ch. 10.
+3. ISO 12233:2017, *Photography — Electronic still picture imaging — Resolution and spatial frequency responses* — already cited in 19.3; the real, standard slanted-edge SFR/MTF measurement specification.
+4. OpenCV 4.13.0 documentation: `cv2.GaussianBlur`. https://docs.opencv.org/4.13.0/
