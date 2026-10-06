@@ -1,0 +1,334 @@
+export const meta = {
+  number: "36.7",
+  title: "PCA",
+  minutes: 22,
+  objectives: [
+    "Compute the covariance matrix and principal directions of a tiny dataset by hand",
+    "Explain 'explained variance' and why keeping the top few components can lose very little information",
+    "Reduce a 5-feature descriptor to 2 dimensions with PCA and read the result",
+    "Use cv2.PCACompute2 and cv2.PCAProject",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 36.7 (Part F, Module 36).
+  Builds on 5.7 (eigenvectors/PCA fundamentals via pixel-coordinate covariance) — this chapter applies the
+  same machinery to feature vectors for dimensionality reduction before classification, a different
+  application, not a repeat of 5.7's worked example.
+  Lab: PcaReduceLab (apps/web/components/visuals/PcaReduceLab.tsx) — PCA of 35.2's 5-D GLCM Haralick
+  features (contrast, homogeneity, energy, correlation, entropy) of the three 35.1 texture images,
+  projected to 2 PCs. Precomputed by scripts/gen_pca_data.py.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 36.7 PCA
+
+<Definition term="Principal Component Analysis (PCA) for features">finding the directions in feature space along which the data varies the most, and re-describing every point by its position along just the first few of those directions — usually losing very little of the data's actual structure while sharply reducing how many numbers describe each point.</Definition>
+
+5.7 introduced eigenvectors and used them to find a *shape's* orientation from the covariance of its pixel coordinates. Here the same machinery is applied to *feature vectors* instead of pixel coordinates: not "which way does this part point," but "which few combinations of these features actually carry the information, and which are mostly redundant."
+
+## 1. An analogy
+
+A restaurant critic rates every dish on ten separate scales (saltiness, sweetness, plating, temperature, portion size...), but it turns out that five of those scales almost always move together — a dish rated high on "richness" is nearly always rated high on "heaviness" and "indulgence" too. Once that's noticed, three or four well-chosen combined scores capture almost everything the original ten did. PCA finds those combined scores automatically, from the data, without being told in advance which original scales were redundant.
+
+## 2. Variance, covariance, and principal directions
+
+<Flow
+  steps={[
+    { label: "Feature vectors (many dimensions)", tone: "data" },
+    { label: "Centre the data (subtract the mean)", tone: "process" },
+    { label: "Covariance matrix; its eigenvectors are the principal directions", tone: "process" },
+    { label: "Project onto the top few -> fewer numbers, most information kept", tone: "result" },
+  ]}
+/>
+
+- **Principal directions**: the eigenvectors of the (centred) data's covariance matrix. The first principal component (PC1) is the direction of greatest spread in the data; PC2 is the direction of next-greatest spread, perpendicular to PC1; and so on.
+- **Explained variance**: each eigenvector's eigenvalue says how much of the data's total variance lies along that direction. Dividing by the sum of all eigenvalues gives the *fraction* of variance explained by each component.
+- **Dimensionality reduction**: keeping only the top k components (projecting every point onto just those k directions) describes the data with fewer numbers, discarding only the (hopefully small) fraction of variance in the directions left out.
+
+## 3. A worked example by hand
+
+Four 2-feature points that happen to lie exactly on a line: (0, 0), (2, 1), (4, 2), (6, 3).
+
+Mean = (3, 1.5). Centred points: (−3, −1.5), (−1, −0.5), (1, 0.5), (3, 1.5).
+
+Covariance matrix (each entry = average of the products, over all 4 points):
+C₁₁ = mean(x²) = (9+1+1+9)/4 = **5**. C₂₂ = mean(y²) = (2.25+0.25+0.25+2.25)/4 = **1.25**. C₁₂ = mean(xy) = (4.5+0.5+0.5+4.5)/4 = **2.5**.
+
+C = [[5, 2.5], [2.5, 1.25]]. Its determinant is 5×1.25 − 2.5² = 6.25 − 6.25 = **0** — so one eigenvalue is 0. The trace (5+1.25=6.25) is the sum of both eigenvalues, so the eigenvalues are **6.25 and 0**. All of the variance is explained by PC1 alone (6.25 / 6.25 = **100%**) — unsurprising, since the four points lie exactly on a line and have *zero* spread perpendicular to it. The eigenvector for eigenvalue 6.25 works out to direction (2, 1) (normalised, (0.894, 0.447)) — exactly the line's own direction, as it has to be.
+
+## 4. A real 5-feature reduction
+
+<PcaReduceLab caption="PCA of 5 Haralick texture features (35.2), reduced to the 2 directions that carry the most information. Smooth separates cleanly along PC1; Woven and Blotchy overlap, matching 36.4's finding that a straight line can't separate them well."/>
+
+Computing all 5 GLCM Haralick features (contrast, homogeneity, energy, correlation, entropy, 35.2) for every 8×8 tile of the three 35.1 textures gives a 243-row, 5-column feature table. Running PCA on it:
+
+| Component | Variance explained |
+| --- | --- |
+| PC1 | 86.1% |
+| PC2 | 7.9% |
+| PC3 | 5.8% |
+| PC4 | 0.2% |
+| PC5 | 0.03% |
+
+PC1 and PC2 together already capture **94.0%** of the variance across all 5 original features — reducing 5 numbers per tile to 2 loses only about 6% of the total spread in the data. Looking at just PC1 by class: Woven averages 0.96 (± 0.57), Smooth averages **−1.27** (± 0.77), Blotchy averages 0.31 (± 0.88). Smooth sits clearly apart from the other two on this one combined axis; Woven and Blotchy overlap considerably — the same pair that 36.4's linear SVM (46.5% training accuracy) could not separate with a straight line, now visible as genuine overlap in a principled 2-D summary of all 5 original features, not just this module's usual 2 (mean, std).
+
+## 5. Industrial use
+
+- **Compressing a large descriptor before classification**: a 1764-number HOG vector (35.3) or a many-word BoVW histogram (35.6) can be reduced to a far smaller number of principal components before feeding a classifier, cutting both computation and the amount of training data needed.
+- **Visualising high-dimensional data**: projecting onto the top 2 or 3 components is one of the standard ways to actually *look at* data that has too many dimensions to plot directly (exactly what Section 4 did).
+- **Noise reduction**: components with very little explained variance (PC4, PC5 above) are often dominated by noise rather than real signal; dropping them can make downstream classification more robust, not just faster.
+
+## What you should remember from 36.7
+
+<Takeaways>
+<Takeaway n={1} title="Principal directions">Eigenvectors of the covariance matrix, ordered by how much variance lies along each.</Takeaway>
+<Takeaway n={2} title="Explained variance">Each component's eigenvalue, as a fraction of the total — how much information keeping it preserves.</Takeaway>
+<Takeaway n={3} title="Reduction, not magic">PCA only helps when some directions genuinely carry little information; it cannot invent separation that isn't in the data.</Takeaway>
+<Takeaway n={4} title="Same tool, new target">The exact eigenvector machinery from 5.7, applied to feature vectors instead of pixel coordinates.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A dataset's covariance matrix has eigenvalues 9 and 1. What fraction of variance does PC1 (eigenvalue 9) explain?
+
+<Solution>
+
+9 / (9 + 1) = **90%**.
+
+</Solution>
+
+**Q2.** If a dataset's two features are completely uncorrelated and have equal variance (covariance matrix [[4, 0], [0, 4]]), what do PC1 and PC2 look like?
+
+<Solution>
+
+Both eigenvalues are 4 (equal), so PC1 and PC2 explain exactly 50% each — there is no single dominant direction, and (unlike Section 3's perfectly-collinear example) *any* pair of perpendicular directions is an equally valid choice of principal axes. PCA is most useful exactly when this is *not* the case — when the variance really is concentrated in a few directions.
+
+</Solution>
+
+### Next: 36.8 Clustering
+
+## Code
+
+### 1. The worked example, with NumPy
+
+```python
+import numpy as np
+import cv2
+
+X = np.array([[0, 0], [2, 1], [4, 2], [6, 3]], dtype=np.float32)
+mean, eigvec, eigval = cv2.PCACompute2(X, mean=None)
+print("mean:", mean.ravel())
+print("eigenvalues:", eigval.ravel())
+print("eigenvectors (rows):\n", eigvec)
+proj = cv2.PCAProject(X, mean, eigvec)
+print("projected (PC1, PC2):\n", proj)
+```
+
+Output:
+
+```text
+mean: [3.  1.5]
+eigenvalues: [6.25 0.  ]
+eigenvectors (rows):
+ [[ 0.8944272  0.4472136]
+ [-0.4472136  0.8944272]]
+projected (PC1, PC2):
+ [[-3.354102  0.       ]
+ [-1.118034  0.       ]
+ [ 1.118034  0.       ]
+ [ 3.354102  0.       ]]
+```
+
+Every point's PC2 coordinate is exactly 0: there genuinely is no spread perpendicular to the line.
+
+### 2. PCA of the 5-feature Haralick table
+
+```python
+TILE = 8
+LEVELS = 8
+def quantize(img, levels=LEVELS):
+    return (img.astype(np.int32) * levels // 256).astype(np.uint8)
+
+def glcm(tile, dx, dy, levels=LEVELS):
+    q = quantize(tile, levels)
+    H, W = q.shape
+    a = q[max(0, -dy):H - max(0, dy), max(0, -dx):W - max(0, dx)]
+    b = q[max(0, dy):H - max(0, -dy), max(0, dx):W - max(0, -dx)]
+    idx = a.ravel().astype(np.int64) * levels + b.ravel().astype(np.int64)
+    return np.bincount(idx, minlength=levels * levels).reshape(levels, levels).astype(np.float64)
+
+def haralick(mat):                                      # same formulas as 35.2
+    P = mat / mat.sum()
+    L = P.shape[0]
+    i, j = np.arange(L).reshape(-1, 1), np.arange(L).reshape(1, -1)
+    contrast = np.sum((i - j) ** 2 * P)
+    homogeneity = np.sum(P / (1 + (i - j) ** 2))
+    energy = np.sum(P ** 2)
+    mu_i, mu_j = np.sum(i * P), np.sum(j * P)
+    sd_i, sd_j = np.sqrt(np.sum((i - mu_i) ** 2 * P)), np.sqrt(np.sum((j - mu_j) ** 2 * P))
+    corr = np.sum((i - mu_i) * (j - mu_j) * P) / (sd_i * sd_j) if sd_i > 0 and sd_j > 0 else 1.0
+    entropy = -np.sum(P[P > 0] * np.log2(P[P > 0]))
+    return [contrast, homogeneity, energy, corr, entropy]
+
+names = ["woven", "smooth", "blotchy"]
+Xf, yf = [], []
+for i, n in enumerate(names):
+    img = cv2.imread(f"sample-texture-{n}.png", cv2.IMREAD_GRAYSCALE)
+    h, w = img.shape
+    for ty in range(h // TILE):
+        for tx in range(w // TILE):
+            tile = img[ty * TILE:(ty + 1) * TILE, tx * TILE:(tx + 1) * TILE]
+            Xf.append(haralick(glcm(tile, 1, 0)))
+            yf.append(i)
+Xf = np.array(Xf, dtype=np.float32)
+yf = np.array(yf)
+
+mean5, eigvec5, eigval5 = cv2.PCACompute2(Xf, mean=None)
+explained = eigval5.ravel() / eigval5.sum()
+print("explained variance per PC:", np.round(explained, 4))
+print("PC1+PC2:", round(float(explained[0] + explained[1]), 4))
+
+proj5 = cv2.PCAProject(Xf, mean5, eigvec5)
+for i, n in enumerate(names):
+    pc1 = proj5[yf == i, 0]
+    print(f"{n}: PC1 mean={pc1.mean():.2f} std={pc1.std():.2f}")
+```
+
+Output:
+
+```text
+explained variance per PC: [0.8614 0.079  0.0576 0.0018 0.0003]
+PC1+PC2: 0.9404
+woven: PC1 mean=0.96 std=0.57
+smooth: PC1 mean=-1.27 std=0.77
+blotchy: PC1 mean=0.31 std=0.88
+```
+
+## OpenCV API notes
+
+- **`cv2.PCACompute2(data, mean, maxComponents=0)`** → `(mean, eigenvectors, eigenvalues)`: `data` is `float32`, one row per sample; `mean` can be `None` to compute it; `maxComponents` limits how many components are returned (0 = all). `cv2.PCACompute` (no `2`) returns only `(mean, eigenvectors)`, without the eigenvalues needed for explained variance.
+- **`cv2.PCAProject(data, mean, eigenvectors)`**: projects data onto the given principal directions — this is how both examples above went from the original features to PC coordinates.
+- **`cv2.PCABackProject(data, mean, eigenvectors)`**: the inverse — reconstructs (approximate, if fewer than all components were kept) original-space vectors from their projections, useful for checking how much is actually lost by keeping only the top components.
+- **Also available as a class**: `cv2.PCA(data, mean, flags, maxComponents)` with `.project()`/`.backProject()` methods — equivalent functionality in an object-oriented form.
+- **Scale your features first** if they are on very different natural scales (as 36.1's API notes already warned for distance-based classifiers) — PCA finds directions of maximum *variance*, and a feature with naturally larger numbers can dominate purely from its scale, not because it is more informative.
+
+## Where it fails
+
+- **PCA only finds *linear* combinations of features** — if the genuinely informative structure in the data is curved, PCA's straight-line directions can miss it (compare with 36.4's kernel trick, which handles curved structure for classification directly).
+- **High explained variance does not guarantee good class separation**: Section 4's PC1 explains 86% of variance but Woven and Blotchy still overlap substantially along it — PCA optimises for spread in the data overall, not for distinguishing the classes (a supervised alternative, Linear Discriminant Analysis, optimises for class separation directly, briefly in Go deeper).
+- **Sensitive to feature scaling** (OpenCV API notes above) — an unscaled feature with large natural variance can dominate the principal directions for a reason that has nothing to do with its actual importance.
+- **Components beyond the first few are often mostly noise**, but "often" is not "always" — always check how much variance is actually being discarded (the explained-variance numbers), never assume.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming PCA improves classification accuracy**: it reduces dimensionality and often removes noise, which can help indirectly, but it has no idea which classes exist — it can just as easily discard a low-variance direction that happened to be exactly the one separating two classes.
+- **Not checking explained variance before reducing dimensions**: keeping "the top 2 components" without checking whether that's 94% or 40% of the total variance makes a big difference to how much information survives.
+- **Forgetting to apply the *same* mean and eigenvectors (from training data) when projecting new data** — fitting PCA separately on training and test data gives inconsistent, incomparable projections.
+- **Confusing PCA (unsupervised, ignores labels) with a supervised dimensionality-reduction method** — PCA does not look at class labels at all when choosing its directions (Section 4 computed it from the texture classes' features, but the labels were never used in the PCA step itself, only afterwards to colour the plot).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### PCA via the covariance matrix vs via SVD
+
+5.7 introduced the SVD as a more numerically robust way to find the same principal directions, by decomposing the (centred) data matrix directly rather than first forming the covariance matrix explicitly — `cv2.PCACompute2` uses this SVD-based approach internally rather than literally computing a covariance matrix and its eigendecomposition step by step, for better numerical stability, though the two give mathematically equivalent results.
+
+### Choosing how many components to keep
+
+Besides eyeballing a cumulative explained-variance number (as in Section 4), a common rule of thumb keeps enough components to reach a target threshold (e.g. 95% or 99% of total variance) — `cv2.PCACompute2`'s `maxComponents` parameter, or `retainedVariance` in some bindings, can be driven by exactly this choice.
+
+### Linear Discriminant Analysis (LDA)
+
+Where PCA finds directions of maximum *variance* regardless of class labels, LDA (a related but supervised technique, not covered by `cv2.ml`) finds directions that maximise the separation *between* classes relative to the spread *within* each class — directly optimising for what PCA only optimises for by coincidence. Section 4's finding that PC1 does not perfectly separate Woven and Blotchy is exactly the kind of case where LDA could, in principle, do better, by using the class labels PCA ignores.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What is the first principal component (PC1)?",
+      options: ["The first feature in the original data", "The direction of greatest variance in the (centred) data", "The class label", "A random direction"],
+      answer: 1,
+      explanation: "Section 2: PC1, PC2, etc. are the covariance matrix's eigenvectors, ordered by eigenvalue (variance explained).",
+    },
+    {
+      question: "In Section 3, why was the second eigenvalue exactly 0?",
+      options: ["A calculation error", "The four points lay exactly on a straight line, so there was zero spread perpendicular to it", "PCA always produces one zero eigenvalue", "The mean was computed wrong"],
+      answer: 1,
+      explanation: "Perfectly collinear data has no variance in the direction perpendicular to the line.",
+    },
+    {
+      question: "In Section 4, PC1 explains 86.1% of variance, yet Woven and Blotchy still overlap substantially along it. What does this show?",
+      options: ["A bug in cv2.PCACompute2", "High explained variance (how spread out the data is) does not guarantee good class separation, since PCA does not use class labels at all", "86% is too low to be useful", "The texture images are mislabelled"],
+      answer: 1,
+      explanation: "Where it fails: PCA optimises for overall spread, not for distinguishing classes -- that is what LDA is for.",
+    },
+    {
+      question: "Why should features typically be scaled before PCA?",
+      options: ["Scaling is never necessary", "PCA finds directions of maximum variance, so a feature with naturally larger numbers can dominate purely from its scale, not its actual importance", "PCA only works on integers", "Scaling changes the number of components"],
+      answer: 1,
+      explanation: "The same scaling concern that applies to every distance/variance-based method in this module.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A dataset's covariance matrix is [[8, 0], [0, 2]] (already diagonal — the features happen to be uncorrelated). What are the eigenvalues, the principal directions, and the variance explained by PC1?
+
+<Solution>
+
+For a diagonal matrix, the eigenvalues are simply the diagonal entries: **8 and 2**, with eigenvectors along the existing axes ((1,0) for eigenvalue 8, (0,1) for eigenvalue 2) — when features are already uncorrelated, PCA's principal directions are just the original feature axes, re-ordered by variance. PC1 explains 8/(8+2) = **80%**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the Code section's `Xf`, `yf`, `mean5`, `eigvec5` from the Haralick PCA, report the mean and std of PC1 (not just PC1, but also PC2) for all three classes, and identify which pair of classes is closest together on PC2.
+
+<Solution>
+
+```python
+proj5 = cv2.PCAProject(Xf, mean5, eigvec5)
+for i, n in enumerate(names):
+    pc = proj5[yf == i]
+    print(f"{n}: PC1 {pc[:,0].mean():.2f}+-{pc[:,0].std():.2f}  PC2 {pc[:,1].mean():.2f}+-{pc[:,1].std():.2f}")
+```
+
+Output:
+
+```text
+woven: PC1 0.96+-0.57  PC2 0.07+-0.08
+smooth: PC1 -1.27+-0.77  PC2 -0.07+-0.49
+blotchy: PC1 0.31+-0.88  PC2 0.01+-0.37
+```
+
+PC2's means (0.07, −0.07, 0.01) are all close to zero and close to each other, with standard deviations several times larger — PC2 (only 7.9% of the total variance) does not cleanly separate any pair of classes on its own. Nearly all of the real class separation in this feature space comes from PC1 alone, exactly matching the 86.1% explained-variance figure from Section 4: a component that explains little of the overall variance also turns out to carry little of the class information here (though, as the chapter warns, that is not guaranteed in general).
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague reduces a 50-feature descriptor to 2 principal components, checks that they explain 97% of the variance, and concludes a classifier trained on just those 2 numbers will work about as well as one trained on all 50. Is that conclusion justified?
+
+<Solution>
+
+Not necessarily. 97% of *variance* explained says the 2 components capture most of how spread out the data is overall — it says nothing directly about whether the discarded 3% (or the kept 97%, for that matter) happens to contain the specific differences that distinguish the classes a classifier needs to tell apart (Section 4's own example: 86% explained by PC1 alone, yet two classes still overlap substantially on it). The only way to know whether the reduced representation is good enough for classification is to actually train and check a classifier on it — PCA's explained variance is a useful but separate measurement from classification performance.
+
+</Solution>
+
+## References
+
+1. I. T. Jolliffe, *Principal Component Analysis*, 2nd ed., Springer, 2002.
+2. R. O. Duda, P. E. Hart, D. G. Stork, *Pattern Classification*, 2nd ed., Wiley, 2001, Section 10.13 (dimensionality reduction).
+3. OpenCV 4.13.0 documentation: `cv2.PCACompute2`, `cv2.PCAProject`, `cv2.PCA`. https://docs.opencv.org/4.13.0/
