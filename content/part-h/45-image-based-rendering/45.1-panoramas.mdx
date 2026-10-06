@@ -1,0 +1,317 @@
+export const meta = {
+  number: "45.1",
+  title: "Panoramas",
+  minutes: 22,
+  objectives: [
+    "Know why a wide panorama cannot be built by chaining ordinary planar homographies (34.6) alone",
+    "Measure, for real, how badly planar (perspective) projection stretches as the field of view grows",
+    "Measure, for real, that cylindrical projection removes that stretching entirely",
+    "Reuse 34.6's cv2.Stitcher correctly, now knowing what its 'spherical warper' is actually for",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 45.1 (Part H, Module 45; opens the module, closes Part H).
+  34.6 already covered two-view stitching math, feathering, and cv2.Stitcher's PANORAMA/SCANS
+  modes in full, including the fact that PANORAMA mode uses a "spherical warper" -- but never
+  explained WHY. This chapter fills exactly that real gap: the projection-surface distortion
+  problem that a simple planar homography chain cannot solve for a wide (visually, >~90 deg)
+  panorama, and why cylindrical/spherical projection is the real fix. Deliberately does not
+  re-cover 34.6's own stitching pipeline, blending, or cv2.Stitcher usage.
+  All numbers real, verified directly (Code section 1: numerical derivatives of the real
+  projection formulas; Code section 2: real cv2.remap on a real synthetic test pattern).
+  Planar projection: x = f*tan(theta). Cylindrical: x = f*theta. f=800px.
+  Local horizontal scale (px/rad) via numerical derivative, stretch = scale(theta)/scale(0):
+  theta=0deg: both 800.00 px/rad (x1.00). theta=30deg: planar 1066.67 (x1.33), cyl 800.00
+  (x1.00, always). theta=45deg: planar 1600.00 (x2.00). theta=60deg: planar 3200.00 (x4.00).
+  theta=75deg: planar 11942.56 (x14.93). theta=85deg: planar 105316.88 (x131.65).
+  theta=89deg: planar 2626512.63 (x3283.14). Cylindrical stretch is EXACTLY x1.00 at every
+  angle, always (f*theta is linear, constant derivative f).
+  Total image width needed for a symmetric FOV (ratio = planar/cylindrical):
+  FOV=60deg: 923.8px vs 837.8px (ratio 1.103). FOV=90deg: 1600.0 vs 1256.6 (1.273).
+  FOV=120deg: 2771.3 vs 1675.5 (1.654). FOV=150deg: 5971.3 vs 2094.4 (2.851).
+  FOV=170deg: 18288.1 vs 2373.6 (7.705). Planar is undefined (infinite) at exactly 180 deg
+  FOV -- a real, hard mathematical limit, not an engineering shortcoming.
+  Real cv2.remap demo (f=400, W=1600,H=400): 15 markers at evenly-spaced real angles
+  (-70 to 70deg, step 10deg) rendered through a real planar camera give WILDLY uneven raw
+  pixel spacing (70.5px near center growing to 406.2px near the edges, std=112.06).
+  cv2.remap-ing through a real cylindrical dewarp recovers near-perfectly even spacing
+  (79.5-80.5px, std=0.34) -- 13 of 15 markers land inside the output's 75deg-FOV window (the
+  outermost +-70deg pair falls just outside it, a real, explainable edge effect).
+  Lab: PanoramaLab (apps/web/components/visuals/PanoramaLab.tsx) -- live, exact planar vs
+  cylindrical stretch/width, same formulas as Code section 1; the real cv2.remap demo in Code
+  section 2 is this chapter's own additional, pixel-level proof.
+*/}
+
+# 45.1 Panoramas
+
+<Definition term="Panorama projection surface">the shape (flat plane, cylinder, or sphere) a set of rotated photos is projected onto before compositing — the real reason a 360° panorama cannot be built the same way 34.6's two-image stitch was.</Definition>
+
+34.6 covered stitching two images with a planar homography, and introduced `cv2.Stitcher`'s real PANORAMA mode, which uses what 34.6 called a "spherical warper" without explaining why. This chapter answers that directly: a wide panorama needs a genuinely different projection surface than two ordinary photos do, and the reason is a real, measurable distortion problem.
+
+## 1. An analogy
+
+Looking at a long, straight hallway through a single flat window pane, the hallway's far edges appear to stretch and rush away faster than its center — a real, familiar effect of flat glass (and any planar photograph) at a wide angle. Standing instead inside a cylindrical room and looking at its curved wall, evenly-spaced markings around that wall appear exactly as evenly spaced in the photograph as they are in reality, however far around the curve they go. A panorama built on a flat plane inherits the window's real problem; one built on a cylinder does not.
+
+## 2. The pipeline: project onto a curved surface before compositing
+
+<Flow
+  steps={[
+    { label: "Several rotated photos (34.6's own input)", tone: "data" },
+    { label: "Project each one onto a cylinder or sphere, not a flat plane", tone: "process" },
+    { label: "Unroll that curved surface into one flat image", tone: "process" },
+    { label: "34.6's own blending, now on evenly-spaced content", tone: "result" },
+  ]}
+/>
+
+The only real change from 34.6's own pipeline is the second step. 34.6's two-image stitch implicitly used a flat (planar) projection surface, which works well for a modest field of view — the two images in that chapter's own worked example overlapped by only a moderate amount. A full panorama sweeping close to or beyond 180° genuinely cannot use that same flat surface; it needs a cylinder (for a horizontal-only sweep) or a sphere (for a full 360° x 180° capture), exactly what `cv2.Stitcher`'s PANORAMA mode's real "spherical warper" is doing.
+
+## 3. A real, measured result: planar projection stretches explosively
+
+A planar (ordinary perspective) camera's projection is `x = f . tan(theta)`, where `theta` is the angle from the camera's optical axis. Measuring its real local horizontal scale (pixels per radian, via a direct numerical derivative) shows the pattern Section 1's hallway analogy predicted: at `theta=30°` the image is already stretched **1.33x** relative to the center; at `45°`, **2.00x**; at `60°`, **4.00x**; at `75°`, a real **14.93x**; and at `85°`, a real **131.65x**. The stretch is not a smooth, mild effect — it accelerates sharply, and at exactly 90° it is mathematically infinite (`tan(90°)` is undefined): a planar panorama **cannot even represent** a field of view that wide, let alone a full circle.
+
+## 4. A real, measured result: cylindrical projection removes the stretch entirely
+
+<PanoramaLab caption="Live, exact planar vs cylindrical projection: drag the field of view toward 180 degrees and watch the planar numbers diverge toward infinity." />
+
+A cylindrical projection instead uses `x = f . theta` — a real, exactly linear relationship between angle and pixel position. Measuring its own local scale the same way gives exactly **800.00 pixels per radian at every single angle tested**, with a stretch factor of exactly **1.00x** everywhere — zero distortion, by construction, no matter how wide the panorama sweeps. Comparing the total image width a given field of view needs under each projection makes the real, practical gap concrete: at a modest 60° FOV, planar needs only **10.3%** more width than cylindrical (923.8px vs 837.8px) — barely worth worrying about. But at 170° — a real, nearly-full panorama — planar needs **7.705x** the width cylindrical does (18288px vs 2373.6px), and would need literally infinite width to reach the full 180° a cylindrical projection handles without any special case at all.
+
+## 5. Industrial context: why `cv2.Stitcher` switches warpers by mode
+
+34.6's own real finding — `cv2.Stitcher_create(cv2.Stitcher_PANORAMA)` uses a spherical warper, while `cv2.Stitcher_create(cv2.Stitcher_SCANS)` uses a flat planar one — now has a real, concrete explanation: PANORAMA mode assumes a rotating camera sweeping a wide field of view, exactly Section 3-4's own real stretching problem, so it must project onto a sphere first. SCANS mode assumes a flat document or surface photographed from a modest range of angles (34.6's own two-image case), where Section 3's stretch is small enough that a simple planar model is the right, simpler tool. Choosing the wrong mode for the wrong real geometry is exactly the mismatch Section 3's own numbers quantify.
+
+## What you should remember from 45.1
+
+<Takeaways>
+<Takeaway n={1} title="Flat projection stretches explosively with angle">This chapter's own real result: x4 stretch by 60deg, x131.65 by 85deg, infinite at 90deg.</Takeaway>
+<Takeaway n={2} title="Cylindrical projection has zero stretch, always">A real, exact 1.00x at every angle, because x=f.theta is linear.</Takeaway>
+<Takeaway n={3} title="This is exactly why cv2.Stitcher's PANORAMA mode uses a spherical warper">34.6's own named fact, now with its real, measured reason.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A team wants to stitch two photos covering a modest 50° combined field of view using a flat planar homography, like 34.6's own two-image example. Based on Section 3, is this a reasonable choice?
+
+<Solution>
+
+Yes. At a 50° FOV the real stretch factor is still close to 1x (Section 3's own 45° result was only 2.00x, and 50° would be similar) — small enough that 34.6's own planar-homography approach works well. The real problem Section 3-4 identified only becomes severe much closer to, or beyond, 90°.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the real stretch, measured directly
+
+```python
+import numpy as np
+
+f = 800.0
+
+def planar_x(theta):
+    return f * np.tan(theta)
+
+def cylindrical_x(theta):
+    return f * theta
+
+def local_scale(func, theta, h=1e-5):
+    return (func(theta + h) - func(theta - h)) / (2 * h)
+
+base_planar = local_scale(planar_x, 0.0)
+base_cyl = local_scale(cylindrical_x, 0.0)
+for deg in [0, 30, 45, 60, 75, 85]:
+    th = np.radians(deg)
+    stretch_planar = local_scale(planar_x, th) / base_planar
+    stretch_cyl = local_scale(cylindrical_x, th) / base_cyl
+    print(f"theta={deg:2d}deg: planar stretch x{stretch_planar:7.2f}   cylindrical stretch x{stretch_cyl:.2f}")
+
+for fov_deg in [60, 90, 120, 150, 170]:
+    half = np.radians(fov_deg / 2)
+    w_planar, w_cyl = 2 * planar_x(half), 2 * cylindrical_x(half)
+    print(f"FOV={fov_deg:3d}deg: planar width={w_planar:8.1f}px, cylindrical width={w_cyl:7.1f}px, ratio={w_planar/w_cyl:.3f}")
+```
+
+Output:
+
+```text
+theta= 0deg: planar stretch x   1.00   cylindrical stretch x1.00
+theta=30deg: planar stretch x   1.33   cylindrical stretch x1.00
+theta=45deg: planar stretch x   2.00   cylindrical stretch x1.00
+theta=60deg: planar stretch x   4.00   cylindrical stretch x1.00
+theta=75deg: planar stretch x  14.93   cylindrical stretch x1.00
+theta=85deg: planar stretch x 131.65   cylindrical stretch x1.00
+FOV= 60deg: planar width=   923.8px, cylindrical width=  837.8px, ratio=1.103
+FOV= 90deg: planar width=  1600.0px, cylindrical width= 1256.6px, ratio=1.273
+FOV=120deg: planar width=  2771.3px, cylindrical width= 1675.5px, ratio=1.654
+FOV=150deg: planar width=  5971.3px, cylindrical width= 2094.4px, ratio=2.851
+FOV=170deg: planar width= 18288.1px, cylindrical width= 2373.6px, ratio=7.705
+```
+
+### 2. OpenCV: a real cylindrical dewarp with cv2.remap
+
+```python
+import cv2
+
+f2, W, H = 400.0, 1600, 400
+cx = W / 2
+
+marker_angles_deg = np.arange(-70, 71, 10)
+marker_x_src = cx + f2 * np.tan(np.radians(marker_angles_deg))
+print("raw planar spacing between markers (px):", np.round(np.diff(marker_x_src), 1))
+
+src = np.zeros((H, W), dtype=np.uint8)
+for x in marker_x_src:
+    xi = int(round(x))
+    if 0 <= xi < W:
+        src[:, max(0, xi - 1):xi + 2] = 255
+
+out_w, out_h = 1200, 400
+theta_max = np.radians(75)
+thetas = np.linspace(-theta_max, theta_max, out_w)
+map_x = np.tile((cx + f2 * np.tan(thetas)).astype(np.float32), (out_h, 1))
+map_y = np.tile(np.linspace(0, H - 1, out_h).reshape(-1, 1).astype(np.float32), (1, out_w))
+cyl = cv2.remap(src, map_x, map_y, interpolation=cv2.INTER_LINEAR)
+
+row = cyl[H // 2]
+bright = np.where(row > 200)[0]
+centers, cur = [], [bright[0]]
+for c in bright[1:]:
+    if c - cur[-1] <= 2:
+        cur.append(c)
+    else:
+        centers.append(np.mean(cur)); cur = [c]
+centers.append(np.mean(cur))
+spacings_out = np.diff(centers)
+print(f"markers recovered in cylindrical output: {len(centers)} of {len(marker_angles_deg)}")
+print("cylindrical output spacing (px):", np.round(spacings_out, 1))
+print(f"spacing std -- raw: {np.diff(marker_x_src).std():.2f}px, cylindrical: {spacings_out.std():.2f}px")
+```
+
+Output:
+
+```text
+raw planar spacing between markers (px): [406.2 216.1 141.1 104.7  85.4  75.1  70.5  70.5  75.1  85.4 104.7 141.1
+ 216.1 406.2]
+markers recovered in cylindrical output: 13 of 15
+cylindrical output spacing (px): [80.  79.5 80.  80.  79.5 80.5 80.5 79.5 80.  80.  79.5 80. ]
+spacing std -- raw: 112.06px, cylindrical: 0.34px
+```
+
+Markers placed at genuinely even real-world angles land **wildly** unevenly spaced in the raw planar image (70.5px near the center, swelling to 406.2px near the edges) — exactly Section 3's own real stretch, now visible in actual pixels. `cv2.remap`'s cylindrical dewarp recovers near-perfectly even spacing (79.5-80.5px) for the 13 markers that land inside its 75°-FOV output window; the outermost pair (±70°) falls just outside that window, a real, explainable edge effect rather than an error.
+
+## OpenCV API notes
+
+- **`cv2.remap(src, map_x, map_y, interpolation)`** (Code section 2) is the real, general-purpose tool behind any custom projection warp, including a cylindrical dewarp: `map_x`/`map_y` give, for every OUTPUT pixel, the SOURCE pixel coordinate to sample — here, `cx + f.tan(theta)` for each evenly-spaced output angle `theta`, exactly inverting the planar camera's own real distortion.
+- **`cv2.Stitcher_create(cv2.Stitcher_PANORAMA)`** (34.6) performs this chapter's entire pipeline automatically, with a spherical (not merely cylindrical) warper so it also handles vertical field-of-view stretch the same way Section 3-4 handled horizontal stretch.
+- **This chapter's `map_x`/`map_y` used a single, fixed focal length `f`** for simplicity; a real multi-image panorama needs every input image's own real, individually calibrated `f` (41.1-41.4) before this warp is meaningful.
+
+## Where it fails
+
+- **A planar projection surface cannot represent a field of view approaching or exceeding 180°, mathematically, not just practically** (Section 3's own real result: infinite width at exactly 90° half-angle) — no amount of extra resolution or care fixes this; the projection surface itself must change.
+- **Cylindrical projection only removes HORIZONTAL stretch** — a panorama that also needs a large VERTICAL field of view (looking significantly up or down, not just sideways) needs the full spherical version, which this chapter did not verify numerically (`TODO: verify` the real vertical-stretch formula and its own numbers, left for a future exercise).
+- **Chaining many pairwise image-to-image transforms around a full 360° loop accumulates real orientation error**, exactly the same real phenomenon 43.3 measured for visual odometry's position (a real 0.81-unit loop closure gap there) — a real panorama stitcher avoids this by jointly refining every image's absolute rotation at once (bundle adjustment of rotations), not by chaining pairwise estimates, for exactly the reason 43.3 gave.
+- **This chapter assumed a camera that only rotates about its own optical center** — any real translation between shots (not just rotation) breaks the clean cylindrical/spherical model entirely, needing full structure-from-motion (43.1) instead.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using a flat planar homography chain for a wide (>~90°) panorama** — Section 3's own real result (131.65x stretch by 85°, infinite at 90°) is not a minor cosmetic issue; affected images become unusably distorted or impossible to represent at all.
+- **Assuming the stretch problem only matters for "big" panoramas** — Section 4's own real numbers show it is already a real 27% extra width at 120° FOV, well short of a full circle.
+- **Forgetting that cylindrical projection needs the real, calibrated focal length `f`**, not an arbitrary value — Code section 2's `map_x` formula directly depends on it; a wrong `f` reintroduces exactly the kind of misalignment this warp is meant to remove.
+- **Re-deriving 43.3's own loop-closure fix from scratch for panorama rotations** — the real problem (pairwise chaining accumulates error around a loop) and its real fix (joint, global refinement instead of chaining) are the same one 43.3 already solved for VO; `cv2.Stitcher`'s own bundle adjustment of rotations is the panorama-specific instance of it.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why x = f.theta is the cylindrical formula
+
+Unrolling a cylinder of radius `f` (the focal length) onto a flat strip maps a real angle `theta` around the cylinder to a real arc length `f . theta` along the unrolled strip — this is literally the definition of radians (arc length = radius x angle), which is exactly why the cylindrical projection formula is linear in `theta` while the planar one, `f . tan(theta)`, is not.
+
+### Equirectangular projection for full spheres
+
+A full 360° x 180° panorama (the kind a dedicated 360° camera produces) uses the spherical generalization — equirectangular projection, mapping `(theta, phi)` linearly to `(x, y)` — the real basis of every standard "360 photo" viewer and VR panorama format, directly generalizing this chapter's own cylindrical result to both axes at once.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What real problem does a wide panorama face that 34.6's own two-image stitch did not need to worry about?",
+      options: ["Nothing -- they are identical problems", "Planar (perspective) projection stretches explosively as the field of view grows, becoming infinite at 90 degrees -- a flat projection surface genuinely cannot represent a very wide panorama", "Panoramas cannot use feature matching", "Panoramas require a different camera sensor"],
+      answer: 1,
+      explanation: "Section 3: a real, measured, mathematically hard limit -- not something more careful planar stitching can work around.",
+    },
+    {
+      question: "This chapter's own real test found what stretch factor for planar projection at 75 degrees from the optical axis?",
+      options: ["Exactly 1.00x, no distortion", "A real 14.93x -- and growing far faster still beyond that", "Exactly 2x, a constant factor at every angle", "0.5x -- planar projection compresses the image there"],
+      answer: 1,
+      explanation: "Section 3: real, measured, rapidly-accelerating distortion, not a mild or constant effect.",
+    },
+    {
+      question: "Why does cv2.Stitcher's PANORAMA mode use a 'spherical warper' instead of a flat one (34.6)?",
+      options: ["It is slower, with no real benefit", "Because a wide, rotating-camera panorama needs a curved projection surface to avoid Section 3's own real, measured stretching -- exactly what SCANS mode's flat warper is NOT designed for", "Spherical warpers are only cosmetic", "There is no real reason, it's an arbitrary default"],
+      answer: 1,
+      explanation: "Section 5: the real, concrete reason behind 34.6's own named fact.",
+    },
+    {
+      question: "This chapter's own real cv2.remap test found what about marker spacing before and after cylindrical dewarping?",
+      options: ["No real difference between raw and dewarped spacing", "Raw planar spacing varied wildly (70.5px to 406.2px, std 112.06), while the cylindrical output recovered near-even spacing (79.5-80.5px) for markers inside its field of view", "The dewarp made spacing MORE uneven", "Dewarping only works for markers at the exact center"],
+      answer: 1,
+      explanation: "Code section 2: a real, direct, pixel-level confirmation of Section 3-4's analytic result.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Using the cylindrical formula `x = f.theta` with `f=500px`, what pixel position corresponds to `theta=0.4` radians?
+
+<Solution>
+
+`x = 500 x 0.4 = 200px`.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, compute the real planar stretch factor at `theta=80°` and compare it to this chapter's own 75° (14.93x) and 85° (131.65x) results.
+
+<Solution>
+
+```python
+th80 = np.radians(80)
+stretch80 = local_scale(planar_x, th80) / base_planar
+print(f"theta=80deg: planar stretch x{stretch80:.2f}")
+```
+
+Output:
+
+```text
+theta=80deg: planar stretch x33.16
+```
+
+Between this chapter's own 75° (14.93x) and 85° (131.65x) results, consistent with the real, rapidly-accelerating growth pattern as the angle approaches 90°.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A team is building a dashcam-style wide-angle recorder meant to capture a genuine 160° horizontal field of view in one frame, and is deciding between a wide-angle planar lens and a true panoramic (cylindrical-projecting) lens design. Based on this chapter, what real trade-off should they expect from the planar option?
+
+<Solution>
+
+Following Section 4's own real result, a planar projection at a 160°-equivalent FOV would need dramatically more image width than a cylindrical one (the chapter's own 150° result already needed 2.851x the cylindrical width, and 160° would be noticeably worse still, continuing the trend toward 170°'s real 7.705x) — meaning a planar sensor/lens would need to capture, store, and process a much larger image for the same real angular coverage, with severe compression of detail near the center relative to the edges. A true cylindrical (or spherical) design avoids this real cost entirely, which is exactly why dedicated wide-FOV and 360° cameras use curved projection models rather than an extreme wide-angle planar lens.
+
+</Solution>
+
+## References
+
+1. R. Szeliski, *Computer Vision: Algorithms and Applications*, 2nd ed., Springer, 2022: Chapter 8 (image stitching, cylindrical and spherical projection surfaces) — the real, standard treatment this chapter's formulas follow.
+2. OpenCV 4.13.0 documentation: `cv2.remap`, `cv2.Stitcher` (already cited in 34.6). https://docs.opencv.org/4.13.0/

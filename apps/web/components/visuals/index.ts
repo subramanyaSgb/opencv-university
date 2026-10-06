@@ -196,3 +196,4 @@ export { SlamLab } from "./SlamLab";
 export { PointCloudLab } from "./PointCloudLab";
 export { PhotoStereoLab } from "./PhotoStereoLab";
 export { MultiViewStereoLab } from "./MultiViewStereoLab";
+export { PanoramaLab } from "./PanoramaLab";
