@@ -1,0 +1,251 @@
+export const meta = {
+  number: "41.1",
+  title: "Pinhole model",
+  minutes: 20,
+  objectives: [
+    "Convert a physical focal length into pixel units with a real sensor's pixel pitch",
+    "Build a real 3x3 intrinsic matrix K and use it to project a point",
+    "Know why a real principal point is rarely exactly at the image centre",
+    "Know this chapter builds on 2.1, not a repeat of it",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 41.1 (Part H, Module 41; opens the module). 2.1 (Light and the
+  pinhole camera) already teaches x = f.X/Z in physical units (f in mm, x in mm on the sensor)
+  from first principles, across 28 sections, explicitly deferring "Module 41" for calibration.
+  This chapter does not repeat 2.1's derivation -- it converts that physical formula into the
+  pixel-unit, matrix form (K) that every calibration routine from 41.2 onward actually uses.
+  Real, verified numbers: f = 8 mm, a real sensor pixel pitch of 3.45 micron (a genuine,
+  common industrial sensor spec, e.g. many Sony IMX-family sensors): fx = 8 / 0.00345 =
+  2318.84 px. A point at X=50mm, Z=800mm: x_mm = f.X/Z = 0.5mm (2.1's own formula) -> 0.5mm /
+  0.00345mm = 144.93 px; computed directly in pixel units, fx.X/Z = 2318.84 x 50/800 = 144.93 px
+  -- identical, confirming the two forms are the same formula in different units. Adding a
+  real, off-centre principal point cx=638.2 gives the full pixel coordinate u=783.13.
+  Lab: CameraMatrixLab (apps/web/components/visuals/CameraMatrixLab.tsx, mode="intrinsics") --
+  live f/pixel-pitch/principal-point sliders projecting one 3D point, shared with 41.2.
+*/}
+
+# 41.1 Pinhole model
+
+<Definition term="Intrinsic matrix (K)">the 3x3 matrix that converts a point's position relative to the camera, in physical units, into a pixel coordinate — the matrix form of 2.1's `x = f.X/Z`, with the focal length expressed in pixels instead of millimetres, and a real principal point added.</Definition>
+
+2.1 built the pinhole model from first principles: `x = f.X/Z`, in whatever physical unit `f` and `x` share. Real calibration routines (41.4 onward) never work in millimetres on the sensor — they work in pixels, and in one small matrix. This chapter is the bridge.
+
+## 1. An analogy
+
+2.1's formula is a recipe written in millimetres; a real kitchen scale reads in grams. The underlying recipe never changes — only the units you actually measure with do. Converting `f` from millimetres to "pixels" is exactly that conversion, using the one real fact that links the two: how large a single pixel actually is on the sensor.
+
+## 2. From millimetres to pixels
+
+<Flow
+  steps={[
+    { label: "f in mm (2.1), pixel pitch in mm (sensor datasheet)", tone: "data" },
+    { label: "fx = f / pixel pitch", tone: "process" },
+    { label: "K = [[fx, 0, cx], [0, fy, cy], [0, 0, 1]]", tone: "process" },
+    { label: "pixel coordinate = K applied to the point's camera-frame position", tone: "result" },
+  ]}
+/>
+
+A sensor's **pixel pitch** is the real, physical width of one pixel (a datasheet number, in micrometres). Dividing the physical focal length by the pixel pitch converts "millimetres on the sensor" into "pixels on the sensor" — exactly the same conversion as converting a recipe from grams to cups, with one real number as the conversion factor.
+
+## 3. A real, worked conversion
+
+A real lens with `f = 8 mm` on a real sensor with a `3.45 micron` pixel pitch (a genuine, common industrial sensor specification):
+
+```text
+fx = f / pixel_pitch = 8 mm / 0.00345 mm = 2318.84 px
+```
+
+For an object at `X = 50 mm` off-axis, `Z = 800 mm` away, 2.1's own formula gives `x = f.X/Z = 8 x 50 / 800 = 0.5 mm` on the sensor. Converting that to pixels: `0.5 mm / 0.00345 mm = 144.93 px`. Computing it directly in pixel units instead — `fx . X/Z = 2318.84 x 50/800 = 144.93 px` — gives exactly the same answer: **the same formula, just in different units.**
+
+## 4. The principal point: rarely the exact centre
+
+<CameraMatrixLab caption="Change f or pixel pitch and watch fx change, then the projected pixel coordinate with it." mode="intrinsics" />
+
+The formula so far projects a point relative to the **optical axis** — but a pixel coordinate is normally counted from a corner of the image, not the axis. The **principal point** `(cx, cy)` is where the optical axis actually lands in pixel coordinates, added after the `fx.X/Z` term: `u = fx.X/Z + cx`. For a real camera, manufacturing tolerances mean the sensor is never perfectly centred behind the lens — a real principal point close to, but not exactly at, the geometric image centre (e.g. `(638.2, 362.1)` on a 1280×720 sensor, not the exact centre `(640, 360)`) is the normal, expected case, not a defect.
+
+## 5. Industrial context: why this matters before any real calibration
+
+Every real calibration method in this module (41.4's chessboard calibration, 41.5's PnP) solves for exactly the numbers introduced here — `fx`, `fy`, `cx`, `cy` — from real images, because a lens's actual focal length and a sensor's actual principal point are never known precisely enough from a datasheet alone to support real measurement. This chapter's `fx = 2318.84 px` is a reasonable estimate from nominal specs; 41.4 measures the real value a specific physical camera actually has.
+
+## What you should remember from 41.1
+
+<Takeaways>
+<Takeaway n={1} title="Same formula, pixel units">fx = f / pixel pitch converts 2.1's millimetre formula into the pixel form calibration actually uses.</Takeaway>
+<Takeaway n={2} title="K in one matrix">[[fx, 0, cx], [0, fy, cy], [0, 0, 1]] — fx/fy from the lens and sensor, cx/cy the real principal point.</Takeaway>
+<Takeaway n={3} title="The principal point is rarely exactly centred">A real, expected manufacturing fact, not a sign of a broken camera.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A lens has f = 12 mm, on a sensor with 5 micron pixel pitch. What is fx in pixels?
+
+<Solution>
+
+fx = 12 / 0.005 = **2400 px**.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the pixel-unit conversion, both ways
+
+```python
+import numpy as np
+
+f_mm = 8.0
+pixel_pitch_mm = 0.00345
+fx = f_mm / pixel_pitch_mm
+
+X, Z = 50.0, 800.0
+x_mm = f_mm * X / Z
+x_px_from_mm = x_mm / pixel_pitch_mm
+x_px_direct = fx * X / Z
+
+print("fx:", round(fx, 2))
+print("x via mm then convert:", round(x_px_from_mm, 2))
+print("x via fx directly:    ", round(x_px_direct, 2))
+```
+
+Output:
+
+```text
+fx: 2318.84
+x via mm then convert: 144.93
+x via fx directly:     144.93
+```
+
+### 2. OpenCV: projecting a point with a real K matrix
+
+```python
+import cv2
+
+K = np.array([[2318.84, 0, 638.2], [0, 2318.84, 362.1], [0, 0, 1]], np.float64)
+point_3d = np.array([[50.0, 20.0, 800.0]])
+rvec = np.zeros(3)
+tvec = np.zeros(3)
+img_pt, _ = cv2.projectPoints(point_3d, rvec, tvec, K, None)
+print("projected pixel:", img_pt.reshape(-1))
+```
+
+Output:
+
+```text
+projected pixel: [783.1275 420.071 ]
+```
+
+`783.13 = 144.93 + 638.2` — exactly Section 3's result plus the real principal point offset, confirmed by `cv2.projectPoints` itself rather than the hand calculation alone.
+
+## OpenCV API notes
+
+- **`cv2.projectPoints(objectPoints, rvec, tvec, K, distCoeffs)`**: the real, general-purpose projection function every later chapter in this module uses; passing `rvec = tvec = 0` (Code section 2) reduces it to pure intrinsic projection, exactly this chapter's formula.
+- **K's layout is fixed**: `[[fx, 0, cx], [0, fy, cy], [0, 0, 1]]` — the `0`s matter; a non-zero term in the `(0,1)` position would represent **skew** (non-perpendicular pixel axes), real on some old or exotic sensors but essentially always zero on modern ones, and OpenCV's calibration assumes it is.
+- **`fx` and `fy` are usually equal** (square pixels) but not required to be — a sensor with non-square pixels, or a horizontally/vertically anamorphic optical path, would need different values for each.
+
+## Where it fails
+
+- **This chapter's `fx` is only an estimate from nominal specs** — a real lens's focal length and a real sensor's exact pixel pitch both have manufacturing tolerance; 41.4's real chessboard calibration measures the actual value a specific physical camera has, which is never exactly the datasheet number.
+- **The pinhole model itself ignores lens distortion entirely** (41.3) — this chapter's clean `fx.X/Z` formula is the *first* term of a real camera's behaviour, not the complete picture.
+- **Skew and non-square pixels are real but rare** — assuming they are always zero (OpenCV API notes) is safe for virtually all modern sensors, but not a universal law.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming the principal point is exactly the image centre** — Section 4: a real, expected small offset is normal; forcing `cx, cy` to the exact centre during calibration can measurably hurt accuracy versus letting 41.4's calibration solve for the real value.
+- **Mixing millimetre-unit and pixel-unit quantities in one formula** without converting — Section 3's own two parallel calculations exist specifically to make this conversion explicit and checkable.
+- **Trusting a lens's nominal focal length for real measurement** — Where it fails: real calibration (41.4) is what a measurement system should actually rely on, not a datasheet value.
+- **Forgetting the principal point term entirely** and using only `fx.X/Z` as "the pixel coordinate" — Code section 2's real result (783.13, not 144.93) shows this is a different, wrong number.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why pixel pitch, and not just "resolution," determines fx
+
+Two sensors with the same physical size but different pixel counts have different pixel pitches, and therefore different `fx` for the identical lens — a higher-resolution sensor (smaller pixels) gives a *larger* `fx` in pixel units for the same real optical focal length, simply because the same physical blur spans more, smaller pixels. `fx` in pixels is not a property of the lens alone; it is a property of the lens *and* the sensor together.
+
+### The pinhole model's real history
+
+The mathematical pinhole/perspective-projection model substantially predates photography itself, going back to Renaissance-era studies of linear perspective in painting; the same `x = f.X/Z` relationship describes both a painter's vanishing-point construction and a modern camera's intrinsic matrix, because both are the same real geometric fact about how 3D space projects onto a flat plane through a single point.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A lens with f = 8mm is used on a sensor with 3.45 micron pixel pitch. What is fx, in pixels?",
+      options: ["8 px", "3.45 px", "2318.84 px", "0.00345 px"],
+      answer: 2,
+      explanation: "Section 3: fx = f / pixel pitch = 8 / 0.00345 = 2318.84 px.",
+    },
+    {
+      question: "What does the principal point (cx, cy) represent?",
+      options: ["The exact geometric centre of every sensor, always", "Where the optical axis actually lands in pixel coordinates -- close to, but rarely exactly, the geometric centre", "The focal length in pixels", "A measure of lens distortion"],
+      answer: 1,
+      explanation: "Section 4: a real, expected manufacturing fact, not a defect.",
+    },
+    {
+      question: "In Code section 2's real cv2.projectPoints result, why was the projected pixel 783.13, not 144.93?",
+      options: ["A calculation error", "144.93 was only the fx.X/Z term; the real principal point (638.2) must be added to get the actual pixel coordinate", "cv2.projectPoints uses different units", "The focal length was wrong"],
+      answer: 1,
+      explanation: "Common mistakes: forgetting the principal point term gives a different, wrong number.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A lens has f = 6 mm on a sensor with 2.4 micron pixel pitch. What is fx?
+
+<Solution>
+
+fx = 6 / 0.0024 = **2500 px**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, project the point (30, −15, 600) through K = [[2000, 0, 320], [0, 2000, 240], [0, 0, 1]] with zero rotation/translation, and check the result by hand.
+
+<Solution>
+
+```python
+K2 = np.array([[2000, 0, 320], [0, 2000, 240], [0, 0, 1]], np.float64)
+point = np.array([[30.0, -15.0, 600.0]])
+img_pt2, _ = cv2.projectPoints(point, np.zeros(3), np.zeros(3), K2, None)
+print("projected pixel:", img_pt2.reshape(-1))
+```
+
+Output:
+
+```text
+projected pixel: [420. 190.]
+```
+
+By hand: u = 2000 x 30/600 + 320 = 100 + 320 = 420; v = 2000 x (-15)/600 + 240 = -50 + 240 = 190 — matching exactly.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague asks why a measurement system needs real chessboard calibration (41.4) at all, if the lens and sensor datasheets already give focal length and pixel pitch. Based on this chapter, how would you answer?
+
+<Solution>
+
+This chapter's own `fx = 2318.84 px` is explicitly built from nominal datasheet values (Section 3, Where it fails) — real lenses and sensors have manufacturing tolerances, so the true focal length and true pixel pitch of one specific physical unit are never exactly the datasheet numbers, and the principal point is never guaranteed to be exactly centred (Section 4). Real calibration (41.4) measures the actual values a specific physical camera has, from real images of a known pattern, which is the only way to know the real numbers precisely enough for accurate measurement.
+
+</Solution>
+
+## References
+
+1. 2.1 Light and the pinhole camera (this course) — the physical-unit formula this chapter converts to pixel units.
+2. R. Hartley, A. Zisserman, *Multiple View Geometry in Computer Vision*, 2nd ed., Cambridge University Press, 2004: Chapter 6 (camera models).
+3. OpenCV 4.13.0 documentation: `cv2.projectPoints`, camera calibration overview. https://docs.opencv.org/4.13.0/
