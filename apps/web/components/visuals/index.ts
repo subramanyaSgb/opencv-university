@@ -206,3 +206,4 @@ export { RoiThermalLab } from "./RoiThermalLab";
 export { PaletteThermalLab } from "./PaletteThermalLab";
 export { BandgapLab } from "./BandgapLab";
 export { PolarizationLab } from "./PolarizationLab";
+export { NdviLab } from "./NdviLab";

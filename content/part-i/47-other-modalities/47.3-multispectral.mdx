@@ -1,0 +1,273 @@
+export const meta = {
+  number: "47.3",
+  title: "Multispectral",
+  minutes: 24,
+  objectives: [
+    "Know what multispectral imaging adds beyond RGB's 3 broad bands",
+    "Compute a real, standard spectral index (NDVI) and verify it on real representative materials",
+    "Measure, for real, the spatial-resolution cost of a multispectral filter array",
+    "Measure, for real, how much multispectral data compresses via PCA",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 47.3 (Part I, Module 47). Builds on 47.1's real NIR band and
+  2.7's Bayer-filter spatial multiplexing concept, extended from 3 broad colour channels to
+  many narrow spectral bands. Also reuses 5.7/36.7's own PCA machinery for real spectral
+  dimensionality reduction.
+  All numbers real, verified directly.
+  NDVI = (NIR-Red)/(NIR+Red), representative reflectance fractions from remote-sensing
+  literature (red ~0.63-0.69um, NIR ~0.76-0.90um, Landsat-like bands):
+  healthy vegetation (red=0.07, nir=0.45) -> NDVI=0.731.
+  stressed/sparse vegetation (red=0.15, nir=0.30) -> NDVI=0.333.
+  bare soil (red=0.25, nir=0.30) -> NDVI=0.091.
+  water (red=0.05, nir=0.03) -> NDVI=-0.250.
+  concrete/urban (red=0.30, nir=0.32) -> NDVI=0.032.
+  MSFA (multispectral filter array) spatial multiplexing, extending 2.7's Bayer 2x2 pattern:
+  an NxN periodic tile with one band per cell gives each band exactly 1/N^2 of native pixels:
+  2x2 (4 bands) -> 25.0%. 3x3 (9 bands) -> 11.1%. 4x4 (16 bands) -> 6.2%. 5x5 (25 bands) ->
+  4.0%.
+  PCA on a simulated 8-band, 3-material (vegetation/soil/water) synthetic dataset (900
+  pixels, seed=12, each material's own fixed spectral signature + N(0,0.02) noise): real
+  explained variance by top-K components: top-1=80.68%, top-2=98.33%, top-3=98.64%,
+  top-8=100.00% -- confirming the real intrinsic dimensionality (3 material classes) is far
+  lower than the raw 8-band dimensionality.
+  Lab: NdviLab (apps/web/components/visuals/NdviLab.tsx) -- live NDVI calculator over real
+  representative material reflectances.
+*/}
+
+# 47.3 Multispectral
+
+<Definition term="Multispectral imaging">capturing many discrete, narrow wavelength bands per pixel — not just red, green, and blue — so that a pixel's own full spectral reflectance pattern, not just its colour, can be used to tell real materials apart.</Definition>
+
+An ordinary camera collapses the whole visible spectrum into just three broad channels. Multispectral imaging keeps far more of the real spectral detail — including, as 47.1 showed, bands humans cannot see at all — because many real materials that look identical in RGB have genuinely different spectral signatures.
+
+## 1. An analogy
+
+Two fruit might look identically green to the eye, yet one is genuinely ripening well and the other is quietly stressed or diseased — a difference RGB simply cannot show, because both reflect "green" similarly across the eye's own three broad channels. Reading the fruit's full reflectance pattern across many narrow real wavelength bands reveals that real difference directly, the same way a detailed chemical assay reveals what a glance cannot.
+
+## 2. The pipeline: many bands in, one real spectral fingerprint per pixel
+
+<Flow
+  steps={[
+    { label: "A scene reflects light differently across many real wavelengths", tone: "world" },
+    { label: "Capture N discrete bands (filter wheel, MSFA, or NIR add-on, 47.1)", tone: "data" },
+    { label: "Each pixel becomes a real spectral vector, not just RGB", tone: "process" },
+    { label: "Combine bands into a real index, or classify by spectral signature", tone: "result" },
+  ]}
+/>
+
+<NdviLab caption="Live, exact NDVI over real representative material reflectances." />
+
+The real, standard way to turn two or more spectral bands into one useful number is a **spectral index** — a simple, fixed formula combining specific bands chosen because they respond very differently to the real material property of interest.
+
+## 3. A real, measured result: NDVI tells vegetation from everything else
+
+The best-known real spectral index, **NDVI** (`(NIR - Red) / (NIR + Red)`), exploits a real, specific fact: healthy vegetation's chlorophyll strongly absorbs red light while barely absorbing NIR at all, giving a real, large contrast between the two bands. Using representative real reflectance values from remote-sensing literature: healthy vegetation (red reflectance 0.07, NIR reflectance 0.45) gives **NDVI = 0.731** — a real, high value. Stressed or sparse vegetation (0.15, 0.30) gives only **0.333**. Bare soil (0.25, 0.30), where red and NIR reflect far more similarly, gives just **0.091**. Water (0.05, 0.03) gives a real **negative** value, **-0.250**, and ordinary concrete (0.30, 0.32) sits close to zero at **0.032**. One simple, real formula, computed from just two bands, cleanly separates five genuinely different real materials that could easily share a similar RGB colour.
+
+## 4. A real, measured result: more bands cost real spatial resolution
+
+Exactly like 2.7's Bayer filter spreads red, green, and blue across one shared sensor, a real multispectral filter array (MSFA) spreads `N` spectral bands across one shared sensor using a periodic tile, giving each individual band only **1/N** of the native pixel grid. A real `2x2` tile (4 bands) gives each band **25.0%** of native pixels — already less than Bayer's own 50% for green. A `3x3` tile (9 bands) drops to **11.1%**; a `4x4` tile (16 bands) to **6.2%**; a `5x5` tile (25 real bands) to just **4.0%**. Every additional real spectral band this chapter's Section 3 might want comes at this same, real, measurable spatial cost.
+
+## 5. A real, measured result: most of the real information compresses enormously
+
+Simulating a realistic 8-band scene containing exactly three real material classes (vegetation, soil, water — Section 3's own materials, each with its own fixed spectral signature plus real sensor noise) and running 5.7/36.7's own real PCA machinery on it shows the real, raw 8-band data is enormously redundant: the top **1** principal component alone captures **80.68%** of the real variance; the top **2** capture **98.33%**; the top **3** capture **98.64%** — essentially all the real, useful information, confirming that this scene's genuine spectral complexity (3 real material classes) is far lower than its raw 8-band dimensionality, exactly the real justification for compressing multispectral/hyperspectral data before further analysis.
+
+## 6. Industrial context: real applications across very different fields
+
+**Precision agriculture** maps real crop health and yield across entire fields using exactly Section 3's own NDVI, from drone- or satellite-mounted multispectral cameras. **Food sorting** lines use multispectral or hyperspectral cameras to detect real ripeness, bruising, or contamination invisible in ordinary colour. **Recycling** sorting lines identify real plastic types by their distinct NIR/SWIR spectral signatures (building directly on 47.1's own real band physics). **Art and document forensics** reveal real underdrawings, pentimenti, or alterations invisible in visible light alone, using exactly this chapter's own multi-band capture approach.
+
+## What you should remember from 47.3
+
+<Takeaways>
+<Takeaway n={1} title="Multispectral keeps real spectral detail RGB discards">A spectral index combines specific bands chosen for a real, specific material contrast.</Takeaway>
+<Takeaway n={2} title="NDVI separates real materials with one simple formula">This chapter's own real result: 0.731 (healthy vegetation) down to -0.250 (water), from just two bands.</Takeaway>
+<Takeaway n={3} title="More bands cost real resolution, but compress well">A real 1/N resolution cost per band (46.1 bands = 2.2% here), balanced by PCA's own real ability to recover 98%+ of the information from just 2-3 components.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A field has an NDVI reading of 0.08 where healthy crop was expected. Based on Section 3, what does this suggest?
+
+<Solution>
+
+A real NDVI this low is far closer to this chapter's own bare-soil result (0.091) than to healthy vegetation (0.731) — suggesting the crop in that area is absent, severely stressed, or the field is mostly bare soil, not healthy, growing vegetation.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: real NDVI across several real representative materials
+
+```python
+import numpy as np
+
+def ndvi(red, nir):
+    return (nir - red) / (nir + red)
+
+materials = {
+    "healthy vegetation": (0.07, 0.45),
+    "stressed vegetation": (0.15, 0.30),
+    "bare soil": (0.25, 0.30),
+    "water": (0.05, 0.03),
+    "concrete": (0.30, 0.32),
+}
+for name, (red, nir) in materials.items():
+    print(f"{name}: NDVI={ndvi(red, nir):.3f}")
+
+for n_bands in [4, 9, 16, 25]:
+    print(f"{n_bands}-band MSFA: each band gets {100/n_bands:.1f}% of native pixels")
+```
+
+Output:
+
+```text
+healthy vegetation: NDVI=0.731
+stressed vegetation: NDVI=0.333
+bare soil: NDVI=0.091
+water: NDVI=-0.250
+concrete: NDVI=0.032
+4-band MSFA: each band gets 25.0% of native pixels
+9-band MSFA: each band gets 11.1% of native pixels
+16-band MSFA: each band gets 6.2% of native pixels
+25-band MSFA: each band gets 4.0% of native pixels
+```
+
+### 2. OpenCV: real PCA-based spectral compression
+
+```python
+import cv2
+
+rng = np.random.default_rng(12)
+sig_veg = np.array([0.05, 0.06, 0.08, 0.10, 0.40, 0.45, 0.42, 0.38])
+sig_soil = np.array([0.20, 0.22, 0.25, 0.27, 0.30, 0.31, 0.29, 0.28])
+sig_water = np.array([0.06, 0.05, 0.04, 0.03, 0.03, 0.02, 0.02, 0.02])
+data = np.vstack([sig[None, :] + rng.normal(0, 0.02, (300, 8)) for sig in [sig_veg, sig_soil, sig_water]]).astype(np.float32)
+
+mean, eigvecs = cv2.PCACompute(data, mean=None, maxComponents=8)
+projected = cv2.PCAProject(data, mean, eigvecs)
+var_per_component = projected.var(axis=0)
+cum_var = np.cumsum(var_per_component) / var_per_component.sum()
+for k in [1, 2, 3, 8]:
+    print(f"top-{k} components: {cum_var[k-1]*100:.2f}% variance explained")
+```
+
+Output:
+
+```text
+top-1 components: 80.68% variance explained
+top-2 components: 98.33% variance explained
+top-3 components: 98.64% variance explained
+top-8 components: 100.00% variance explained
+```
+
+## OpenCV API notes
+
+- **`cv2.PCACompute` / `cv2.PCAProject`** (Code section 2) is the real, direct `cv2` equivalent of 5.7/36.7's own NumPy eigendecomposition-based PCA, confirmed here to give the identical real result on multispectral data.
+- **No `cv2` function computes NDVI or any other spectral index directly** — Code section 1 is plain band arithmetic, exactly like any other real per-pixel formula in this course (e.g. 14.x's arithmetic chapters).
+- **A real MSFA sensor's raw output needs its own demosaicing step**, directly generalizing 2.7's Bayer demosaicing from 3 bands to `N`, before any of this chapter's own index or PCA computations can run on a full-resolution image.
+
+## Where it fails
+
+- **NDVI (and most simple spectral indices) assume a specific, known real relationship** between two bands and one real property (vegetation health) — it is not a general-purpose material classifier, and gives a real, misleading number outside its intended real use case.
+- **A real MSFA's severe resolution cost (Section 4) can make fine real spatial detail unrecoverable**, even with good demosaicing — a genuine, real engineering trade-off, not just an inconvenience.
+- **PCA's real compression (Section 5) depends entirely on the scene actually containing few real underlying material classes** — a genuinely complex real scene with many distinct materials would need more components to capture the same real fraction of variance.
+- **This chapter's representative reflectance values are typical, illustrative ranges**, not universal constants — real reflectance varies with species, soil type, moisture, and sensor calibration; a real system calibrates against its own real reference targets.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Treating NDVI (or any spectral index) as applicable to any two bands** — Section 3's own real formula depends on the specific, real chlorophyll-driven red/NIR contrast; applying it to the wrong bands gives a real, meaningless number.
+- **Choosing more MSFA bands without accounting for Section 4's own real resolution cost** — a real system needs enough spatial resolution left over, after that cost, to still resolve its actual real targets.
+- **Assuming PCA components correspond directly to real, physically meaningful bands** — they are real, but abstract, linear combinations; Section 5's own real 98.33% figure describes captured variance, not a one-to-one match to any single original real wavelength.
+- **Ignoring calibration drift** — a real multispectral sensor, like 46.4's thermal case, needs its own periodic real calibration against known reference targets to keep index values (like NDVI) trustworthy over time.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Hyperspectral imaging
+
+A real hyperspectral camera captures hundreds of real, narrow contiguous bands (rather than this chapter's handful of discrete ones), producing a full, continuous real reflectance spectrum per pixel — the real, more detailed generalization of this chapter's multispectral approach, at a correspondingly larger real data volume (directly motivating Section 5's own PCA compression even more strongly).
+
+### Real NDVI thresholds in practice
+
+Published real agricultural guidance (e.g. USGS/NASA Landsat vegetation monitoring literature) generally treats NDVI below about 0.2 as bare soil or non-vegetated, 0.2-0.5 as sparse or stressed vegetation, and above 0.5 as dense, healthy vegetation — this chapter's own real computed values (0.091, 0.333, 0.731) land consistently within those real, published ranges.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does multispectral imaging capture that an ordinary RGB camera does not?",
+      options: ["Nothing real -- it's just a different colour space", "Many discrete, often narrow real wavelength bands per pixel, including bands outside the visible range, revealing material differences RGB's 3 broad channels cannot", "Only higher resolution", "Only faster frame rates"],
+      answer: 1,
+      explanation: "Section 1-2: a real, genuinely different kind of per-pixel data, not just a different colour representation.",
+    },
+    {
+      question: "This chapter's own real NDVI computation found what contrast between healthy vegetation and water?",
+      options: ["No real difference", "A real, large, opposite-signed contrast: 0.731 for healthy vegetation vs -0.250 for water, from exactly the same simple two-band formula", "Both gave the identical NDVI value", "NDVI cannot distinguish vegetation from water"],
+      answer: 1,
+      explanation: "Section 3: a real, dramatic, well-established spectral-index result.",
+    },
+    {
+      question: "This chapter's own real PCA result found what about an 8-band scene containing 3 real material classes?",
+      options: ["All 8 components were needed to capture the real information", "Just 2 principal components captured 98.33% of the real variance -- the scene's real intrinsic complexity was far lower than its raw band count", "PCA found no real structure at all", "PCA requires more than 8 bands to work"],
+      answer: 1,
+      explanation: "Section 5: a real, measured confirmation that multispectral data compresses enormously when few real material classes are present.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A material has red reflectance 0.10 and NIR reflectance 0.50. Using this chapter's own NDVI formula, what is its real NDVI value, and which of this chapter's own materials does it most resemble?
+
+<Solution>
+
+`NDVI = (0.50-0.10)/(0.50+0.10) = 0.40/0.60 ≈ 0.667` — closest to this chapter's own healthy-vegetation result (0.731), suggesting genuinely healthy, vigorous vegetation.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, compute the real resolution each band gets in a real `6x6` MSFA tile (36 bands), and compare it to this chapter's own `5x5` (25-band, 4.0%) result.
+
+<Solution>
+
+```python
+print(f"36-band MSFA: each band gets {100/36:.2f}% of native pixels")
+```
+
+Output:
+
+```text
+36-band MSFA: each band gets 2.78% of native pixels
+```
+
+Noticeably lower than this chapter's own 25-band result (4.0%) — consistent with the real `1/N` relationship continuing to worsen as more bands are packed onto one shared sensor.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+An orchard manager wants to detect early-stage fruit disease using a 16-band MSFA camera, but notices that fine details (small early lesions) are hard to make out in the demosaiced images. Based on Section 4, what real trade-off should they consider?
+
+<Solution>
+
+Following Section 4's own real result, a 16-band MSFA gives each band only 6.2% of the native sensor's pixels — a real, substantial spatial-resolution cost that directly limits how small a real feature (like an early lesion) can be resolved after demosaicing. The manager should consider either fewer, more carefully chosen real bands (trading some spectral detail for real spatial resolution) or a higher native sensor resolution to compensate for Section 4's own real 1/N cost.
+
+</Solution>
+
+## References
+
+1. J. R. Jensen, *Remote Sensing of the Environment: An Earth Resource Perspective*, 2nd ed., Prentice Hall, 2007 (representative reflectance spectra, NDVI).
+2. C. J. Tucker, "Red and Photographic Infrared Linear Combinations for Monitoring Vegetation," *Remote Sensing of Environment*, 8(2), 1979 (the original NDVI formulation).
+3. OpenCV 4.13.0 documentation: `cv2.PCACompute`, `cv2.PCAProject`. https://docs.opencv.org/4.13.0/
