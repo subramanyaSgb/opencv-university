@@ -17,6 +17,7 @@
     "lint:content": "node scripts/lint-content.mjs",
     "test": "node --test --experimental-strip-types \"apps/web/lib/*.test.ts\" \"scripts/*.test.mjs\"",
     "check": "npm run lint:content && npm test && npm run build",
-    "images": "python assets/images/generate_samples.py"
+    "images": "python assets/images/generate_samples.py",
+    "videos": "python assets/videos/generate_videos.py"
   }
 }

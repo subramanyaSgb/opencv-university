@@ -6,7 +6,7 @@ Usage (with opencv-python 4.13.0.92 installed):
 
 Only blocks from the "## Code" section onward are run (lesson snippets are illustrative).
 Blocks run in order in one namespace (later blocks may use earlier variables),
-inside a temporary folder that holds a copy of assets/images/generated/*.
+inside a temporary folder that holds a copy of assets/images/generated/* and assets/videos/generated/*.
 Blocks whose first line starts with "# Needs a desktop" (GUI windows, cameras), "# Needs a CUDA" or
 "# Needs a GPU" (CUDA builds, OpenCL devices) or any other "# Needs …" marker (a model file to download) are skipped.
 Blocks whose first line starts with "# Needs opencv-contrib" run only when the contrib modules are
@@ -38,6 +38,8 @@ def main(chapter: str) -> int:
     print(f"OpenCV {cv2.__version__}")
     with tempfile.TemporaryDirectory() as tmp:
         for f in (ROOT / "assets/images/generated").glob("*"):
+            shutil.copy(f, tmp)
+        for f in (ROOT / "assets/videos/generated").glob("*"):
             shutil.copy(f, tmp)
         with contextlib.chdir(tmp):
             for i, b in enumerate(blocks):

@@ -1,0 +1,314 @@
+export const meta = {
+  number: "39.1",
+  title: "Frames and FPS",
+  minutes: 22,
+  objectives: [
+    "Explain what fps means and compute a clip's duration and per-frame timestamp by hand",
+    "Read a video's real properties with cv2.VideoCapture, and know which ones can lie",
+    "Know that reading a video file is not paced to real time unless you pace it yourself",
+    "Tell constant frame rate (CFR) apart from variable frame rate (VFR), and why it matters",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 39.1 (Part G, Module 39; opens the module and Part G -- the
+  course's first chapter on video rather than single images).
+  New asset: assets/videos/generate_videos.py -> assets/videos/generated/sample-ball-25fps.mp4
+  (a ball crossing a 400x300 frame at a real, constant 25 fps, 50 frames = 2.000 s), copied to
+  apps/web/public/videos/ by scripts/build-content-index.mjs (added alongside the existing
+  assets/images -> public/images copy). Generated with cv2.VideoWriter (mp4v/MPEG-4), then
+  transcoded to H.264/yuv420p with a real local ffmpeg for browser playback -- OpenCV's own
+  VideoWriter cannot write H.264 in this pinned build (verified: requesting fourcc "mp4v" stores
+  container tag "FMP4", ffprobe reports codec_name=mpeg4, not h264).
+  Lab: FpsLab (apps/web/components/visuals/FpsLab.tsx) -- the real clip in an HTML5 <video>,
+  frame-accurate stepping (currentTime +/- 1/fps) and a playback-rate control.
+  All numbers verified on opencv-python-headless 4.13.0.92 + a real local ffmpeg 9.0.2 (libx264).
+*/}
+
+# 39.1 Frames and FPS
+
+<Definition term="Frames per second (fps)">how many whole still pictures ("frames") a video shows, captures or processes every second — the single number that turns a stack of pictures into a sense of motion and a sense of time.</Definition>
+
+Every chapter before this one treated an image as a single still picture. A video is just many of those stills, one after another — but *how many per second* changes everything: how smooth the motion looks, how much data a minute of footage takes, and how long a camera can expose each frame before the next one is due.
+
+## 1. An analogy
+
+A video is a flip-book: each page is one frame, and fps is how fast you flip the pages. Flip slowly (low fps) and the motion looks jerky, with big jumps between pages; flip fast (high fps) and it looks smooth, but you need many more pages for the same story, and each page gets less time in front of your eye before the next one arrives.
+
+## 2. From a stream of frames to a time axis
+
+<Flow
+  steps={[
+    { label: "Camera sensor or video file", tone: "world" },
+    { label: "cv2.VideoCapture.read() -> one frame + its position", tone: "data" },
+    { label: "fps tells you how many frames = how many seconds", tone: "process" },
+    { label: "Frame index <-> real time, both ways", tone: "result" },
+  ]}
+/>
+
+`cv2.VideoCapture` treats a video as a sequence of frames you pull one at a time with `.read()`. It also reports metadata about the whole stream — frame count, size, and **fps**, the average number of frames per second. fps is the conversion factor between "which frame" and "what time": multiply a frame index by the frame period (1/fps seconds) to get a timestamp, or divide a timestamp by the frame period to get back a frame index.
+
+## 3. A real clip, real numbers
+
+<FpsLab caption="The real sample-ball-25fps.mp4 clip: 50 frames at a constant 25 fps. Step frame by frame and watch the time and frame index move together, or change the playback rate and see that it never changes what a frame index means."/>
+
+This course's own test clip (`sample-ball-25fps.mp4`, generated for this chapter) is exactly 50 frames, written at a constant 25 fps. Reading it back with `cv2.VideoCapture` reports:
+
+| Property | Value |
+| --- | --- |
+| `CAP_PROP_FPS` | 25.0 |
+| `CAP_PROP_FRAME_COUNT` | 50.0 |
+| `CAP_PROP_FRAME_WIDTH` / `HEIGHT` | 400.0 / 300.0 |
+| `CAP_PROP_POS_MSEC`, frame 0 -> frame 4 | 0.0, 40.0, 80.0, 120.0, 160.0 |
+
+Each successive frame's timestamp jumps by exactly 40 ms — this is `1000 / 25`, the frame period, confirming a genuinely **constant** frame rate (Section 5): every frame is exactly one period after the last, with no missing or doubled gaps.
+
+## 4. A worked example by hand
+
+The clip has 50 frames at 25 fps. Total duration = frames ÷ fps = 50 ÷ 25 = **2.000 seconds** — exactly what `FpsLab`'s scrubber range confirms.
+
+The timestamp of frame index *i* is *i* × (1000 / fps) milliseconds. For frame 24: 24 × (1000 / 25) = 24 × 40 = **960 ms** — step `FpsLab` to frame 24 and check its "Current time" readout against this by hand calculation.
+
+Going the other way, a frame arriving at real time *t* seconds belongs to frame index round(*t* × fps). At *t* = 1.234 s: round(1.234 × 25) = round(30.85) = **frame 31**.
+
+## 5. Industrial context: fps sets the exposure ceiling
+
+In a production-line camera, fps is not just a smoothness dial — it is a hard physical constraint. At 25 fps, a *continuously-running* camera has at most 1/25 s = 40 ms to both expose and read out each frame (2.6's exposure time); push fps higher to catch a faster-moving part, and the maximum possible exposure time drops with it, forcing either more light or a wider aperture to compensate (2.5, 2.9). A machine-vision engineer chooses fps first from how fast the part moves past the camera, then works out from there whether enough light is available for the exposure time that fps leaves.
+
+## What you should remember from 39.1
+
+<Takeaways>
+<Takeaway n={1} title="fps is seconds <-> frames">Multiply frame index by 1/fps for a timestamp; divide a timestamp by 1/fps (and round) for a frame index.</Takeaway>
+<Takeaway n={2} title="CFR means exactly even spacing">This chapter's own clip proved it: every POS_MSEC step was exactly 40 ms, never 39 or 41.</Takeaway>
+<Takeaway n={3} title="fps bounds exposure time">A faster frame rate leaves strictly less time per frame to expose and read out the sensor.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A camera runs at 60 fps. What is the frame period, in milliseconds, and what is the timestamp of frame index 10?
+
+<Solution>
+
+Frame period = 1000 / 60 = **16.667 ms** (repeating). Timestamp of frame 10 = 10 × 16.667 = **166.67 ms**.
+
+</Solution>
+
+## Code
+
+### 1. Writing and reading back a real, known clip
+
+```python
+import numpy as np
+import cv2
+
+W, H, FPS, N_FRAMES = 400, 300, 25, 50
+fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+writer = cv2.VideoWriter("raw_ball.mp4", fourcc, FPS, (W, H))
+for i in range(N_FRAMES):
+    frame = np.full((H, W, 3), 235, np.uint8)
+    writer.write(frame)
+writer.release()
+
+cap = cv2.VideoCapture("raw_ball.mp4")
+print("isOpened:", cap.isOpened())
+print("CAP_PROP_FPS:", cap.get(cv2.CAP_PROP_FPS))
+print("CAP_PROP_FRAME_COUNT:", cap.get(cv2.CAP_PROP_FRAME_COUNT))
+fourcc_int = int(cap.get(cv2.CAP_PROP_FOURCC))
+fourcc_str = "".join(chr((fourcc_int >> 8 * i) & 0xFF) for i in range(4))
+print("requested fourcc 'mp4v', stored CAP_PROP_FOURCC:", fourcc_str)
+
+count = 0
+while cap.read()[0]:
+    count += 1
+cap.release()
+print("frames actually read:", count)
+```
+
+Output:
+
+```text
+isOpened: True
+CAP_PROP_FPS: 25.0
+CAP_PROP_FRAME_COUNT: 50.0
+requested fourcc 'mp4v', stored CAP_PROP_FOURCC: FMP4
+frames actually read: 50
+```
+
+The fourcc actually stored is **`FMP4`**, not the `mp4v` that was requested (⚠️ Common mistakes) — OpenCV's bundled FFmpeg backend mapped the request to its own MPEG-4 variant. `ffprobe` confirms the real codec:
+
+```text
+$ ffprobe -show_entries stream=codec_name,r_frame_rate,nb_frames raw_ball.mp4
+codec_name=mpeg4
+r_frame_rate=25/1
+nb_frames=50
+```
+
+### 2. Transcoding to a browser-playable codec, and checking the real throughput
+
+```python
+# Needs a timing run: numbers depend on the machine
+import time
+cap = cv2.VideoCapture("sample-ball-25fps.mp4")   # the H.264 version, transcoded by ffmpeg
+fps = cap.get(cv2.CAP_PROP_FPS)
+n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+t0 = time.perf_counter()
+while cap.read()[0]:
+    pass
+elapsed = time.perf_counter() - t0
+cap.release()
+print(f"declared duration: {n / fps:.3f} s; wall-clock read time: {elapsed:.4f} s")
+print(f"that is {(n / fps) / elapsed:.1f}x faster than real-time playback")
+```
+
+Typical output (one machine, opencv-python-headless 4.13.0.92):
+
+```text
+declared duration: 2.000 s; wall-clock read time: 0.0119 s
+that is 167.7x faster than real-time playback
+```
+
+`cv2.VideoCapture.read()` on a file decodes and returns frames **as fast as it can**, with no built-in pacing to the clip's own fps — reading this 2-second clip actually took about 12 ms.
+
+```bash
+# the real ffmpeg transcode used to produce the browser-playable file (not Python)
+ffmpeg -i raw_ball.mp4 -c:v libx264 -pix_fmt yuv420p -movflags +faststart sample-ball-25fps.mp4
+```
+
+```text
+$ ffprobe -show_entries stream=codec_name,r_frame_rate,nb_frames sample-ball-25fps.mp4
+codec_name=h264
+r_frame_rate=25/1
+nb_frames=50
+```
+
+## OpenCV API notes
+
+- **`cv2.VideoCapture(path_or_index)`**: opens a file, an image sequence pattern, or (with an integer) a camera index. `.get(cv2.CAP_PROP_*)` reads metadata; `.read()` returns `(ret, frame)`, `ret=False` at end of stream or on a failed grab.
+- **`cv2.VideoWriter(path, fourcc, fps, (w, h)[, isColor])`**: `fourcc = cv2.VideoWriter_fourcc(*"mp4v")` (or `"XVID"`, `"MJPG"`, …) selects a *requested* codec; what actually gets stored depends on the backend (Code section 1's real `FMP4` result) — always verify with `CAP_PROP_FOURCC` or `ffprobe`, never assume the request was honoured exactly.
+- **`CAP_PROP_FPS`**: the stream's average reported frame rate — a single number, even for a variable-frame-rate (VFR) source where it cannot be exact (Section 5 / Go deeper).
+- **`CAP_PROP_FRAME_COUNT`**: for many container formats this is an *estimate* from the stream's declared duration and fps, not a guaranteed exact count (Where it fails) — `TODO: verify` exact behaviour per container/backend combination beyond this chapter's own MPEG-4/H.264 mp4 tests, where it was exact.
+- **`CAP_PROP_POS_MSEC` / `CAP_PROP_POS_FRAMES`**: current position, readable after each `.read()`; `.set(...)` on these can seek, though exact-frame seeking is not guaranteed on every codec (B-frames, keyframe-only containers).
+- **No built-in real-time pacing**: Code section 2's measurement is the key API fact of this chapter — `.read()` never sleeps to match the source's fps; add that yourself (e.g. `time.sleep` matched to the frame period, or `cv2.waitKey(delay_ms)` in a GUI loop) if real-time playback is the goal.
+
+## Where it fails
+
+- **`CAP_PROP_FRAME_COUNT` can be wrong or unavailable** for some live-camera backends and some streamed/variable-bitrate containers — treat it as a hint, not a guarantee, especially on anything that is not a simple local file.
+- **`CAP_PROP_FPS` can report 0 or a nonsensical value** for some camera backends that do not expose a fixed rate — falling back to measuring real elapsed time between frames is sometimes the only reliable option.
+- **Frame-accurate seeking is not guaranteed** on codecs that use inter-frame prediction (P/B-frames, 39.2) — `.set(CAP_PROP_POS_FRAMES, n)` may land on the nearest keyframe instead of frame *n* exactly.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming a video file plays back at its own pace automatically** — Code section 2's own measurement showed a plain read loop running the whole 2-second clip in about 12 ms, nearly 168x too fast, when the goal was to simulate a live feed.
+- **Assuming the fourcc you request is the fourcc you get** — this chapter's own test requested `"mp4v"` and received a file whose real, stored tag was `FMP4`; always check `CAP_PROP_FOURCC` (or `ffprobe`) rather than trusting the write call's argument.
+- **Off-by-one frame/timestamp arithmetic** — frame index 0 is at time 0, not at time 1/fps; the *n*-th frame (1-indexed) is frame index *n* − 1.
+- **Treating `CAP_PROP_FRAME_COUNT` or `CAP_PROP_FPS` as always exact** (Where it fails) — reasonable for this chapter's own simple local mp4, not guaranteed for every live or streamed source.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Constant vs variable frame rate (CFR vs VFR)
+
+A **constant frame rate (CFR)** stream has every frame exactly one frame period apart — Section 3's `POS_MSEC` readout (every step exactly 40 ms) is a direct, measured demonstration. A **variable frame rate (VFR)** stream (common from phone cameras and screen recorders, which skip writing a frame when nothing changes, or adapt to available light) has frames spaced unevenly in real time; a single `CAP_PROP_FPS` average can no longer tell you exactly when any given frame occurred — only each frame's own timestamp can. Downstream tools that assume CFR (simple frame-index-based video editing, naive frame-difference motion detection at a fixed expected interval) can misbehave on VFR footage without accounting for this.
+
+### Presentation timestamps (PTS) and decode order
+
+Compressed video (39.2) often stores frames in a different order from the order they are displayed in, because some frames (B-frames) are predicted from both earlier *and* later frames. Every frame carries its own **presentation timestamp (PTS)** saying when it should actually be shown, separate from the order bytes arrive in the file — `CAP_PROP_POS_MSEC` is derived from this, not from a simple frame count divided by fps, which is exactly why it can diverge from the naive index × (1000/fps) formula on a real-world VFR or B-frame-heavy stream, even though this chapter's own simple CFR clip happens to match it precisely.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A clip has 150 frames at a constant 30 fps. What is its duration?",
+      options: ["150 seconds", "5 seconds", "30 seconds", "4500 seconds"],
+      answer: 1,
+      explanation: "Section 4: duration = frames / fps = 150 / 30 = 5 seconds.",
+    },
+    {
+      question: "This chapter measured cv2.VideoCapture.read() reading a 2-second, 25 fps file in about 12 ms with no pacing. What does that demonstrate?",
+      options: ["The file was corrupted", "Reading a file is not automatically paced to real time -- you must add that yourself if needed", "25 fps is too slow to read reliably", "cv2.VideoCapture always skips frames"],
+      answer: 1,
+      explanation: "Code section 2 and Common mistakes: no built-in real-time pacing is the key API fact of this chapter.",
+    },
+    {
+      question: "This chapter requested fourcc \"mp4v\" from cv2.VideoWriter. What did CAP_PROP_FOURCC actually report back?",
+      options: ["mp4v, exactly as requested", "FMP4 -- not the exact string that was requested", "H264", "An error, because mp4v is invalid"],
+      answer: 1,
+      explanation: "Code section 1's real, verified result: the backend stored FMP4, not mp4v -- always verify, never assume.",
+    },
+    {
+      question: "What distinguishes a variable frame rate (VFR) stream from a constant frame rate (CFR) one?",
+      options: ["VFR streams have no fps value at all", "In a CFR stream every frame is exactly one frame period apart in time; in a VFR stream the spacing between frames varies, so a single average fps cannot tell you exactly when any one frame occurred", "VFR is only used for audio, not video", "CFR streams cannot be transcoded"],
+      answer: 1,
+      explanation: "Go deeper: Section 3's own clip was proven CFR by its perfectly even 40 ms POS_MSEC steps; VFR breaks that even spacing.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A camera records at 50 fps for exactly 3.5 seconds. How many frames does that produce, and what is the timestamp of the last frame (0-indexed)?
+
+<Solution>
+
+Frame count = fps × seconds = 50 × 3.5 = **175 frames** (indices 0 to 174). Timestamp of the last frame (index 174) = 174 × (1000 / 50) = 174 × 20 = **3480 ms** (not 3500 ms — the last frame starts one period before the clip ends, since index 0 is at time 0).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using this chapter's Code section pattern, write a short loop that reads `sample-ball-25fps.mp4` and prints the frame index and `CAP_PROP_POS_MSEC` for every 10th frame, confirming the even 25 fps spacing continues throughout the whole clip (not just the first 5 frames shown in Section 3).
+
+<Solution>
+
+```python
+cap = cv2.VideoCapture("sample-ball-25fps.mp4")
+i = 0
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+    if i % 10 == 0:
+        print(i, cap.get(cv2.CAP_PROP_POS_MSEC))
+    i += 1
+cap.release()
+```
+
+Output:
+
+```text
+0 0.0
+10 400.0
+20 800.0
+30 1200.0
+40 1600.0
+```
+
+Every step of 10 frames adds exactly 400 ms (10 × 40 ms), confirming the constant 25 fps spacing holds across the entire 50-frame clip, not just the first few frames.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague wants to detect motion by comparing every frame to the one before it (18's frame differencing), on footage they suspect might be VFR (recorded by a phone that skips frames when the scene is static). Based on Go deeper, what goes wrong with assuming a fixed time gap between consecutive frames, and what should they read instead?
+
+<Solution>
+
+If the footage is VFR, consecutive frames are *not* a fixed time apart — some gaps might be one normal frame period, others might be several periods long (if the phone skipped frames during a static stretch) or oddly short. Assuming a fixed gap would make any motion-speed calculation (pixels moved per unit time) wrong whenever the gap isn't what was assumed. They should read each frame's own timestamp (`CAP_PROP_POS_MSEC`, or the stream's actual PTS values, Go deeper) and use the *real*, possibly uneven, time difference between the two specific frames being compared, rather than a single assumed 1/fps value.
+
+</Solution>
+
+## References
+
+1. OpenCV 4.13.0 documentation: `cv2.VideoCapture`, `cv2.VideoWriter`, `VideoCaptureProperties`. https://docs.opencv.org/4.13.0/
+2. FFmpeg documentation: `ffprobe`, stream metadata (`r_frame_rate`, `avg_frame_rate`, `nb_frames`). https://ffmpeg.org/ffprobe.html
+3. ITU-T / ISO video timing concepts: presentation timestamp (PTS) and decode order, as used throughout MPEG-family and H.264/H.265 containers.

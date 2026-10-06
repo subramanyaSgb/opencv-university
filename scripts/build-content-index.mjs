@@ -1,5 +1,5 @@
 // Builds apps/web/generated/content-index.ts from content/course.json and module.json files,
-// and copies assets/images/generated/* to apps/web/public/images/.
+// and copies assets/images/generated/* to apps/web/public/images/ and assets/videos/generated/* to apps/web/public/videos/.
 // Runs automatically before `npm run dev` and `npm run build`.
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -73,6 +73,8 @@ ${loaders.join("\n")}
 
   const imgSrc = join(root, "assets/images/generated");
   if (existsSync(imgSrc)) cpSync(imgSrc, join(root, "apps/web/public/images"), { recursive: true });
+  const vidSrc = join(root, "assets/videos/generated");
+  if (existsSync(vidSrc)) cpSync(vidSrc, join(root, "apps/web/public/videos"), { recursive: true });
   console.log(`content index: ${loaders.length} chapter(s) available, ${glossary.length} glossary term(s)`);
 }
 
