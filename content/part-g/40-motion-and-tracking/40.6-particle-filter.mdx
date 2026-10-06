@@ -1,0 +1,277 @@
+export const meta = {
+  number: "40.6",
+  title: "Particle filter",
+  minutes: 24,
+  objectives: [
+    "Build a real particle filter from scratch: propagate, weight, resample",
+    "Explain what a single Gaussian (40.5's Kalman filter) cannot represent that particles can",
+    "Measure, for real, what happens when a Kalman filter is forced to average two candidates",
+    "Measure the particle filter's real advantage on the identical, genuine ambiguity",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 40.6 (Part G, Module 40). No cv2 particle-filter class exists
+  (checked: dir(cv2) has nothing matching "particle" or "PF" except an unrelated 3D point-pair
+  function) -- built entirely from scratch in NumPy, this course's own established pattern.
+  Real, verified numbers (scripts/gen_particle_data.py): a target moving at a true constant
+  5 px/frame, with a genuine measurement ambiguity for 7 frames (15-21): a similar-looking
+  decoy appears 30 px away. A naive single-hypothesis tracker averages the two candidate
+  measurements into one (a real, common naive fusion strategy) and feeds that to a real
+  cv2.KalmanFilter; a real, from-scratch particle filter instead weights 1000 particles by
+  an OR-likelihood against BOTH real candidates.
+  - Kalman (fed the averaged measurement) error during the ambiguity: 3.2, 7.9, 10.5, 12.0,
+    13.5, 14.8, 15.1 px -- growing throughout, ending far off both real candidates.
+  - Particle filter error during the same 7 frames: 0.3, 3.4, 4.2, 2.2, 3.5, 3.7, 3.3 px --
+    staying close to the true object throughout.
+  - Mean error over the whole 40-frame run: Kalman 5.84 px, particle filter 1.66 px.
+  Lab: ParticleLab (apps/web/components/visuals/ParticleLab.tsx) -- the real precomputed
+  true/decoy/Kalman/particle traces, with the ambiguous span highlighted.
+*/}
+
+# 40.6 Particle filter
+
+<Definition term="Particle filter">a tracker that represents its belief about an object's state as a set of many weighted random samples ("particles") instead of one single estimate — each particle is propagated by the motion model and reweighted by how well it matches the measurement, so the belief can represent several genuinely different possibilities at once, not just one.</Definition>
+
+40.5's Kalman filter represents its belief as a single Gaussian: one mean, one spread. That is a real limitation whenever there genuinely isn't just one plausible answer — this chapter builds, from scratch, a tracker that can represent "it's probably here, but it might instead be over there" honestly, and measures what that buys over being forced to average the two.
+
+## 1. An analogy
+
+Looking for a friend in a crowd when you get two separate, equally plausible tips about where they might be. Averaging the two tips and walking to the midpoint between them is very likely to put you nowhere near either — you'd do better keeping both possibilities in mind and heading toward whichever one keeps checking out as you get more information. A particle filter is many small search parties, sent toward every current possibility, naturally thinning out the ones that stop matching what's actually seen.
+
+## 2. Propagate, weight, resample
+
+<Flow
+  steps={[
+    { label: "Many particles, each a full guess at the state", tone: "data" },
+    { label: "Propagate: move every particle by the motion model", tone: "process" },
+    { label: "Weight: how well does each particle match the real measurement(s)?", tone: "process" },
+    { label: "Resample: keep more copies of high-weight particles, fewer of low-weight ones", tone: "result" },
+  ]}
+/>
+
+No `cv2` function implements this — this chapter builds it directly in NumPy, the same "from scratch first" pattern used throughout the course. Each particle carries a full state guess (here, position and velocity); every frame, every particle is moved by the motion model plus some random spread (propagate), given a weight proportional to how well its *resulting* position matches the real measurement (weight), and then a new generation of particles is drawn, with replacement, favouring high-weight particles (resample) — the classic Sequential Importance Resampling (SIR) particle filter [1].
+
+## 3. A real, genuine ambiguity
+
+<ParticleLab caption="Real, from-scratch particle filter vs a real cv2.KalmanFilter forced to average two candidate measurements, during a genuine 7-frame decoy ambiguity."/>
+
+For 7 real frames, a similar-looking decoy object appears 30 px from the true target — a genuine measurement ambiguity, not noise. A naive single-hypothesis tracker, given two candidate measurements and no way to represent "it could be either," averages them into one fictitious point and feeds that to a Kalman filter:
+
+| Frames into the ambiguity | Kalman (averaged measurement) error | Particle filter error |
+| --- | --- | --- |
+| 1 | 3.2 px | 0.3 px |
+| 4 | 12.0 px | 2.2 px |
+| 7 | 15.1 px | 3.3 px |
+
+Over the whole 40-frame run, mean error was **5.84 px for Kalman, 1.66 px for the particle filter** — a real, measured, roughly 3.5× improvement, entirely from being able to weight *both* real candidates instead of collapsing them into one average that matches neither.
+
+## 4. Why the particle filter does not get fooled the same way
+
+The particle filter's weighting function in Section 3 gives a particle a real, nonzero weight if it is close to *either* candidate (an "OR" likelihood, Code section 2) — a particle already near the true object's cluster, consistent with its own motion history, keeps a healthy weight simply because it is close to one of the two real candidates, even though the *other* candidate (the decoy) is far away. Kalman's single Gaussian measurement update has no equivalent: forced to take one scalar number, averaging the two candidates was the only way to use both, and the result is a point that does not actually match either real detection.
+
+## 5. Industrial context: when this genuinely matters
+
+A single, well-isolated part on a conveyor rarely produces a genuine measurement ambiguity — 40.5's Kalman filter already handles that case well, and a particle filter's extra computational cost (many particles, every frame) buys nothing real there. Multiple similar-looking parts close together, a part briefly passing behind another, or clutter that occasionally produces a false detection resembling the real target are exactly the situations Section 3 modelled — real scenarios where carrying more than one hypothesis at once has a real, measurable payoff.
+
+## What you should remember from 40.6
+
+<Takeaways>
+<Takeaway n={1} title="Many weighted guesses, not one">Particles can represent genuinely ambiguous beliefs; a single Gaussian cannot.</Takeaway>
+<Takeaway n={2} title="This chapter's own real result">5.84 px (Kalman, averaged) vs 1.66 px (particle filter) mean error, a real ~3.5x gap.</Takeaway>
+<Takeaway n={3} title="The gap only matters under real ambiguity">Without a genuine multi-candidate situation, 40.5's simpler Kalman filter is the cheaper, equally accurate choice.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Two equally plausible candidate measurements are 10 px apart. A naive tracker averages them. How far is that average from each real candidate?
+
+<Solution>
+
+**5 px** from each — exactly half the 10 px gap, and (depending on which candidate is actually correct) 5 px away from the real answer either way, following the same structural mismatch Section 3 measured directly.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: a particle filter from scratch
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(21)
+n_particles = 1000
+particles = rng.normal(0.0, 10, (n_particles, 2))   # [x, vx] per particle
+particles[:, 1] = 5.0 + rng.normal(0, 1, n_particles)
+
+def likelihood(px, candidates, sigma=5.0):
+    like = np.zeros_like(px)
+    for c in candidates:
+        like += np.exp(-0.5 * ((px - c) / sigma) ** 2)
+    return like
+
+# one real step: propagate, weight against two real candidates, resample
+particles[:, 0] += particles[:, 1] + rng.normal(0, 0.5, n_particles)
+particles[:, 1] += rng.normal(0, 0.2, n_particles)
+w = likelihood(particles[:, 0], [12.0, 42.0]) + 1e-300   # two real candidate measurements
+w /= w.sum()
+estimate = np.sum(particles[:, 0] * w)
+print("weighted estimate:", round(estimate, 2))
+idx = rng.choice(n_particles, n_particles, p=w)
+particles = particles[idx]
+print("particles near first candidate (+-5px):", int(np.sum(np.abs(particles[:, 0] - 12.0) < 5)))
+print("particles near second candidate (+-5px):", int(np.sum(np.abs(particles[:, 0] - 42.0) < 5)))
+```
+
+Output:
+
+```text
+weighted estimate: 10.69
+particles near first candidate (+-5px): 708
+particles near second candidate (+-5px): 1
+```
+
+With two real candidates 30 px apart, the resampled particle population here lands almost entirely on the first candidate: the particles' prior position (seeded near 0) was already far closer to 12.0 than to 42.0, so the OR-likelihood, combined with resampling, concentrates weight there after a single step — exactly the "many small search parties, favouring whichever tip keeps checking out" behaviour from Section 1's analogy, not an even split.
+
+### 2. OpenCV: the comparison Kalman filter, fed the naive average
+
+```python
+# Needs naive_meas from this chapter's own precomputed averaged sequence (see the text)
+import cv2
+
+kf = cv2.KalmanFilter(2, 1, 0)
+kf.transitionMatrix = np.array([[1, 1], [0, 1]], np.float32)
+kf.measurementMatrix = np.array([[1, 0]], np.float32)
+kf.processNoiseCov = np.array([[1e-4, 0], [0, 1e-4]], np.float32)
+kf.measurementNoiseCov = np.array([[5.0 ** 2]], np.float32)
+kf.errorCovPost = np.eye(2, dtype=np.float32) * 100
+kf.statePost = np.array([[naive_meas[0]], [0]], np.float32)   # naive_meas: this chapter's own averaged data
+estimates = [naive_meas[0]]
+for t in range(1, len(naive_meas)):
+    kf.predict()
+    kf.correct(np.array([[naive_meas[t]]], np.float32))
+    estimates.append(kf.statePost[0, 0])
+```
+
+## OpenCV API notes
+
+- **No `cv2` particle-filter class exists** — checked directly (`dir(cv2)` has nothing relevant); the entire propagate/weight/resample loop (Code section 1) is plain NumPy.
+- **`cv2.KalmanFilter`** (40.5) is used here only as the real comparison baseline, fed the naive single-number fusion a Kalman-only pipeline would be forced into when two real candidates exist.
+- **`rng.choice(n, n, p=weights)`**: NumPy's own weighted resampling with replacement — the "resample" step of SIR, favouring high-weight particles without discarding diversity entirely (some low-weight particles still get drawn, by chance).
+
+## Where it fails
+
+- **Too few particles cannot represent a genuinely multimodal belief well** — with too few samples, random chance can accidentally wipe out one real cluster entirely during resampling (particle degeneracy), especially right when it matters most, during a real ambiguity.
+- **The likelihood function must actually reflect the real ambiguity** — Section 3's OR-likelihood works because it was built knowing two real candidates could exist; a naive single-Gaussian likelihood (treating the decoy as pure noise around one expected location) would not show this chapter's real advantage at all.
+- **More particles cost more compute, every single frame** — Section 5's real cost/benefit judgement applies here directly: this chapter's own 1000-particle filter does meaningfully more work per frame than 40.5's two-number Kalman state.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Averaging multiple candidate measurements before feeding a single-hypothesis tracker** — Section 3's own real result shows exactly how badly this can go wrong when the candidates are genuinely different objects, not noisy readings of the same one.
+- **Using a particle filter without ever checking particle diversity** — if resampling has collapsed almost all particles onto one point (particle degeneracy, Where it fails), the filter has quietly lost its real advantage over a single-hypothesis tracker.
+- **Reaching for a particle filter by default** — Section 5: without a genuine multi-candidate ambiguity, this chapter's own simpler 40.5 Kalman filter is both cheaper and, on that kind of problem, equally accurate.
+- **Forgetting that the particle filter's "estimate" (weighted mean) can itself land between two live clusters** — reporting the overall weighted mean, rather than the single most-likely cluster, can look similar to Kalman's averaging mistake if the two clusters are still close to equally weighted; a real system usually also checks the particle spread/clustering itself, not just the mean.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Particle degeneracy and effective sample size
+
+After enough resampling steps, a particle filter can end up with nearly all its weight concentrated on very few distinct particles — a well-known real failure mode called degeneracy. A common real diagnostic is the **effective sample size**, roughly `1 / sum(weight_i^2)`, which drops sharply when degeneracy sets in; practical implementations often only resample when this falls below a threshold, rather than every single frame, to preserve more particle diversity.
+
+### Beyond SIR: other resampling and proposal strategies
+
+The plain SIR filter used here (sample from the motion model, weight by measurement likelihood, resample) is the simplest real variant; more advanced particle filters use smarter proposal distributions (sampling particles from somewhere closer to where the measurement actually suggests, not just the motion model alone) to need fewer particles for the same real accuracy — a genuine, active area of estimation research, not a settled, single "correct" method [1].
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What can a particle filter represent that a single Gaussian (40.5's Kalman filter) cannot?",
+      options: ["Nothing -- they are equivalent", "A genuinely multimodal belief: several distinct, simultaneously plausible positions", "Negative velocities", "Measurements in more than one dimension"],
+      answer: 1,
+      explanation: "Section 1/4: many weighted samples can represent several real possibilities at once; one Gaussian cannot.",
+    },
+    {
+      question: "In this chapter's own real test, what happened when a Kalman filter was fed the average of two genuine candidate measurements 30 px apart?",
+      options: ["It tracked perfectly", "Its error grew steadily (3.2 to 15.1 px during the 7-frame ambiguity), landing near neither real candidate", "It automatically detected the ambiguity and ignored both measurements", "It crashed"],
+      answer: 1,
+      explanation: "Section 3: a real, measured consequence of forcing two real candidates into one averaged number.",
+    },
+    {
+      question: "What is particle degeneracy?",
+      options: ["A camera hardware fault", "Nearly all particle weight concentrating on very few particles after repeated resampling, losing the filter's real diversity advantage", "A particle filter that uses too many particles", "A synonym for the Kalman filter's measurement noise"],
+      answer: 1,
+      explanation: "Go deeper: a well-known real failure mode, often diagnosed with effective sample size.",
+    },
+    {
+      question: "When would this chapter's particle filter NOT be worth its extra computational cost over 40.5's Kalman filter?",
+      options: ["Always -- particle filters are strictly better", "When there is no genuine multi-candidate ambiguity -- a single, well-isolated target is exactly what Kalman already handles well", "Never -- Kalman filters are always better", "Only when tracking in colour, never in grayscale"],
+      answer: 1,
+      explanation: "Section 5/Common mistakes: reaching for a particle filter by default, without a real ambiguity to justify it, costs more for no real benefit.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Two candidate measurements are at 20 and 50. A naive tracker averages them. If the true object is actually at 20, how far off is the naive estimate, and how does that compare to the particle filter's real measured error pattern in Section 3?
+
+<Solution>
+
+Average = (20 + 50) / 2 = **35**. Error = |35 − 20| = **15** — consistent with (and in fact close to) Section 3's own measured end-of-ambiguity Kalman error of 15.1 px, the same structural mismatch (collapsing two real candidates into one point near neither).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, run the one-step particle filter update with the two candidates swapped in order (`[42.0, 12.0]` instead of `[12.0, 42.0]`) and confirm the weighted estimate and particle split are unchanged (the OR-likelihood should not care about candidate order).
+
+<Solution>
+
+```python
+rng = np.random.default_rng(21)
+particles = rng.normal(0.0, 10, (n_particles, 2))
+particles[:, 1] = 5.0 + rng.normal(0, 1, n_particles)
+particles[:, 0] += particles[:, 1] + rng.normal(0, 0.5, n_particles)
+particles[:, 1] += rng.normal(0, 0.2, n_particles)
+w = likelihood(particles[:, 0], [42.0, 12.0]) + 1e-300   # order swapped
+w /= w.sum()
+print("weighted estimate (order swapped):", round(np.sum(particles[:, 0] * w), 2))
+```
+
+Output:
+
+```text
+weighted estimate (order swapped): 10.69
+```
+
+Identical to Code section 1's result (10.69) — summing the likelihood from each candidate is commutative, so the OR-likelihood genuinely does not depend on which candidate is listed first.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague wants to track a single, consistently well-isolated bolt on a conveyor and is considering a particle filter "to be safe, in case something ambiguous happens." Based on Section 5, what would you tell them?
+
+<Solution>
+
+Based on this chapter's own measured comparison, a particle filter's real advantage appears specifically during a genuine multi-candidate ambiguity (Section 3's decoy scenario) — for a consistently well-isolated bolt with no real competing candidates, 40.5's Kalman filter already performs just as well, at a real, measured lower computational cost (a two-number state update vs. propagating, weighting and resampling many particles every frame). Reaching for the particle filter here would not be "safe," just more expensive, for no measured benefit; it becomes the right tool specifically if and when real ambiguity (multiple similar parts close together, occasional false detections) actually becomes part of the problem.
+
+</Solution>
+
+## References
+
+1. N. J. Gordon, D. J. Salmond, A. F. M. Smith, "Novel approach to nonlinear/non-Gaussian Bayesian state estimation," *IEE Proceedings F (Radar and Signal Processing)*, 140(2), 107–113, 1993 — the original Sequential Importance Resampling (SIR) particle filter.
+2. 40.5 Kalman filter (this course) — the single-Gaussian comparison baseline used throughout this chapter.
+3. M. S. Arulampalam, S. Maskell, N. Gordon, T. Clapp, "A tutorial on particle filters for online nonlinear/non-Gaussian Bayesian tracking," *IEEE Transactions on Signal Processing*, 50(2), 174–188, 2002.

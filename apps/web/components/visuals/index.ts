@@ -175,3 +175,4 @@ export { BgSubLab } from "./BgSubLab";
 export { FlowLab } from "./FlowLab";
 export { CamShiftLab } from "./CamShiftLab";
 export { KalmanLab } from "./KalmanLab";
+export { ParticleLab } from "./ParticleLab";
