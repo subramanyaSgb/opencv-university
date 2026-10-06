@@ -1,0 +1,269 @@
+export const meta = {
+  number: "46.1",
+  title: "Infrared basics",
+  minutes: 22,
+  objectives: [
+    "Know that a thermal camera detects a scene's OWN emitted heat radiation, not reflected light",
+    "Compute real peak emission wavelengths (Wien's law) and total radiated power (Stefan-Boltzmann) at real scene temperatures",
+    "Know why most industrial/body thermal cameras use the LWIR band specifically",
+    "Measure, for real, how small a real temperature-driven brightness contrast actually is",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 46.1 (Part I, Module 46; opens the module). 21.4 covered
+  registering and fusing a thermal image with a visible one, explicitly deferring the real
+  physics to "Part I ... (46)" -- this chapter is that deferred physics. All numbers real,
+  verified directly via Planck's law, Wien's displacement law, and the Stefan-Boltzmann law
+  (standard physical constants, CODATA values).
+  h=6.62607015e-34 J.s, c=2.99792458e8 m/s, kB=1.380649e-23 J/K,
+  sigma=5.670374419e-8 W/(m^2.K^4), Wien's constant b=2.897771955e-3 m.K.
+  Peak wavelength (Wien) and total radiated power (Stefan-Boltzmann):
+  room (20C, 293.15K): peak=9.88um, power=418.8 W/m^2.
+  skin (33C, 306.15K): peak=9.47um, power=498.1 W/m^2.
+  hot machine (80C, 353.15K): peak=8.21um, power=882.0 W/m^2.
+  molten metal (800C, 1073.15K): peak=2.70um, power=75206.2 W/m^2.
+  Real spectral radiance (Planck's law) at 10um: skin=1.0937e7 W/(m^2.sr.m),
+  room=8.8641e6, ratio=1.2338 -- skin is only ~23% brighter than the room background at this
+  one wavelength, a real, small contrast a sensitive detector must resolve.
+  Real, standard waveband names (citing Vollmer & Mollmann 2017): LWIR 8-14um, MWIR 3-5um,
+  SWIR 1-2.5um -- these correspond to real atmospheric transmission windows (gaps between
+  water vapour/CO2 absorption bands), which is why LWIR/MWIR are the real, standard bands for
+  uncooled/cooled thermal cameras respectively, not an arbitrary engineering choice.
+*/}
+
+# 46.1 Infrared basics
+
+<Definition term="Thermal (infrared) imaging">forming an image from the infrared radiation a scene emits because of its own temperature — not from visible light it reflects, which is what every camera in this course up to now has used.</Definition>
+
+Every camera chapter before this one (2.x onward) assumed a scene reflects light from some external source toward the lens. A thermal camera needs no external light at all: every object above absolute zero continuously radiates its own real electromagnetic energy, and a thermal camera simply detects a slice of that self-emitted spectrum.
+
+## 1. An analogy
+
+A stove burner glows visibly red once it gets hot enough — everyone has seen this. A person's hand, or a warm engine block, is also radiating energy the entire time, continuously, exactly the same real physical process — it is simply too cool for that radiation's peak to fall inside the narrow band of wavelengths human eyes can see. A thermal camera is a sensor built to see exactly that same real radiation, just shifted further into the infrared than the stove burner's visible glow.
+
+## 2. The pipeline: temperature in, a detectable spectrum out
+
+<Flow
+  steps={[
+    { label: "An object at some real temperature", tone: "world" },
+    { label: "Planck's law: its real emission spectrum", tone: "process" },
+    { label: "Wien's law: where that spectrum peaks", tone: "process" },
+    { label: "The camera's own detector band captures a slice of it", tone: "result" },
+  ]}
+/>
+
+Planck's law gives the real spectral radiance any object at temperature `T` emits at each wavelength; Wien's displacement law (`lambda_peak = b / T`, with `b = 2.897771955 x 10^-3 m.K`, a real physical constant) gives the one wavelength where that spectrum is brightest. A thermal camera's detector is simply built to be sensitive over whichever real wavelength band matters for the temperatures it is meant to see.
+
+## 3. A real, measured result: why thermal cameras use the band they do
+
+<InfraredLab caption="Live, exact Planck's law: drag the temperature and watch the real peak wavelength shift between LWIR, MWIR and SWIR." />
+
+| Scene | Temperature | Peak wavelength (Wien) | Total radiated power (Stefan-Boltzmann) |
+| --- | --- | --- | --- |
+| Room background | 20°C (293.15K) | 9.88 µm | 418.8 W/m² |
+| Human skin | 33°C (306.15K) | 9.47 µm | 498.1 W/m² |
+| Hot machine surface | 80°C (353.15K) | 8.21 µm | 882.0 W/m² |
+| Molten metal | 800°C (1073.15K) | 2.70 µm | 75,206.2 W/m² |
+
+Room-temperature and body-temperature scenes both peak real close to **9-10 µm** — squarely inside the real **LWIR** band (8-14 µm, "long-wave infrared"), which is exactly why uncooled microbolometer cameras built for building inspection, predictive maintenance, and body-temperature screening are tuned to that specific real wavelength range. Molten metal's peak shifts dramatically, to **2.70 µm** — inside the real **SWIR/MWIR** range (1-5 µm) — which is why furnace and casting-line cameras use a genuinely different detector technology tuned to that much shorter real wavelength.
+
+## 4. A real, measured surprise: the real contrast is small
+
+Comparing real skin radiance to real room-background radiance at a single representative LWIR wavelength (10 µm) gives a ratio of only **1.2338** — skin is just **23%** brighter than its background at that wavelength, a real, genuinely small contrast. This is why a thermal camera's detector needs real, careful sensitivity engineering (its **NETD**, noise-equivalent temperature difference, typically a real fraction of a degree) to turn this small a real physical difference into a usable image — nothing like the often much larger brightness contrasts an ordinary visible-light camera sees between a lit object and shadow.
+
+## 5. Industrial context: picking the right band for the job
+
+21.4's own real example — an electrical cabinet, where a thermal camera finds an overheating joint near ambient temperature — needs exactly Section 3's LWIR band; a steel mill watching a 1000°C casting process needs the shorter-wavelength MWIR/SWIR band instead, because Section 3's own real numbers show the emission has shifted that far by then. Choosing the wrong band for a given real temperature range (Go deeper) genuinely degrades or defeats a thermal measurement, not just its image quality.
+
+## What you should remember from 46.1
+
+<Takeaways>
+<Takeaway n={1} title="Every object radiates, continuously">A thermal camera detects a scene's OWN real emission, not reflected light -- 21.4's registration chapter assumed exactly this.</Takeaway>
+<Takeaway n={2} title="Wien's law sets the real peak wavelength">Room/skin temperatures peak near 9-10um (LWIR); molten metal peaks near 2.7um (SWIR/MWIR) -- a real, measured, physical shift.</Takeaway>
+<Takeaway n={3} title="The real contrast a camera must resolve is small">Skin was only 1.2338x brighter than room background at 10um -- real sensitivity matters more here than in an ordinary visible camera.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A furnace surface is at 1200K. Using Wien's law (`lambda_peak = 2.897771955e-3 / T` metres), roughly what wavelength band does its emission peak in?
+
+<Solution>
+
+`lambda_peak = 2.897771955e-3 / 1200 ≈ 2.415e-6 m = 2.415 µm` — inside the real SWIR/MWIR range, consistent with Section 3's own molten-metal result.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: Planck's law, Wien's law, and Stefan-Boltzmann, for real
+
+```python
+import numpy as np
+
+h = 6.62607015e-34    # Planck constant, J.s
+c = 2.99792458e8       # speed of light, m/s
+kB = 1.380649e-23      # Boltzmann constant, J/K
+sigma = 5.670374419e-8 # Stefan-Boltzmann constant, W/(m^2.K^4)
+WIEN_B = 2.897771955e-3  # Wien's displacement constant, m.K
+
+def planck_spectral_radiance(wavelength_m, T):
+    return (2 * h * c**2) / (wavelength_m**5 * (np.exp(h * c / (wavelength_m * kB * T)) - 1))
+
+def wien_peak_wavelength(T):
+    return WIEN_B / T
+
+temps = {"room (20C)": 293.15, "skin (33C)": 306.15, "hot machine (80C)": 353.15, "molten metal (800C)": 1073.15}
+for label, T in temps.items():
+    peak_um = wien_peak_wavelength(T) * 1e6
+    power = sigma * T**4
+    print(f"{label}: peak={peak_um:.2f}um, power={power:.1f} W/m^2")
+
+L_skin = planck_spectral_radiance(10e-6, temps["skin (33C)"])
+L_room = planck_spectral_radiance(10e-6, temps["room (20C)"])
+print(f"radiance at 10um: skin={L_skin:.4e}, room={L_room:.4e}, ratio={L_skin/L_room:.4f}")
+```
+
+Output:
+
+```text
+room (20C): peak=9.88um, power=418.8 W/m^2
+skin (33C): peak=9.47um, power=498.1 W/m^2
+hot machine (80C): peak=8.21um, power=882.0 W/m^2
+molten metal (800C): peak=2.70um, power=75206.2 W/m^2
+radiance at 10um: skin=1.0937e+07, room=8.8641e+06, ratio=1.2338
+```
+
+### 2. OpenCV: displaying a synthetic radiance map
+
+```python
+import cv2
+
+temps_grid = 293.15 + 15 * np.exp(-((np.arange(100)[:, None] - 50)**2 + (np.arange(100)[None, :] - 50)**2) / (2 * 15**2))
+radiance_grid = planck_spectral_radiance(10e-6, temps_grid)
+display_8bit = cv2.normalize(radiance_grid, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+thermal_view = cv2.applyColorMap(display_8bit, cv2.COLORMAP_INFERNO)
+print("radiance grid:", radiance_grid.shape, radiance_grid.dtype)
+print("thermal_view:", thermal_view.shape, thermal_view.dtype)
+```
+
+Output:
+
+```text
+radiance grid: (100, 100) float64
+thermal_view: (100, 100, 3) uint8
+```
+
+## OpenCV API notes
+
+- **No `cv2` function computes real radiometric physics** — Planck's law, Wien's law, and Stefan-Boltzmann (Code section 1) are plain physics, independent of any imaging library; `cv2` enters only once there is an actual image to display or process (Code section 2).
+- **`cv2.applyColorMap(..., cv2.COLORMAP_INFERNO)`** (also used in 21.4) is a common real choice for a quick thermal-style display; 46.6 covers the real, dedicated thermal-specific palettes (ironbow, white-hot, black-hot) a real thermal camera's own UI actually offers.
+- **This chapter's radiance values are real physical units** (W/(m².sr.m)) — converting a real camera's raw sensor counts into either radiance or a calibrated temperature is 46.3-46.4's own real subject, not covered here.
+
+## Where it fails
+
+- **This chapter assumed every surface radiates exactly like an ideal blackbody** — real surfaces do not; 46.2 covers emissivity, the real correction every actual thermal measurement needs.
+- **Raw detector output is not yet a calibrated temperature** — 46.3-46.4 cover converting a real sensor's raw counts into an actual, trustworthy temperature reading.
+- **A shiny or reflective surface can show a reflected hot (or cold) object instead of its own real temperature** — a real, common thermal-imaging pitfall, covered properly in 46.2.
+- **Atmospheric absorption and path length matter for real long-range thermal measurements** — this chapter assumed a close, clear path with no real atmospheric attenuation.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Assuming a thermal camera "sees temperature" directly** — it detects real radiance (Section 2's Planck's law), which depends on BOTH temperature and emissivity (46.2); the two are easy to conflate.
+- **Using a visible-light-style camera band for a very hot process** — Section 3's own real result (molten metal peaking at 2.70µm, not LWIR's 8-14µm) shows why an LWIR sensor is the wrong real tool there.
+- **Expecting large, visible-camera-like brightness contrasts in a thermal image** — Section 4's own real result (only a 1.2338x contrast between skin and background at 10µm) is a genuinely small real signal, not a display or sensor fault.
+- **Forgetting that "infrared" covers a huge real wavelength range** — NIR, SWIR, MWIR, and LWIR are physically very different real bands, each needing different real detector technology.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Atmospheric windows
+
+The real LWIR (8-14µm) and MWIR (3-5µm) bands are not arbitrary engineering choices — they correspond to real atmospheric transmission windows, gaps between the strong real absorption bands of water vapour and CO2 that otherwise block infrared radiation over any real distance (Vollmer, Möllmann, *Infrared Thermal Imaging: Fundamentals, Research and Applications*, 2nd ed., Wiley-VCH, 2017). A detector tuned to the real 5-8µm gap between these two windows would see almost nothing over any real distance, which is exactly why commercial thermal cameras are never built for that band.
+
+### Cooled vs uncooled detectors
+
+A real uncooled microbolometer (the common, cheaper LWIR technology) measures a tiny real resistance change as its own pixels heat up from absorbed radiation — simple, but with a real, slower response and fewer very hot/cold distinctions at the far ends. A real cooled detector (often MWIR, used in aerospace/furnace monitoring) is cryogenically chilled to let far more sensitive real photon-counting technology work, at real extra cost and complexity.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does a thermal camera actually detect?",
+      options: ["Reflected visible light, just dimmer", "The scene's OWN emitted infrared radiation, caused by its real temperature -- a completely different physical process from a visible camera", "Sound waves converted to an image", "Nothing real -- it's entirely computed from a formula"],
+      answer: 1,
+      explanation: "Section 1-2: every object radiates continuously; a thermal camera is built to detect that real emission directly.",
+    },
+    {
+      question: "Why do most body-temperature and room-temperature thermal cameras use the LWIR (8-14um) band specifically?",
+      options: ["It's an arbitrary standard with no real reason", "Because Wien's law puts these real temperatures' peak emission wavelength right around 9-10um, squarely inside LWIR, as this chapter's own real computation showed", "LWIR is simply the cheapest band to build sensors for", "Visible light cameras cannot be modified to see infrared at all"],
+      answer: 1,
+      explanation: "Section 3: a real, computed, physically-grounded reason, not an arbitrary convention.",
+    },
+    {
+      question: "This chapter's own real result found what about the radiance contrast between skin and room background at 10um?",
+      options: ["Skin was 100x brighter", "Skin was only about 1.23x (23%) brighter than the background -- a genuinely small real contrast needing a sensitive detector", "There was no detectable difference at all", "Skin was dimmer than the background"],
+      answer: 1,
+      explanation: "Section 4: a real, measured, surprisingly small contrast -- not the dramatic difference a visible camera usually sees.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Using Wien's law (`lambda_peak = 2.897771955e-3 / T`), what is the real peak wavelength for a surface at 500K?
+
+<Solution>
+
+`2.897771955e-3 / 500 = 5.7955e-6 m ≈ 5.80 µm` — between the MWIR and LWIR bands.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, compute the real peak wavelength and total radiated power for a surface at 150°C (423.15K), and compare to this chapter's own "hot machine (80°C)" result.
+
+<Solution>
+
+```python
+T_150 = 423.15
+peak_150 = wien_peak_wavelength(T_150) * 1e6
+power_150 = sigma * T_150**4
+print(f"150C ({T_150}K): peak={peak_150:.2f}um, power={power_150:.1f} W/m^2")
+```
+
+Output:
+
+```text
+150C (423.15K): peak=6.85um, power=1818.0 W/m^2
+```
+
+A shorter real peak wavelength (6.85µm vs the 80°C case's 8.21µm) and over double the real radiated power — consistent with Wien's and Stefan-Boltzmann's real, predictable temperature dependence.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A facilities team wants to use a single thermal camera to monitor both a server room (around 22°C) and a nearby furnace exhaust (around 600°C) in the same system. Based on Section 3, what real problem should they expect?
+
+<Solution>
+
+Following Section 3's own real result, these two real temperatures peak in very different bands — the server room near 9.88µm (LWIR) and the furnace exhaust (873.15K) considerably shorter, well into SWIR/MWIR — so a single detector tuned for one band would see the other scene poorly or not at all. A real system needs either two different cameras with different detector bands, or a genuine trade-off in sensitivity across both real temperature ranges.
+
+</Solution>
+
+## References
+
+1. M. Vollmer, K.-P. Möllmann, *Infrared Thermal Imaging: Fundamentals, Research and Applications*, 2nd ed., Wiley-VCH, 2017.
+2. CODATA 2018 recommended values of the fundamental physical constants (Planck constant, Boltzmann constant, Stefan-Boltzmann constant, Wien's displacement constant).
+3. OpenCV 4.13.0 documentation: `cv2.applyColorMap`, `cv2.normalize`. https://docs.opencv.org/4.13.0/
