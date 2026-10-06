@@ -550,6 +550,60 @@ for name, (cx, cy), sc, ang, mir in SH_PLACE:
     cv2.fillPoly(sh_big, [np.rint(((p @ R.T) * sc + (cx, cy)) * 8).astype(np.int32)], 255)
 images["sample-shapes.png"] = (cv2.resize(sh_big, (430, 180), interpolation=cv2.INTER_AREA) > 127).astype(np.uint8) * 255
 
+# 30.x: 256 x 256 test images for the Fourier chapters: a square crop of sample-clean, and the same with periodic noise
+fq = cv2.resize(images["sample-clean.png"][:, 60:260], (256, 256), interpolation=cv2.INTER_CUBIC).astype(np.float64)
+images["sample-fft-scene.png"] = np.clip(np.rint(fq), 0, 255).astype(np.uint8)
+fy, fx = np.mgrid[0:256, 0:256]
+fq_noise = 28 * np.sin(2 * np.pi * (20 * fx + 12 * fy) / 256) + 18 * np.sin(2 * np.pi * (-8 * fx + 30 * fy) / 256)   # two interference waves
+images["sample-fft-periodic.png"] = np.clip(np.rint(fq + fq_noise), 0, 255).astype(np.uint8)
+
+# 31.x: woven fabric (two thread gratings, period 8 px) with a band of missing vertical threads and a small knot,
+# for Gabor filters; and a CT test object of ellipses for the Radon transform (seeds 31, 32)
+by, bx = np.mgrid[0:256, 0:256].astype(np.float64)
+warp_amp = np.where((bx > 150) & (bx < 172) & (by > 60) & (by < 200), 0.0, 40.0)          # missing threads
+fab = 128 + warp_amp * np.cos(2 * np.pi * bx / 8) + 40 * np.cos(2 * np.pi * by / 8)
+fab += 60 * np.exp(-((bx - 70) ** 2 + (by - 180) ** 2) / (2 * 5.0 ** 2))                  # a knot
+fab += np.random.default_rng(31).normal(0, 8, fab.shape)
+images["sample-fabric.png"] = np.clip(np.rint(fab), 0, 255).astype(np.uint8)
+ph = np.zeros((128, 128), np.float64)
+for (cx, cy, a, b, ang, v) in [(64, 64, 46, 58, 0, 200), (64, 66, 40, 52, 0, -120), (48, 56, 10, 20, 18, 60), (80, 56, 8, 16, -18, 60), (64, 36, 7, 7, 0, 90), (64, 92, 5, 3, 0, 120), (56, 96, 2, 2, 0, 120), (72, 96, 2, 2, 0, 120)]:
+    m = np.zeros((128, 128), np.uint8); cv2.ellipse(m, (cx, cy), (a, b), ang, 0, 360, 1, -1); ph += v * m.astype(np.float64)
+images["sample-phantom.png"] = np.clip(ph, 0, 255).astype(np.uint8)
+
+# 32.x: grey circuit board for template matching (240 x 150): identical chips, one rotated by 15 deg, one scaled 1.3x,
+# one brighter with a lower-contrast body, one upside down; three ring fiducials and a printed label (seed 32)
+def board():
+    W, H, S = 240, 150, 8
+    def chip(big, cx, cy, ang=0.0, sc=1.0, body=40, pin=210):
+        # chip 26 x 16 with 5 pins top and bottom and a pin-1 dot, drawn at 8x into a float canvas
+        def tr(pts):
+            a = np.deg2rad(ang); R = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+            return np.rint((np.array(pts, float) @ R.T * sc + (cx, cy)) * S).astype(np.int32)
+        for i in range(5):
+            x = -10 + i * 5
+            cv2.fillPoly(big, [tr([[x - 1.2, -11], [x + 1.2, -11], [x + 1.2, 11], [x - 1.2, 11]])], pin)
+        cv2.fillPoly(big, [tr([[-13, -8], [13, -8], [13, 8], [-13, 8]])], body)
+        c = tr([[-9, -4]])[0]; cv2.circle(big, (int(c[0]), int(c[1])), int(1.6 * sc * S), 150, -1)
+    def ring(big, cx, cy):
+        cv2.circle(big, (cx * S, cy * S), 6 * S, 230, -1); cv2.circle(big, (cx * S, cy * S), 3 * S, 70, -1)
+    big = np.full((H * S, W * S), 0, np.float32)
+    for (x, y) in [(40, 35), (90, 35), (140, 35), (40, 80), (140, 80)]:
+        chip(big, x, y)
+    chip(big, 90, 80, ang=15)                      # rotated copy
+    chip(big, 195, 45, sc=1.3)                     # larger copy
+    chip(big, 195, 110, body=70, pin=250)          # brighter, lower contrast body
+    chip(big, 40, 122, ang=180)                    # upside down
+    for (x, y) in [(10, 10), (230, 10), (230, 140)]:
+        ring(big, x, y)
+    cv2.rectangle(big, (75 * S, 110 * S), (150 * S, 135 * S), 120, -1)   # a label area
+    cv2.putText(big, "U7 REV B", (80 * S, 128 * S), cv2.FONT_HERSHEY_SIMPLEX, 0.45 * S, 20, 2 * S // 2)
+    m = (big > 0).astype(np.float32); img = cv2.resize(big, (W, H), interpolation=cv2.INTER_AREA); cov = cv2.resize(m, (W, H), interpolation=cv2.INTER_AREA)
+    yy, xx = np.mgrid[0:H, 0:W]; bg = 85 + 25 * xx / W
+    img = img + (1 - cov) * bg
+    img = img + np.random.default_rng(32).normal(0, 3, img.shape)
+    return np.clip(np.rint(img), 0, 255).astype(np.uint8)
+images["sample-board.png"] = board()
+
 for name, img in images.items():
     ok = cv2.imwrite(str(OUT / name), img)
     assert ok, f"could not write {name}"

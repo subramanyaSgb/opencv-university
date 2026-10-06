@@ -1,0 +1,348 @@
+export const meta = {
+  number: "30.5",
+  title: "Convolution theorem",
+  minutes: 25,
+  objectives: [
+    "State the convolution theorem: convolution in space = multiplication of spectra",
+    "Compute a small circular convolution both ways by hand",
+    "Get exactly the same result as cv2.filter2D with the right padding",
+    "Decide when FFT filtering is faster, and use the correlation theorem to find a pattern",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 30.5 (Module 30).
+  Lab: FourierLab mode "conv".
+  Reference tail: all examples are deterministic and compared automatically (timings are labelled "Typical output").
+*/}
+
+# 30.5 Convolution theorem
+
+<Definition term="Convolution theorem">the Fourier transform of a convolution is the product of the Fourier transforms: DFT(f ∗ h) = DFT(f) · DFT(h). Filtering with a kernel (Module 17) is therefore the same as multiplying the image's spectrum by the kernel's spectrum.</Definition>
+
+This one fact connects Part C to Part E. It explains why a blur is a low-pass filter (the kernel's spectrum is small at high frequencies), why sharpening boosts high frequencies, why deconvolution divides spectra (19.4), and why template matching can be done with FFTs (32.2). It also gives a fast way to apply large kernels.
+
+## 1. An analogy
+
+Mixing paint in two ways. Either you blend the colours stroke by stroke on the canvas (convolution: every output pixel is a weighted sum of input pixels), or you separate both paints into their pigments, scale each pigment amount, and recombine (Fourier: transform, multiply component by component, transform back). The result is identical; which is faster depends on how many strokes you would need.
+
+## 2. The theorem and its catch
+
+<Flow
+  steps={[
+    { label: "Image f, kernel h", tone: "data" },
+    { label: "F = DFT(f), H = DFT(h) (same size)", tone: "process" },
+    { label: "G = F · H (one multiplication per frequency)", tone: "process" },
+    { label: "g = inverse DFT(G) = f ⊛ h (circular convolution)", tone: "result" },
+  ]}
+/>
+
+The catch is the word **circular**. The DFT treats both signals as periodic, so the kernel wraps around the image borders: pixels near the left edge are mixed with pixels from the right edge. To get an ordinary (linear) convolution:
+
+- **Zero padding**: embed the image and the kernel in arrays of size at least M + K − 1 (image M, kernel K) filled with zeros. The result equals convolution with a black border (`BORDER_CONSTANT`).
+- Or pad the image with the border mode you want (reflect, replicate) before the FFT and crop afterwards.
+
+## 3. A worked example by hand
+
+f = [1, 2, 3, 4] and h = [1, 1, 0, 0] (sum of a sample and the one before it), length 4.
+
+**Circular convolution** g[n] = Σ f[m] · h[(n − m) mod 4]:
+
+```text
+g[0] = f[0]·h[0] + f[3]·h[1] = 1 + 4 = 5    ← f[3] wraps around from the end
+g[1] = f[1] + f[0] = 3,   g[2] = f[2] + f[1] = 5,   g[3] = f[3] + f[2] = 7
+```
+
+So g = **[5, 3, 5, 7]**, and `ifft(fft(f) · fft(h))` gives exactly that. A linear convolution would start with g[0] = 1 (nothing before the first sample); padding both to length 5 gives **[1, 3, 5, 7, 4]**, the full linear result.
+
+## 4. Exact agreement with filter2D
+
+A 15 × 15 box filter on the 256 × 256 test scene, computed three ways:
+
+| FFT method | Compared with | Largest difference |
+| --- | --- | --- |
+| circular (no padding) | `cv2.filter2D` on the image wrap-padded by 7 px | 2 × 10⁻¹³ |
+| circular (no padding) | `cv2.filter2D` default (`BORDER_REFLECT_101`) | 2 × 10⁻¹³ inside, **42.6** near the border |
+| zero-padded to 270 × 270 | `cv2.filter2D` with `BORDER_CONSTANT` | 2 × 10⁻¹³ |
+
+Away from the borders all methods are identical to rounding error. At the borders, the result depends only on how the image is extended, and the FFT can reproduce any extension if you pad accordingly.
+
+<FourierLab mode="conv" caption="A box filter of size k computed spatially (cv2.blur, reflect-101 border) and by FFT multiplication. Right: the absolute difference, scaled to its maximum: zero inside, large in a band of (k − 1)/2 pixels at the border. Switch to zero padding: the border band changes (dark instead of wrapped), but still differs from reflect-101."/>
+
+## 5. When is the FFT faster?
+
+Direct convolution costs about M² · K² multiplications for an M × M image and a K × K kernel; FFT filtering costs about 3 FFTs of size M², O(M² log M), independent of K. Measured on a 1024 × 1024 float image (times vary by machine):
+
+| Kernel | `cv2.filter2D` | NumPy FFT | `cv2.boxFilter` |
+| --- | --- | --- | --- |
+| 3 × 3 | ~1 ms | ~70 ms | ~1 ms |
+| 11 × 11 | ~5 ms | ~65 ms | ~2 ms |
+| 15 × 15 | ~145 ms | ~70 ms | ~2 ms |
+| 63 × 63 | ~160 ms | ~72 ms | ~2 ms |
+
+- `cv2.filter2D` switches to its own DFT-based algorithm for large kernels (OpenCV documents the switch for kernels of about 11 × 11 and larger); then the time is nearly independent of the kernel size.
+- A separable or box kernel is fastest of all with dedicated functions (`sepFilter2D`, `boxFilter`, `GaussianBlur`): never use an FFT for those.
+- The FFT wins for large, **non-separable** kernels: measured PSFs (19.3), large templates (32.2), custom frequency responses.
+
+## 6. Industrial use
+
+- **Large custom filters**: matched filters for defect shapes, measured optical blur for deblurring.
+- **Template matching**: correlation is convolution with the flipped template, so `cv2.matchTemplate` uses the DFT for large templates (32.2).
+- **Registration**: phase correlation (21.2) is the normalised cross-power spectrum.
+- **Deconvolution**: dividing spectra (with regularisation) undoes a known blur (19.4–19.5).
+
+## What you should remember from 30.5
+
+<Takeaways>
+<Takeaway n={1} title="Theorem">DFT(f ∗ h) = F · H.</Takeaway>
+<Takeaway n={2} title="Circular">The DFT wraps around; pad to get linear convolution.</Takeaway>
+<Takeaway n={3} title="Speed">FFT cost does not grow with the kernel; wins for large non-separable kernels.</Takeaway>
+<Takeaway n={4} title="Correlation">Correlation = multiply by the conjugate spectrum; basis of fast template matching.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Image 500 × 500, kernel 41 × 41. What minimum size avoids wrap-around, and which optimal DFT size would you use?
+
+<Solution>
+
+500 + 41 − 1 = **540** in each direction; `cv2.getOptimalDFTSize(540)` = 540 (= 2² · 3³ · 5), already fast.
+
+</Solution>
+
+**Q2.** Why is a 31 × 31 Gaussian blur not done with an FFT?
+
+<Solution>
+
+The Gaussian is separable: two 1-D passes of 31 taps cost 62 multiplications per pixel, far less than the FFT route.
+
+</Solution>
+
+### Next: 31.1 DCT and JPEG
+
+Module 31: transforms beyond Fourier: the DCT, wavelets, Gabor filters and the Radon transform.
+
+## Code
+
+Three examples: the 1-D example, exact agreement with filter2D, and fast correlation.
+
+### 1. Circular and linear convolution
+
+```python
+import numpy as np
+import cv2
+
+f = np.array([1, 2, 3, 4], float)
+h = np.array([1, 1, 0, 0], float)
+print("circular via FFT:", np.round(np.fft.ifft(np.fft.fft(f) * np.fft.fft(h)).real, 6).tolist())
+print("padded to 5:     ", np.round(np.fft.ifft(np.fft.fft(f, 5) * np.fft.fft(h[:2], 5)).real, 6).tolist())
+print("np.convolve:     ", np.convolve(f, h[:2]).tolist())
+```
+
+Output:
+
+```text
+circular via FFT: [5.0, 3.0, 5.0, 7.0]
+padded to 5:      [1.0, 3.0, 5.0, 7.0, 4.0]
+np.convolve:      [1.0, 3.0, 5.0, 7.0, 4.0]
+```
+
+- `np.fft.fft(x, n)` zero-pads x to length n.
+
+### 2. FFT filtering equals filter2D
+
+```python
+img = cv2.imread("sample-fft-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float64)
+k, r = 15, 7
+kernel = np.ones((k, k)) / k ** 2
+
+K = np.zeros_like(img)                                               # kernel centred at (0, 0), wrapping
+for dy in range(-r, r + 1):
+    for dx in range(-r, r + 1):
+        K[dy % 256, dx % 256] = 1 / k ** 2
+circular = np.fft.ifft2(np.fft.fft2(img) * np.fft.fft2(K)).real
+
+wrap = cv2.filter2D(np.pad(img, r, mode="wrap"), -1, kernel)[r:-r, r:-r]   # wrap the image ourselves
+reflect = cv2.filter2D(img, -1, kernel)                              # default BORDER_REFLECT_101
+print("vs wrap-padded filter2D:", f"{np.abs(circular - wrap).max():.0e}")
+print("vs reflect-101: inside", f"{np.abs(circular - reflect)[r:-r, r:-r].max():.0e}", "| border", round(float(np.abs(circular - reflect).max()), 1))
+
+M = 256 + k - 1                                                       # zero padding: linear convolution
+A = np.zeros((M, M)); A[:256, :256] = img
+B = np.zeros((M, M)); B[:k, :k] = kernel
+linear = np.fft.ifft2(np.fft.fft2(A) * np.fft.fft2(B)).real[r:r + 256, r:r + 256]
+print("zero-padded vs BORDER_CONSTANT:", f"{np.abs(linear - cv2.filter2D(img, -1, kernel, borderType=cv2.BORDER_CONSTANT)).max():.0e}")
+```
+
+Output:
+
+```text
+vs wrap-padded filter2D: 2e-13
+vs reflect-101: inside 2e-13 | border 42.6
+zero-padded vs BORDER_CONSTANT: 2e-13
+```
+
+- `cv2.filter2D` does not support `BORDER_WRAP` (small kernels raise an assertion error); pad with `np.pad(..., mode="wrap")` or `cv2.copyMakeBorder(..., cv2.BORDER_WRAP)` instead.
+
+### 3. Fast correlation: finding a patch
+
+```python
+patch = img[150:190, 100:150]                                         # 40 × 50 piece of the scene (contains "A7")
+t = patch - patch.mean()
+T = np.zeros_like(img); T[:40, :50] = t
+corr = np.fft.ifft2(np.fft.fft2(img - img.mean()) * np.conj(np.fft.fft2(T))).real   # correlation theorem
+y, x = np.unravel_index(np.argmax(corr), corr.shape)
+print("raw correlation peak at (x, y):", (int(x), int(y)), "| true: (100, 150)")
+res = cv2.matchTemplate(img.astype(np.float32), patch.astype(np.float32), cv2.TM_CCOEFF_NORMED)
+print("matchTemplate TM_CCOEFF_NORMED:", cv2.minMaxLoc(res)[3])
+```
+
+Output:
+
+```text
+raw correlation peak at (x, y): (174, 68) | true: (100, 150)
+matchTemplate TM_CCOEFF_NORMED: (100, 150)
+```
+
+- Correlation multiplies by the **conjugate** spectrum (convolution with the flipped template).
+- The raw correlation peaks in the wrong place: it is large wherever the image is bright and contrasty, not only where it resembles the patch. Normalising by the local mean and energy (`TM_CCOEFF_NORMED`, 32.2) finds the true position; OpenCV computes the correlation part of it with DFTs for large templates.
+
+### 4. Timing (varies by machine)
+
+```python
+# Needs a timing run (results vary by machine)
+import time
+big = np.random.default_rng(0).random((1024, 1024)).astype(np.float32)
+for k in (3, 11, 15, 63):
+    kk = np.ones((k, k), np.float32) / k ** 2
+    t0 = time.perf_counter(); cv2.filter2D(big, -1, kk); t1 = time.perf_counter()
+    np.fft.ifft2(np.fft.fft2(big) * np.fft.fft2(kk, s=big.shape)).real; t2 = time.perf_counter()
+    print(f"{k:2d}: filter2D {1000 * (t1 - t0):6.1f} ms, FFT {1000 * (t2 - t1):6.1f} ms")
+```
+
+Typical output (one machine):
+
+```text
+ 3: filter2D    1.2 ms, FFT   67.4 ms
+11: filter2D    5.0 ms, FFT   65.2 ms
+15: filter2D  145.4 ms, FFT   69.6 ms
+63: filter2D  158.9 ms, FFT   71.8 ms
+```
+
+## OpenCV API notes
+
+- **`cv2.filter2D(src, ddepth, kernel, anchor=(-1, -1), delta=0, borderType=BORDER_REFLECT_101)`**: correlation (not flipped) with the kernel; for symmetric kernels the same as convolution. Uses a DFT algorithm internally for large kernels.
+- **`cv2.mulSpectrums(a, b, flags, conjB=False)`**: multiplies two `cv2.dft` outputs (packed or complex); `conjB=True` gives correlation.
+- **`cv2.dft(..., nonzeroRows=…)`**: speeds up transforms of zero-padded arrays.
+- **Padding**: `cv2.copyMakeBorder(img, top, bottom, left, right, borderType)` before the FFT, crop after.
+
+## Where it fails
+
+- **Small kernels**: direct convolution is much faster.
+- **Separable kernels**: two 1-D passes beat any FFT.
+- **Memory**: FFTs of large padded images need complex float arrays (16 bytes per pixel in float64).
+- **Spatially varying kernels**: the theorem needs one kernel for the whole image.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Forgetting the wrap-around**: borders mix with the opposite side; pad first.
+- **Kernel not centred**: placing the kernel's centre at (k/2, k/2) instead of (0, 0) shifts the result by k/2 pixels.
+- **Convolution vs correlation**: `filter2D` correlates; multiply by the conjugate spectrum to match it with non-symmetric kernels.
+- **Different array sizes**: both spectra must have the same size (pad the kernel to the image size).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Proof sketch
+
+Write f and h as sums of complex exponentials. Convolution is linear and shift-invariant, and complex exponentials are its eigenfunctions: convolving e^(2πikx/N) with h just multiplies it by H(k). So each frequency component of f is scaled by H(k): G = F · H. The same reasoning gives the correlation theorem (multiply by the conjugate) and Parseval's theorem (energy is the same in both domains).
+
+### Overlap-add and overlap-save
+
+For very long signals or huge images with moderate kernels, the image is cut into blocks, each convolved by FFT with the kernel, and the overlapping block borders are added (overlap-add) or discarded (overlap-save): the FFT advantage without one gigantic transform.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Multiplying two spectra and transforming back gives…",
+      options: ["Linear convolution", "Circular convolution", "Correlation", "The sum"],
+      answer: 1,
+      explanation: "Linear only with enough zero padding.",
+    },
+    {
+      question: "Which FFT result equals cv2.filter2D with BORDER_CONSTANT?",
+      options: ["No padding", "Zero padding to at least M + K − 1", "Mirror padding", "None"],
+      answer: 1,
+      explanation: "Zeros outside the image.",
+    },
+    {
+      question: "Why did filter2D become slower than the FFT for 15 × 15 kernels here?",
+      options: ["A bug", "It switches to a DFT-based algorithm for large kernels, which was slower than NumPy's FFT on this machine", "Memory", "Wrong border"],
+      answer: 1,
+      explanation: "Measure on your own machine.",
+    },
+    {
+      question: "Correlation in the frequency domain is…",
+      options: ["F · H", "F · conj(H)", "F / H", "F + H"],
+      answer: 1,
+      explanation: "Convolution with the flipped kernel.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Circularly convolve f = [1, 0, 0, 2] with h = [0, 1, 0, 0] (a shift by one). Check with the DFT idea: what does H do to each frequency?
+
+<Solution>
+
+g[n] = f[n − 1]: **[2, 1, 0, 0]**, a circular shift right by one (2 wraps to the front). H(k) = e^(−2πik/4): magnitude 1, a phase ramp; shifting changes only phases.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Apply a 31 × 31 Gaussian (σ = 5) by FFT with mirror padding (`np.pad(..., mode="reflect")`, which is reflect-101) and compare with `cv2.GaussianBlur(img, (31, 31), 5)`.
+
+<Solution>
+
+```python
+g1 = cv2.getGaussianKernel(31, 5)
+kernel = g1 @ g1.T
+p = 15
+padded = np.pad(img, p, mode="reflect")                               # NumPy "reflect" = OpenCV REFLECT_101
+S = padded.shape[0]
+K = np.zeros((S, S))
+for dy in range(-p, p + 1):
+    for dx in range(-p, p + 1):
+        K[dy % S, dx % S] = kernel[dy + p, dx + p]
+fft_blur = np.fft.ifft2(np.fft.fft2(padded) * np.fft.fft2(K)).real[p:-p, p:-p]
+print("max difference:", f"{np.abs(fft_blur - cv2.GaussianBlur(img, (31, 31), 5)).max():.0e}")
+```
+
+Output:
+
+```text
+max difference: 2e-13
+```
+
+With matching (reflect-101) padding, the FFT result equals `cv2.GaussianBlur` everywhere, borders included.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Section 4.6 (convolution theorem) and 4.7.
+2. A. V. Oppenheim, R. W. Schafer, *Discrete-Time Signal Processing*, 3rd ed., Pearson, 2010 (circular convolution, overlap-add).
+3. OpenCV 4.13.0 documentation: `filter2D`, `mulSpectrums`, `dft`, `copyMakeBorder`. https://docs.opencv.org/4.13.0/

@@ -1,0 +1,297 @@
+export const meta = {
+  number: "32.4",
+  title: "Limits",
+  minutes: 25,
+  objectives: [
+    "Measure how fast NCC falls with rotation, occlusion and lighting changes",
+    "Search over rotations when the angle is unknown, and know the cost",
+    "Recognise look-alikes and orientation ambiguity",
+    "Decide when to switch from template matching to features, shape matching or learning",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 32.4 (Module 32).
+  Lab: MatchLab mode "limits".
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 32.4 Limits
+
+<Definition term="Limits of template matching">the conditions under which comparing a fixed picture pixel by pixel stops working: the object is rotated, scaled, seen in perspective, partly hidden, unevenly lit, or other objects look almost the same. Each can be patched by searching more poses, masking or normalising, at a cost; beyond that, feature-based or learned methods are needed.</Definition>
+
+Template matching is attractive because it is simple and exact when its assumptions hold. This chapter measures, on the same board, how quickly each assumption breaks, so that you can predict whether a template will work before building a system on it.
+
+## 1. An analogy
+
+A key fits its lock only when inserted straight, the right way up, all the way in. Turn it a little, use half of it, or try it on a different lock of the same brand, and it fails, or worse, it fits a lock it should not open.
+
+## 2. What breaks it
+
+<Flow
+  steps={[
+    { label: "Rotation: NCC falls from 1.0 to ~0.8 at 5°, ~0.6 at 10°", tone: "process" },
+    { label: "Scale: ~0.13 lost per 10 % (32.3)", tone: "process" },
+    { label: "Occlusion: score falls with the hidden fraction", tone: "process" },
+    { label: "Non-linear lighting: shadows, glare", tone: "process" },
+    { label: "Look-alikes: other objects or orientations score high too", tone: "result" },
+  ]}
+/>
+
+## 3. A worked example by hand
+
+How many rotations must you test? If NCC must stay above 0.8 and it falls to 0.8 at about 5° away from the true angle (Section 4), the tested angles must be at most 10° apart (±5°). A full turn then needs 360 / 10 = **36** templates; with 4 scales, 144 matches per image. At 2 ms each that is about 0.3 s, too slow for many lines. Coarse-to-fine (32.3) and restricting the angle range (parts usually lie within ±20°) bring it back down.
+
+## 4. Measured on the board
+
+**Rotation.** The chip rotated by 15°, matched with templates rotated by different angles (in OpenCV's sign convention, negative = clockwise):
+
+| Template angle | 0° | −5° | −10° | **−15°** | −20° |
+| --- | --- | --- | --- | --- | --- |
+| NCC at the rotated chip | 0.51 | 0.61 | 0.82 | **0.98** | 0.81 |
+| NCC at an upright chip | 1.00 | 0.79 | 0.60 | 0.51 | 0.39 |
+
+Rotation search finds it, but each 5° of error costs about 0.2 of NCC.
+
+**Occlusion.** Covering the left part of a chip with a grey bar:
+
+| Hidden width | 0 % | 20 % | 40 % | 60 % |
+| --- | --- | --- | --- | --- |
+| NCC | 0.99 | 0.89 | 0.75 | 0.58 |
+
+**Shadow.** Darkening the right half of one chip by up to 60 % (a non-linear change that normalisation cannot undo): NCC 0.89.
+
+**Look-alikes.** The upside-down chip scores **0.961** with the upright template: only its small pin-1 dot differs, so only 21 of the template's 837 pixels (2.5 %) differ by more than 30 grey levels. A 180°-rotated template scores 0.987 there, but also 0.953 on the upright chips. NCC cannot reliably tell the orientation; a separate check of the dot (for example the mean brightness at the dot's position: 87.9 on the upright chip, 39.9 on the upside-down one) can.
+
+<MatchLab mode="limits" caption="Choose a target chip, then rotate and scale the template until the NCC at the target (blue box) is back above 0.9. The rotated chip needs about 15° clockwise; the large chip about 1.3×. For the upside-down chip, note how high the score is even without any rotation."/>
+
+## 5. Remedies and alternatives
+
+| Problem | Patch within template matching | Better method |
+| --- | --- | --- |
+| rotation | search angles (±range, 5–10° steps) | rotation-invariant features (34.x), shape-based matching |
+| scale | search scales, pyramids (32.3) | scale-invariant features (SIFT, ORB) |
+| perspective | rectify first (16.3) | homography from feature matches (34.5) |
+| occlusion | mask the template, use several partial templates | features (many local matches), learned detectors |
+| lighting | NCC (32.2), gradient images, local normalisation | gradient-orientation matching, learned detectors |
+| look-alikes | add a second check on the distinguishing detail | classifiers on the candidate (36.x) |
+| many classes | one template per class | learned detectors (54.x) |
+
+**Masks.** `cv2.matchTemplate(image, templ, method, mask=…)` ignores template pixels where the mask is 0, for example the background around a round or irregular part, so that changing backgrounds do not lower the score.
+
+## 6. Industrial use
+
+Template matching remains the right tool when the pose is controlled (fixtures, conveyors with guides), the part is rigid and distinctive, and lighting is stable: fiducials, labels, printed marks, connectors on fixed boards. When parts arrive in random poses, use rotation-tolerant methods; when appearance varies a lot, use learning.
+
+## What you should remember from 32.4
+
+<Takeaways>
+<Takeaway n={1} title="Fragile to pose">~0.2 NCC lost per 5° of rotation here; scale similar.</Takeaway>
+<Takeaway n={2} title="Search costs">Angles × scales × positions: restrict ranges, use pyramids.</Takeaway>
+<Takeaway n={3} title="Look-alikes">High scores do not prove orientation or identity; check the difference.</Takeaway>
+<Takeaway n={4} title="Know when to switch">Random poses, occlusion, variation → features or learning.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Parts lie within ±20° and NCC drops to 0.8 at 5° error. How many angles to test?
+
+<Solution>
+
+Steps of 10° (±5° coverage) from −20° to +20°: −20, −10, 0, 10, 20: **5 angles**.
+
+</Solution>
+
+**Q2.** A connector must be checked for presence; another connector type looks almost the same except for a key notch. What do you add?
+
+<Solution>
+
+A second, small template (or measurement) on the notch region, checked only where the first match succeeded. The whole-part score cannot separate them.
+
+</Solution>
+
+### Next: 33.1 What a good feature is
+
+Part F: features and recognition, starting with points that can be found again under rotation, scale and lighting changes.
+
+## Code
+
+Three examples: rotation search, occlusion, and the orientation check.
+
+### 1. Rotation search
+
+```python
+import numpy as np
+import cv2
+
+board = cv2.imread("sample-board.png", cv2.IMREAD_GRAYSCALE)
+tpl = board[22:49, 25:56].copy()
+around = board[12:59, 17:64].copy()                                  # larger crop: rotate without empty corners
+
+def rotated_template(angle):
+    M = cv2.getRotationMatrix2D((23, 23), angle, 1.0)
+    return cv2.warpAffine(around, M, (47, 47))[10:37, 8:39]           # crop back to 31 × 27
+
+def ncc_at(image, t, cx, cy, r=3):
+    res = cv2.matchTemplate(image, t, cv2.TM_CCOEFF_NORMED)
+    h, w = t.shape
+    return round(float(res[cy - h // 2 - r:cy - h // 2 + r + 1, cx - w // 2 - r:cx - w // 2 + r + 1].max()), 3)
+
+for angle in (0, -5, -10, -15, -20):
+    t = rotated_template(angle)
+    print(f"template {angle:4d} deg: rotated chip {ncc_at(board, t, 90, 80)}, upright chip {ncc_at(board, t, 40, 35)}")
+```
+
+Output:
+
+```text
+template    0 deg: rotated chip 0.509, upright chip 1.0
+template   -5 deg: rotated chip 0.606, upright chip 0.791
+template  -10 deg: rotated chip 0.815, upright chip 0.599
+template  -15 deg: rotated chip 0.98, upright chip 0.512
+template  -20 deg: rotated chip 0.809, upright chip 0.39
+```
+
+### 2. Occlusion
+
+```python
+for frac in (0, 0.2, 0.4, 0.6):
+    img = board.copy()
+    width = int(round(31 * frac))
+    img[22:49, 125:125 + width] = 100                                  # grey bar over the left of the chip at (140, 35)
+    print(f"{frac:.0%} hidden: NCC {ncc_at(img, tpl, 140, 35)}")
+```
+
+Output:
+
+```text
+0% hidden: NCC 0.991
+20% hidden: NCC 0.892
+40% hidden: NCC 0.752
+60% hidden: NCC 0.58
+```
+
+### 3. Is it upside down?
+
+```python
+print("upright template at the upside-down chip:", ncc_at(board, tpl, 40, 122))
+for name, (cx, cy) in [("upright (40, 35)", (40, 35)), ("upside down (40, 122)", (40, 122))]:
+    patch = board[cy - 13:cy + 14, cx - 15:cx + 16]                    # the 27 × 31 area of the match
+    print(name, "mean brightness at the pin-1 dot:", round(float(patch[7:11, 4:8].mean()), 1))
+```
+
+Output:
+
+```text
+upright template at the upside-down chip: 0.961
+upright (40, 35) mean brightness at the pin-1 dot: 87.9
+upside down (40, 122) mean brightness at the pin-1 dot: 39.9
+```
+
+## OpenCV API notes
+
+- **Rotated templates**: `cv2.getRotationMatrix2D(center, angle_deg, scale)` + `cv2.warpAffine`; rotate a larger crop and cut the template out to avoid empty corners, or use a `mask`.
+- **`cv2.matchTemplate(..., mask=m)`**: `m` same size as the template, non-zero = use; supported for all methods in OpenCV 4.x, but without the FFT shortcut (slower).
+- **`cv2.ROTATE_180`**, **`cv2.flip`** for exact 90°/180° and mirrored templates.
+- **Alternatives in OpenCV**: feature detectors and matchers (`cv2.ORB_create`, `cv2.SIFT_create`, `BFMatcher`, Module 34), `cv2.findHomography` (34.5), Generalized Hough (`cv2.createGeneralizedHoughGuil`), DNN detectors (Module 54).
+
+## Where it fails
+
+- **Any uncontrolled pose** beyond the searched ranges.
+- **Deformable or variable objects**: food, textiles, natural parts.
+- **Small distinguishing details**: whole-template scores hide them.
+- **Large search spaces**: rotation × scale × position grows quickly in time.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **One high score = success**: check that look-alikes score clearly lower.
+- **Rotating the template inside its own box**: empty corners lower the score; crop from a larger area or mask.
+- **Mixing up rotation directions** (OpenCV: positive angle = counter-clockwise on screen).
+- **Ignoring occlusion in tests**: test with partly hidden parts if they occur in production.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Shape-based matching
+
+Industrial "geometric" or shape-based matchers (Steger 2002 [1]) compare the directions of edge gradients at model points instead of grey values. The score is the mean cosine between model and image gradient directions; it ignores contrast (and optionally contrast reversal), tolerates occlusion and clutter (missing points simply do not contribute), and is computed over pyramids and angle ranges, with sub-pixel refinement of position, angle and scale.
+
+### The Generalized Hough transform
+
+Ballard's Generalized Hough (26.1) lets every edge point vote for the object's reference point using a table of offsets indexed by gradient direction, which handles occlusion naturally; OpenCV provides it as `GeneralizedHoughBallard` and `GeneralizedHoughGuil` (with rotation and scale).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The template differs from the part by 10° of rotation. NCC here is about…",
+      options: ["0.99", "0.8–0.6", "0.0", "1.0"],
+      answer: 1,
+      explanation: "0.82 / 0.60 in the measurements.",
+    },
+    {
+      question: "Why did the upside-down chip still score 0.961?",
+      options: ["A bug", "Only a tiny detail (the pin-1 dot) differs", "NCC ignores rotation", "Wrong method"],
+      answer: 1,
+      explanation: "Only 21 of 837 pixels (2.5 %) differ clearly: the dot in one corner versus the other.",
+    },
+    {
+      question: "40 % of the part is hidden. What happens?",
+      options: ["Nothing", "NCC falls to about 0.75", "NCC rises", "The match moves"],
+      answer: 1,
+      explanation: "0.99 → 0.75 in the test.",
+    },
+    {
+      question: "Parts arrive in any rotation and partly overlapping. Best approach?",
+      options: ["Template matching with a lower threshold", "Feature-based or shape-based matching, or a learned detector", "SQDIFF", "A bigger template"],
+      answer: 1,
+      explanation: "Template matching's assumptions no longer hold.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A full rotation search with 8° steps, 3 scales, and 1.5 ms per match. How long per image? How long if parts lie within ±16°?
+
+<Solution>
+
+Full: 360 / 8 = 45 angles × 3 scales × 1.5 ms = **202.5 ms**. Within ±16°: angles −16, −8, 0, 8, 16 = 5 × 3 × 1.5 = **22.5 ms**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Search angles from −30° to 30° in 5° steps over the whole board with the rotated template, and report the best angle and position.
+
+<Solution>
+
+```python
+best = max((float(cv2.minMaxLoc(cv2.matchTemplate(board, rotated_template(a), cv2.TM_CCOEFF_NORMED))[1]), a) for a in range(-30, 31, 5) if a != 0)
+print("best angle:", best[1], "deg, NCC", round(best[0], 3))
+```
+
+Output:
+
+```text
+best angle: -15 deg, NCC 0.98
+```
+
+</Solution>
+
+## References
+
+1. C. Steger, "Occlusion, clutter, and illumination invariant object recognition", *International Archives of Photogrammetry, Remote Sensing and Spatial Information Sciences* XXXIV(3A), 345–350, 2002.
+2. D. H. Ballard, "Generalizing the Hough transform to detect arbitrary shapes", *Pattern Recognition* 13(2), 111–122, 1981.
+3. R. Brunelli, *Template Matching Techniques in Computer Vision: Theory and Practice*, Wiley, 2009.
+4. OpenCV 4.13.0 documentation: `matchTemplate`, `getRotationMatrix2D`, `GeneralizedHoughGuil`. https://docs.opencv.org/4.13.0/

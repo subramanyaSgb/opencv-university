@@ -134,3 +134,6 @@ export { HoughLab } from "./HoughLab";
 export { SegmentLab } from "./SegmentLab";
 export { ActiveContourLab } from "./ActiveContourLab";
 export { ShapeLab } from "./ShapeLab";
+export { FourierLab } from "./FourierLab";
+export { BasisLab } from "./BasisLab";
+export { MatchLab } from "./MatchLab";

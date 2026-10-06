@@ -1,0 +1,297 @@
+export const meta = {
+  number: "31.3",
+  title: "Gabor filters",
+  minutes: 25,
+  objectives: [
+    "Describe a Gabor kernel: a wave of chosen direction and wavelength inside a Gaussian window",
+    "Compute kernel values by hand and with cv2.getGaborKernel",
+    "Build a small Gabor filter bank and measure local texture energy",
+    "Detect a texture defect from a drop in one orientation's energy",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 31.3 (Module 31).
+  Lab: BasisLab mode "gabor" (kernel equals cv2.getGaborKernel).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 31.3 Gabor filters
+
+<Definition term="Gabor filter">a filter whose kernel is a sinusoidal wave multiplied by a Gaussian window. It responds strongly where the image contains stripes of a particular direction and wavelength, near that position: a local, oriented frequency detector (Gabor 1946 [1]; Daugman 1985 [2]).</Definition>
+
+Fourier analysis (30.x) finds frequencies but not their positions; wavelets (31.2) find positions but only in three fixed directions. A Gabor filter can be tuned to any direction and wavelength and is local. Banks of Gabor filters model the orientation-selective cells of the visual cortex and are a classic tool for texture: fabric, wood, paper, machined surfaces, fingerprints and iris codes.
+
+## 1. An analogy
+
+Running a comb over a fabric. A comb with the same tooth spacing as the threads, held in the threads' direction, slides into them and "rings"; held across them or with the wrong spacing it barely engages. A Gabor filter is a comb with a chosen spacing (λ) and angle (θ), and its response tells where the fabric matches.
+
+## 2. The kernel
+
+<Flow
+  steps={[
+    { label: "Rotate coordinates by θ: x′ = x cos θ + y sin θ, y′ = −x sin θ + y cos θ", tone: "data" },
+    { label: "Gaussian window: exp(−(x′² + γ² y′²) / 2σ²)", tone: "process" },
+    { label: "Carrier wave: cos(2π x′ / λ + ψ)", tone: "process" },
+    { label: "Kernel = window × wave (cv2.getGaborKernel)", tone: "result" },
+  ]}
+/>
+
+| Parameter | Meaning |
+| --- | --- |
+| θ | direction of the wave's variation; stripes in the image perpendicular to it respond (θ = 0: vertical stripes) |
+| λ | wavelength in pixels: the stripe period it responds to |
+| σ | size of the Gaussian window: how local the filter is (σ ≈ 0.5 λ is common) |
+| γ | aspect ratio: γ < 1 makes the window longer along the stripes |
+| ψ | phase: 0 gives an even (symmetric) kernel, π/2 an odd (antisymmetric) one |
+
+## 3. A worked example by hand
+
+Kernel values for θ = 0, λ = 8, σ = 4, γ = 0.5, ψ = 0 (window exponent −(x² + 0.25 y²) / 32):
+
+| Position (x, y) | Window | Wave cos(2πx/8) | Kernel |
+| --- | --- | --- | --- |
+| (0, 0) | 1 | 1 | **1.000** |
+| (4, 0) | e^(−16/32) = 0.607 | cos π = −1 | **−0.607** |
+| (8, 0) | e^(−64/32) = 0.135 | cos 2π = 1 | **0.135** |
+| (0, 4) | e^(−4/32) = 0.882 | 1 | **0.882** |
+
+Along x the kernel alternates every half wavelength; along y (the stripe direction) it stays positive and fades slowly, because γ = 0.5 stretches the window. `cv2.getGaborKernel` returns exactly these values. Note that the kernel's sum is 2.14, not 0: an even Gabor kernel also responds to the mean brightness, so subtract the mean (or use the odd kernel, or pairs) before measuring texture.
+
+## 4. Finding a texture defect
+
+The fabric image has vertical and horizontal threads (period 8 px), a band where the vertical threads are missing, and a knot. Filter with four orientations (λ = 8, σ = 4, γ = 0.5) and average |response| over 15 × 15 windows (**local energy**):
+
+| θ | Energy outside the band | Inside the band |
+| --- | --- | --- |
+| 0° (vertical threads) | 1 925 | **532** |
+| 45° | 47 | 63 |
+| 90° (horizontal threads) | 1 949 | 1 975 |
+| 135° | 47 | 53 |
+
+Only the 0° channel sees the defect: its energy drops to 28 % in the band, while the 90° channel is unchanged (the horizontal threads are intact). Thresholding the 0° energy at its mean − 4 standard deviations (measured outside the band) finds the band with an IoU of 0.79 (the 15 × 15 averaging rounds its corners). The 45° and 135° channels are nearly silent: the fabric has no diagonal structure.
+
+<BasisLab mode="gabor" caption="The Gabor kernel (left), the fabric, its response and the local energy. At θ = 0° and λ = 8 the band of missing threads is dark in the energy map. Turn θ to 90°: now the horizontal threads respond and the band disappears. Change λ away from 8 and the whole response collapses. Try ψ = 90° for the odd kernel."/>
+
+## 5. Industrial use
+
+- **Textile inspection**: missing threads, holes, slubs and weave faults as local energy drops or changes in a Gabor bank.
+- **Surface texture**: grain direction in wood, grinding marks on metal, orientation of fibres.
+- **Fingerprints**: Gabor filters tuned to the local ridge direction and spacing enhance ridges before minutiae extraction.
+- **Iris recognition**: Daugman's iris codes are the signs of complex Gabor responses [2].
+- **Texture features** for classification: mean and variance of each filter's energy (35.x).
+
+## What you should remember from 31.3
+
+<Takeaways>
+<Takeaway n={1} title="Wave in a window">cos(2πx′/λ + ψ) × Gaussian; local and oriented.</Takeaway>
+<Takeaway n={2} title="Tuning">θ direction, λ period, σ size, γ elongation, ψ even/odd.</Takeaway>
+<Takeaway n={3} title="Bank">Several θ (and λ): each channel's energy describes the texture.</Takeaway>
+<Takeaway n={4} title="Defects">Local energy drops or changes where the texture breaks.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Stripes run horizontally with a period of 12 px. Which θ and λ?
+
+<Solution>
+
+Horizontal stripes vary along y: **θ = 90°**, **λ = 12 px**.
+
+</Solution>
+
+**Q2.** Why subtract the image mean before measuring Gabor energy with an even kernel?
+
+<Solution>
+
+The even kernel's sum is not zero (2.14 here), so it also responds to plain brightness; without removing the mean, bright regions look like strong texture.
+
+</Solution>
+
+### Next: 31.4 Radon and CT reconstruction
+
+Projections, sinograms, and how a CT scanner rebuilds an image from its shadows.
+
+## Code
+
+Three examples: kernel values, an orientation bank, and defect detection.
+
+### 1. Kernel values
+
+```python
+import numpy as np
+import cv2
+
+k = cv2.getGaborKernel((21, 21), 4.0, 0, 8.0, 0.5, 0, ktype=cv2.CV_64F)   # (size, sigma, theta, lambda, gamma, psi)
+c = 10                                                                      # centre index
+print("centre:", k[c, c], "| (4, 0):", round(k[c, c + 4], 3), "| (8, 0):", round(k[c, c + 8], 3), "| (0, 4):", round(k[c + 4, c], 3))
+print("sum:", round(float(k.sum()), 3))
+```
+
+Output:
+
+```text
+centre: 1.0 | (4, 0): -0.607 | (8, 0): 0.135 | (0, 4): 0.882
+sum: 2.142
+```
+
+- `theta` and `psi` are in **radians**; `lambd` is spelled without the a (lambda is a Python keyword).
+
+### 2. An orientation bank
+
+```python
+img = cv2.imread("sample-fabric.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+y, x = np.mgrid[0:256, 0:256]
+band = (x > 150) & (x < 172) & (y > 60) & (y < 200)                     # where the vertical threads are missing
+
+energy = {}
+for deg in (0, 45, 90, 135):
+    k = cv2.getGaborKernel((21, 21), 4.0, np.deg2rad(deg), 8.0, 0.5, 0, ktype=cv2.CV_32F)
+    response = cv2.filter2D(img - img.mean(), cv2.CV_32F, k)
+    energy[deg] = cv2.blur(np.abs(response), (15, 15))                   # local energy
+    print(f"theta {deg:3d}: outside {energy[deg][~band].mean():7.1f}, inside {energy[deg][band].mean():7.1f}")
+```
+
+Output:
+
+```text
+theta   0: outside  1924.8, inside   532.3
+theta  45: outside    47.1, inside    63.0
+theta  90: outside  1948.5, inside  1974.9
+theta 135: outside    47.3, inside    52.7
+```
+
+### 3. Detecting the defect
+
+```python
+e = energy[0]
+mu, sd = e[~band].mean(), e[~band].std()
+defect = e < mu - 4 * sd
+iou = (defect & band).sum() / (defect | band).sum()
+n, labels, stats, _ = cv2.connectedComponentsWithStats(defect.astype(np.uint8))
+print("threshold:", round(float(mu - 4 * sd), 1), "| defect pixels:", int(defect.sum()), "| IoU with the band:", round(float(iou), 3))
+print("regions:", n - 1, "| largest box (x, y, w, h):", stats[1:, :4][np.argmax(stats[1:, 4])].tolist())
+```
+
+Output:
+
+```text
+threshold: 1358.9 | defect pixels: 3653 | IoU with the band: 0.794
+regions: 2 | largest box (x, y, w, h): [147, 57, 27, 147]
+```
+
+- The largest region's box (x 147–173, y 57–203) matches the band (x 151–171, y 61–199) within the 15 × 15 energy window; the second, small region is a false alarm.
+
+## OpenCV API notes
+
+- **`cv2.getGaborKernel(ksize, sigma, theta, lambd, gamma, psi=CV_PI*0.5, ktype=CV_64F)`**: note the default ψ = π/2 (odd kernel); pass 0 for the even one. `ksize` should cover about ±3σ.
+- **Filtering**: `cv2.filter2D(img, cv2.CV_32F, kernel)`, float output (responses are signed).
+- **Energy**: |response| or response² smoothed with `cv2.blur` / `GaussianBlur`; or combine even and odd kernels: √(even² + odd²) (a phase-independent amplitude).
+- **Speed**: a bank of k filters costs k convolutions; for large kernels filter in the frequency domain (30.5).
+
+## Where it fails
+
+- **Wrong scale**: a bank tuned to λ = 8 misses textures of period 20; use several λ (octaves).
+- **Irregular textures** (stone, foam): no dominant frequency; statistical descriptors (LBP, GLCM, 35.x) work better.
+- **Lighting changes**: energy scales with contrast; normalise by local contrast.
+- **Border effects** and the energy window blur the defect outline; refine with morphology.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Degrees instead of radians** for θ and ψ.
+- **Forgetting ψ's default** of π/2 when an even kernel was intended.
+- **uint8 filter output**: negative responses are clipped; use CV_32F.
+- **Mixing up θ**: θ is the direction across the stripes (θ = 0 detects vertical stripes).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Uncertainty and optimality
+
+Gabor showed that his elementary signals (Gaussian-windowed waves) reach the lower bound of the joint uncertainty in time and frequency; Daugman [2] extended this to 2-D, where Gabor functions are optimally localised in position and spatial frequency together, and matched them to receptive fields of simple cells in the visual cortex.
+
+### Complex Gabor and log-Gabor
+
+A complex Gabor kernel (even + i · odd) gives amplitude (texture strength) and phase (position of stripes) separately; phase is used for fingerprint and iris codes. Log-Gabor filters (Gaussian on a log-frequency axis) have no DC response and better cover high frequencies, which avoids the mean-brightness issue of the even Gabor.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "θ = 0 makes the Gabor filter respond to…",
+      options: ["Horizontal stripes", "Vertical stripes", "Diagonal stripes", "Edges only"],
+      answer: 1,
+      explanation: "The wave varies along x.",
+    },
+    {
+      question: "Which parameter sets the stripe period it responds to?",
+      options: ["σ", "λ", "γ", "ψ"],
+      answer: 1,
+      explanation: "λ is the wavelength in pixels.",
+    },
+    {
+      question: "Why did only the 0° channel show the missing-thread band?",
+      options: ["It is the strongest filter", "The missing threads are vertical; horizontal threads are intact", "Noise", "Wrong λ"],
+      answer: 1,
+      explanation: "Each orientation channel sees one thread direction.",
+    },
+    {
+      question: "cv2.getGaborKernel's default ψ is…",
+      options: ["0", "π/2", "π", "2π"],
+      answer: 1,
+      explanation: "An odd kernel by default.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+With θ = 0, λ = 8, σ = 4, γ = 0.5, ψ = 0, compute the kernel at (2, 0) and (4, 4).
+
+<Solution>
+
+(2, 0): e^(−4/32) · cos(π/2) = 0.882 · 0 = **0**. (4, 4): e^(−(16 + 4)/32) · cos π = e^(−0.625) · (−1) = **−0.535**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Run the 0° filter with λ = 6 and λ = 12 instead of 8. How does the energy outside the band change?
+
+<Solution>
+
+```python
+for lam in (6, 8, 12):
+    k = cv2.getGaborKernel((21, 21), 4.0, 0, float(lam), 0.5, 0, ktype=cv2.CV_32F)
+    e = cv2.blur(np.abs(cv2.filter2D(img - img.mean(), cv2.CV_32F, k)), (15, 15))
+    print("lambda", lam, "energy outside the band:", round(float(e[~band].mean()), 1))
+```
+
+Output:
+
+```text
+lambda 6 energy outside the band: 1169.1
+lambda 8 energy outside the band: 1924.8
+lambda 12 energy outside the band: 1159.9
+```
+
+The energy is highest when λ matches the 8-px thread period and falls by about 40 % either side. A bank over several wavelengths finds the period of an unknown texture as the λ with the largest energy.
+
+</Solution>
+
+## References
+
+1. D. Gabor, "Theory of communication", *Journal of the IEE* 93(26), 429–457, 1946.
+2. J. G. Daugman, "Uncertainty relation for resolution in space, spatial frequency, and orientation optimized by two-dimensional visual cortical filters", *Journal of the Optical Society of America A* 2(7), 1160–1169, 1985.
+3. A. K. Jain, F. Farrokhnia, "Unsupervised texture segmentation using Gabor filters", *Pattern Recognition* 24(12), 1167–1186, 1991.
+4. OpenCV 4.13.0 documentation: `getGaborKernel`, `filter2D`. https://docs.opencv.org/4.13.0/

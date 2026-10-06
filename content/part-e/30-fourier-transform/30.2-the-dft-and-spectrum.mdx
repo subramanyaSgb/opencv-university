@@ -1,0 +1,331 @@
+export const meta = {
+  number: "30.2",
+  title: "The DFT and spectrum",
+  minutes: 30,
+  objectives: [
+    "Compute the 2-D DFT of an image with cv2.dft and np.fft.fft2",
+    "Display the spectrum: magnitude, logarithm, shift to the centre",
+    "Read a spectrum: mean, edges, textures, periodic patterns, the border cross",
+    "Understand what the phase carries, and use windowing against leakage",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 30.2 (Module 30).
+  Lab: FourierLab mode "spectrum".
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 30.2 The DFT and spectrum
+
+<Definition term="Spectrum">the picture of an image's Fourier transform: for every frequency (u, v), how strong that wave is (magnitude) and where its stripes sit (phase). Usually shown as the logarithm of the magnitude, with frequency (0, 0) moved to the centre.</Definition>
+
+The 2-D DFT turns a W × H image into W × H complex numbers F(u, v), one per wave (30.1). It is computed in O(N log N) by the fast Fourier transform (Cooley and Tukey 1965 [1]), so a megapixel image takes milliseconds. This chapter is about **looking** at the result: a spectrum is hard to read at first, but a few patterns cover most cases.
+
+## 1. An analogy
+
+A weather map of a country's winds, rather than of its cities. You cannot find a particular street on it, but you see at a glance the main directions and strengths. A spectrum shows the main directions and strengths of brightness changes in an image, not where they are.
+
+## 2. From image to picture of the spectrum
+
+<Flow
+  steps={[
+    { label: "Grey image (float)", tone: "data" },
+    { label: "2-D DFT: complex F(u, v)", tone: "process" },
+    { label: "Magnitude |F| (and phase ∠F)", tone: "process" },
+    { label: "log(1 + |F|): values span many decades", tone: "process" },
+    { label: "fftshift: (0, 0) to the centre → display", tone: "result" },
+  ]}
+/>
+
+- **Magnitude** |F(u, v)| = √(re² + im²): how much of the wave (u, v) the image contains.
+- **Phase** ∠F = atan2(im, re): the wave's shift.
+- **Log**: F(0, 0) (N × mean) is typically thousands of times larger than the rest; without the logarithm only one bright dot is visible.
+- **Shift**: the DFT stores frequencies in the order 0, 1, …, W/2 − 1, −W/2, …, −1. `np.fft.fftshift` swaps the quadrants so that (0, 0) is in the middle and low frequencies are around it.
+
+## 3. A worked example by hand
+
+A 2 × 2 image [[10, 20], [30, 40]]. For a 2 × 2 DFT the waves are just sums and differences:
+
+```text
+F(0, 0) = 10 + 20 + 30 + 40         = 100   (4 × mean 25)
+F(1, 0) = 10 − 20 + 30 − 40         = −20   (left minus right columns)
+F(0, 1) = 10 + 20 − 30 − 40         = −40   (top minus bottom rows)
+F(1, 1) = 10 − 20 − 30 + 40         = 0     (diagonal pattern: none)
+```
+
+The image is brighter at the bottom (by 20 per row) more than at the right (by 10 per column), so the vertical wave F(0, 1) is twice as strong as the horizontal one. There is no checkerboard component.
+
+## 4. Reading a spectrum
+
+<FourierLab mode="spectrum" caption="Switch between images and compare their spectra. Vertical stripes: two dots on the horizontal axis plus their odd harmonics (sharp stripes are square waves). Stripes at 29°: the dots rotate with them. The bright square: a cross of sinc ripples. The test scene: a bright centre, lines from its straight edges, and dots from its fine stripes. Click any point of the spectrum to see its wave. Then try 'swap magnitude and phase'."/>
+
+| What you see | What it means |
+| --- | --- |
+| bright centre | the mean and slow shading (most of the energy) |
+| a line through the centre | straight edges **perpendicular** to the line |
+| isolated pairs of dots | a periodic pattern (stripes, mesh, interference) |
+| rings | circular structures or a blurred (defocused) image |
+| a strong horizontal / vertical cross | edges at the image border: the DFT treats the image as repeating, so left and right edges meet |
+
+In the test scene, the mean gives F(0, 0) = 8 520 769 (256 × 256 × 130.0), which is 4.4 % of the sum of all magnitudes on its own.
+
+## 5. Magnitude vs phase
+
+Which part carries the picture? Combine the **phase** of the test scene with the **magnitude** of a plain square, and the other way round:
+
+| Result | Correlation with the scene | with the square |
+| --- | --- | --- |
+| scene phase + square magnitude | **0.77** | −0.19 |
+| square phase + scene magnitude | −0.40 | **0.77** |
+
+The image follows its **phase**: positions of edges and objects are stored there (Oppenheim and Lim 1981 [2]). The magnitude says how much of each frequency, which is enough to describe textures and to design filters, but not to recognise the scene.
+
+## 6. Leakage and windowing
+
+The DFT assumes the image repeats. Two consequences:
+
+- **Border cross**: a horizontal ramp (dark left, bright right) repeats with a jump. Only 82.8 % of its energy lies within 3 frequency steps of the centre; the rest smears along the horizontal axis as a bright line.
+- **Leakage**: stripes with a period of 15.3 px do not fit a whole number of times into 256 px. Their peak spreads to neighbouring frequencies: only 95.6 % of the energy is within 2 bins of the peak (100 % for a period of 16 px).
+
+Multiplying the image by a smooth **window** (a Hann window falls to zero at the borders) removes the jump: the ramp then keeps 99.9 % near the centre, the stripes 99.4 % near their peak. Window when you analyse a spectrum; do not window when you filter and transform back (the window would stay in the image).
+
+## 7. Industrial use
+
+- **Texture and mesh inspection**: the period and direction of a weave or a screen from its spectrum peaks; defects change the peak pattern.
+- **Orientation measurement**: the dominant line in the spectrum gives the direction of grooves, scratches or text lines.
+- **Focus and blur analysis**: a blurred image loses its high frequencies (dark outer spectrum); motion blur leaves dark parallel lines.
+- **Frequency-domain filtering** (30.3, 30.4).
+
+## What you should remember from 30.2
+
+<Takeaways>
+<Takeaway n={1} title="Display">log(1 + |F|), shifted so (0, 0) is in the centre.</Takeaway>
+<Takeaway n={2} title="Read">Lines ⟂ edges; dot pairs = periodic patterns; bright centre = smooth content.</Takeaway>
+<Takeaway n={3} title="Phase">Holds the positions: the picture follows the phase.</Takeaway>
+<Takeaway n={4} title="Window">A Hann window removes the border cross and leakage for analysis.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A spectrum shows a strong bright line from the centre at 45° (up-right). What is in the image?
+
+<Solution>
+
+Edges or stripes **perpendicular** to it: lines running at −45° (down-right) in the image.
+
+</Solution>
+
+**Q2.** Why does an image's spectrum often show a bright horizontal and vertical cross, even without such edges inside?
+
+<Solution>
+
+The DFT treats the image as periodic: the left and right (and top and bottom) borders meet with a jump, which acts like vertical (horizontal) edges. A window removes it.
+
+</Solution>
+
+### Next: 30.3 Low- and high-pass filters
+
+Filtering by multiplying the spectrum: ideal, Butterworth and Gaussian filters.
+
+## Code
+
+Three examples: the 2 × 2 example and OpenCV vs NumPy, magnitude vs phase, and windowing.
+
+### 1. The DFT with OpenCV and NumPy
+
+```python
+import numpy as np
+import cv2
+
+tiny = np.array([[10, 20], [30, 40]], np.float32)
+print("np.fft.fft2:", np.fft.fft2(tiny).real.tolist())
+
+img = cv2.imread("sample-fft-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float32)
+D = cv2.dft(img, flags=cv2.DFT_COMPLEX_OUTPUT)                       # H × W × 2 (re, im)
+F = np.fft.fft2(img)
+print("cv2.dft shape:", D.shape, "| F(0,0):", D[0, 0].tolist(), "| pixel sum:", float(img.sum()))
+print("same as NumPy:", np.allclose(D[..., 0] + 1j * D[..., 1], F, rtol=1e-4, atol=1))
+
+mag = cv2.magnitude(D[..., 0], D[..., 1])
+spectrum = np.fft.fftshift(np.log1p(mag))                            # for display
+show = cv2.normalize(spectrum, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+print("display range:", int(show.min()), int(show.max()), "| centre:", show.shape[0] // 2, show.shape[1] // 2, "value", int(show[128, 128]))
+```
+
+Output:
+
+```text
+np.fft.fft2: [[100.0, -20.0], [-40.0, 0.0]]
+cv2.dft shape: (256, 256, 2) | F(0,0): [8520769.0, 0.0] | pixel sum: 8520769.0
+same as NumPy: True
+display range: 0 255 | centre: 128 128 value 255
+```
+
+- `cv2.dft` needs float32/float64 input. `DFT_COMPLEX_OUTPUT` gives two channels; without it, a real input gives a packed format (CCS) that is harder to use.
+- `cv2.magnitude(re, im)` and `cv2.phase(re, im)` compute |F| and ∠F.
+
+### 2. Magnitude vs phase
+
+```python
+square = np.zeros((256, 256))
+square[104:152, 104:152] = 1
+A, B = np.fft.fft2(img), np.fft.fft2(square)
+scene_phase = np.fft.ifft2(np.abs(B) * np.exp(1j * np.angle(A))).real
+square_phase = np.fft.ifft2(np.abs(A) * np.exp(1j * np.angle(B))).real
+cc = lambda a, b: round(float(np.corrcoef(a.ravel(), b.ravel())[0, 1]), 2)
+print("scene phase + square magnitude: corr scene", cc(scene_phase, img), "| square", cc(scene_phase, square))
+print("square phase + scene magnitude: corr scene", cc(square_phase, img), "| square", cc(square_phase, square))
+```
+
+Output:
+
+```text
+scene phase + square magnitude: corr scene 0.77 | square -0.19
+square phase + scene magnitude: corr scene -0.4 | square 0.77
+```
+
+### 3. Leakage and the Hann window
+
+```python
+y, x = np.mgrid[0:256, 0:256].astype(float)
+hann = cv2.createHanningWindow((256, 256), cv2.CV_64F)               # 2-D Hann window, 0 at the borders
+
+def share_near_peak(im, r=2):
+    p = np.abs(np.fft.fft2(im - im.mean())) ** 2
+    v, u = np.unravel_index(np.argmax(p), p.shape)
+    f = np.fft.fftfreq(256, 1 / 256)
+    U, V = np.meshgrid(f, f)
+    near = (np.hypot(U - f[u], V - f[v]) <= r) | (np.hypot(U + f[u], V + f[v]) <= r)
+    return round(float(p[near].sum() / p.sum()), 3)
+
+for period in (16, 15.3):
+    s = 128 + 60 * np.cos(2 * np.pi * x / period)
+    print(f"period {period}: plain {share_near_peak(s)}, Hann {share_near_peak((s - s.mean()) * hann)}")
+```
+
+Output:
+
+```text
+period 16: plain 1.0, Hann 0.993
+period 15.3: plain 0.956, Hann 0.994
+```
+
+- With an exact period (16 px = 16 cycles per 256), the plain DFT has no leakage; the window then widens the peak slightly.
+
+## OpenCV API notes
+
+- **`cv2.dft(src, flags=0, nonzeroRows=0)`**: flags `DFT_COMPLEX_OUTPUT`, `DFT_INVERSE`, `DFT_SCALE`, `DFT_ROWS`, `DFT_REAL_OUTPUT`. **`cv2.idft(src, flags)`** = `dft` with `DFT_INVERSE`; add `DFT_SCALE` to divide by the number of pixels.
+- **`cv2.getOptimalDFTSize(n)`**: next size with only factors 2, 3 and 5 (for example 257 → 270, 1009 → 1024). Pad with `cv2.copyMakeBorder` before transforming.
+- **`cv2.magnitude`, `cv2.phase`, `cv2.cartToPolar`, `cv2.polarToCart`** for the complex parts; **`cv2.createHanningWindow(size, type)`** for a 2-D window.
+- **NumPy**: `np.fft.fft2`, `ifft2`, `fftshift`, `ifftshift`, `fftfreq`; `np.fft.rfft2` for real input (half the spectrum, faster).
+
+## Where it fails
+
+- **Localisation**: the spectrum says what frequencies, not where; a small defect barely changes it.
+- **Strong low frequencies** hide weak details in the display; subtract the mean or high-pass first.
+- **Non-integer periods**: leakage spreads peaks; use windowing and interpolate between bins.
+- **Phase is hard to read** directly; use it through the inverse transform.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Showing |F| without log**: a single bright dot on black.
+- **Forgetting fftshift** (or undoing it before the inverse with `ifftshift`).
+- **uint8 into cv2.dft**: convert to float first.
+- **Windowing before filtering**: the window then multiplies the result.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The FFT
+
+The Cooley–Tukey algorithm [1] splits an N-point DFT into two N/2-point DFTs (even and odd samples) recursively, giving O(N log N) instead of O(N²); mixed-radix versions handle factors 2, 3 and 5, which is why `getOptimalDFTSize` returns such sizes. A 2-D DFT is a 1-D DFT of every row followed by one of every column.
+
+### Periodic and smooth decomposition
+
+Instead of windowing, Moisan's periodic plus smooth decomposition splits an image into a periodic part (whose DFT has no border cross) and a smooth part that carries the border jumps; the periodic part gives a clean spectrum without darkening the image borders.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why display log(1 + |F|)?",
+      options: ["To remove noise", "Magnitudes span many orders of magnitude", "OpenCV requires it", "To get the phase"],
+      answer: 1,
+      explanation: "F(0,0) dominates otherwise.",
+    },
+    {
+      question: "Which carries the positions of edges and objects?",
+      options: ["Magnitude", "Phase", "F(0,0) only", "Neither"],
+      answer: 1,
+      explanation: "The swap experiment: the image follows its phase.",
+    },
+    {
+      question: "A bright cross in the spectrum of a scene without such edges comes from…",
+      options: ["Noise", "The jump between opposite image borders", "Compression", "A wrong fftshift"],
+      answer: 1,
+      explanation: "The DFT assumes periodic repetition.",
+    },
+    {
+      question: "cv2.getOptimalDFTSize(257) returns…",
+      options: ["256", "257", "270", "512"],
+      answer: 2,
+      explanation: "270 = 2 · 3³ · 5.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+DFT of the 2 × 2 image [[5, 5], [5, 5]] and of [[0, 10], [10, 0]].
+
+<Solution>
+
+Constant: F(0, 0) = 20, all others 0. Checkerboard: F(0, 0) = 20, F(1, 0) = 0 − 10 + 10 − 0 = 0, F(0, 1) = 0 + 10 − 10 − 0 = 0, F(1, 1) = 0 − 10 − 10 + 0 = **−20**: only the diagonal pattern.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Rotate vertical stripes (period 16 px) by 0°, 30° and 60° and find the angle of the strongest spectrum peak. Does it rotate with the stripes?
+
+<Solution>
+
+```python
+for deg in (0, 30, 60):
+    a = np.deg2rad(deg)
+    s = 128 + 60 * np.cos(2 * np.pi * (x * np.cos(a) + y * np.sin(a)) / 16)
+    p = np.abs(np.fft.fft2(s - s.mean()))
+    v, u = np.unravel_index(np.argmax(p), p.shape)
+    f = np.fft.fftfreq(256, 1 / 256)
+    print(deg, "deg -> peak at", (int(f[u]), int(f[v])), "angle", round(float(np.degrees(np.arctan2(f[v], f[u]))) % 180, 1))
+```
+
+Output:
+
+```text
+0 deg -> peak at (16, 0) angle 0.0
+30 deg -> peak at (14, 8) angle 29.7
+60 deg -> peak at (8, 14) angle 60.3
+```
+
+The peak rotates with the stripes (the small errors come from rounding the frequency to whole bins).
+
+</Solution>
+
+## References
+
+1. J. W. Cooley, J. W. Tukey, "An algorithm for the machine calculation of complex Fourier series", *Mathematics of Computation* 19(90), 297–301, 1965.
+2. A. V. Oppenheim, J. S. Lim, "The importance of phase in signals", *Proceedings of the IEEE* 69(5), 529–541, 1981.
+3. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Sections 4.5–4.6 (2-D DFT and its properties).
+4. OpenCV 4.13.0 documentation: `dft`, `idft`, `getOptimalDFTSize`, `magnitude`, `createHanningWindow`; tutorial "Discrete Fourier Transform". https://docs.opencv.org/4.13.0/

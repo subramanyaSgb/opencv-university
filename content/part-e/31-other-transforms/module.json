@@ -1,0 +1,11 @@
+{
+  "number": 31,
+  "title": "Other transforms",
+  "summary": "Beyond Fourier: the DCT and energy compaction, wavelets for multi-scale analysis and denoising, Gabor filters for oriented texture, and the Radon transform behind CT reconstruction.",
+  "chapters": [
+    { "number": "31.1", "slug": "31.1-dct-and-jpeg", "title": "DCT and JPEG" },
+    { "number": "31.2", "slug": "31.2-wavelets", "title": "Wavelets" },
+    { "number": "31.3", "slug": "31.3-gabor-filters", "title": "Gabor filters" },
+    { "number": "31.4", "slug": "31.4-radon-and-ct-reconstruction", "title": "Radon and CT reconstruction" }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "number": 32,
+  "title": "Template matching",
+  "summary": "Finding a known pattern by comparing it at every position: sliding comparison, SSD and normalised correlation, multi-scale search, and where template matching breaks down.",
+  "chapters": [
+    { "number": "32.1", "slug": "32.1-sliding-comparison", "title": "Sliding comparison" },
+    { "number": "32.2", "slug": "32.2-ssd-and-ncc", "title": "SSD and NCC" },
+    { "number": "32.3", "slug": "32.3-multi-scale", "title": "Multi-scale" },
+    { "number": "32.4", "slug": "32.4-limits", "title": "Limits" }
+  ]
+}

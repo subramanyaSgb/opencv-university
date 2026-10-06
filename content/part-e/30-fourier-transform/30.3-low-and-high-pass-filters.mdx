@@ -1,0 +1,312 @@
+export const meta = {
+  number: "30.3",
+  title: "Low- and high-pass filters",
+  minutes: 30,
+  objectives: [
+    "Filter an image by multiplying its spectrum with a transfer function H(u, v)",
+    "Compare ideal, Butterworth and Gaussian low-pass filters, including ringing",
+    "Build high-pass and high-frequency-emphasis filters",
+    "Relate a frequency-domain Gaussian to a spatial Gaussian blur",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 30.3 (Module 30).
+  Lab: FourierLab mode "filter" (transfer functions and results equal NumPy).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 30.3 Low- and high-pass filters
+
+<Definition term="Frequency-domain filter">a filter applied by transforming the image, multiplying every frequency (u, v) by a weight H(u, v) (the transfer function), and transforming back. A low-pass filter keeps low frequencies (smooths); a high-pass filter keeps high frequencies (edges and detail).</Definition>
+
+Module 17 filtered by convolution: a kernel slides over the image. The convolution theorem (30.5) says the same result comes from multiplying spectra. In the frequency domain, designing a filter is drawing a mask on the spectrum: keep this ring, remove that dot. This chapter covers the three classic smooth and sharp masks and their trade-offs (Gonzalez and Woods [1]).
+
+## 1. An analogy
+
+The bass and treble knobs of a stereo. Turning down the treble (a low-pass filter) makes the sound softer and duller; turning down the bass (a high-pass filter) leaves a thin sound of clicks and hiss. A brick-wall cut at one exact pitch, instead of a gentle slope, makes the music ring.
+
+## 2. Three low-pass filters
+
+<Flow
+  steps={[
+    { label: "Image f", tone: "data" },
+    { label: "F = DFT(f)", tone: "process" },
+    { label: "G(u, v) = H(u, v) · F(u, v), D = distance of (u, v) from the centre", tone: "process" },
+    { label: "g = inverse DFT(G), real part", tone: "result" },
+  ]}
+/>
+
+With D the distance of a frequency from (0, 0) and D0 the cut-off:
+
+| Filter | H(D) | Character |
+| --- | --- | --- |
+| Ideal | 1 if D ≤ D0, else 0 | sharp cut; strong **ringing** |
+| Butterworth, order n | 1 / (1 + (D / D0)^(2n)) | adjustable slope; mild ringing for n ≥ 2 |
+| Gaussian | e^(−D² / 2D0²) | smooth; **no ringing** |
+
+A **high-pass** filter is 1 − H_low. All three are **zero-phase**: H is real, so nothing is shifted, only weakened.
+
+## 3. A worked example by hand
+
+Weights at a few distances, for D0 = 20 (Butterworth n = 2):
+
+| D | 0 | 10 | 20 | 40 |
+| --- | --- | --- | --- | --- |
+| Ideal | 1 | 1 | 1 | 0 |
+| Butterworth: 1 / (1 + (D/20)⁴) | 1 | 1 / 1.0625 = 0.94 | 1 / 2 = **0.50** | 1 / 17 = 0.06 |
+| Gaussian: e^(−D²/800) | 1 | e^(−0.125) = 0.88 | e^(−0.5) = **0.61** | e^(−2) = 0.14 |
+
+A Butterworth filter is always exactly 0.5 at its cut-off; the Gaussian is 0.61 at D0 and falls off more slowly beyond. The ideal filter jumps from 1 to 0, and that jump causes the ringing: its spatial kernel is a sinc with endless ripples (Gibbs, 30.1).
+
+## 4. On the test scene
+
+Low-pass filters with D0 = 20 cycles per image, across the right edge of the bright square (230 on the left, about 106 on the right), every second pixel from x = 62:
+
+| Filter | Profile | Largest value in that row |
+| --- | --- | --- |
+| original | 230 238 93 106 107 107 108 108 109 110 111 | 238 |
+| ideal | 217 183 145 115 98 96 102 110 114 115 113 | **242** (overshoot) |
+| Butterworth n = 2 | 217 185 143 114 104 103 105 108 110 112 113 | 234 |
+| Gaussian | 220 187 139 113 107 107 108 108 109 110 110 | 230 |
+
+The ideal filter overshoots to 242, above the square's 230 and even above the original's brightest edge pixel (238), and undershoots below the background (96 < 106), then oscillates: ringing. The Gaussian falls smoothly. Over the whole image, with D0 = 30 the three keep 98.1 %, 97.9 % and 97.9 % of the energy Σ|F|²: almost all energy is in the low frequencies, even though the lost 2 % carries every edge.
+
+<FourierLab mode="filter" caption="Choose a filter and drag the cut-off. Middle: the spectrum multiplied by H (what survives). With the ideal low-pass at D0 ≈ 20, look for ripples next to the square, the disc and the text; switch to Gaussian at the same D0: they vanish. High-pass keeps only edges and the stripes (the result is stretched for display)."/>
+
+## 5. High-pass and high-frequency emphasis
+
+- **High-pass** (1 − H_low): removes the mean and smooth shading; keeps edges, texture and noise. The result has mean 0 and must be shifted or stretched to display.
+- **High-frequency emphasis**: H = a + b · H_high (for example a = 1, b = 1.5). Keeps the image and boosts its detail: the frequency-domain version of unsharp masking (19.1).
+- **Homomorphic filtering**: filter log(image) with a high-frequency emphasis, then exponentiate; this flattens uneven illumination (a low-frequency multiplicative factor) and boosts reflectance detail at the same time.
+
+## 6. Frequency or space?
+
+A Gaussian low-pass with cut-off D0 (cycles per image of size N) equals a spatial Gaussian blur with σ = N / (2π·D0), with wrap-around borders. For N = 256 and D0 = 30, σ = 1.36 px: the two results differ by at most 0.001 grey levels. Use the frequency domain when the filter is easier to describe there (notches, rings, wedges), or when the kernel is very large (30.5); use spatial filters for small kernels and streaming images.
+
+## 7. Industrial use
+
+- **Background removal**: a strong low-pass gives the illumination; dividing by it flattens the image (15.2).
+- **Texture suppression**: a low-pass removes fine fabric or paper texture before measuring a stain.
+- **Edge emphasis** before OCR or measurement (high-frequency emphasis).
+- **Band-pass filters**: keep only the frequency band of the defect size, removing both shading and pixel noise.
+
+## What you should remember from 30.3
+
+<Takeaways>
+<Takeaway n={1} title="Multiply">Filter = spectrum × H, then inverse DFT.</Takeaway>
+<Takeaway n={2} title="Ringing">Sharp cut-offs ring; Gaussian does not; Butterworth in between.</Takeaway>
+<Takeaway n={3} title="High-pass">1 − low-pass; add the image back for emphasis.</Takeaway>
+<Takeaway n={4} title="Same as blur">Gaussian in frequency ↔ Gaussian blur with σ = N / (2π D0).</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Butterworth, order 2, D0 = 25. What is H at D = 50?
+
+<Solution>
+
+1 / (1 + (50/25)⁴) = 1 / (1 + 16) = **0.059**.
+
+</Solution>
+
+**Q2.** You need a smoothing filter that never creates ripples next to edges. Which?
+
+<Solution>
+
+The **Gaussian** low-pass: its spatial kernel is also a Gaussian, always positive, so it cannot overshoot.
+
+</Solution>
+
+### Next: 30.4 Notch filters and periodic noise
+
+Removing a few frequencies only: the cure for regular interference patterns.
+
+## Code
+
+Three examples: filters in NumPy, the edge profile, and the spatial equivalence.
+
+### 1. The three filters
+
+```python
+import numpy as np
+import cv2
+
+img = cv2.imread("sample-fft-scene.png", cv2.IMREAD_GRAYSCALE).astype(float)
+N = img.shape[0]
+f = np.fft.fftfreq(N, 1 / N)                                           # 0, 1, …, −1 (cycles per image)
+U, V = np.meshgrid(f, f)
+D = np.hypot(U, V)                                                    # distance from the zero frequency
+
+def lowpass(kind, D0, n=2):
+    if kind == "ideal":
+        return (D <= D0).astype(float)
+    if kind == "butterworth":
+        return 1 / (1 + (D / D0) ** (2 * n))
+    return np.exp(-D ** 2 / (2 * D0 ** 2))                            # Gaussian
+
+def apply(H):
+    return np.fft.ifft2(np.fft.fft2(img) * H).real
+
+F = np.fft.fft2(img)
+energy = np.abs(F) ** 2
+for kind in ("ideal", "butterworth", "gaussian"):
+    H = lowpass(kind, 30)
+    kept = (energy * H ** 2).sum() / energy.sum()
+    print(f"{kind:11s} D0 30: energy kept {kept * 100:.1f} %, H at (u, v) = (30, 0): {H[0, 30]:.2f}, at (40, 0): {H[0, 40]:.2f}")
+```
+
+Output:
+
+```text
+ideal       D0 30: energy kept 98.1 %, H at (u, v) = (30, 0): 1.00, at (40, 0): 0.00
+butterworth D0 30: energy kept 97.9 %, H at (u, v) = (30, 0): 0.50, at (40, 0): 0.24
+gaussian    D0 30: energy kept 97.9 %, H at (u, v) = (30, 0): 0.61, at (40, 0): 0.41
+```
+
+### 2. Ringing at an edge
+
+```python
+print("original   ", img[60, 62:84:2].astype(int).tolist())
+for kind in ("ideal", "butterworth", "gaussian"):
+    out = apply(lowpass(kind, 20))
+    print(f"{kind:11s}", np.round(out[60, 62:84:2]).astype(int).tolist(), "| row max", round(float(out[60, 40:110].max()), 1))
+```
+
+Output:
+
+```text
+original    [230, 238, 93, 106, 107, 107, 108, 108, 109, 110, 111]
+ideal       [217, 183, 145, 115, 98, 96, 102, 110, 114, 115, 113] | row max 242.4
+butterworth [217, 185, 143, 114, 104, 103, 105, 108, 110, 112, 113] | row max 234.3
+gaussian    [220, 187, 139, 113, 107, 107, 108, 108, 109, 110, 110] | row max 230.0
+```
+
+### 3. Frequency Gaussian = spatial Gaussian
+
+```python
+D0 = 30
+sigma = N / (2 * np.pi * D0)                                          # matching spatial σ
+k = 2 * int(np.ceil(4 * sigma)) + 1
+padded = np.pad(img, k, mode="wrap")                                  # the DFT wraps around: do the same
+spatial = cv2.GaussianBlur(padded, (k, k), sigma)[k:-k, k:-k]
+print("sigma:", round(sigma, 3), "px | max difference:", round(float(np.abs(spatial - apply(lowpass("gaussian", D0))).max()), 3))
+```
+
+Output:
+
+```text
+sigma: 1.358 px | max difference: 0.001
+```
+
+## OpenCV API notes
+
+- **Pipeline with OpenCV**: `F = cv2.dft(img32, flags=cv2.DFT_COMPLEX_OUTPUT)`; multiply both channels by H (built in the unshifted order, or shift F with `np.fft.fftshift` and use a centred H); `cv2.idft(F * H[..., None], flags=cv2.DFT_SCALE | cv2.DFT_REAL_OUTPUT)`.
+- **No built-in transfer functions**: build H with NumPy as above (D from `np.fft.fftfreq` and `np.hypot`).
+- **Non-square images**: use u/W and v/H (cycles per pixel) so that D0 means the same in both directions.
+- **Speed**: two FFTs and one multiplication, independent of the filter's size.
+
+## Where it fails
+
+- **Ideal filters** ring; avoid them on images people look at.
+- **Border effects**: the DFT wraps; filters with low cut-offs mix the left and right borders. Pad (mirror) before filtering.
+- **Spatially varying needs**: one H applies everywhere; shading that changes across the image needs local methods.
+- **Small kernels**: a 3 × 3 or 5 × 5 spatial filter is faster than two FFTs.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Mixing shifted and unshifted arrays**: build H in the same order as F (or shift both).
+- **Taking |inverse| instead of the real part**: the magnitude folds negative high-pass values to positive.
+- **Clipping a high-pass result to 0–255** without shifting: half the edges disappear.
+- **Using pixels for D0** on non-square images without normalising.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why the ideal filter rings
+
+The ideal low-pass is a disc in the frequency domain; its spatial kernel is the 2-D sinc (an Airy-like pattern, J1(r)/r), with a central peak and rings of alternating sign. Convolving an edge with a kernel that has negative lobes creates overshoots, and they do not shrink as D0 grows, only move closer to the edge (Gibbs). The Gaussian is its own Fourier transform and has no negative lobes.
+
+### Optimal filters
+
+When the noise spectrum is known, the Wiener filter (19.4) gives the frequency weights that minimise the mean squared error, H = |S|² / (|S|² + |N|²) per frequency; the filters of this chapter are fixed shapes that approximate it.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Where does a Butterworth filter of any order equal 0.5?",
+      options: ["At D = 0", "At D = D0", "At D = 2 D0", "Never"],
+      answer: 1,
+      explanation: "1 / (1 + 1) = 0.5.",
+    },
+    {
+      question: "Which low-pass filter rings?",
+      options: ["Gaussian", "Ideal (and slightly Butterworth of high order)", "None", "All equally"],
+      answer: 1,
+      explanation: "A sharp cut-off has a sinc kernel with negative lobes.",
+    },
+    {
+      question: "A high-pass filter in terms of a low-pass H is…",
+      options: ["H²", "1 − H", "1 / H", "−H"],
+      answer: 1,
+      explanation: "It keeps what the low-pass removes.",
+    },
+    {
+      question: "D0 = 30 on a 256-px image corresponds to a spatial Gaussian σ of about…",
+      options: ["30 px", "1.4 px", "8.5 px", "0.1 px"],
+      answer: 1,
+      explanation: "σ = 256 / (2π · 30) = 1.36 px.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A Gaussian low-pass should keep 90 % of a wave at D = 10 cycles. Which D0?
+
+<Solution>
+
+e^(−100 / 2D0²) = 0.9 → 100 / 2D0² = −ln 0.9 = 0.105 → D0² = 474 → **D0 ≈ 21.8**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Apply a high-frequency emphasis H = 1 + 1.5 · (1 − Gaussian(D0 = 30)) and compare the edge profile at row 60 with the original.
+
+<Solution>
+
+```python
+emph = apply(1 + 1.5 * (1 - lowpass("gaussian", 30)))
+print("original", img[60, 60:72:2].astype(int).tolist())
+print("emphasis", np.round(emph[60, 60:72:2]).astype(int).tolist())
+```
+
+Output:
+
+```text
+original [230, 230, 238, 93, 106, 107]
+emphasis [230, 233, 301, 41, 105, 108]
+```
+
+The edge step grows from 238 → 93 to 301 → 41: the contrast at the edge is boosted, while flat areas (230 and 106–108) keep their values, because H = 1 at low frequencies. Values beyond 0–255 must be clipped (or the result scaled) for display.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Sections 4.8–4.9 (image smoothing and sharpening in the frequency domain).
+2. S. Butterworth, "On the theory of filter amplifiers", *Experimental Wireless and the Wireless Engineer* 7, 536–541, 1930.
+3. A. V. Oppenheim, R. W. Schafer, T. G. Stockham, "Nonlinear filtering of multiplied and convolved signals", *Proceedings of the IEEE* 56(8), 1264–1291, 1968 (homomorphic filtering).
+4. OpenCV 4.13.0 documentation: `dft`, `idft`, `mulSpectrums`. https://docs.opencv.org/4.13.0/

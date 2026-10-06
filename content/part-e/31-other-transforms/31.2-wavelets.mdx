@@ -1,0 +1,326 @@
+export const meta = {
+  number: "31.2",
+  title: "Wavelets",
+  minutes: 30,
+  objectives: [
+    "Explain what wavelets add to Fourier: frequency and position together",
+    "Compute a two-level Haar transform of four samples by hand",
+    "Implement the 2-D Haar transform in NumPy and read its sub-bands",
+    "Denoise an image by soft-thresholding wavelet coefficients and compare with blurring",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 31.2 (Module 31).
+  Lab: BasisLab mode "wavelet" (same Haar transform as the NumPy code).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 31.2 Wavelets
+
+<Definition term="Wavelet transform">a transform that describes an image by small, localised waves (wavelets) at several scales: at each scale it records how much detail there is, in which direction, and where. It answers "what frequency, and where?" which the Fourier transform cannot (Mallat 1989 [1]).</Definition>
+
+A Fourier coefficient belongs to the whole image: a single scratch changes all of them a little. Wavelets are short: a wavelet coefficient describes one place at one scale. Smooth regions give near-zero detail coefficients, edges give a few large ones exactly where they are. That makes wavelets ideal for compression (JPEG 2000), denoising, and multi-scale analysis.
+
+## 1. An analogy
+
+A map service with zoom levels. The coarsest level shows only the outline of the country; each finer level adds the differences: roads, then streets, then buildings, and only where there is something to add. Empty sea needs no extra detail at any level. A wavelet transform stores an image the same way: a coarse version plus the differences needed at each finer level.
+
+## 2. The Haar transform
+
+The simplest wavelet (Haar 1910 [2]) works on pairs of pixels: their (scaled) **sum** keeps the coarse content, their **difference** the detail.
+
+<Flow
+  steps={[
+    { label: "Image N × N", tone: "data" },
+    { label: "Each 2 × 2 block → average A and details H, V, D", tone: "process" },
+    { label: "A: half-size approximation; H, V, D: detail sub-bands", tone: "process" },
+    { label: "Repeat on A for more levels", tone: "process" },
+    { label: "Coarse approximation + details at every scale", tone: "result" },
+  ]}
+/>
+
+For a 2 × 2 block p q / r u, with the orthonormal scaling used here:
+
+```text
+A = (p + q + r + u) / 2      H = (p − q + r − u) / 2   (left minus right: vertical edges)
+V = (p + q − r − u) / 2      D = (p − q − r + u) / 2   (top minus bottom; diagonal)
+```
+
+The transform is orthonormal: energy is preserved, and the inverse uses the same formulas backwards.
+
+## 3. A worked example by hand
+
+One-dimensional Haar of 4, 6, 10, 12 (pairs: sum/√2 and difference/√2):
+
+| Level | Approximation | Details |
+| --- | --- | --- |
+| 1 | (4 + 6)/√2 = 7.07, (10 + 12)/√2 = 15.56 | (4 − 6)/√2 = −1.41, (10 − 12)/√2 = −1.41 |
+| 2 | (7.07 + 15.56)/√2 = **16.0** | (7.07 − 15.56)/√2 = **−6.0** |
+
+Result: 16, −6, −1.41, −1.41. The first number is the overall level (mean 8 × 2), −6 says "the right half is brighter", and the small −1.41s say "each pair rises a little". Energy: 4² + 6² + 10² + 12² = 296 = 16² + 6² + 1.41² + 1.41². A flat signal would give zeros everywhere except the first number.
+
+## 4. On the test scene
+
+Three Haar levels of the 256 × 256 scene: a 32 × 32 approximation plus nine detail sub-bands. 92.1 % of the detail coefficients are smaller than 5 in magnitude; only edges, text and stripes produce large ones. Reconstruction from all coefficients is exact.
+
+**Denoising.** Add Gaussian noise (σ = 20), then shrink every detail coefficient towards zero by T (**soft thresholding**: c → sign(c) · max(0, |c| − T)): small coefficients, which are mostly noise, vanish; large ones (edges) survive, slightly reduced.
+
+| Method | PSNR against the clean scene |
+| --- | --- |
+| noisy | 22.24 dB |
+| Haar, 1 level, T = 40 | 26.35 dB |
+| Haar, 3 levels, T = 40 | **28.55 dB** |
+| Haar, 3 levels, T = 60 | 26.50 dB |
+| Gaussian blur σ = 0.8 | 27.30 dB |
+| Gaussian blur σ = 1.5 | 23.74 dB |
+
+Wavelet shrinkage beats any Gaussian blur here: the blur smooths edges and noise alike, while thresholding keeps the large edge coefficients. The theory-based "universal" threshold σ·√(2 ln N) = 94 (Donoho and Johnstone [3]) is too high for this image: it removes real detail too.
+
+<BasisLab mode="wavelet" caption="The noisy scene and its Haar transform: the small top-left square is the approximation, the other blocks are details at each level (brightness = |coefficient|). Raise the threshold and watch the PSNR: it rises, peaks around T = 40, then falls as edges are removed. Haar's blocky basis shows as small square artefacts."/>
+
+## 5. Beyond Haar
+
+Haar wavelets are blocky: thresholded images show small squares. Smoother wavelets (Daubechies, the CDF 9/7 of JPEG 2000) give smoother results with the same idea. The **stationary** (undecimated) wavelet transform repeats the analysis at every shift and averages, which removes the blocks at more computational cost.
+
+## 6. Industrial use
+
+- **Compression**: JPEG 2000 (also used in digital cinema and medical imaging, DICOM) with no block artefacts.
+- **Denoising** of X-ray, ultrasound and low-light images (48.4).
+- **Defect detection** in textures: defects show as unusual energy in specific sub-bands and scales.
+- **Multi-scale features**: wavelet sub-band energies as texture descriptors (35.x).
+
+## What you should remember from 31.2
+
+<Takeaways>
+<Takeaway n={1} title="Where + what">Wavelet coefficients are local in position and in frequency.</Takeaway>
+<Takeaway n={2} title="Haar">Sums and differences of pairs; approximation + H, V, D details per level.</Takeaway>
+<Takeaway n={3} title="Sparse">Smooth regions give near-zero details; edges give few large ones.</Takeaway>
+<Takeaway n={4} title="Shrinkage">Soft-threshold the details to remove noise and keep edges.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Haar (one level) of the pair (9, 9) and of (2, 8)?
+
+<Solution>
+
+(9, 9): approximation 18/√2 = 12.73, detail **0**. (2, 8): approximation 10/√2 = 7.07, detail −6/√2 = **−4.24**.
+
+</Solution>
+
+**Q2.** After soft thresholding with T = 10, what happens to coefficients 25, −7 and −14?
+
+<Solution>
+
+25 → **15**; −7 → **0**; −14 → **−4**.
+
+</Solution>
+
+### Next: 31.3 Gabor filters
+
+Oriented wave patches: the filters behind texture analysis and early vision models.
+
+## Code
+
+Three examples: the 1-D Haar by hand, the 2-D transform, and denoising.
+
+### 1. Haar in one dimension
+
+```python
+import numpy as np
+import cv2
+
+x = np.array([4, 6, 10, 12], float)
+a1, d1 = (x[0::2] + x[1::2]) / np.sqrt(2), (x[0::2] - x[1::2]) / np.sqrt(2)
+a2, d2 = (a1[0::2] + a1[1::2]) / np.sqrt(2), (a1[0::2] - a1[1::2]) / np.sqrt(2)
+coeffs = np.r_[a2, d2, d1]
+print("coefficients:", np.round(coeffs, 2).tolist(), "| energy", round(float((coeffs ** 2).sum()), 6), "=", float((x ** 2).sum()))
+```
+
+Output:
+
+```text
+coefficients: [16.0, -6.0, -1.41, -1.41] | energy 296.0 = 296.0
+```
+
+### 2. The 2-D Haar transform
+
+```python
+def haar_level(a, inverse=False):
+    if not inverse:
+        p, q, r, u = a[0::2, 0::2], a[0::2, 1::2], a[1::2, 0::2], a[1::2, 1::2]
+        return np.block([[(p + q + r + u) / 2, (p - q + r - u) / 2],      # A | H
+                         [(p + q - r - u) / 2, (p - q - r + u) / 2]])     # V | D
+    h = a.shape[0] // 2
+    A, H, V, D = a[:h, :h], a[:h, h:], a[h:, :h], a[h:, h:]
+    out = np.empty_like(a)
+    out[0::2, 0::2] = (A + H + V + D) / 2; out[0::2, 1::2] = (A - H + V - D) / 2
+    out[1::2, 0::2] = (A + H - V - D) / 2; out[1::2, 1::2] = (A - H - V + D) / 2
+    return out
+
+def haar2(img, levels, inverse=False):
+    a = img.astype(np.float64).copy()
+    n = a.shape[0]
+    for l in (range(levels) if not inverse else range(levels - 1, -1, -1)):
+        s = n >> l                                                    # size of the block at this level
+        a[:s, :s] = haar_level(a[:s, :s], inverse)
+    return a
+
+img = cv2.imread("sample-fft-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float64)
+c = haar2(img, 3)
+detail = np.ones_like(c, bool)
+detail[:32, :32] = False                                              # everything but the 32 × 32 approximation
+print("exact inverse:", np.abs(haar2(c, 3, inverse=True) - img).max() < 1e-9, "| energy ratio:", round(float((c ** 2).sum() / (img ** 2).sum()), 6))
+print("detail coefficients below 5:", round(float((np.abs(c[detail]) < 5).mean() * 100), 1), "%")
+```
+
+Output:
+
+```text
+exact inverse: True | energy ratio: 1.0
+detail coefficients below 5: 92.1 %
+```
+
+### 3. Denoising by soft thresholding
+
+```python
+rng = np.random.default_rng(31)
+noisy = img + rng.normal(0, 20, img.shape)
+
+def psnr(a):
+    return round(cv2.PSNR(np.clip(np.rint(a), 0, 255).astype(np.uint8), img.astype(np.uint8)), 2)
+
+def denoise(levels, T):
+    c = haar2(noisy, levels)
+    s = 256 >> levels
+    m = np.ones_like(c, bool); m[:s, :s] = False                     # only details are thresholded
+    c[m] = np.sign(c[m]) * np.maximum(0, np.abs(c[m]) - T)
+    return haar2(c, levels, inverse=True)
+
+print("noisy:", psnr(noisy))
+for levels, T in [(1, 40), (3, 40), (3, 60)]:
+    print(f"Haar {levels} level(s), T {T}:", psnr(denoise(levels, T)))
+print("Gaussian 0.8:", psnr(cv2.GaussianBlur(noisy, (0, 0), 0.8)), "| 1.5:", psnr(cv2.GaussianBlur(noisy, (0, 0), 1.5)))
+```
+
+Output:
+
+```text
+noisy: 22.24
+Haar 1 level(s), T 40: 26.35
+Haar 3 level(s), T 40: 28.55
+Haar 3 level(s), T 60: 26.5
+Gaussian 0.8: 27.3 | 1.5: 23.74
+```
+
+## OpenCV API notes
+
+- **No wavelet transform in OpenCV.** Use NumPy for Haar (as above), or PyWavelets (`pywt.wavedec2`, `pywt.threshold`), which is outside the pinned environment.
+- **Related OpenCV tools**: `cv2.pyrDown` / `pyrUp` (Gaussian and Laplacian pyramids, 20.x) are the closest built-in multi-scale decomposition; `cv2.fastNlMeansDenoising` (18.5) is a strong alternative denoiser.
+- **Sizes**: the dyadic transform needs dimensions divisible by 2^levels; pad with `cv2.copyMakeBorder` (reflect) first.
+- **JPEG 2000**: `cv2.imwrite("x.jp2", img)` if OpenCV was built with OpenJPEG (the pip wheels are); `IMWRITE_JPEG2000_COMPRESSION_X1000` sets the rate.
+
+## Where it fails
+
+- **Haar blockiness**: thresholded Haar coefficients produce square artefacts; use smoother wavelets or the undecimated transform.
+- **Shift variance**: shifting the image by one pixel changes the decimated coefficients a lot; bad for features, fine for compression.
+- **Orientation**: only horizontal, vertical and diagonal details; curved or oblique edges spread over sub-bands (steerable pyramids or curvelets handle orientation better).
+- **Threshold choice**: depends on the noise level and the image; estimate σ from the finest diagonal band (median absolute value / 0.6745).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Thresholding the approximation band**: it holds the image's content; shrink only the details.
+- **Hard instead of soft thresholding** without care: hard thresholds keep noisy coefficients just above T and cause speckles.
+- **Odd sizes**: the dyadic transform fails or silently drops a row or column.
+- **Mixing normalisations**: unnormalised Haar (averages and half-differences) changes energies and thresholds by factors of 2 per level.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Multi-resolution analysis
+
+Mallat [1] showed that wavelet transforms correspond to a pyramid of low-pass and high-pass filter banks with downsampling, computed in O(N); the Haar filters are the shortest pair ([1, 1]/√2 and [1, −1]/√2). Daubechies constructed compactly supported orthonormal wavelets with more vanishing moments, which make smooth regions (polynomials up to some degree) give exactly zero details.
+
+### Why shrinkage works
+
+For an orthonormal transform, white Gaussian noise stays white Gaussian noise with the same σ in every coefficient, while a piecewise-smooth image is concentrated in few large coefficients. Donoho and Johnstone [3] proved that soft thresholding at σ√(2 ln N) removes the noise with high probability and is nearly optimal in the minimax sense; data-adaptive thresholds (SureShrink, BayesShrink) usually do better on real images, as Section 4 suggests.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What can wavelets tell that Fourier cannot?",
+      options: ["The mean", "Where in the image a frequency occurs", "The phase", "The colour"],
+      answer: 1,
+      explanation: "Coefficients are local in position and scale.",
+    },
+    {
+      question: "One Haar level turns a 256 × 256 image into…",
+      options: ["Four 128 × 128 sub-bands (A, H, V, D)", "One 512 × 512 image", "64 coefficients", "A spectrum"],
+      answer: 0,
+      explanation: "Approximation plus three detail bands.",
+    },
+    {
+      question: "Soft thresholding with T = 10 maps 4 to…",
+      options: ["4", "0", "−6", "14"],
+      answer: 1,
+      explanation: "|4| < T → 0.",
+    },
+    {
+      question: "Why did Haar shrinkage beat Gaussian blurring?",
+      options: ["It is faster", "It keeps large edge coefficients while removing small noisy ones", "It adds detail", "Blur was wrongly set"],
+      answer: 1,
+      explanation: "Blur treats edges and noise alike.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+2-D Haar (one level) of the block 10 10 / 10 10 and of 10 30 / 10 30.
+
+<Solution>
+
+Flat: A = 20, H = V = D = 0. Second: A = (10 + 30 + 10 + 30)/2 = 40, H = (10 − 30 + 10 − 30)/2 = **−20** (a vertical edge), V = 0, D = 0.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Estimate the noise σ from the finest diagonal sub-band of the noisy image (median(|D|) / 0.6745). How close is it to the true 20?
+
+<Solution>
+
+```python
+c1 = haar2(noisy, 1)
+D = c1[128:, 128:]                                                    # finest diagonal band
+print("estimated sigma:", round(float(np.median(np.abs(D)) / 0.6745), 2))
+```
+
+Output:
+
+```text
+estimated sigma: 20.13
+```
+
+Within 1 % of the true value: the finest diagonal band contains almost only noise (diagonal detail at the pixel scale is rare in images), and the median ignores the few large edge coefficients. With σ known, a threshold of about 2σ (here 40) worked best in Section 4.
+
+</Solution>
+
+## References
+
+1. S. G. Mallat, "A theory for multiresolution signal decomposition: the wavelet representation", *IEEE Trans. Pattern Analysis and Machine Intelligence* 11(7), 674–693, 1989.
+2. A. Haar, "Zur Theorie der orthogonalen Funktionensysteme", *Mathematische Annalen* 69(3), 331–371, 1910.
+3. D. L. Donoho, I. M. Johnstone, "Ideal spatial adaptation by wavelet shrinkage", *Biometrika* 81(3), 425–455, 1994.
+4. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Chapter 6 (wavelet and other image transforms).

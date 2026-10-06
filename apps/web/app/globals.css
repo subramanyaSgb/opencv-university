@@ -1885,3 +1885,44 @@ button.nl-cell { cursor: pointer; }
 .shapelab .sh-true td:first-child { font-weight: 650; }
 .shapelab .sh-ok { background: rgba(28, 158, 90, 0.18); font-weight: 600; }
 .shapelab .sh-bad { background: rgba(214, 69, 69, 0.18); font-weight: 600; }
+
+/* Module 30 (FourierLab) */
+.fourierlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.fourierlab .seg { flex-wrap: wrap; }
+.fourierlab .seg button { white-space: normal; }
+.fourierlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.fourierlab .fq-two { grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); }
+.fourierlab .fq-two > div { display: grid; gap: 0.3rem; }
+.fourierlab .fq-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 0.6rem; }
+.fourierlab .fq-view { margin: 0; min-width: 0; }
+.fourierlab .fq-img { display: block; width: 100%; height: auto; image-rendering: pixelated; border-radius: 3px; border: 1px solid var(--line); }
+.fourierlab .fq-view figcaption { font-size: 0.75rem; color: var(--fg-soft); margin-top: 0.2rem; }
+.fourierlab .fq-read { font-size: 0.82rem; margin: 0.5rem 0 0; font-variant-numeric: tabular-nums; }
+
+/* Module 31 (BasisLab) */
+.basislab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.basislab .seg { flex-wrap: wrap; }
+.basislab .seg button { white-space: normal; }
+.basislab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.basislab .bs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 0.6rem; align-items: start; }
+.basislab .bs-grid-4 { grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr)); }
+.basislab .bs-view { margin: 0; min-width: 0; }
+.basislab .bs-img { display: block; width: 100%; height: auto; image-rendering: pixelated; border-radius: 3px; border: 1px solid var(--line); }
+.basislab .bs-view figcaption { font-size: 0.75rem; color: var(--fg-soft); margin-top: 0.2rem; }
+.basislab .bs-read { font-size: 0.82rem; margin: 0.5rem 0 0; font-variant-numeric: tabular-nums; }
+
+/* Module 32 (MatchLab) */
+.matchlab .sc-ctl { grid-template-columns: minmax(0, 1fr); margin-bottom: 0.6rem; }
+.matchlab .seg { flex-wrap: wrap; }
+.matchlab .seg button { white-space: normal; }
+.matchlab .ctl-wide { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; min-width: 0; }
+.matchlab .tm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: 0.6rem; align-items: start; }
+.matchlab .tm-view { margin: 0; min-width: 0; }
+.matchlab .tm-img { display: block; width: 100%; max-width: 44rem; height: auto; image-rendering: pixelated; border-radius: 3px; border: 1px solid var(--line); }
+.matchlab .tm-view figcaption { font-size: 0.75rem; color: var(--fg-soft); margin-top: 0.2rem; }
+.matchlab .tm-read { font-size: 0.82rem; margin: 0.5rem 0 0; font-variant-numeric: tabular-nums; }
+.matchlab .tm-bars { display: flex; align-items: flex-end; gap: 0.2rem; height: 11rem; }
+.matchlab .tm-bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; font-size: 0.62rem; min-width: 0; }
+.matchlab .tm-bar i { display: block; width: 100%; background: #2f7de1; border-radius: 2px 2px 0 0; }
+.matchlab .tm-bar.is-best i { background: #e0a800; }
+.matchlab .tm-bar b { font-weight: 500; color: var(--fg-soft); }

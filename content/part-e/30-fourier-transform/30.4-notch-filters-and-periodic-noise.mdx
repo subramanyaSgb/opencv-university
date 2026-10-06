@@ -1,0 +1,327 @@
+export const meta = {
+  number: "30.4",
+  title: "Notch filters and periodic noise",
+  minutes: 25,
+  objectives: [
+    "Recognise periodic noise as pairs of bright points in the spectrum",
+    "Find the interference frequencies automatically and estimate their amplitude",
+    "Remove them with Butterworth notch-reject filters and measure the gain in PSNR",
+    "Know why ordinary smoothing cannot do this, and what not to notch",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 30.4 (Module 30).
+  Lab: FourierLab mode "notch".
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 30.4 Notch filters and periodic noise
+
+<Definition term="Notch filter">a frequency-domain filter that removes (notch reject) or keeps (notch pass) a few small regions of the spectrum, centred on chosen frequencies and their mirror points. It cures periodic noise: interference patterns that are a few pure waves.</Definition>
+
+Electrical interference, a vibrating camera, a scanned printed raster or a moiré pattern add a **regular** pattern on top of the image. In pixels it is spread everywhere and looks hard to remove; in the spectrum it is only a few bright points. Cut those points out and the pattern disappears, while everything else stays.
+
+## 1. An analogy
+
+A constant hum on a recording. A general "noise reduction" dulls the music; a narrow filter tuned to exactly 50 Hz removes the hum and leaves the music untouched. A notch filter is that tuned filter for images.
+
+## 2. The method
+
+<Flow
+  steps={[
+    { label: "Noisy image", tone: "data" },
+    { label: "Spectrum: find bright isolated peaks away from the centre", tone: "process" },
+    { label: "H = product of notches at ±(u, v) of each peak", tone: "process" },
+    { label: "Multiply, inverse DFT", tone: "process" },
+    { label: "Clean image (+ the removed pattern = noisy − clean)", tone: "result" },
+  ]}
+/>
+
+A Butterworth notch reject at (u0, v0) with radius D0:
+
+```text
+H(u, v) = 1 / (1 + (D0 / D1)^(2n)) · 1 / (1 + (D0 / D2)^(2n))
+D1 = distance from (u0, v0),  D2 = distance from (−u0, −v0)
+```
+
+H is 0 exactly at the notches and close to 1 elsewhere; several notches multiply. Both mirror points must be removed, or the result is complex (not a real image).
+
+## 3. A worked example by hand
+
+A wave of amplitude A at (u, v) adds a peak of |F| = W·H·A / 2 at (u, v) and at (−u, −v) (30.1). In the test image, interference of amplitude 28 at (20, 12) on 256 × 256 pixels gives
+
+```text
+|F(20, 12)| = 256 · 256 · 28 / 2 = 917 504
+```
+
+Dividing a measured peak by W·H/2 therefore gives the interference amplitude in grey levels. The second wave, amplitude 18 at (−8, 30), gives 589 824.
+
+## 4. On the test image
+
+`sample-fft-periodic.png` is the test scene with two added waves. Its four strongest off-centre peaks (|F| / (W·H) = A/2):
+
+| Peak (u, v) | A/2 | What it is |
+| --- | --- | --- |
+| (20, 12) | 14.0 | interference 1 (A = 28) |
+| (−8, 30) | 8.8 | interference 2 (A = 18) |
+| (50, 0) | 2.9 | **the scene's fine stripes**: real content |
+| (−1, 6) | 2.5 | low-frequency scene content |
+
+Only the first two are noise. Removing them with notches of radius D0:
+
+| Filter | PSNR against the clean scene |
+| --- | --- |
+| noisy input | 20.84 dB |
+| one notch pair (20, 12), D0 = 3 | 26.06 dB |
+| both notches, D0 = 1 | **40.88 dB** |
+| both, D0 = 3 | 39.19 dB |
+| both, D0 = 8 | 30.51 dB |
+| both + the scene's peak (50, 0), D0 = 3 | 25.98 dB |
+| Gaussian low-pass, best D0 tried (15) | 21.45 dB |
+
+The notches raise the PSNR by 20 dB. Wider notches remove more of the scene around the noise frequencies. A low-pass filter cannot help: the interference frequencies (|D| = 23 and 31) are lower than the scene's own edges, so removing them blurs the scene as much as it cleans it.
+
+<FourierLab mode="notch" caption="The detected peaks are circled: red ones are removed. Start at 0, then remove 1 and 2 peaks and watch the PSNR. Remove 3 or 4: the third peak is the scene's stripe pattern, and notching it damages real content. Change the notch radius: small radii remove the noise precisely."/>
+
+## 5. Notch pass: seeing the noise
+
+1 − H (a **notch pass** filter) keeps only the notched frequencies: the result is the interference pattern itself. Useful to measure its amplitude and direction, or for "optimum notch filtering" (Gonzalez and Woods [1]), which subtracts a locally weighted copy of the extracted pattern when the interference amplitude varies across the image.
+
+## 6. Industrial use
+
+- **Electrical interference** in analogue or long-cable camera links (fixed frequency bands).
+- **Scanned printed images**: the halftone screen of a print is a regular grid of frequencies (descreening).
+- **Vibration and line patterns** in line-scan images (rows repeat with a fixed period).
+- **Moiré** between a fine texture (mesh, fabric) and the sensor grid.
+- **Texture defects**: the opposite use: notch away the regular weave of a fabric; what remains are the defects.
+
+## What you should remember from 30.4
+
+<Takeaways>
+<Takeaway n={1} title="Peaks">Periodic noise = pairs of bright points at ±(u, v).</Takeaway>
+<Takeaway n={2} title="Amplitude">A = 2·|F| / (W·H) at the peak.</Takeaway>
+<Takeaway n={3} title="Notch both">Remove (u, v) and (−u, −v); small radius, smooth (Butterworth) shape.</Takeaway>
+<Takeaway n={4} title="Only noise">Do not notch the scene's own periodic content.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 512 × 512 image has a spectrum peak |F| = 1 310 720 at (40, 0). Amplitude and look of the pattern?
+
+<Solution>
+
+A = 2 · 1 310 720 / 262 144 = **10 grey levels**; (40, 0): vertical stripes with a period of 512 / 40 = **12.8 px**.
+
+</Solution>
+
+**Q2.** You notch only (u, v) and not (−u, −v). What happens?
+
+<Solution>
+
+The transfer function is no longer symmetric, so the inverse transform is complex; the real part still contains half the interference (amplitude A/2).
+
+</Solution>
+
+### Next: 30.5 Convolution theorem
+
+Why multiplying spectra equals convolving images, and when the FFT is the faster way.
+
+## Code
+
+Three examples: finding the peaks, notch filtering, and extracting the pattern.
+
+### 1. Finding the peaks
+
+```python
+import numpy as np
+import cv2
+
+clean = cv2.imread("sample-fft-scene.png", cv2.IMREAD_GRAYSCALE).astype(float)
+noisy = cv2.imread("sample-fft-periodic.png", cv2.IMREAD_GRAYSCALE).astype(float)
+N = 256
+f = np.fft.fftfreq(N, 1 / N)
+U, V = np.meshgrid(f, f)
+F = np.fft.fft2(noisy)
+
+m = np.abs(F)
+m[np.hypot(U, V) < 6] = 0                                             # ignore the centre (scene shading)
+m[(V < 0) | ((V == 0) & (U < 0))] = 0                                 # one point of each ± pair
+local_max = (m == cv2.dilate(m, np.ones((3, 3)))) & (m > 0)
+ys, xs = np.nonzero(local_max)
+peaks = sorted(((m[y, x], int(f[x]), int(f[y])) for y, x in zip(ys, xs)), reverse=True)[:4]
+for mag, u, v in peaks:
+    print(f"(u, v) = ({u}, {v}): |F| = {mag:.0f}, amplitude A = {2 * mag / N ** 2:.1f}")
+```
+
+Output:
+
+```text
+(u, v) = (20, 12): |F| = 920629, amplitude A = 28.1
+(u, v) = (-8, 30): |F| = 578852, amplitude A = 17.7
+(u, v) = (50, 0): |F| = 191114, amplitude A = 5.8
+(u, v) = (-1, 6): |F| = 163136, amplitude A = 5.0
+```
+
+- The two interference waves are found with amplitudes 28.1 and 17.7 (true: 28 and 18; the scene adds a little at the same frequencies).
+
+### 2. Notch reject
+
+```python
+def notch_reject(centres, D0, n=2):
+    H = np.ones((N, N))
+    for u, v in centres:
+        for s in (1, -1):                                             # the point and its mirror
+            Dk = np.hypot(U - s * u, V - s * v)
+            H *= 1 / (1 + (D0 / np.maximum(Dk, 1e-12)) ** (2 * n))
+    return H
+
+def psnr(a):
+    return round(cv2.PSNR(np.clip(np.rint(a), 0, 255).astype(np.uint8), clean.astype(np.uint8)), 2)
+
+print("noisy:", psnr(noisy), "dB")
+for centres, D0 in [([(20, 12)], 3), ([(20, 12), (-8, 30)], 1), ([(20, 12), (-8, 30)], 3), ([(20, 12), (-8, 30), (50, 0)], 3)]:
+    out = np.fft.ifft2(F * notch_reject(centres, D0)).real
+    print(f"notches {centres}, D0 {D0}: {psnr(out)} dB")
+```
+
+Output:
+
+```text
+noisy: 20.84 dB
+notches [(20, 12)], D0 3: 26.06 dB
+notches [(20, 12), (-8, 30)], D0 1: 40.88 dB
+notches [(20, 12), (-8, 30)], D0 3: 39.19 dB
+notches [(20, 12), (-8, 30), (50, 0)], D0 3: 25.98 dB
+```
+
+- Adding a notch at (50, 0), the scene's stripes, drops the PSNR from 39.19 to 25.98 dB: it removes real content.
+
+### 3. Notch pass: the removed pattern
+
+```python
+pattern = np.fft.ifft2(F * (1 - notch_reject([(20, 12), (-8, 30)], 1))).real
+truth = noisy - clean                                                 # the added interference (rounded)
+print("pattern range:", round(float(pattern.min()), 1), "to", round(float(pattern.max()), 1))
+print("correlation with the true interference:", round(float(np.corrcoef(pattern.ravel(), truth.ravel())[0, 1]), 3))
+```
+
+Output:
+
+```text
+pattern range: -47.0 to 47.0
+correlation with the true interference: 0.995
+```
+
+## OpenCV API notes
+
+- **No notch function**: build H with NumPy (as above) and apply it with `np.fft` or `cv2.dft` / `cv2.idft`.
+- **Peak finding**: `cv2.dilate` on the magnitude finds local maxima (as for distance-transform peaks, 25.4); `cv2.minMaxLoc` gives the single strongest.
+- **Sizes**: pad to `cv2.getOptimalDFTSize` for speed; peaks then move to (u · W′/W, v · H′/H).
+- **Video**: interference is often stable over time: find the notches once, reuse H for every frame.
+
+## Where it fails
+
+- **Interference that drifts** in frequency or changes amplitude across the image: fixed notches leave residues; use optimum notch filtering or adaptive methods.
+- **Noise that overlaps real content** at the same frequency: notching removes both.
+- **Broadband noise** (sensor noise): no peaks to notch; use the smoothing filters of Module 18.
+- **Sharp (ideal) notches**: ringing patterns around strong edges; use Butterworth or Gaussian notches.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Notching only one of the pair**: the result becomes complex.
+- **Notching the strongest peaks blindly**: some belong to the scene (stripes, textures).
+- **Too wide notches**: remove scene content around the noise frequency.
+- **Searching peaks near the centre**: the scene's shading dominates there; exclude a small disc.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Optimum notch filtering
+
+Gonzalez and Woods [1] describe extracting the interference with a notch pass filter, then subtracting w(x, y) · pattern, where the weight w is chosen in each neighbourhood to minimise the local variance of the result. This handles interference whose strength varies over the image.
+
+### Descreening
+
+A printed halftone is a 2-D grid of frequencies and their harmonics; scanners remove it with low-pass or notch filtering tuned to the screen ruling (lines per inch) and angle, often adaptively per colour channel, since each ink uses a different screen angle.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "How does periodic noise appear in the spectrum?",
+      options: ["A bright centre", "Pairs of bright isolated points", "A ring", "Uniform brightness"],
+      answer: 1,
+      explanation: "Each wave at ±(u, v).",
+    },
+    {
+      question: "Why could a Gaussian low-pass not remove the interference?",
+      options: ["Too slow", "The noise frequencies are lower than the scene's edges", "Wrong colour", "It is nonlinear"],
+      answer: 1,
+      explanation: "Removing them would blur the scene too.",
+    },
+    {
+      question: "Why not notch the third-strongest peak (50, 0)?",
+      options: ["It is too weak", "It is the scene's own stripe pattern", "It is the mean", "Notches cannot be at v = 0"],
+      answer: 1,
+      explanation: "Real periodic content also makes peaks.",
+    },
+    {
+      question: "A peak |F| on a W × H image means an amplitude of…",
+      options: ["|F|", "2·|F| / (W·H)", "|F| / 2", "W·H / |F|"],
+      answer: 1,
+      explanation: "A cosine of amplitude A gives W·H·A/2 at each of ±(u, v).",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A Butterworth notch (n = 2, D0 = 3): what is H at distances 1, 3 and 9 from the notch centre (ignoring the mirror notch)?
+
+<Solution>
+
+H = 1 / (1 + (3/D)⁴): D = 1: 1 / 82 = **0.012**; D = 3: **0.5**; D = 9: 1 / (1 + 1/81) = **0.988**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Find the radius D0 that maximises the PSNR when removing both interference waves (try 0.5, 1, 1.5, 2).
+
+<Solution>
+
+```python
+for D0 in (0.5, 1, 1.5, 2):
+    out = np.fft.ifft2(F * notch_reject([(20, 12), (-8, 30)], D0)).real
+    print("D0", D0, "->", psnr(out), "dB")
+```
+
+Output:
+
+```text
+D0 0.5 -> 40.87 dB
+D0 1 -> 40.88 dB
+D0 1.5 -> 40.58 dB
+D0 2 -> 40.19 dB
+```
+
+The best radius is about 1: the interference frequencies are whole numbers of cycles per image, so their energy sits in single bins. Real interference rarely fits exactly; then a slightly larger radius (2–3) catches the leakage around the peak.
+
+</Solution>
+
+## References
+
+1. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Sections 4.10 (selective filtering: notch filters) and 5.4 (periodic noise reduction).
+2. A. K. Jain, *Fundamentals of Digital Image Processing*, Prentice Hall, 1989, Chapter 8.
+3. OpenCV 4.13.0 documentation: `dft`, `idft`, `dilate`, `minMaxLoc`. https://docs.opencv.org/4.13.0/

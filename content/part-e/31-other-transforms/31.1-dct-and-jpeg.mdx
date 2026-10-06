@@ -1,0 +1,324 @@
+export const meta = {
+  number: "31.1",
+  title: "DCT and JPEG",
+  minutes: 25,
+  objectives: [
+    "Explain why the DCT packs image energy into fewer coefficients than the DFT",
+    "Compute a 4-point DCT and compare it with the DFT of the same signal",
+    "Use cv2.dct / cv2.idct on whole images and on 8 × 8 blocks",
+    "Connect energy compaction to JPEG's quality–size trade-off",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 31.1 (Part E, Module 31).
+  New lab: BasisLab (lib/basis-ops.ts; dct2 = cv2.dct, gaborKernel = cv2.getGaborKernel). Also reuses DctLab from 4.3.
+  New samples: sample-fabric.png (31.3), sample-phantom.png (31.4).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 31.1 DCT and JPEG
+
+<Definition term="Discrete cosine transform (DCT)">a transform like the DFT that writes a signal as a sum of cosines only, with real coefficients. Because it implicitly mirrors the signal at its ends instead of repeating it, smooth images need very few large DCT coefficients: the DCT compacts energy, which is why JPEG, MPEG and H.264 are built on it (Ahmed, Natarajan and Rao 1974 [1]).</Definition>
+
+Chapter 4.3 followed one 8 × 8 block through JPEG. This chapter asks **why the DCT** and not the DFT, measures how much each can compress the same image, and shows why JPEG cuts the image into small blocks.
+
+## 1. An analogy
+
+Describing a slope to someone who can only use waves. With the DFT the slope must repeat: the end of one copy jumps back down to the start of the next, and describing that cliff takes many fast waves. With the DCT the slope is reflected at each end, like a roof with two sides: no cliff, so a couple of gentle waves suffice.
+
+## 2. DFT vs DCT
+
+<Flow
+  steps={[
+    { label: "Signal x(0) … x(N − 1)", tone: "data" },
+    { label: "DFT: assumes x repeats → jump from x(N − 1) back to x(0)", tone: "process" },
+    { label: "DCT: assumes x is mirrored → no jump", tone: "process" },
+    { label: "No jump → small high-frequency coefficients → better compression", tone: "result" },
+  ]}
+/>
+
+The orthonormal 2-D DCT-II of an N × N block (what `cv2.dct` computes):
+
+```text
+X(k) = c(k) · Σ x(n) · cos(π (2n + 1) k / 2N),   c(0) = √(1/N), c(k) = √(2/N)
+```
+
+applied to rows and then to columns. The coefficients are real, and k = 0 is the scaled mean ("DC").
+
+## 3. A worked example by hand
+
+The ramp 1, 2, 3, 4:
+
+| Transform | Coefficients | Magnitudes after the first |
+| --- | --- | --- |
+| DFT | 10, −2 + 2i, −2, −2 − 2i | 2.83, 2.00, 2.83 |
+| DCT | 5.00, −2.23, 0.00, −0.16 | 2.23, 0.00, 0.16 |
+
+The DFT sees the ramp repeating as 1 2 3 4 1 2 3 4…: the drop from 4 back to 1 spreads energy over all frequencies. The DCT sees 1 2 3 4 4 3 2 1…: smooth, so almost everything is in the first two coefficients. (Energy is preserved in both: 1² + 2² + 3² + 4² = 30 = 5² + 2.23² + 0.16² for the orthonormal DCT.)
+
+## 4. Compressing a whole image
+
+Keep only the largest coefficients of the 256 × 256 test scene, set the rest to zero, transform back:
+
+| Kept | DCT: PSNR | DFT: PSNR | Energy kept (DCT / DFT) |
+| --- | --- | --- | --- |
+| 1 % | 25.7 dB | 24.4 dB | 99.12 % / 98.84 % |
+| 5 % | 31.2 dB | 29.6 dB | 99.75 % / 99.64 % |
+| 10 % | 34.3 dB | 32.6 dB | 99.88 % / 99.82 % |
+
+The DCT wins at every level (and a DFT coefficient is complex, two numbers, so the real gap is larger). Both keep over 99 % of the energy with 1 % of the coefficients, but that last 1 % of energy holds the edges, so the PSNR is still moderate.
+
+**Blocks help more than the transform choice.** Keeping the same 5 % of coefficients, but from separate 8 × 8 block DCTs, gives **40.0 dB** instead of 31.2 dB: each block spends its coefficients where its own detail is, while flat blocks need only their DC value. This locality is why JPEG works on 8 × 8 blocks.
+
+<BasisLab mode="dct" caption="Keep the largest x % of the coefficients of the whole image, with the DCT and with the DFT. At 1–2 % compare the borders: the DFT result bleeds the right edge into the left one; the DCT does not. Both blur fine stripes and text first."/>
+
+## 5. JPEG in one paragraph
+
+JPEG (4.3) converts to YCbCr, subsamples colour, cuts each channel into 8 × 8 blocks, takes the DCT of each, divides each coefficient by a quality-dependent step from a quantisation table (large steps for high frequencies, to which the eye is less sensitive), rounds, and entropy-codes the many resulting zeros. On the test scene (65 536 bytes raw):
+
+| JPEG quality | File size | PSNR |
+| --- | --- | --- |
+| 10 | 2 152 bytes | 31.2 dB |
+| 30 | 3 160 bytes | 35.8 dB |
+| 50 | 3 987 bytes | 38.3 dB |
+| 90 | 7 029 bytes | 47.2 dB |
+
+<DctLab caption="One 8 × 8 block through JPEG (from 4.3): the DCT weights, quantisation at the chosen quality, and the decoded block."/>
+
+The price of blocks: at low quality, the block borders become visible (**blocking**) and edges ring inside their blocks.
+
+## 6. Industrial use
+
+- **Image and video compression**: JPEG, MPEG-2, H.264 / AVC use DCTs (H.265 integer approximations of DCT and DST).
+- **Storage in inspection systems**: choose JPEG quality by checking that the measurement or defect detection still works on decoded images (lossy artefacts can create or hide defects).
+- **Fast features**: low DCT coefficients of a block as a compact descriptor (perceptual hashing, 35.5).
+- **Denoising**: thresholding DCT coefficients in sliding blocks (the idea behind BM3D's transform step).
+
+## What you should remember from 31.1
+
+<Takeaways>
+<Takeaway n={1} title="Mirroring">DCT = cosines of the mirrored signal: no border jump.</Takeaway>
+<Takeaway n={2} title="Compaction">Fewer large coefficients than the DFT for smooth content.</Takeaway>
+<Takeaway n={3} title="Blocks">Local 8 × 8 DCTs adapt to local detail: 40 dB vs 31 dB at 5 %.</Takeaway>
+<Takeaway n={4} title="JPEG">Quantised block DCT + entropy coding; blocking at low quality.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Why does the DCT need no window (30.2) to avoid the border cross?
+
+<Solution>
+
+Its implied extension mirrors the image at the borders, so the extended image is continuous there: there is no jump to create spurious high frequencies.
+
+</Solution>
+
+**Q2.** A flat 8 × 8 block of value 100: which DCT coefficients are non-zero?
+
+<Solution>
+
+Only the DC coefficient: 8 · 100 = **800** (c(0)² · 64 · 100 with c(0) = √(1/8) per dimension). All AC coefficients are 0.
+
+</Solution>
+
+### Next: 31.2 Wavelets
+
+Transforms that say both *which* frequency and *where*: multi-scale analysis.
+
+## Code
+
+Three examples: the ramp, whole-image vs block DCT, and JPEG sizes.
+
+### 1. DFT vs DCT of a ramp
+
+```python
+import numpy as np
+import cv2
+
+x = np.array([[1, 2, 3, 4]], np.float64)
+print("DFT:", np.round(np.fft.fft(x[0]), 2).tolist())
+print("DCT:", np.round(cv2.dct(x)[0], 3).tolist())
+print("energy: signal", float((x ** 2).sum()), "| DCT", round(float((cv2.dct(x) ** 2).sum()), 6))
+```
+
+Output:
+
+```text
+DFT: [(10+0j), (-2+2j), (-2+0j), (-2-2j)]
+DCT: [5.0, -2.23, 0.0, -0.159]
+energy: signal 30.0 | DCT 30.0
+```
+
+- `cv2.dct` needs float32 or float64 and an even size (pad odd sizes); `cv2.idct` inverts it exactly.
+
+### 2. Whole image vs 8 × 8 blocks
+
+```python
+img = cv2.imread("sample-fft-scene.png", cv2.IMREAD_GRAYSCALE).astype(np.float64)
+
+def keep_largest(C, fraction):
+    t = np.sort(np.abs(C).ravel())[::-1][int(fraction * C.size) - 1]
+    return np.where(np.abs(C) >= t, C, 0)
+
+def psnr(a):
+    return round(cv2.PSNR(np.clip(np.rint(a), 0, 255).astype(np.uint8), img.astype(np.uint8)), 1)
+
+for frac in (0.01, 0.05, 0.10):
+    dct_rec = cv2.idct(keep_largest(cv2.dct(img), frac))
+    dft_rec = np.fft.ifft2(keep_largest(np.fft.fft2(img), frac)).real
+    print(f"{frac:.0%} kept: DCT {psnr(dct_rec)} dB, DFT {psnr(dft_rec)} dB")
+
+blocks = np.zeros_like(img)
+for y in range(0, 256, 8):
+    for x in range(0, 256, 8):
+        blocks[y:y + 8, x:x + 8] = cv2.dct(img[y:y + 8, x:x + 8])
+kept = keep_largest(blocks, 0.05)
+rec = np.zeros_like(img)
+for y in range(0, 256, 8):
+    for x in range(0, 256, 8):
+        rec[y:y + 8, x:x + 8] = cv2.idct(kept[y:y + 8, x:x + 8])
+print("8 x 8 blocks, 5% kept:", psnr(rec), "dB")
+```
+
+Output:
+
+```text
+1% kept: DCT 25.7 dB, DFT 24.4 dB
+5% kept: DCT 31.2 dB, DFT 29.6 dB
+10% kept: DCT 34.3 dB, DFT 32.6 dB
+8 x 8 blocks, 5% kept: 40.0 dB
+```
+
+### 3. JPEG quality and size
+
+```python
+u8 = img.astype(np.uint8)
+for q in (10, 30, 50, 90):
+    ok, buf = cv2.imencode(".jpg", u8, [cv2.IMWRITE_JPEG_QUALITY, q])
+    dec = cv2.imdecode(buf, cv2.IMREAD_GRAYSCALE)
+    print(f"quality {q:2d}: {len(buf):5d} bytes, PSNR {cv2.PSNR(dec, u8):.1f} dB")
+```
+
+Output:
+
+```text
+quality 10:  2152 bytes, PSNR 31.2 dB
+quality 30:  3160 bytes, PSNR 35.8 dB
+quality 50:  3987 bytes, PSNR 38.3 dB
+quality 90:  7029 bytes, PSNR 47.2 dB
+```
+
+## OpenCV API notes
+
+- **`cv2.dct(src, flags=0)`**, **`cv2.idct(src, flags=0)`**: float32/float64, even sizes; `DCT_INVERSE`, `DCT_ROWS` (1-D DCT of each row) flags. Orthonormal scaling (energy preserved).
+- **`cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, q, …])`**: also `IMWRITE_JPEG_PROGRESSIVE`, `IMWRITE_JPEG_OPTIMIZE`, `IMWRITE_JPEG_SAMPLING_FACTOR` (chroma subsampling), `IMWRITE_JPEG_LUMA_QUALITY` / `CHROMA_QUALITY`.
+- **Block processing**: loop over 8 × 8 tiles as above, or reshape to (H/8, 8, W/8, 8) and use `scipy.fft.dctn` (outside the pinned environment).
+
+## Where it fails
+
+- **Sharp edges and text**: they need many high coefficients; at low quality they ring and blur.
+- **Block borders**: independent blocks produce visible seams at low quality (blocking).
+- **Repeated compression** (save, edit, save): errors accumulate.
+- **Measurement**: lossy compression moves edges by fractions of a pixel; keep raw or lossless images (PNG) for metrology.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Odd image sizes in cv2.dct**: an error; pad to an even size.
+- **uint8 into cv2.dct**: convert to float first.
+- **Comparing DCT and DFT at the same "number of coefficients"** without noting that DFT coefficients are complex.
+- **Using JPEG for training labels or masks**: compression changes label values at borders; use PNG.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### DCT and the Karhunen–Loève transform
+
+For signals modelled as a first-order Markov process with high correlation between neighbours (a good model for natural images), the DCT is very close to the Karhunen–Loève transform, the optimal (PCA) basis for energy compaction [1]. Unlike the KLT it is fixed and fast (O(N log N) through the FFT), which is why it became the standard.
+
+### Beyond 8 × 8
+
+Modern codecs use variable block sizes (4 × 4 to 64 × 64 in HEVC), integer transforms, and in-loop deblocking filters; JPEG 2000 replaced the block DCT by a wavelet transform (31.2), which avoids blocking.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why does the DCT compact energy better than the DFT?",
+      options: ["It is complex", "It mirrors the signal at its ends: no border jump", "It uses more coefficients", "It is nonlinear"],
+      answer: 1,
+      explanation: "The DFT's implied repetition creates a jump.",
+    },
+    {
+      question: "Keeping 5 % of the coefficients, which gave the higher PSNR?",
+      options: ["Whole-image DCT", "Whole-image DFT", "8 × 8 block DCT", "All equal"],
+      answer: 2,
+      explanation: "40.0 dB vs 31.2 / 29.6 dB.",
+    },
+    {
+      question: "cv2.dct requires…",
+      options: ["uint8, any size", "float, even size", "complex input", "a power of two"],
+      answer: 1,
+      explanation: "Pad odd sizes.",
+    },
+    {
+      question: "JPEG blocking appears because…",
+      options: ["Colour subsampling", "Each 8 × 8 block is quantised independently", "Entropy coding", "The DCT is lossy"],
+      answer: 1,
+      explanation: "Neighbouring blocks lose different coefficients.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Compute the 2-point orthonormal DCT of (6, 2).
+
+<Solution>
+
+X(0) = √(1/2) · (6 + 2) = **5.66**; X(1) = √(2/2) · (6 · cos(π/4) + 2 · cos(3π/4)) = 0.707 · (6 − 2) = **2.83**. Energy: 36 + 4 = 40 = 32 + 8 ✓.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Count how many of the 1 024 8 × 8 blocks of the test scene are "flat": all AC coefficients below 5 in magnitude. What does that mean for compression?
+
+<Solution>
+
+```python
+flat = 0
+for y in range(0, 256, 8):
+    for x in range(0, 256, 8):
+        c = cv2.dct(img[y:y + 8, x:x + 8])
+        c[0, 0] = 0                                                    # ignore DC
+        flat += int(np.abs(c).max() < 5)
+print("flat blocks:", flat, "of", (256 // 8) ** 2)
+```
+
+Output:
+
+```text
+flat blocks: 269 of 1024
+```
+
+About a quarter of the blocks are flat (the plain background, the inside of the square and disc): after quantisation they cost one DC value and an end-of-block code each, almost nothing. Busy blocks (text, stripes) take most of the file.
+
+</Solution>
+
+## References
+
+1. N. Ahmed, T. Natarajan, K. R. Rao, "Discrete cosine transform", *IEEE Trans. Computers* C-23(1), 90–93, 1974.
+2. G. K. Wallace, "The JPEG still picture compression standard", *Communications of the ACM* 34(4), 30–44, 1991.
+3. ITU-T Recommendation T.81 / ISO/IEC 10918-1, *Digital compression and coding of continuous-tone still images*, 1992.
+4. OpenCV 4.13.0 documentation: `dct`, `idct`, `imencode`, `ImwriteFlags`. https://docs.opencv.org/4.13.0/

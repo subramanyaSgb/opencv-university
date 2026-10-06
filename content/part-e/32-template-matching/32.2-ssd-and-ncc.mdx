@@ -1,0 +1,308 @@
+export const meta = {
+  number: "32.2",
+  title: "SSD and NCC",
+  minutes: 25,
+  objectives: [
+    "Write the six cv2.matchTemplate scores and say what each one ignores",
+    "Compute SSD, correlation and normalised correlation of a tiny example by hand",
+    "Compare the methods on the board, with and without a brightness change",
+    "Choose TM_CCOEFF_NORMED and a threshold for robust matching",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 32.2 (Module 32).
+  Lab: MatchLab mode "methods" (same formulas as cv2.matchTemplate).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 32.2 SSD and NCC
+
+<Definition term="Normalised cross-correlation (NCC)">a similarity score between a template and an image patch that subtracts both means and divides by both contrasts. It is 1 for a perfect match, also when the patch is brighter or has more contrast, 0 for no relation and −1 for an inverted match. In OpenCV it is `TM_CCOEFF_NORMED`.</Definition>
+
+SSD (32.1) asks "are the pixel values the same?". In real images the same object rarely has the same values: lighting changes, exposure changes, the camera's gain changes. Correlation-based scores ask a better question: "does the patch have the same **pattern** of brighter and darker pixels?" (Lewis 1995 [1]).
+
+## 1. An analogy
+
+Recognising a song played louder or softer. Comparing loudness sample by sample (SSD) says the louder version is different. Comparing the shape of the melody, after removing the average volume and scaling to the same loudness (NCC), says it is the same song.
+
+## 2. Six scores
+
+With T the template, I the patch under it, sums over the template area, T′ = T − mean(T) and I′ = I − mean(I):
+
+<Flow
+  steps={[
+    { label: "SQDIFF = Σ (T − I)²: sensitive to brightness and contrast", tone: "data" },
+    { label: "CCORR = Σ T·I: grows with brightness; favours bright regions", tone: "process" },
+    { label: "CCOEFF = Σ T′·I′: ignores brightness offsets, not contrast", tone: "process" },
+    { label: "…_NORMED: divide by √(ΣT² ΣI²) or √(ΣT′² ΣI′²)", tone: "process" },
+    { label: "CCOEFF_NORMED (NCC): ignores brightness and contrast; −1 … 1", tone: "result" },
+  ]}
+/>
+
+| Method | Best | Invariant to |
+| --- | --- | --- |
+| `TM_SQDIFF` | min | nothing |
+| `TM_SQDIFF_NORMED` | min | partly to contrast |
+| `TM_CCORR` | max | nothing (bright regions win) |
+| `TM_CCORR_NORMED` | max | contrast (gain) |
+| `TM_CCOEFF` | max | brightness (offset) |
+| `TM_CCOEFF_NORMED` | max | **brightness and contrast** |
+
+## 3. A worked example by hand
+
+Template T = (1, 2, 3). Two patches: A = (2, 4, 6) (twice the contrast) and B = (11, 12, 13) (brighter by 10).
+
+| Score | A = 2T | B = T + 10 |
+| --- | --- | --- |
+| SSD Σ(T − I)² | 1 + 4 + 9 = 14 | 3 · 100 = 300 |
+| CCORR Σ T·I | 2 + 8 + 18 = 28 | 11 + 24 + 39 = 74 |
+| CCORR_NORMED | 28 / √(14 · 56) = **1.000** | 74 / √(14 · 434) = **0.949** |
+| CCOEFF_NORMED | **1.000** | **1.000** |
+
+For CCOEFF_NORMED: T′ = (−1, 0, 1), A′ = (−2, 0, 2), B′ = (−1, 0, 1): both patterns are proportional to T′, so both score exactly 1. SSD calls both very different; CCORR_NORMED handles the gain but not the offset.
+
+## 4. On the board
+
+Scores at two identical chips, at the printed label and at plain background, then with the right half of the image made 40 % brighter (gain 1.4, as when the light changes):
+
+| Method | Chip (140, 35) | Label | Background | Chip, gain 1.4 |
+| --- | --- | --- | --- | --- |
+| `SQDIFF` | 54 387 | 2 730 184 | 2 007 028 | 1 295 101 |
+| `SQDIFF_NORMED` | 0.008 | 0.327 | 0.288 | 0.137 |
+| `CCORR_NORMED` | **0.998** | 0.862 | 0.857 | 0.993 |
+| `CCOEFF_NORMED` | **0.991** | 0.222 | 0.126 | **0.976** |
+
+- **SSD** grows 24-fold for the brighter chips: they are now closer to "not a chip" than to the template.
+- **CCORR_NORMED** stays high for the chips but also gives 0.86 to plain background: the gap between a match and no match is small, so thresholds are fragile.
+- **CCOEFF_NORMED** separates clearly: 0.98–0.99 for chips, 0.13–0.22 for everything else, with or without the brightness change.
+
+The unnormalised scores do not even pick the template's own position as best: `TM_CCORR` prefers the brighter chip (195, 110), because its score grows with brightness, and `TM_CCOEFF` picks another chip (140, 80) whose contrast is slightly higher. On a busier image they can just as well pick a bright or contrasty background region.
+
+<MatchLab mode="methods" caption="Switch between the six methods: the result map (bright = high score), the best match (yellow) and, for the normalised methods, all matches over the threshold (green). Raise the gain of the right half of the image: SQDIFF loses the right-hand chips, CCOEFF_NORMED keeps them. Try TM_CCORR: its best match moves to the brighter chip."/>
+
+## 5. Choosing a threshold
+
+With `TM_CCOEFF_NORMED`:
+
+- Identical objects under noise: 0.95–1.0. Same object under modest lighting change: above 0.9.
+- Different objects: typically below 0.5; textured backgrounds can reach 0.5–0.7.
+- Rotated by 15° or scaled by 1.3: 0.2–0.3 here (32.4): template matching does not tolerate geometric change.
+
+Set the threshold from good and bad examples of your own images (often 0.7–0.9), and keep one peak per object (non-maximum suppression, 37.4).
+
+## 6. Industrial use
+
+- **Fiducials and alignment marks** under varying illumination: `TM_CCOEFF_NORMED`.
+- **Label and logo presence** with a score threshold as the pass/fail criterion.
+- **Optical character verification** of fixed fonts at a known position.
+- **Sub-pixel registration** of a reference patch (with peak interpolation).
+
+## What you should remember from 32.2
+
+<Takeaways>
+<Takeaway n={1} title="SSD">Exact values: breaks with lighting changes.</Takeaway>
+<Takeaway n={2} title="CCORR">Unnormalised correlation favours bright regions: avoid.</Takeaway>
+<Takeaway n={3} title="NCC">TM_CCOEFF_NORMED ignores brightness and contrast; 1 = perfect.</Takeaway>
+<Takeaway n={4} title="Threshold">Learn it from examples; typically 0.7–0.9.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Template (0, 5, 10) and patch (100, 50, 0). What is CCOEFF_NORMED?
+
+<Solution>
+
+T′ = (−5, 0, 5), I′ = (50, 0, −50) = −10 · T′: the score is **−1** (an inverted pattern).
+
+</Solution>
+
+**Q2.** Why is the CCORR_NORMED score of plain background (0.86) so high?
+
+<Solution>
+
+Without subtracting the means, two mostly positive vectors (bright pixels) always point in similar directions: the angle between them is small. Removing the means (CCOEFF) leaves only the pattern.
+
+</Solution>
+
+### Next: 32.3 Multi-scale
+
+When the object can appear larger or smaller: image pyramids and scale search.
+
+## Code
+
+Three examples: the tiny example, all methods on the board, and the brightness test.
+
+### 1. Scores by hand and with OpenCV
+
+```python
+import numpy as np
+import cv2
+
+T = np.array([[1, 2, 3]], np.float32)
+for name, I in [("2T", 2 * T), ("T+10", T + 10)]:
+    scores = {m: float(cv2.matchTemplate(I, T, getattr(cv2, "TM_" + m))[0, 0]) for m in ("SQDIFF", "CCORR", "CCORR_NORMED", "CCOEFF_NORMED")}
+    print(name, {k: round(v, 3) for k, v in scores.items()})
+```
+
+Output:
+
+```text
+2T {'SQDIFF': 14.0, 'CCORR': 28.0, 'CCORR_NORMED': 1.0, 'CCOEFF_NORMED': 1.0}
+T+10 {'SQDIFF': 300.0, 'CCORR': 74.0, 'CCORR_NORMED': 0.949, 'CCOEFF_NORMED': 1.0}
+```
+
+### 2. Where does each method put its best match?
+
+```python
+board = cv2.imread("sample-board.png", cv2.IMREAD_GRAYSCALE)
+tpl = board[22:49, 25:56].copy()
+h, w = tpl.shape
+for m in ("SQDIFF", "SQDIFF_NORMED", "CCORR", "CCORR_NORMED", "CCOEFF", "CCOEFF_NORMED"):
+    r = cv2.matchTemplate(board, tpl, getattr(cv2, "TM_" + m))
+    mn, mx, mn_loc, mx_loc = cv2.minMaxLoc(r)
+    loc = mn_loc if m.startswith("SQDIFF") else mx_loc
+    print(f"{m:14s} best centre {(loc[0] + w // 2, loc[1] + h // 2)}")
+```
+
+Output:
+
+```text
+SQDIFF         best centre (40, 35)
+SQDIFF_NORMED  best centre (40, 35)
+CCORR          best centre (195, 110)
+CCORR_NORMED   best centre (40, 35)
+CCOEFF         best centre (140, 80)
+CCOEFF_NORMED  best centre (40, 35)
+```
+
+### 3. A brightness change
+
+```python
+brighter = board.astype(np.float32)
+brighter[:, 121:] = np.minimum(255, brighter[:, 121:] * 1.4)           # right half 40 % brighter
+t32 = tpl.astype(np.float32)
+for m in ("SQDIFF", "CCORR_NORMED", "CCOEFF_NORMED"):
+    before = cv2.matchTemplate(board.astype(np.float32), t32, getattr(cv2, "TM_" + m))[35 - h // 2, 140 - w // 2]
+    after = cv2.matchTemplate(brighter, t32, getattr(cv2, "TM_" + m))[35 - h // 2, 140 - w // 2]
+    print(f"{m:14s} chip (140, 35): {before:.3f} -> {after:.3f}")
+```
+
+Output:
+
+```text
+SQDIFF         chip (140, 35): 54387.000 -> 1295101.000
+CCORR_NORMED   chip (140, 35): 0.998 -> 0.993
+CCOEFF_NORMED  chip (140, 35): 0.991 -> 0.976
+```
+
+## OpenCV API notes
+
+- **Methods**: `cv2.TM_SQDIFF`, `TM_SQDIFF_NORMED`, `TM_CCORR`, `TM_CCORR_NORMED`, `TM_CCOEFF`, `TM_CCOEFF_NORMED`. Formulas in the `TemplateMatchModes` documentation.
+- **Colour images**: scores are summed over channels; matching in grey is usually enough and three times faster.
+- **Flat patches**: NCC divides by the patch's contrast; on uniform regions OpenCV returns values near 0 (or unstable values for float images): ignore matches on flat backgrounds.
+- **Masks**: `mask=` excludes template pixels (for example the background around a round part); results with masks are slower (no FFT shortcut).
+
+## Where it fails
+
+- **Geometric changes** (rotation, scale, perspective): NCC drops quickly (32.4).
+- **Non-linear lighting changes** (shadows across the object, specular highlights): NCC assumes a linear change.
+- **Low-texture templates**: few distinctive pixels; many similar positions score high.
+- **Partial occlusion**: the covered part pulls the score down.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using TM_CCORR**: bright regions win regardless of shape.
+- **Comparing raw scores between images**: only normalised scores have a fixed range.
+- **Threshold on SQDIFF without normalising**: the value scales with template size and brightness.
+- **Matching colour templates on colour images** when the colour is not distinctive: three times the cost, no gain.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Fast NCC
+
+Lewis [1] showed how to compute normalised cross-correlation fast: the numerator via the FFT (correlation theorem, 30.5) and the denominator's local sums via running sums (integral images, 17.5). OpenCV's implementation follows this idea, which is why `matchTemplate` is fast even for large templates.
+
+### Beyond NCC
+
+Zero-mean NCC is optimal for a template corrupted by additive Gaussian noise and linear lighting changes. For other changes: rank-based scores (census, Kendall's tau) tolerate monotonic lighting changes; mutual information handles different modalities (21.4); gradient-orientation matching (as in shape-based matching tools) tolerates contrast reversal and clutter.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Which score is invariant to both brightness and contrast changes?",
+      options: ["TM_SQDIFF", "TM_CCORR_NORMED", "TM_CCOEFF_NORMED", "TM_CCORR"],
+      answer: 2,
+      explanation: "It subtracts means and divides by contrasts.",
+    },
+    {
+      question: "CCOEFF_NORMED of a patch equal to 3·T + 20 is…",
+      options: ["0.33", "1", "3", "Depends on T"],
+      answer: 1,
+      explanation: "A linear change of the template.",
+    },
+    {
+      question: "Why did TM_CCORR's best match move to the brighter chip?",
+      options: ["It is a better match", "Unnormalised correlation grows with brightness", "Noise", "The template is wrong"],
+      answer: 1,
+      explanation: "Bright regions give large products.",
+    },
+    {
+      question: "A score of −1 with TM_CCOEFF_NORMED means…",
+      options: ["No match", "The inverted pattern (dark where the template is bright)", "An error", "A perfect match"],
+      answer: 1,
+      explanation: "Perfect negative correlation.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Template (2, 4) and patches (3, 5), (4, 8), (5, 3). Compute SSD and CCOEFF_NORMED for each.
+
+<Solution>
+
+(3, 5): SSD 2, NCC 1 (offset +1). (4, 8): SSD 4 + 16 = 20, NCC 1 (gain 2). (5, 3): SSD 9 + 1 = 10, NCC **−1** (reversed). SSD ranks (3, 5) best but calls the reversed pattern better than the scaled one; NCC sees the patterns.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+With TM_CCOEFF_NORMED, find all matches above 0.9 on the board (one per object). Which chips are found and which are missed?
+
+<Solution>
+
+```python
+r = cv2.matchTemplate(board, tpl, cv2.TM_CCOEFF_NORMED)
+keep = (r >= 0.9) & (r == cv2.dilate(r, np.ones((9, 9), np.uint8)))
+ys, xs = np.nonzero(keep)
+print(sorted((int(x) + w // 2, int(y) + h // 2, round(float(r[y, x]), 3)) for x, y in zip(xs, ys)))
+```
+
+Output:
+
+```text
+[(40, 35, 1.0), (40, 80, 0.995), (40, 122, 0.961), (90, 35, 0.995), (140, 35, 0.991), (140, 80, 0.991), (195, 110, 0.983)]
+```
+
+Found: the five identical chips, the brighter chip (0.983) and the upside-down chip (0.961). Missed: the rotated (15°) and the scaled (1.3×) chip. Note that the upside-down chip passes: only its small pin-1 dot differs, so NCC cannot tell its orientation (32.4).
+
+</Solution>
+
+## References
+
+1. J. P. Lewis, "Fast normalized cross-correlation", *Vision Interface*, 120–123, 1995.
+2. R. Brunelli, *Template Matching Techniques in Computer Vision: Theory and Practice*, Wiley, 2009, Chapters 2–3.
+3. OpenCV 4.13.0 documentation: `matchTemplate`, `TemplateMatchModes`. https://docs.opencv.org/4.13.0/

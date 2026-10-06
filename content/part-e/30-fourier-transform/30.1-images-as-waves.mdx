@@ -1,0 +1,314 @@
+export const meta = {
+  number: "30.1",
+  title: "Images as waves",
+  minutes: 25,
+  objectives: [
+    "Describe a 2-D wave by its frequency (u, v): period and direction",
+    "See that any row of pixels, and any image, is a sum of waves",
+    "Compute a tiny discrete Fourier transform by hand",
+    "Explain why edges need many high-frequency waves (and why cutting them causes ringing)",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 30.1 (Part E, Module 30).
+  New lab: FourierLab (lib/fourier-ops.ts; filters and spectra equal NumPy).
+  New samples: sample-fft-scene.png, sample-fft-periodic.png (256 × 256).
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 30.1 Images as waves
+
+<Definition term="Frequency (of an image)">how fast brightness changes across the image. Every image can be written as a sum of smooth waves (cosines) of different frequencies, directions and strengths; the Fourier transform tells how much of each wave the image contains (Fourier 1822 [1]).</Definition>
+
+Until now we described images by their pixels: position by position. Part E describes them by their **frequencies**: slow changes (a gentle gradient of light), medium ones (the shape of a part) and fast ones (edges, fine texture, noise). Some problems are much easier in that view: removing a regular interference pattern, measuring sharpness, filtering with very large kernels, compressing (JPEG, 4.3).
+
+## 1. An analogy
+
+A chord on a piano. You hear one sound, but it is made of several notes, each a pure tone at its own pitch and loudness. A sound engineer's equaliser shows how loud each pitch is, and can turn some down. The Fourier transform is the equaliser display of an image: each "note" is a wave of brightness, and filtering turns some of them up or down.
+
+## 2. One wave in 2-D
+
+<Flow
+  steps={[
+    { label: "Wave: brightness = mean + A · cos(2π (u·x/W + v·y/H) + φ)", tone: "data" },
+    { label: "u cycles across the width, v cycles down the height", tone: "process" },
+    { label: "Period = W / √(u² + v²) pixels (square image)", tone: "process" },
+    { label: "Stripes run perpendicular to the direction (u, v)", tone: "result" },
+  ]}
+/>
+
+- (u, v) = (8, 0) on a 256 × 256 image: 8 vertical stripe pairs across, period 32 pixels.
+- (0, 8): the same stripes lying horizontally.
+- (8, 8): diagonal stripes, period 256 / √128 = 22.6 pixels.
+- **A** is the contrast (amplitude) and **φ** the phase: where along the stripes the bright bands sit.
+
+The highest frequency a pixel grid can show is half a cycle per pixel (u = W/2: stripes of one bright and one dark pixel), the **Nyquist limit** (3.2).
+
+<FourierLab mode="waves" caption="Two waves added to a grey background. Move u and v: the stripes turn and get finer, and the bright dots in the spectrum (right) move with them. Every wave appears twice, at (u, v) and (−u, −v). Switch on wave 2 to see two dots pairs and a crossed pattern."/>
+
+## 3. A worked example by hand
+
+The discrete Fourier transform (DFT) of N samples f(x):
+
+```text
+F(k) = Σ f(x) · e^(−2πi·k·x/N),   x = 0 … N − 1
+```
+
+Take N = 8 samples **3, 1, 3, 1, 3, 1, 3, 1**: a mean of 2 plus a pattern that alternates +1, −1.
+
+- F(0) = Σ f(x) = **16** = N × mean.
+- F(4): e^(−2πi·4x/8) = e^(−iπx) = +1, −1, +1, … so F(4) = 3 − 1 + 3 − 1 + 3 − 1 + 3 − 1 = **8** = N × amplitude of the ±1 wave (it is a cosine at the Nyquist frequency, which appears only once).
+- Every other F(k) is **0**: the signal contains no other waves.
+
+A slower wave, f(x) = 2 + cos(2πx/8) (one cycle over 8 samples), gives F(0) = 16 and F(1) = F(7) = **4** = N · A / 2: a cosine splits its amplitude between +k and −k (k = 7 is −1 in disguise).
+
+## 4. Edges are many waves
+
+A sharp edge, a jump from −1 to +1, is the opposite of a smooth wave. Its Fourier series is
+
+```text
+square wave = (4/π) · (sin x + sin 3x / 3 + sin 5x / 5 + …)
+```
+
+Only odd harmonics appear, with amplitudes falling as 1/k. Rebuilding the edge from more and more of them:
+
+| Harmonics kept (k ≤ K) | 1 | 3 | 9 | 31 | all |
+| --- | --- | --- | --- | --- | --- |
+| Peak value (true: 1) | 1.27 | 1.20 | 1.18 | 1.17 | 1.00 |
+| Mean error | 0.343 | 0.218 | 0.111 | 0.045 | 0 |
+
+The mean error falls as K grows, but next to the jump an overshoot of about 0.17 to 0.18 remains, roughly 9 % of the jump of 2 (the **Gibbs phenomenon**). Only with every harmonic does the edge become exact. In images, cutting off high frequencies sharply produces exactly these ripples beside edges: **ringing** (30.3).
+
+Consequences for image processing:
+
+- **Edges, fine texture and noise live in the high frequencies**; smooth shading and large shapes in the low ones.
+- **Blurring = removing high frequencies**; sharpening = boosting them (Module 19).
+- **Sampling** must keep the frequencies of interest below Nyquist, or they fold back as aliasing (3.2).
+
+## 5. Industrial use
+
+- **Periodic defects and textures**: woven fabric, mesh, printed raster and machined surfaces are a few strong frequencies; a defect breaks the pattern (30.4).
+- **Interference removal**: electrical hum and line patterns in camera images are single frequencies.
+- **Focus and sharpness**: the share of high-frequency energy rises when the image is in focus (50.3).
+- **Compression**: JPEG keeps low frequencies precisely and quantises high ones coarsely (4.3, 31.1).
+
+## What you should remember from 30.1
+
+<Takeaways>
+<Takeaway n={1} title="Waves">Any image is a sum of 2-D cosines with frequency (u, v), amplitude and phase.</Takeaway>
+<Takeaway n={2} title="Low vs high">Slow shading = low frequencies; edges, detail, noise = high.</Takeaway>
+<Takeaway n={3} title="DFT">F(0) = N × mean; a cosine of amplitude A gives N·A/2 at ±k.</Takeaway>
+<Takeaway n={4} title="Gibbs">Cutting high frequencies sharply leaves ~9 % ripples at edges.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 512 × 512 image shows stripes with (u, v) = (0, 16). Describe them.
+
+<Solution>
+
+16 cycles down the height: **horizontal** stripes with a period of 512 / 16 = **32 pixels**.
+
+</Solution>
+
+**Q2.** Samples 5, 5, 5, 5. What is the DFT?
+
+<Solution>
+
+F(0) = 20 (4 × mean 5); F(1) = F(2) = F(3) = **0**: a constant has no waves.
+
+</Solution>
+
+### Next: 30.2 The DFT and spectrum
+
+The 2-D transform of a whole image, how to display it, and what magnitude and phase each tell.
+
+## Code
+
+Three examples: the hand DFT, a square edge rebuilt from harmonics, and a 2-D wave.
+
+### 1. A tiny DFT
+
+```python
+import numpy as np
+import cv2
+
+f = np.array([3, 1, 3, 1, 3, 1, 3, 1], float)
+print("F:", np.round(np.fft.fft(f).real, 3).tolist())
+x = np.arange(8)
+g = 2 + np.cos(2 * np.pi * x / 8)
+print("G:", np.round(np.fft.fft(g).real, 3).tolist())
+```
+
+Output:
+
+```text
+F: [16.0, 0.0, 0.0, 0.0, 8.0, 0.0, 0.0, 0.0]
+G: [16.0, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0]
+```
+
+- `np.fft.fft` uses the formula of Section 3 (no scaling forward; `ifft` divides by N).
+
+### 2. An edge from harmonics
+
+```python
+N = 256
+t = np.arange(N)
+square = np.where(t < N // 2, 1.0, -1.0)                              # one period: +1 then −1
+F = np.fft.fft(square)
+k = np.fft.fftfreq(N, 1 / N)                                          # 0, 1, 2, …, −2, −1
+print("amplitudes |F(k)|/N for k = 1, 3, 5:", np.round(np.abs(F[[1, 3, 5]]) / N, 3).tolist(), "| k = 2:", round(abs(F[2]) / N, 3))
+for K in (1, 3, 9, 31):
+    G = np.where(np.abs(k) <= K, F, 0)                                # keep harmonics up to K
+    rebuilt = np.fft.ifft(G).real
+    print(f"K = {K:2d}: peak {rebuilt.max():.2f}, mean error {np.abs(rebuilt - square).mean():.3f}")
+```
+
+Output:
+
+```text
+amplitudes |F(k)|/N for k = 1, 3, 5: [0.637, 0.212, 0.127] | k = 2: 0.0
+K =  1: peak 1.27, mean error 0.343
+K =  3: peak 1.20, mean error 0.218
+K =  9: peak 1.18, mean error 0.111
+K = 31: peak 1.17, mean error 0.045
+```
+
+- The amplitudes are 2/(πk) = 0.637, 0.212, 0.127 (each wave appears at +k and −k, so its full amplitude is twice that: 4/(πk)). Even harmonics are zero.
+
+### 3. A 2-D wave and its spectrum peak
+
+```python
+W = H = 256
+y, x = np.mgrid[0:H, 0:W]
+img = 128 + 60 * np.cos(2 * np.pi * (8 * x / W + 8 * y / H))
+F = np.fft.fft2(img)
+mag = np.abs(F)
+mag[0, 0] = 0                                                         # ignore the mean
+v, u = np.unravel_index(np.argsort(mag.ravel())[-2:], mag.shape)     # the two largest
+print("peaks at (u, v):", sorted((int(np.fft.fftfreq(W, 1 / W)[a]), int(np.fft.fftfreq(H, 1 / H)[b])) for a, b in zip(u, v)))
+print("|F| at the peak:", round(float(mag[8, 8])), "= W·H·A/2 =", W * H * 60 // 2)
+print("period:", round(W / np.hypot(8, 8), 1), "px")
+```
+
+Output:
+
+```text
+peaks at (u, v): [(-8, -8), (8, 8)]
+|F| at the peak: 1966080 = W·H·A/2 = 1966080
+period: 22.6 px
+```
+
+## OpenCV API notes
+
+- **`cv2.dft(src, flags=0)`**: float32/float64 input; `flags=cv2.DFT_COMPLEX_OUTPUT` returns a 2-channel (re, im) array; `cv2.idft(..., flags=cv2.DFT_SCALE | cv2.DFT_REAL_OUTPUT)` goes back. Details in 30.2.
+- **NumPy**: `np.fft.fft`, `fft2`, `ifft2`, `fftfreq`, `fftshift` give the same numbers and are often simpler to read.
+- **`cv2.getOptimalDFTSize(n)`**: the next size that is a product of 2, 3 and 5, for which the DFT is fastest.
+
+## Where it fails
+
+- **Local events**: a single scratch in one corner is spread over all frequencies; the Fourier view says *what* frequencies, not *where*. Use wavelets or Gabor filters (Module 31) for "what and where".
+- **Non-periodic images**: the DFT treats the image as repeating; the jump between the right and left (top and bottom) edges adds a bright cross to the spectrum (30.2).
+- **Non-stationary content**: textures that change across the image average out.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Forgetting ±k**: a real cosine shows two peaks, at (u, v) and (−u, −v).
+- **Mixing up (u, v) and (row, column)**: NumPy arrays index [v, u].
+- **Reading F(0) as noise**: it is the image mean times the number of pixels and is usually by far the largest value.
+- **Expecting a smooth reconstruction from few harmonics** near edges: the Gibbs overshoot remains.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Basis functions
+
+The DFT expresses an N-sample signal in a basis of N complex exponentials e^(2πi·k·x/N), which are orthogonal: the inner product of two different ones is zero. So F(k) is simply the projection of the signal on the k-th basis function, and the inverse DFT adds them back up. In 2-D, the basis images are e^(2πi(ux/W + vy/H)), the waves of Section 2.
+
+### The Gibbs phenomenon
+
+For a jump discontinuity, partial Fourier sums overshoot by about 8.95 % of the jump on each side, however many terms are used; the overshoot moves closer to the edge but does not shrink. Smooth windows (Fejér or Lanczos sigma factors, a Gaussian filter in 30.3) remove it at the cost of a softer edge.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A wave with (u, v) = (0, 10) looks like…",
+      options: ["Vertical stripes", "Horizontal stripes", "Diagonal stripes", "A ring"],
+      answer: 1,
+      explanation: "It changes only down the image: 10 cycles in y.",
+    },
+    {
+      question: "F(0) of an image equals…",
+      options: ["Its largest pixel", "Number of pixels × mean", "Zero", "The Nyquist frequency"],
+      answer: 1,
+      explanation: "The sum of all pixel values.",
+    },
+    {
+      question: "Where do edges and noise live?",
+      options: ["Low frequencies", "High frequencies", "Only in F(0)", "In the phase only"],
+      answer: 1,
+      explanation: "Fast changes need fast waves.",
+    },
+    {
+      question: "Keeping only the first harmonics of a sharp edge gives…",
+      options: ["An exact edge", "A smooth edge with overshoot (Gibbs)", "Nothing", "A higher contrast everywhere"],
+      answer: 1,
+      explanation: "About 9 % overshoot beside the jump.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Compute the DFT of 4 samples 1, 0, −1, 0.
+
+<Solution>
+
+F(0) = 0. F(1) = 1 + 0 + (−1)(−1) + 0 = **2**. F(2) = 1 − 0 + (−1) − 0 = 0. F(3) = 2. It is cos(2πx/4) with amplitude 1: N·A/2 = 2 at k = ±1.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Create a 256 × 256 image of stripes with period 16 px rotated by 30°. Predict (u, v) and check with the FFT.
+
+<Solution>
+
+```python
+a = np.deg2rad(30)
+stripes = 128 + 60 * np.cos(2 * np.pi * (x * np.cos(a) + y * np.sin(a)) / 16)
+mag = np.abs(np.fft.fft2(stripes))
+mag[0, 0] = 0
+vy, ux = np.unravel_index(np.argmax(mag), mag.shape)
+f = np.fft.fftfreq(256, 1 / 256)
+print("predicted:", round(256 / 16 * np.cos(a), 2), round(256 / 16 * np.sin(a), 2), "| peak at:", (int(f[ux]), int(f[vy])))
+```
+
+Output:
+
+```text
+predicted: 13.86 8.0 | peak at: (14, 8)
+```
+
+The true frequency (13.86, 8) is not a whole number of cycles per image, so the energy is shared by neighbouring bins and the peak lands on the nearest one, (14, 8). This **leakage** is discussed in 30.2.
+
+</Solution>
+
+## References
+
+1. J. Fourier, *Théorie analytique de la chaleur*, Firmin Didot, Paris, 1822.
+2. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Chapter 4 (filtering in the frequency domain).
+3. R. N. Bracewell, *The Fourier Transform and Its Applications*, 3rd ed., McGraw-Hill, 2000.
+4. OpenCV 4.13.0 documentation: `dft`, `getOptimalDFTSize`; tutorial "Discrete Fourier Transform". https://docs.opencv.org/4.13.0/

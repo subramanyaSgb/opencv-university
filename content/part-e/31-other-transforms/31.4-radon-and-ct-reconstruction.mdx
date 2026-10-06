@@ -1,0 +1,326 @@
+export const meta = {
+  number: "31.4",
+  title: "Radon and CT reconstruction",
+  minutes: 30,
+  objectives: [
+    "Describe the Radon transform: line sums of an object at many angles (a sinogram)",
+    "Project and back-project a small image by hand and see why plain back-projection blurs",
+    "Implement filtered back-projection with OpenCV and NumPy",
+    "Relate the number of angles and the ramp filter to image quality",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 31.4 (Module 31).
+  Lab: BasisLab mode "radon".
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 31.4 Radon and CT reconstruction
+
+<Definition term="Radon transform">the set of all line sums (projections) of an image: for every angle θ and every offset s, the sum of the image along the line at angle θ and distance s from the centre (Radon 1917 [1]). Displayed as an image of angle against offset, it is called a sinogram. Computed tomography (CT) measures it with X-rays and reconstructs the image from it.</Definition>
+
+An X-ray image shows the sum of absorption along each ray: everything in the path is superimposed. CT takes such projections from many angles around the object and computes a slice image in which every point has its own value. The mathematics is the inversion of the Radon transform; the standard method, filtered back-projection, uses the Fourier ideas of Module 30 (Hounsfield and Cormack, Nobel Prize 1979).
+
+## 1. An analogy
+
+Guessing what is inside a closed box by looking at its shadows. One shadow says how much stuff lies along each line in one direction, but not where along the line. Shadows from many directions overlap only at the places where stuff really is. Back-projection smears each shadow back across the box; filtering first sharpens the smears so they add up to the right picture.
+
+## 2. Projection and back-projection
+
+<Flow
+  steps={[
+    { label: "Object f(x, y)", tone: "data" },
+    { label: "Projection at angle θ: sum along parallel lines → p_θ(s)", tone: "process" },
+    { label: "All angles 0 … 180° → sinogram", tone: "process" },
+    { label: "Filter each projection with the ramp |ω| (sharpening)", tone: "process" },
+    { label: "Back-project: smear every filtered projection across the image, add", tone: "result" },
+  ]}
+/>
+
+A single point traces a **sinusoid** in the sinogram: its offset s = (x − c) cos θ + (y − c) sin θ changes with the angle. Hence the name.
+
+## 3. A worked example by hand
+
+A 3 × 3 image:
+
+```text
+0 1 0
+0 2 0
+0 0 3
+```
+
+- Projection down the columns (θ = 0°): **0, 3, 3**. Projection along the rows (θ = 90°): **1, 2, 3**.
+- Plain back-projection: every pixel gets its column sum plus its row sum:
+
+```text
+1 4 4
+2 5 5
+3 6 6
+```
+
+The brightest values (5, 6) are near the true object, but zeros became 1–4: the smears spread the object over the whole image. Two angles cannot even decide whether the right column's 3 is at the top or the bottom. More angles narrow it down, but plain back-projection always blurs (the blur falls off as 1/r around each point). The **ramp filter** (multiply each projection's spectrum by |ω|) removes exactly this blur before back-projecting.
+
+## 4. On a test object
+
+The 128 × 128 test object (ellipses of grey values 80 to 230) projected over N angles from 0° to 180°:
+
+| Angles | Filtered back-projection: RMS error | Correlation with the object | Plain back-projection: correlation |
+| --- | --- | --- | --- |
+| 8 | 67.6 | 0.709 | 0.684 |
+| 30 | 21.5 | 0.961 | 0.684 |
+| 90 | 14.4 | 0.987 | 0.684 |
+| 180 | 13.9 | 0.988 | 0.684 |
+
+- With 8 angles, streaks dominate; from about 90 angles (for 128 detector positions) the reconstruction is close to the object. The usual rule is roughly π/2 × the number of detector positions for a full-quality scan.
+- Without the ramp filter the result never improves beyond a blurry correlation of 0.684, however many angles are used.
+
+<BasisLab mode="radon" caption="The test object, its sinogram (each row one angle) and the reconstruction. Lower the number of angles to 8 or 16: streaks fan out from the edges. Switch to plain back-projection: a blurred halo, whatever the number of angles. Each small dot of the object traces a sinusoid in the sinogram."/>
+
+## 5. Industrial use
+
+- **Medical CT** and dental CBCT: slices from X-ray projections.
+- **Industrial CT**: internal defects (voids, cracks, porosity) in castings, welds and additive-manufactured parts; wall thickness and assembly checks without cutting.
+- **Line detection**: the Radon transform of an edge image has peaks for straight lines, like the Hough transform (26.1).
+- **Other tomography**: PET, SPECT, electron tomography, seismic and ultrasound tomography use the same principle.
+
+## What you should remember from 31.4
+
+<Takeaways>
+<Takeaway n={1} title="Projections">Radon = line sums at all angles; a point → a sinusoid.</Takeaway>
+<Takeaway n={2} title="Back-projection">Smearing projections back blurs as 1/r.</Takeaway>
+<Takeaway n={3} title="Ramp filter">Filter each projection with |ω| first: filtered back-projection.</Takeaway>
+<Takeaway n={4} title="Angles">Too few angles → streaks; ~90–180 for 128 detector positions.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A single bright pixel in the centre of the object. What does its sinogram look like?
+
+<Solution>
+
+A **straight vertical line** at s = centre: its offset is the same at every angle (a sinusoid of amplitude zero).
+
+</Solution>
+
+**Q2.** Why does the ramp filter boost high frequencies?
+
+<Solution>
+
+Back-projection over-weights low frequencies (each angle adds the centre of the spectrum again, so it is sampled densely there): the blur is like 1/|ω|. Multiplying by |ω| undoes it.
+
+</Solution>
+
+### Next: 32.1 Sliding comparison
+
+Module 32: template matching, finding a known pattern by comparing it at every position.
+
+## Code
+
+Three examples: the 3 × 3 example, a sinogram, and filtered back-projection.
+
+### 1. Projections of a 3 × 3 image
+
+```python
+import numpy as np
+import cv2
+
+f = np.array([[0, 1, 0], [0, 2, 0], [0, 0, 3]], float)
+cols, rows = f.sum(axis=0), f.sum(axis=1)                              # theta = 0 and 90 degrees
+print("column sums:", cols.tolist(), "| row sums:", rows.tolist())
+print("plain back-projection:\n", (cols[None, :] + rows[:, None]).astype(int))
+```
+
+Output:
+
+```text
+column sums: [0.0, 3.0, 3.0] | row sums: [1.0, 2.0, 3.0]
+plain back-projection:
+ [[1 4 4]
+ [2 5 5]
+ [3 6 6]]
+```
+
+### 2. The sinogram
+
+```python
+obj = cv2.imread("sample-phantom.png", cv2.IMREAD_GRAYSCALE).astype(np.float64)
+n = obj.shape[0]
+c = (n - 1) / 2
+
+def radon(img, angles):
+    rows = []
+    for a in angles:
+        M = cv2.getRotationMatrix2D((c, c), a, 1.0)                    # rotate the object …
+        rotated = cv2.warpAffine(img, M, (n, n), flags=cv2.INTER_LINEAR, borderValue=0)
+        rows.append(rotated.sum(axis=0))                               # … and sum each column
+    return np.array(rows)
+
+dot = np.zeros((n, n)); dot[40, 90] = 1
+print("a dot at (90, 40): projection peaks at", [int(np.argmax(r)) for r in radon(dot, [0, 45, 90, 135])])
+s = radon(obj, [0, 90])
+print("every projection keeps the total:", s.sum(axis=1).tolist(), "=", obj.sum())
+```
+
+Output:
+
+```text
+a dot at (90, 40): projection peaks at [90, 66, 40, 28]
+every projection keeps the total: [998500.0, 998500.0] = 998500.0
+```
+
+- The dot's peak position moves with the angle: one point of a sinusoid per angle.
+
+### 3. Filtered back-projection
+
+```python
+def ramp(sino):
+    m = 2 * n                                                           # zero-pad to avoid wrap-around
+    return np.fft.ifft(np.fft.fft(sino, m, axis=1) * np.abs(np.fft.fftfreq(m)), axis=1).real[:, :n]
+
+def backproject(sino, angles):
+    out = np.zeros((n, n))
+    for p, a in zip(sino, angles):
+        smear = np.tile(p, (n, 1))                                     # same value down each column
+        M = cv2.getRotationMatrix2D((c, c), -a, 1.0)                   # rotate the smear back
+        out += cv2.warpAffine(smear, M, (n, n), flags=cv2.INTER_LINEAR, borderValue=0)
+    return out * np.pi / len(angles)
+
+for N in (8, 30, 90, 180):
+    angles = np.arange(N) * 180 / N
+    sino = radon(obj, angles)
+    rec = backproject(ramp(sino), angles)
+    plain = backproject(sino, angles)
+    corr = lambda a: round(float(np.corrcoef(a.ravel(), obj.ravel())[0, 1]), 3)
+    print(f"{N:3d} angles: RMS {np.sqrt(((rec - obj) ** 2).mean()):5.1f}, corr {corr(rec)} | plain corr {corr(plain)}")
+```
+
+Output:
+
+```text
+  8 angles: RMS  67.6, corr 0.709 | plain corr 0.684
+ 30 angles: RMS  21.5, corr 0.961 | plain corr 0.684
+ 90 angles: RMS  14.4, corr 0.987 | plain corr 0.684
+180 angles: RMS  13.9, corr 0.988 | plain corr 0.684
+```
+
+## OpenCV API notes
+
+- **No Radon or back-projection function in OpenCV.** Build them from `cv2.getRotationMatrix2D` + `cv2.warpAffine` (rotate) and `np.sum` (project), as above; or use scikit-image's `radon` / `iradon` (outside the pinned environment).
+- **Rotation sign**: OpenCV's positive angle rotates counter-clockwise in the displayed image (y down); back-projection must use the opposite angle.
+- **Ramp filter**: zero-pad projections to at least twice their length before the FFT, or the filtered projections wrap around.
+- **Real CT**: fan- and cone-beam geometries, detector calibration, beam hardening and iterative reconstruction go far beyond this parallel-beam model.
+
+## Where it fails
+
+- **Few angles or a limited angular range**: streak artefacts; iterative methods (ART, SIRT) or learned priors help.
+- **Noise**: the ramp filter amplifies high-frequency noise; use apodised filters (Shepp–Logan, Hann).
+- **Metal and dense parts**: beam hardening and photon starvation cause streaks and cupping.
+- **Truncation**: an object wider than the detector gives wrong projections.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Back-projecting without the ramp filter** and expecting a sharp image.
+- **Rotating in the same direction** for projection and back-projection.
+- **Not padding** the projections before FFT filtering.
+- **Angles over 0–360°** for parallel beams: 0–180° already holds all information; 360° just doubles it (and the scaling).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The Fourier slice theorem
+
+The 1-D Fourier transform of a projection at angle θ equals the 2-D Fourier transform of the object along the line through the origin at angle θ. So projections fill the object's spectrum on radial lines; filtered back-projection compensates for their density (∝ 1/|ω|) with the ramp filter. Kak and Slaney [2] give the full derivation and discrete implementation.
+
+### Iterative reconstruction
+
+Algebraic methods (ART, Kaczmarz) and statistical methods (maximum likelihood, penalised least squares) treat reconstruction as solving A x = p with a projection matrix A; they handle few or noisy projections better and dominate modern low-dose CT, increasingly combined with learned regularisers.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A single off-centre point traces what shape in the sinogram?",
+      options: ["A straight line", "A sinusoid", "A circle", "A point"],
+      answer: 1,
+      explanation: "s = (x − c) cos θ + (y − c) sin θ.",
+    },
+    {
+      question: "Plain back-projection gives…",
+      options: ["The exact object", "A blurred object (1/r halo)", "Noise only", "The sinogram"],
+      answer: 1,
+      explanation: "Correlation stayed at 0.684 for any number of angles.",
+    },
+    {
+      question: "The ramp filter multiplies each projection's spectrum by…",
+      options: ["A Gaussian", "|ω|", "1/|ω|", "cos θ"],
+      answer: 1,
+      explanation: "It undoes the 1/|ω| over-weighting.",
+    },
+    {
+      question: "With 8 angles the reconstruction shows…",
+      options: ["Ringing", "Streaks", "Colour noise", "Nothing"],
+      answer: 1,
+      explanation: "RMS error 67.6 vs 14.4 at 90 angles.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Projections of the 2 × 2 image [[a, b], [c, d]] at 0° (columns) and 90° (rows) are (4, 6) and (3, 7). Find two different images that fit both.
+
+<Solution>
+
+a + c = 4, b + d = 6, a + b = 3, c + d = 7. For example [[1, 2], [3, 4]] and [[0, 3], [4, 3]]: both fit. Two angles cannot determine 4 unknowns; more angles (here the diagonals) are needed.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Add Gaussian noise (σ = 50 and σ = 500, seed 0) to the 90-angle sinogram and reconstruct with the ramp filter and with a Hann-windowed ramp (ramp × (0.5 + 0.5 cos(2π f))). Which RMS error is lower in each case?
+
+<Solution>
+
+```python
+angles = np.arange(90) * 2.0
+clean = radon(obj, angles)
+m = 2 * n
+f = np.fft.fftfreq(m)
+for sigma in (50, 500):
+    noisy = clean + np.random.default_rng(0).normal(0, sigma, (90, n))
+    for name, H in [("ramp", np.abs(f)), ("Hann ramp", np.abs(f) * (0.5 + 0.5 * np.cos(2 * np.pi * f)))]:
+        filtered = np.fft.ifft(np.fft.fft(noisy, m, axis=1) * H, axis=1).real[:, :n]
+        rec = backproject(filtered, angles)
+        print(f"noise {sigma}: {name} RMS {np.sqrt(((rec - obj) ** 2).mean()):.1f}")
+```
+
+Output:
+
+```text
+noise 50: ramp RMS 14.7
+noise 50: Hann ramp RMS 18.1
+noise 500: ramp RMS 34.2
+noise 500: Hann ramp RMS 21.4
+```
+
+With little noise, the plain ramp is better: the Hann window blurs the edges more than it removes noise. With strong noise the Hann window wins clearly (21.4 vs 34.2), because the ramp amplifies the high-frequency noise. Real scanners choose the reconstruction filter (kernel) for the task: sharp for bone, smooth for soft tissue.
+
+</Solution>
+
+## References
+
+1. J. Radon, "Über die Bestimmung von Funktionen durch ihre Integralwerte längs gewisser Mannigfaltigkeiten", *Berichte über die Verhandlungen der Sächsischen Akademie der Wissenschaften* 69, 262–277, 1917.
+2. A. C. Kak, M. Slaney, *Principles of Computerized Tomographic Imaging*, IEEE Press, 1988 (reprinted SIAM 2001), Chapter 3.
+3. L. A. Shepp, B. F. Logan, "The Fourier reconstruction of a head section", *IEEE Trans. Nuclear Science* 21(3), 21–43, 1974.
+4. R. C. Gonzalez, R. E. Woods, *Digital Image Processing*, 4th ed., Pearson, 2018, Section 5.11 (image reconstruction from projections).

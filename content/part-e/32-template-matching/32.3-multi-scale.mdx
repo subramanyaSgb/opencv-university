@@ -1,0 +1,322 @@
+export const meta = {
+  number: "32.3",
+  title: "Multi-scale",
+  minutes: 25,
+  objectives: [
+    "Search over template scales when the object's size is unknown",
+    "Choose the scale range and step from how fast NCC falls with scale error",
+    "Speed up matching with an image pyramid: coarse search, fine refinement",
+    "Estimate the work saved by coarse-to-fine matching",
+  ],
+};
+
+{/*
+  Lesson content written in the owner's style for Chapter 32.3 (Module 32).
+  Lab: MatchLab mode "scale".
+  Reference tail: all examples are deterministic and compared automatically.
+*/}
+
+# 32.3 Multi-scale
+
+<Definition term="Multi-scale template matching">matching a template at several sizes (or matching on several resolutions of the image), so that objects closer to or farther from the camera, or slightly different in size, are still found; and using coarse resolutions first to find candidates quickly.</Definition>
+
+A template matches objects of its own size. If the camera's distance changes, or the parts come in several sizes, a fixed template fails: on the board, the 1.3× chip scores only 0.41 with the original template. Two ideas fix size and speed: search over **scales**, and search **coarse to fine** with an image pyramid (20.1).
+
+## 1. An analogy
+
+Looking for a friend in a crowd from a balcony. First you scan with a rough idea of a head of about this size, quickly, ignoring detail; when something looks right, you look more closely at just that spot. If you do not know how far away they are, you also try "a bit bigger" and "a bit smaller" heads.
+
+## 2. Two strategies
+
+<Flow
+  steps={[
+    { label: "Scale search: resize the template by s = 0.8 … 1.5, match each", tone: "process" },
+    { label: "Keep the scale with the highest NCC", tone: "process" },
+    { label: "Pyramid: match a half-size template on a half-size image", tone: "process" },
+    { label: "Refine at full size in a small window around each candidate", tone: "result" },
+  ]}
+/>
+
+- **Scale search** costs one full match per scale. The step must be small enough that the true scale is never far from a tested one.
+- **Coarse-to-fine** cuts the cost: at half resolution there are 4 times fewer positions and 4 times fewer template pixels, about 16 times less work; the refinement only searches a few pixels around each candidate.
+
+## 3. A worked example by hand
+
+How fine must the scale steps be? On the board, NCC at the 1.3× chip against the template scale:
+
+| Template scale | 1.0 | 1.1 | 1.2 | **1.3** | 1.4 | 1.5 |
+| --- | --- | --- | --- | --- | --- | --- |
+| NCC at the chip | 0.41 | 0.52 | 0.82 | **0.96** | 0.83 | 0.63 |
+
+A 10 % scale error (1.2 or 1.4 instead of 1.3) costs about 0.13 of NCC; 20 % costs 0.33. If matches must score above 0.8, the true scale must be within about ±10 % of a tested scale, so steps of about 10–15 % (geometric: 1.0, 1.12, 1.25, 1.4 …) are enough. Halve the step if the object is small or detailed.
+
+**Cost of coarse-to-fine**: full resolution 210 × 124 positions × 837 template pixels ≈ 21.8 million products; half resolution 105 × 62 positions × 224 pixels ≈ 1.46 million, **15 times less**, plus a tiny refinement window.
+
+## 4. On the board
+
+Matching the original template at scales 0.8 to 1.5:
+
+| Scale | Template size | Best NCC anywhere | Where |
+| --- | --- | --- | --- |
+| 0.9 | 28 × 24 | 0.71 | an identical chip (poor fit) |
+| 1.0 | 31 × 27 | 1.00 | the reference chip |
+| 1.2 | 37 × 32 | 0.82 | the large chip |
+| 1.3 | 40 × 35 | **0.96** | the large chip |
+| 1.4 | 43 × 38 | 0.83 | the large chip |
+
+At scale 1.3 the large chip is found with 0.96, nearly as good as the identical chips at scale 1.0 (resampling the template costs a little). A complete multi-scale search reports both: the small chips at 1.0, the large one at 1.3.
+
+**Coarse to fine**: matching a half-size template on the half-size board finds a chip with NCC 0.96; refining at full size in a ±4 px window around it gives NCC 0.995 at the exact position.
+
+<MatchLab mode="scale" caption="NCC at the large chip for each template scale: only scales near 1.3 match well. The box shows the best scale's template on the image. Use this curve to choose a scale step: the peak is about ±0.1 wide at NCC 0.8."/>
+
+## 5. Industrial use
+
+- **Variable working distance**: parts on a conveyor of varying height, hand-held scanners.
+- **Product variants** of similar shape in several sizes.
+- **Fast alignment**: coarse-to-fine search for fiducials on large, high-resolution images (pyramids of 3–5 levels are common).
+- **Zoom and focus changes** in camera systems with motorised lenses.
+
+## What you should remember from 32.3
+
+<Takeaways>
+<Takeaway n={1} title="Scale search">Resize the template over a range; keep the best NCC.</Takeaway>
+<Takeaway n={2} title="Step">~10 % scale error costs ~0.13 NCC here: steps of 10–15 %.</Takeaway>
+<Takeaway n={3} title="Pyramid">Half resolution ≈ 16× less work; refine candidates at full size.</Takeaway>
+<Takeaway n={4} title="Cost">Scales × levels × positions × template pixels: budget it.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Objects appear between 0.7 and 1.4 times the template size. How many geometric steps of 12 %?
+
+<Solution>
+
+1.12ⁿ ≥ 1.4 / 0.7 = 2 → n = ln 2 / ln 1.12 = 6.1 → **7 steps** (8 scales including the start): 0.70, 0.78, 0.88, 0.98, 1.10, 1.23, 1.38, (1.55).
+
+</Solution>
+
+**Q2.** Matching takes 40 ms at full resolution. Roughly how long at quarter resolution (two pyramid levels)?
+
+<Solution>
+
+Each level divides the work by about 16: 40 / 16 / 16 ≈ **0.16 ms**, plus refinement. In practice overheads keep it higher, but the gain is large.
+
+</Solution>
+
+### Next: 32.4 Limits
+
+Rotation, perspective, occlusion and look-alikes: where template matching stops working, and what to use instead.
+
+## Code
+
+Three examples: scale search, coarse-to-fine, and a multi-scale detector.
+
+### 1. Scale search
+
+```python
+import numpy as np
+import cv2
+
+board = cv2.imread("sample-board.png", cv2.IMREAD_GRAYSCALE)
+tpl = board[22:49, 25:56].copy()
+for s in (0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5):
+    interp = cv2.INTER_AREA if s < 1 else cv2.INTER_LINEAR
+    t = cv2.resize(tpl, None, fx=s, fy=s, interpolation=interp)
+    r = cv2.matchTemplate(board, t, cv2.TM_CCOEFF_NORMED)
+    _, best, _, loc = cv2.minMaxLoc(r)
+    th, tw = t.shape
+    near = r[45 - th // 2 - 2:45 - th // 2 + 3, 195 - tw // 2 - 2:195 - tw // 2 + 3].max()   # at the large chip
+    print(f"scale {s:.1f} ({tw} x {th}): best {best:.3f} at {(loc[0] + tw // 2, loc[1] + th // 2)}, large chip {near:.3f}")
+```
+
+Output:
+
+```text
+scale 0.9 (28 x 24): best 0.707 at (140, 80), large chip 0.375
+scale 1.0 (31 x 27): best 1.000 at (40, 35), large chip 0.413
+scale 1.1 (34 x 30): best 0.750 at (141, 81), large chip 0.516
+scale 1.2 (37 x 32): best 0.815 at (195, 45), large chip 0.815
+scale 1.3 (40 x 35): best 0.957 at (195, 45), large chip 0.957
+scale 1.4 (43 x 38): best 0.834 at (195, 46), large chip 0.834
+scale 1.5 (46 x 40): best 0.629 at (196, 46), large chip 0.629
+```
+
+- Shrink with `INTER_AREA` (averages, avoids aliasing), enlarge with `INTER_LINEAR` or `INTER_CUBIC`.
+
+### 2. Coarse to fine
+
+```python
+small_board, small_tpl = cv2.pyrDown(board), cv2.pyrDown(tpl)          # half resolution
+r = cv2.matchTemplate(small_board, small_tpl, cv2.TM_CCOEFF_NORMED)
+_, coarse_score, _, (cx, cy) = cv2.minMaxLoc(r)
+x0, y0 = max(0, 2 * cx - 4), max(0, 2 * cy - 4)                         # back to full resolution, ±4 px window
+window = board[y0:2 * cy + tpl.shape[0] + 4, x0:2 * cx + tpl.shape[1] + 4]
+r2 = cv2.matchTemplate(window, tpl, cv2.TM_CCOEFF_NORMED)
+_, fine_score, _, (fx, fy) = cv2.minMaxLoc(r2)
+print("coarse:", round(coarse_score, 3), "at", (2 * cx, 2 * cy), "| refined:", round(fine_score, 3), "at", (x0 + fx, y0 + fy))
+full_ops = (240 - 31 + 1) * (150 - 27 + 1) * 31 * 27
+half_ops = r.size * small_tpl.size
+print("products: full", full_ops, "| half", half_ops, "| ratio", round(full_ops / half_ops, 1))
+```
+
+Output:
+
+```text
+coarse: 0.959 at (76, 22) | refined: 0.995 at (75, 22)
+products: full 21795480 | half 1458240 | ratio 14.9
+```
+
+- The coarse search picked one of the identical chips (top-left corner (75, 22), the chip at (90, 35)); the refinement moved it by one pixel and confirmed it with 0.995.
+
+### 3. A multi-scale detector
+
+```python
+def detect(image, template, scales, threshold=0.85):
+    found = []
+    for s in scales:
+        t = cv2.resize(template, None, fx=s, fy=s, interpolation=cv2.INTER_AREA if s < 1 else cv2.INTER_LINEAR)
+        r = cv2.matchTemplate(image, t, cv2.TM_CCOEFF_NORMED)
+        peaks = (r >= threshold) & (r == cv2.dilate(r, np.ones((9, 9), np.uint8)))
+        for y, x in zip(*np.nonzero(peaks)):
+            found.append((float(r[y, x]), int(x) + t.shape[1] // 2, int(y) + t.shape[0] // 2, s))
+    found.sort(reverse=True)                                            # keep the best, drop overlapping weaker ones
+    kept = []
+    for f in found:
+        if all(abs(f[1] - k[1]) > 12 or abs(f[2] - k[2]) > 12 for k in kept):
+            kept.append(f)
+    return kept
+
+for score, x, y, s in detect(board, tpl, [1.0, 1.12, 1.25, 1.4]):
+    print(f"({x}, {y}) scale {s:.2f} NCC {score:.3f}")
+```
+
+Output:
+
+```text
+(40, 35) scale 1.00 NCC 1.000
+(40, 80) scale 1.00 NCC 0.995
+(90, 35) scale 1.00 NCC 0.995
+(140, 35) scale 1.00 NCC 0.991
+(140, 80) scale 1.00 NCC 0.991
+(195, 110) scale 1.00 NCC 0.983
+(40, 122) scale 1.00 NCC 0.961
+(195, 46) scale 1.25 NCC 0.925
+```
+
+Eight of the nine chips, each with its scale: the large chip is found at 1.25 (the nearest tested scale to 1.3). Only the rotated chip is missing (32.4).
+
+## OpenCV API notes
+
+- **`cv2.resize(tpl, None, fx=s, fy=s, interpolation=…)`** for template scales; **`cv2.pyrDown`** for image pyramids (Gaussian blur + halving, 20.1).
+- **Positions across scales**: convert every match to the centre and the scale; compare detections in full-resolution coordinates.
+- **Masks** help when the template's background differs between sizes (32.4).
+- **Speed**: OpenCV's `matchTemplate` is multi-threaded and FFT-based for large templates; scale and pyramid loops are in Python but cheap.
+
+## Where it fails
+
+- **Small templates at coarse levels**: below about 8 × 8 pixels there is too little detail; the coarse search finds random candidates.
+- **Fine detail that disappears** when halving the image (thin lines, small text): coarse search misses the object.
+- **Non-uniform scaling** (perspective, aspect changes): uniform scale search does not cover it.
+- **Many scales × many templates**: cost multiplies; use feature-based methods (Module 34).
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Scale steps too coarse**: the true scale falls between steps and scores below the threshold.
+- **Forgetting to rescale coordinates** from pyramid levels (×2 per level).
+- **Comparing scores across scales without care**: resampled templates score slightly lower; use the same threshold only if verified.
+- **Shrinking with INTER_NEAREST**: aliasing makes the template noisy.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Coarse-to-fine guarantees
+
+A coarse search can miss the true match if the object is too small or too detailed at low resolution. Robust implementations keep the top few candidates per level (not only the best), widen the refinement window, or use a lower threshold at coarse levels. Industrial shape-based matching tools combine pyramids with rotation and scale ranges and gradient-based scores to cover all poses efficiently (Steger [1]).
+
+### Scale-space theory
+
+Matching across scales is a special case of scale-space analysis (20.4, Lindeberg [2]): the representation of the image at all resolutions, in which features (and templates) can be compared at their natural scale. Scale-invariant feature detectors (SIFT, 34.1) choose the scale automatically per keypoint.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "The 1.3× chip scores 0.41 with the original template. What fixes it?",
+      options: ["A lower threshold", "Matching with the template scaled by about 1.3", "Using SQDIFF", "Blurring"],
+      answer: 1,
+      explanation: "NCC rises to 0.96 at scale 1.3.",
+    },
+    {
+      question: "Halving image and template reduces the matching work by about…",
+      options: ["2×", "4×", "16×", "100×"],
+      answer: 2,
+      explanation: "4× fewer positions × 4× fewer template pixels.",
+    },
+    {
+      question: "Why refine at full resolution after a coarse search?",
+      options: ["To change the scale", "To get the exact position and a reliable score", "To find more objects", "It is required by OpenCV"],
+      answer: 1,
+      explanation: "Coarse positions are only accurate to about 2 px.",
+    },
+    {
+      question: "Which interpolation for shrinking templates?",
+      options: ["INTER_NEAREST", "INTER_AREA", "INTER_LANCZOS4 only", "None"],
+      answer: 1,
+      explanation: "Area averaging avoids aliasing.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A template of 64 × 64 pixels is searched in a 1024 × 768 image. How many multiplications at full resolution and at one-quarter resolution (two halvings)?
+
+<Solution>
+
+Full: (1024 − 63) × (768 − 63) × 4 096 ≈ 961 × 705 × 4 096 ≈ **2.78 billion**. Quarter: (256 − 15) × (192 − 15) × 256 = 241 × 177 × 256 ≈ **10.9 million**, about 250 times less.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Search the large chip with scales from 1.0 to 1.6 in steps of 0.02 and report the best scale and its NCC. How close is it to the true 1.3?
+
+<Solution>
+
+```python
+scores = []
+for s in np.arange(1.0, 1.61, 0.02):
+    t = cv2.resize(tpl, None, fx=s, fy=s, interpolation=cv2.INTER_LINEAR)
+    r = cv2.matchTemplate(board, t, cv2.TM_CCOEFF_NORMED)
+    th, tw = t.shape
+    scores.append((float(r[45 - th // 2 - 2:45 - th // 2 + 3, 195 - tw // 2 - 2:195 - tw // 2 + 3].max()), round(float(s), 2)))
+print("best:", max(scores))
+```
+
+Output:
+
+```text
+best: (0.9674403667449951, 1.32)
+```
+
+The best fine scale is 1.32, within 2 % of the true 1.3, with NCC 0.967. Fine scale steps give a size measurement as a by-product; the remaining offset comes from resampling the template.
+
+</Solution>
+
+## References
+
+1. C. Steger, M. Ulrich, C. Wiedemann, *Machine Vision Algorithms and Applications*, 2nd ed., Wiley-VCH, 2018, Section 3.11 (template matching).
+2. T. Lindeberg, *Scale-Space Theory in Computer Vision*, Kluwer, 1994.
+3. S. L. Tanimoto, "Template matching in pyramids", *Computer Graphics and Image Processing* 16(4), 356–369, 1981.
+4. OpenCV 4.13.0 documentation: `matchTemplate`, `resize`, `pyrDown`. https://docs.opencv.org/4.13.0/
