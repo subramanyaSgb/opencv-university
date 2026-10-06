@@ -159,3 +159,4 @@ export { HogSvmLab } from "./HogSvmLab";
 export { NmsLab } from "./NmsLab";
 export { FaceDetectLab } from "./FaceDetectLab";
 export { FaceRecLab } from "./FaceRecLab";
+export { ArucoLab } from "./ArucoLab";

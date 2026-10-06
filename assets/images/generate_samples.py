@@ -725,6 +725,17 @@ for i, (name, params) in enumerate(IDENTITIES.items()):
         images[f"sample-synth-identity-{name}-{s}.png"] = synth_face_id(seed=i * 10 + s, **params)
     images[f"sample-synth-identity-{name}-test.png"] = synth_face_id(seed=1000 + i, **params)
 images["sample-synth-identity-unknown.png"] = synth_face_id(seed=2000, eye_off_ratio=0.25, face_w_ratio=0.45, mouth_w=32)
+
+# Module 38.1: a real cv2.aruco marker (DICT_4X4_50, id 7), flat and under a mild perspective warp.
+_aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+_marker = cv2.aruco.generateImageMarker(_aruco_dict, 7, 200)
+_marker_canvas = np.full((400, 400), 200, np.uint8)
+_marker_canvas[80:280, 80:280] = _marker
+images["sample-aruco-marker.png"] = _marker_canvas
+_src_pts = np.float32([[0, 0], [400, 0], [400, 400], [0, 400]])
+_dst_pts = np.float32([[40, 20], [380, 0], [400, 380], [0, 400]])
+_H_aruco = cv2.getPerspectiveTransform(_src_pts, _dst_pts)
+images["sample-aruco-marker-warped.png"] = cv2.warpPerspective(_marker_canvas, _H_aruco, (400, 400), borderValue=200)
 ft_b = cv2.warpPerspective(images["sample-feat.png"].astype(np.float64), FEAT_H, (320, 200), flags=cv2.INTER_LINEAR,
                            borderMode=cv2.BORDER_CONSTANT, borderValue=110)
 images["sample-feat-b.png"] = np.clip(np.rint(ft_b * 0.8 + 20 + np.random.default_rng(34).normal(0, 3, ft_b.shape)), 0, 255).astype(np.uint8)

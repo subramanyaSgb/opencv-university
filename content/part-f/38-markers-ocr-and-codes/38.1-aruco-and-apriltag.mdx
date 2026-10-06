@@ -1,0 +1,318 @@
+export const meta = {
+  number: "38.1",
+  title: "ArUco and AprilTag",
+  minutes: 22,
+  objectives: [
+    "Compute Hamming distance between two binary codes, and decide a match within an error-correction radius, by hand",
+    "Explain how a fiducial marker is detected: quadrilateral, perspective correction, bit sampling, dictionary match",
+    "Detect a real ArUco marker under rotation, perspective and noise",
+    "Know why a bigger dictionary (more bits) tolerates more damage than a smaller one",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 38.1 (Part F, Module 38; opens the module).
+  cv2.aruco is in OpenCV's main modules (no contrib needed), and also provides the AprilTag dictionaries
+  (DICT_APRILTAG_*) through the same API -- both marker families are covered together here.
+  New asset: sample-aruco-marker.png / sample-aruco-marker-warped.png (a real cv2.aruco.generateImageMarker
+  output, DICT_4X4_50 id 7).
+  Lab: ArucoLab (apps/web/components/visuals/ArucoLab.tsx) — live Hamming-distance dictionary matching
+  using the REAL bit patterns of DICT_4X4_50 ids 0-2.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 38.1 ArUco and AprilTag
+
+<Definition term="Fiducial marker (ArUco / AprilTag)">a square black-and-white pattern designed to be found reliably and read precisely: a black border for detection, and an inner grid of bits that encodes an ID from a known dictionary, with enough built-in redundancy to survive some misread bits.</Definition>
+
+A QR code (38.4) is built for a phone to read a URL. ArUco and AprilTag markers are built for a different job entirely: letting a robot, a drone or an AR app find a known reference point in a scene *fast*, and recover its exact four corners precisely enough to compute position and orientation (Module 41) — a small ID number is all the payload they need.
+
+## 1. An analogy
+
+A stadium seating chart where every seat has a short, simple barcode rather than a printed name — not because names aren't useful, but because the usher scanning hundreds of seats a minute needs something that is fast, unambiguous, and still readable if a corner is scuffed or the lighting is uneven. The marker's job is to be found and read reliably under real conditions, not to carry much information.
+
+## 2. How a marker is decoded
+
+<Flow
+  steps={[
+    { label: "Image", tone: "data" },
+    { label: "Threshold + find quadrilateral (4-cornered) contours", tone: "process" },
+    { label: "Perspective-correct the quad to a square (16.3)", tone: "process" },
+    { label: "Sample the bit grid; compare to every dictionary codeword", tone: "process" },
+    { label: "Nearest codeword within tolerance -> ID + exact corners", tone: "result" },
+  ]}
+/>
+
+- **Finding candidates**: ordinary contour-based quadrilateral detection (24.1–24.4) — any 4-sided shape is a candidate, most of which are quickly discarded.
+- **Perspective correction**: the candidate's 4 detected corners define a homography (16.3) that warps it to a flat square, however tilted the real marker was — this is *why* ArUco detection survives rotation and perspective distortion so well, demonstrated directly in Section 4.
+- **Reading bits**: the corrected square is divided into a grid (4×4 for the dictionary used in this chapter, up to 7×7 for larger ones), each cell read as black (0) or white (1).
+- **Dictionary matching with error correction**: the read bit pattern is compared, by **Hamming distance** (37.4 used this same idea for IoU-adjacent reasoning; here it counts differing bits, not area), against every valid codeword in the chosen dictionary. If the nearest codeword is close enough (within a tolerance the dictionary's own redundancy supports), that codeword's ID is the answer — even if a few bits were misread.
+
+## 3. A worked example by hand
+
+A toy 4-bit dictionary with two codewords: ID A = `1010`, ID B = `0101` (complements of each other — Hamming distance 4, as far apart as two 4-bit codes can be). A marker is read (possibly with one misread bit) as `1011`.
+
+Distance to A: compare `1011` and `1010` bit by bit — differ only in the last position → **1**. Distance to B: compare `1011` and `0101` → differ in positions 1, 2 and 4 → **3**. The nearest codeword is A, at distance 1. If the dictionary's error-correction tolerance is 1 bit (reasonable, given the codewords are 4 bits apart), this reading is confidently decoded as **ID A** — one misread bit, correctly recovered.
+
+## 4. A real marker, real robustness, and a real limit
+
+<ArucoLab caption="The real bit patterns of DICT_4X4_50 IDs 0, 1 and 2. Click cells to simulate misread bits and see the Hamming distance to each real codeword, and whether the result still decodes within your chosen error-correction radius."/>
+
+Generating a real `cv2.aruco` marker (dictionary `DICT_4X4_50`, ID 7) and detecting it under several distortions:
+
+| Condition | Detected ID |
+| --- | --- |
+| Flat, undistorted | 7 |
+| Rotated 25° | **7** |
+| Under a mild perspective warp | **7** |
+| With heavy Gaussian pixel noise (σ = 25) | **7** |
+
+Every one of these still decodes correctly — rotation and perspective are exactly what the quadrilateral-and-homography step (Section 2) is built to undo, and thresholding handles the pixel noise. Now testing actual **bit damage** (flipping whole marker cells, simulating misread bits) against two dictionary sizes:
+
+| Dictionary | Bits per marker | Min. distance between any two codewords | Cells flipped before detection fails |
+| --- | --- | --- | --- |
+| `DICT_4X4_50` | 16 | 4 | fails at **1** flipped cell |
+| `DICT_6X6_50` | 36 | 6 | fails at **4** flipped cells (tolerates up to 3) |
+
+The smaller, 16-bit dictionary has far less redundancy between codewords and, in practice, does not survive even a single flipped cell at `cv2.aruco`'s default settings; the larger, 36-bit dictionary — with more bits and more separation between codewords — correctly recovers the ID through up to 3 flipped cells. More bits per marker (and the dictionary design that goes with them) buys real, measurable robustness to damage, at the cost of a physically larger or more finely detailed printed marker.
+
+## 5. Industrial use
+
+- **Robot and drone localisation**: markers at known positions let a robot compute its own position and orientation from a detected marker's corners (full pose estimation is 41.5's `solvePnP`, built directly on this chapter's corner detection).
+- **Augmented reality anchors**: placing virtual content precisely relative to a printed marker.
+- **Camera calibration boards**: a **ChArUco board** (a chessboard with ArUco markers in it, `cv2.aruco.CharucoBoard`) combines reliable detection even when partially occluded with the sub-pixel corner accuracy chessboards are known for (41.4).
+- **Choosing a dictionary size** for the application: a small, close-up marker that will always be clearly lit might use a small dictionary; a marker that could be partially occluded, distant, or poorly lit benefits from a larger one's extra error tolerance (Section 4).
+
+## What you should remember from 38.1
+
+<Takeaways>
+<Takeaway n={1} title="Border + bit grid">A detectable black border for finding it, an inner bit grid for identifying it.</Takeaway>
+<Takeaway n={2} title="Perspective correction first">The 4 detected corners are warped flat before any bit is read — this is why tilt and rotation barely matter.</Takeaway>
+<Takeaway n={3} title="Nearest codeword, with tolerance">Hamming distance to every dictionary entry; close enough still decodes correctly.</Takeaway>
+<Takeaway n={4} title="More bits, more robustness">A larger dictionary's greater code separation measurably tolerates more real damage.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Dictionary codewords: ID X = `110`, ID Y = `001`. A marker reads as `100`. Which ID is nearest, and at what distance?
+
+<Solution>
+
+Distance to X (`110` vs `100`): differ in position 2 → **1**. Distance to Y (`001` vs `100`): differ in positions 1 and 3 → **2**. Nearest is **X**, distance **1**.
+
+</Solution>
+
+**Q2.** Why does ArUco detection survive a perspective-distorted (tilted) view of the marker almost as well as a straight-on view?
+
+<Solution>
+
+Because the detected quadrilateral's 4 corners are used to compute a homography (16.3) that warps the marker flat *before* any bit is sampled — the perspective distortion is corrected away as a geometric step, prior to and separate from the dictionary-matching step that actually reads the ID.
+
+</Solution>
+
+### Next: 38.2 Character segmentation
+
+## Code
+
+### 1. The worked example, and real cv2.aruco detection
+
+```python
+import numpy as np
+import cv2
+
+def hamming(a, b):
+    return sum(x != y for x, y in zip(a, b))
+
+A, B, received = "1010", "0101", "1011"
+print("distance to A:", hamming(received, A), " distance to B:", hamming(received, B))
+
+aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+params = cv2.aruco.DetectorParameters()
+detector = cv2.aruco.ArucoDetector(aruco_dict, params)
+
+flat = cv2.imread("sample-aruco-marker.png", cv2.IMREAD_GRAYSCALE)
+warped = cv2.imread("sample-aruco-marker-warped.png", cv2.IMREAD_GRAYSCALE)
+for name, img in [("flat", flat), ("warped", warped)]:
+    corners, ids, rejected = detector.detectMarkers(img)
+    print(f"{name}: ids={ids.ravel().tolist() if ids is not None else None}")
+
+rng = np.random.default_rng(0)
+noisy = np.clip(flat.astype(np.float64) + rng.normal(0, 25, flat.shape), 0, 255).astype(np.uint8)
+_, ids_noisy, _ = detector.detectMarkers(noisy)
+print("noisy (sigma=25):", ids_noisy.ravel().tolist())
+```
+
+Output:
+
+```text
+distance to A: 1  distance to B: 3
+flat: ids=[7]
+warped: ids=[7]
+noisy (sigma=25): [7]
+```
+
+### 2. Dictionary size and real error tolerance
+
+```python
+def flip_cell(img, cell, row, col, x0=80, y0=80):
+    out = img.copy()
+    y, x = y0 + cell * row, x0 + cell * col
+    out[y:y + cell, x:x + cell] = 255 - out[y:y + cell, x:x + cell]
+    return out
+
+cell4 = 200 // 6                                       # DICT_4X4: 4 data + 2 border cells per side
+corrupted_4x4 = flip_cell(flat, cell4, 1, 1)
+_, ids4, _ = detector.detectMarkers(corrupted_4x4)
+print("4x4, 1 cell flipped:", ids4)
+
+dict6 = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_50)
+marker6 = cv2.aruco.generateImageMarker(dict6, 7, 240)
+canvas6 = np.full((400, 400), 200, np.uint8)
+canvas6[80:320, 80:320] = marker6
+detector6 = cv2.aruco.ArucoDetector(dict6, params)
+cell6 = 240 // 8                                        # DICT_6X6: 6 data + 2 border cells per side
+
+def flip_cells(img, cells):
+    out = img.copy()
+    for r, c in cells:
+        y, x = 80 + cell6 * r, 80 + cell6 * c
+        out[y:y + cell6, x:x + cell6] = 255 - out[y:y + cell6, x:x + cell6]
+    return out
+
+for n, cells in [(3, [(2, 2), (3, 4), (5, 5)]), (4, [(2, 2), (3, 4), (5, 5), (4, 2)])]:
+    _, ids6, _ = detector6.detectMarkers(flip_cells(canvas6, cells))
+    print(f"6x6, {n} cells flipped:", ids6.ravel().tolist() if ids6 is not None else None)
+```
+
+Output:
+
+```text
+4x4, 1 cell flipped: None
+6x6, 3 cells flipped: [7]
+6x6, 4 cells flipped: None
+```
+
+## OpenCV API notes
+
+- **`cv2.aruco.getPredefinedDictionary(dict_id)`**: standard dictionaries include `DICT_4X4_50` through `DICT_7X7_1000` (grid size × how many IDs), `DICT_ARUCO_ORIGINAL`, and — in the same module — `DICT_APRILTAG_16H5` through `DICT_APRILTAG_36H11`, letting `cv2.aruco`'s single API detect AprilTag-family markers too.
+- **`cv2.aruco.generateImageMarker(dictionary, id, sidePixels)`**: renders one marker image, border included.
+- **`cv2.aruco.ArucoDetector(dictionary, detectorParams)`** with **`.detectMarkers(image)`** → `(corners, ids, rejectedCandidates)`: `corners` is a list of 4-point arrays (one per detected marker, in the order the original corners mapped to after detection); `ids` is `None` if nothing was found — always check before indexing.
+- **`cv2.aruco.CharucoBoard`** / **`cv2.aruco.CharucoDetector`**: combine a chessboard pattern with ArUco markers for calibration boards that remain detectable even partially occluded (Section 5; full use in 41.4).
+- **`DetectorParameters`** exposes many tuning knobs (adaptive threshold window sizes, `errorCorrectionRate`, corner refinement method including `CORNER_REFINE_APRILTAG` and `CORNER_REFINE_SUBPIX`) — Section 4's real error-tolerance behaviour comes from this object's defaults, not a fixed, unconfigurable rule.
+
+## Where it fails
+
+- **Small dictionaries have little room for error** (Section 4: `DICT_4X4_50` failed at just 1 flipped cell) — choosing too small a dictionary for a noisy or damage-prone environment sacrifices robustness that a larger one would have provided.
+- **Needs a reasonably unobstructed, flat (or only moderately warped) view of all 4 corners**: heavy occlusion of the border, or extreme perspective, still breaks detection, even though moderate versions of both are well tolerated (Section 4).
+- **Very small or very distant markers** eventually fall below the pixel resolution needed to distinguish individual cells reliably, regardless of dictionary size.
+- **Only the ID and corners are recovered here**: turning that into an actual 3-D position and orientation needs camera calibration and `solvePnP` (41.5) — this chapter's detection is the input to that step, not the final answer for pose.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Not checking `ids is None` before using the result** — `detectMarkers` returns `None` for `ids` (and an empty tuple for `corners`) when nothing is found, not an empty array that happens to behave safely.
+- **Printing a marker too small for its dictionary's grid resolution**: a `DICT_7X7` marker printed at the same physical size as a `DICT_4X4` one packs the same page space with much finer detail, which can fail to resolve at a distance where the simpler marker would still work fine.
+- **Assuming every dictionary tolerates the same amount of damage**: Section 4 showed a very real, large difference between a 16-bit and a 36-bit dictionary's practical error tolerance.
+- **Confusing "detected" with "accurately localised"**: a marker can be detected (an ID returned) while its corner positions are still imprecise under extreme viewing angles — relevant whenever the corners feed into a pose estimate (41.5).
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### ArUco vs AprilTag, historically
+
+ArUco (Garrido-Jurado et al. [1]) and AprilTag (Olson [2]) were developed independently, with similar goals and similar bit-grid-plus-dictionary designs, differing mainly in their specific encoding and detection pipeline details (AprilTag's detector, for instance, historically emphasised sub-pixel edge-based corner refinement). OpenCV's `cv2.aruco` module has converged to support both families' dictionaries through one shared API, as used throughout this chapter.
+
+### Why a black border specifically
+
+The solid black border is what the *first* detection stage (quadrilateral contour finding) locks onto — it is deliberately high-contrast and simple to find reliably, before any of the more delicate inner-bit reading happens. Separating "find something marker-shaped" from "read which marker it is" into two stages is the same cheap-filter-first principle 37.2's cascade stages used, applied to a different problem.
+
+### Error-correcting codes, briefly
+
+Choosing dictionary codewords to be far apart in Hamming distance (Section 4's real minimum-distance numbers) is exactly the design principle behind error-correcting codes generally: with minimum distance d between any two valid codewords, up to roughly (d−1)/2 bit errors can in principle be corrected unambiguously, since a corrupted codeword is still closer to its true original than to any other valid codeword. `cv2.aruco`'s actual tolerance in practice is governed by its own `errorCorrectionRate` setting on top of this, which is why Section 4's measured tolerance is a real, specific empirical result, not a number to derive from the dictionary's minimum distance alone.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does an ArUco/AprilTag marker's black border do, versus its inner bit grid?",
+      options: ["Both do the same thing", "The border is for finding the marker (quadrilateral detection); the inner grid encodes which marker it is", "The border encodes the ID", "Neither part matters for detection"],
+      answer: 1,
+      explanation: "Section 2: find-then-read, a two-stage pipeline.",
+    },
+    {
+      question: "Why did the real marker still decode correctly after a perspective warp (Section 4)?",
+      options: ["Perspective warps don't affect binary images", "The detected 4 corners are used to compute a homography that flattens the marker before any bit is read", "cv2.aruco ignores perspective by default", "The marker was not actually warped"],
+      answer: 1,
+      explanation: "Section 2's perspective-correction step runs before dictionary matching, not after.",
+    },
+    {
+      question: "In Section 4, why did DICT_6X6_50 tolerate more flipped cells than DICT_4X4_50 before detection failed?",
+      options: ["6x6 markers are physically bigger on paper, nothing more", "More bits (36 vs 16) with more separation between codewords (minimum distance 6 vs 4) gives more real redundancy to correct errors from", "4x4 dictionaries are deprecated", "The test used a different detector"],
+      answer: 1,
+      explanation: "Measured directly: 4x4 failed at 1 flipped cell; 6x6 survived up to 3.",
+    },
+    {
+      question: "What must always be checked before using detectMarkers' output?",
+      options: ["Nothing, it always returns a valid array", "Whether ids is None (nothing detected) before indexing into it", "That the image is in colour", "That the dictionary has exactly 50 entries"],
+      answer: 1,
+      explanation: "Common mistakes: ids is None, not an empty-but-safe array, when no marker is found.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Dictionary codewords: ID P = `0110`, ID Q = `1001` (complements, distance 4). A marker reads as `0100`. Find the nearest ID and the distance.
+
+<Solution>
+
+Distance to P (`0100` vs `0110`): differ at position 3 → **1**. Distance to Q (`0100` vs `1001`): differ at positions 1, 3, 4 → **3**. Nearest is **P**, distance **1**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the Code section's `detector` and `flat` marker image, flip 2 cells of the 4x4 marker instead of 1 (choose two different interior cells) and confirm detection still fails, consistent with Section 4's finding that this dictionary has essentially no error tolerance at default settings.
+
+<Solution>
+
+```python
+corrupted_2cells = flip_cell(flip_cell(flat, cell4, 1, 1), cell4, 2, 2)
+_, ids_2, _ = detector.detectMarkers(corrupted_2cells)
+print("4x4, 2 cells flipped:", ids_2)
+```
+
+Output:
+
+```text
+4x4, 2 cells flipped: None
+```
+
+Still fails, as expected — if even 1 flipped cell already defeats this dictionary's default error correction (Section 4), 2 flipped cells certainly will too.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A warehouse wants to place small ArUco markers on fast-moving forklifts, often partially dusty or scuffed, read by a fixed overhead camera. Based on this chapter, what dictionary choice and marker size trade-off should they consider?
+
+<Solution>
+
+Given the markers will often be partially damaged (dust, scuffs) rather than cleanly printed, Section 4's finding — a larger dictionary (more bits, greater minimum distance between codewords) tolerates meaningfully more real damage before failing — argues for choosing a larger dictionary (e.g. 6×6 or 7×7 over 4×4) despite the extra printed detail it requires, since the warehouse's actual operating conditions are exactly the "noisy/damage-prone environment" this chapter's "Where it fails" section warns a small dictionary handles poorly. The trade-off is marker size: the finer grid needs to stay legible to the overhead camera at the forklift's typical operating distance, so marker size and camera resolution need to be checked together, not the dictionary choice in isolation.
+
+</Solution>
+
+## References
+
+1. S. Garrido-Jurado, R. Muñoz-Salinas, F. J. Madrid-Cuevas, M. J. Marín-Jiménez, "Automatic generation and detection of highly reliable fiducial markers under occlusion," *Pattern Recognition* 47(6), 2014, pp. 2280–2292.
+2. E. Olson, "AprilTag: a robust and flexible visual fiducial system," *ICRA*, 2011, pp. 3400–3407.
+3. OpenCV 4.13.0 documentation: `cv2.aruco`, `ArucoDetector`, `CharucoBoard`. https://docs.opencv.org/4.13.0/
