@@ -1,37 +1,44 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import type { ChapterMeta, ChapterRef, ModuleRef, PartRef } from "@/lib/course-types";
+import { ArrowLeft, ArrowRight, Clock } from "lucide-react";
+import type { ChapterMeta, ChapterRef } from "@/lib/course-types";
 import { TableOfContents } from "./TableOfContents";
+import { ReadingProgress } from "./ReadingProgress";
+import { MarkComplete } from "./MarkComplete";
 
 interface Props {
   meta: ChapterMeta;
-  part: PartRef;
-  module: ModuleRef;
+  href: string;
   prev?: ChapterRef;
   next?: ChapterRef;
   children: ReactNode;
 }
 
-function Objectives({ meta }: { meta: ChapterMeta }) {
+function LearningObjectives({ meta }: { meta: ChapterMeta }) {
   return (
-    <div className="objectives">
-      <div className="side-title">You will learn to</div>
+    <div className="learning-objectives">
+      <div className="side-title">Learning objectives</div>
       <ul>
         {meta.objectives.map((o) => (
           <li key={o}>{o}</li>
         ))}
       </ul>
-      <div className="side-meta">About {meta.minutes} minutes</div>
+      <div className="side-meta">
+        <Clock size={14} strokeWidth={2} aria-hidden="true" /> About {meta.minutes} minutes
+      </div>
     </div>
   );
 }
 
 function PagerLink({ ch, dir }: { ch?: ChapterRef; dir: "prev" | "next" }) {
   if (!ch) return <span />;
-  const label = dir === "prev" ? "← Previous" : "Next →";
   const body = (
     <>
-      <span className="pager-dir">{label}</span>
+      <span className="pager-dir">
+        {dir === "prev" ? <ArrowLeft size={14} strokeWidth={2} aria-hidden="true" /> : null}
+        {dir === "prev" ? "Previous" : "Next"}
+        {dir === "next" ? <ArrowRight size={14} strokeWidth={2} aria-hidden="true" /> : null}
+      </span>
       <span className="pager-title">
         {ch.number} {ch.title}
       </span>
@@ -49,44 +56,35 @@ function PagerLink({ ch, dir }: { ch?: ChapterRef; dir: "prev" | "next" }) {
   );
 }
 
-/** The chapter template frame: breadcrumb, article, contents sidebar, pager. */
-export function ChapterLayout({ meta, part, module, prev, next, children }: Props) {
+/** The chapter template frame: reading progress, article with inline objectives, contents rail, pager. */
+export function ChapterLayout({ meta, href, prev, next, children }: Props) {
   return (
-    <div className="chapter-shell">
-      <nav className="breadcrumb" aria-label="Breadcrumb">
-        <Link href="/">Course</Link>
-        <span aria-hidden="true">›</span>
-        <span>
-          Part {part.letter}: {part.title}
-        </span>
-        <span aria-hidden="true">›</span>
-        <span>
-          {module.number}. {module.title}
-        </span>
-      </nav>
+    <>
+      <ReadingProgress />
+      <div className="chapter-shell">
+        <div className="chapter-grid">
+          <article className="chapter">
+            <details className="toc-mobile">
+              <summary>On this page</summary>
+              <TableOfContents />
+            </details>
+            <LearningObjectives meta={meta} />
+            {children}
+            <MarkComplete href={href} />
+            <nav className="pager" aria-label="Chapter navigation">
+              <PagerLink ch={prev} dir="prev" />
+              <PagerLink ch={next} dir="next" />
+            </nav>
+          </article>
 
-      <div className="chapter-grid">
-        <article className="chapter">
-          <details className="toc-mobile">
-            <summary>On this page</summary>
-            <Objectives meta={meta} />
-            <TableOfContents />
-          </details>
-          {children}
-          <nav className="pager" aria-label="Chapter navigation">
-            <PagerLink ch={prev} dir="prev" />
-            <PagerLink ch={next} dir="next" />
-          </nav>
-        </article>
-
-        <aside className="chapter-side" aria-label="On this page">
-          <div className="sticky">
-            <Objectives meta={meta} />
-            <div className="side-title">On this page</div>
-            <TableOfContents />
-          </div>
-        </aside>
+          <aside className="chapter-side" aria-label="On this page">
+            <div className="sticky">
+              <div className="side-title">On this page</div>
+              <TableOfContents />
+            </div>
+          </aside>
+        </div>
       </div>
-    </div>
+    </>
   );
 }

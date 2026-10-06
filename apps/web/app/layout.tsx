@@ -1,6 +1,12 @@
 import type { Metadata, Viewport } from "next";
-import Link from "next/link";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { course } from "@/generated/content-index";
+import { AppShell } from "@/components/layout/AppShell";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
+const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jetbrains-mono", display: "swap" });
 
 export const metadata: Metadata = {
   title: { default: "OpenCV University", template: "%s · OpenCV University" },
@@ -12,25 +18,21 @@ export const viewport: Viewport = {
   initialScale: 1,
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0f1419" },
+    { media: "(prefers-color-scheme: dark)", color: "#11161c" },
   ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body>
         <a href="#main" className="skip">
           Skip to content
         </a>
-        <header className="site-header">
-          <Link href="/" className="brand">
-            <span className="brand-mark" aria-hidden="true" />
-            OpenCV University
-          </Link>
-          <span className="site-tag">Internal training · Phase 0 preview</span>
-        </header>
-        <main id="main">{children}</main>
+        <AppShell course={course}>{children}</AppShell>
       </body>
     </html>
   );

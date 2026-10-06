@@ -20,7 +20,7 @@ function locate({ part, module: moduleId, chapter }: Params) {
   const m = p?.modules.find((x) => x.id === moduleId);
   const i = m?.chapters.findIndex((x) => x.slug === chapter) ?? -1;
   if (!p || !m || i < 0) return null;
-  return { part: p, module: m, prev: m.chapters[i - 1], next: m.chapters[i + 1] };
+  return { href: m.chapters[i].href, prev: m.chapters[i - 1], next: m.chapters[i + 1] };
 }
 
 export async function generateMetadata({ params }: { params: Promise<Params> }): Promise<Metadata> {
