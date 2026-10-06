@@ -1,0 +1,315 @@
+export const meta = {
+  number: "36.5",
+  title: "Decision trees and random forests",
+  minutes: 24,
+  objectives: [
+    "Pick the best single-feature split by hand, using Gini impurity",
+    "Explain why a deeper tree fits training data better but risks overfitting",
+    "Explain how a random forest's bagging and randomness reduce that risk",
+    "Use cv2.ml.DTrees and cv2.ml.RTrees, including the forest's out-of-bag error estimate",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 36.5 (Part F, Module 36).
+  Lab: TreeLab (apps/web/components/visuals/TreeLab.tsx) — single-tree (depth) vs random-forest decision
+  regions on the same texture tile feature space as 36.1-36.4, precomputed by scripts/gen_tree_data.py.
+  All numbers verified on opencv-python-headless 4.13.0.92.
+*/}
+
+# 36.5 Decision trees and random forests
+
+<Definition term="Decision tree">a classifier built from a sequence of simple yes/no questions, each about a single feature ("is the mean grey level above 140?"), arranged so that following the answers down the tree leads to a predicted class at the bottom (a leaf).</Definition>
+
+Every classifier so far compares a point against the whole training set at once (distance to every point or centroid, a fitted distribution, a margin). A decision tree instead asks one question at a time, each one splitting the remaining points into two groups — closer to how a person might actually describe a sorting rule out loud.
+
+## 1. An analogy
+
+A game of twenty questions for sorting parts: "Is it longer than 5 cm?" then, depending on the answer, a different follow-up question, and so on, until the questions narrow it down to one category. Each question only looks at one property; the *order and choice* of questions is what makes the sorting efficient (or not).
+
+## 2. Building a tree: picking the best split
+
+<Flow
+  steps={[
+    { label: "Training points, mixed classes", tone: "data" },
+    { label: "Try every possible threshold on every feature", tone: "process" },
+    { label: "Keep the split that best separates the classes", tone: "process" },
+    { label: "Repeat on each resulting group, until pure (or a stopping rule)", tone: "result" },
+  ]}
+/>
+
+- **Impurity**: how mixed a group of points' classes is. **Gini impurity** of a group = 1 − Σ(p꜀)², where p꜀ is the fraction of the group belonging to class c. A pure group (one class only) has Gini impurity 0; a group evenly split between classes has higher impurity.
+- **Choosing a split**: for every candidate threshold on every feature, compute the *weighted* Gini impurity of the two resulting groups (weighted by how many points end up in each); pick the threshold that makes this weighted impurity as low as possible.
+- **Recursing**: each resulting group is split again the same way, building a tree, until every leaf is pure (or a stopping rule — maximum depth, minimum group size — kicks in).
+- **Depth**: how many questions deep the tree goes. A shallow tree asks few questions (simple, possibly too simple); a deep tree can keep splitting until every training point is perfectly separated (if no two points share identical features) — which is a classic overfitting risk, not a guarantee of a good rule.
+
+## 3. A worked example by hand
+
+Four points, one feature (x): x=1 (class A), x=2 (class A), x=8 (class B), x=9 (class B). Three candidate split thresholds (the midpoints between consecutive sorted values): 1.5, 5, 8.5.
+
+| Split at | Left group | Right group | Weighted Gini impurity |
+| --- | --- | --- | --- |
+| x < 1.5 | A only (pure, Gini 0) | A, B, B (Gini = 1 − (⅓² + ⅔²) = 4/9 ≈ 0.444) | ¼·0 + ¾·0.444 = **0.333** |
+| x < 5 | A, A (pure, Gini 0) | B, B (pure, Gini 0) | **0.000** |
+| x < 8.5 | A, A, B (Gini = 1 − (⅔² + ⅓²) = 4/9 ≈ 0.444) | B only (pure, Gini 0) | ¾·0.444 + ¼·0 = **0.333** |
+
+**x < 5** gives zero impurity on both sides — a perfect split — and is clearly the best of the three candidates. A real tree-building algorithm checks every candidate threshold this way and always picks the one with the lowest weighted impurity.
+
+## 4. Staircases, overfitting, and a forest's honest estimate
+
+<TreeLab caption="The same texture feature space as 36.1-36.4. A single tree's boundary is a staircase of rectangles (try different depths); a random forest's is smoother, because it averages many different staircases."/>
+
+Training a single decision tree at several maximum depths, on the same 243 tiles (81 each of Woven, Smooth, Blotchy):
+
+| Max depth | Training accuracy |
+| --- | --- |
+| 1 | 66.7% |
+| 2 | 81.5% |
+| 3 | 95.9% |
+| 5 | 98.4% |
+| 10 | **99.2%** |
+
+Accuracy climbs steadily with depth — a deep enough tree can essentially memorise the training set (depth 10 is within a whisker of perfect). A **random forest** (many trees, each trained on a random bootstrap sample of the data and a random subset of features at each split, 50 trees by default in OpenCV) trained on the same data reaches only **94.7%** training accuracy — *lower* than even the depth-5 single tree. That looks worse, until the forest's own built-in check is examined: its **out-of-bag (OOB) error is 8.8%** (OOB accuracy ≈ 91.2%) — an estimate computed from each tree's predictions on the roughly one-third of data it *didn't* see during its own training, a free, honest approximation of how the forest performs on new data. A single deep tree has no equivalent built-in check at all; its 99.2% training accuracy says nothing reliable about new data, while the forest's 91.2% OOB accuracy is a real (if rougher) estimate of exactly that.
+
+## 5. Industrial use
+
+- **When interpretability matters**: a shallow decision tree's rule can be read and explained directly ("if mean > 140 and std < 10, classify as X") — something none of this module's other classifiers offer as simply.
+- **Random forests as a strong, low-maintenance default**: often competitive with more complex models, with the OOB error giving a built-in generalisation check without setting aside separate validation data.
+- **Mixed feature types**: trees handle categorical and numerical features naturally, without the scaling concerns that affect every distance-based method earlier in this module (36.1, 36.3, 36.4).
+
+## What you should remember from 36.5
+
+<Takeaways>
+<Takeaway n={1} title="One split at a time">Each node asks a single yes/no question about one feature.</Takeaway>
+<Takeaway n={2} title="Gini impurity picks the split">Lowest weighted impurity across both resulting groups wins.</Takeaway>
+<Takeaway n={3} title="Depth vs overfitting">Deeper trees fit training data better but increasingly memorise rather than generalise.</Takeaway>
+<Takeaway n={4} title="Forests + OOB error">Bagging many trees, each checked on data it didn't train on, trades some training accuracy for a genuine generalisation estimate.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A group of 10 points: 7 of class A, 3 of class B. What is its Gini impurity?
+
+<Solution>
+
+p_A = 0.7, p_B = 0.3. Gini = 1 − (0.7² + 0.3²) = 1 − (0.49 + 0.09) = 1 − 0.58 = **0.42**.
+
+</Solution>
+
+**Q2.** Why might a random forest's training accuracy be *lower* than a single deep tree's, and why is that not necessarily a bad thing?
+
+<Solution>
+
+Each tree in the forest only sees a bootstrap sample of the data and a random subset of features at each split, so no single tree can memorise the whole training set the way one unrestricted deep tree can (Section 4: 94.7% vs 99.2%). This is not necessarily bad because the deep single tree's near-perfect training accuracy is largely memorisation, not a sign of a good general rule — the forest's lower training accuracy, paired with a genuine out-of-bag check, is often the more trustworthy number.
+
+</Solution>
+
+### Next: 36.6 Boosting and AdaBoost
+
+## Code
+
+### 1. The worked example, and growing trees at several depths with cv2.ml.DTrees
+
+```python
+import numpy as np
+import cv2
+
+def gini(labels):
+    _, counts = np.unique(labels, return_counts=True)
+    p = counts / counts.sum()
+    return 1 - np.sum(p ** 2)
+
+x = np.array([1, 2, 8, 9])
+labels = np.array(["A", "A", "B", "B"])
+for split in (1.5, 5, 8.5):
+    left, right = labels[x < split], labels[x >= split]
+    w_gini = len(left) / len(x) * gini(left) + len(right) / len(x) * gini(right)
+    print(f"split at {split}: weighted Gini = {w_gini:.3f}")
+
+TILE = 8
+def tile_features(img):
+    h, w = img.shape
+    feats = []
+    for ty in range(h // TILE):
+        for tx in range(w // TILE):
+            patch = img[ty * TILE:(ty + 1) * TILE, tx * TILE:(tx + 1) * TILE].astype(np.float64)
+            feats.append((patch.mean(), patch.std()))
+    return np.array(feats)
+
+names = ["woven", "smooth", "blotchy"]
+classes = {n: tile_features(cv2.imread(f"sample-texture-{n}.png", cv2.IMREAD_GRAYSCALE)) for n in names}
+X = np.vstack([classes[n] for n in names]).astype(np.float32)
+y = np.array(sum(([i] * len(classes[n]) for i, n in enumerate(names)), []), dtype=np.int32)
+
+for depth in (1, 2, 3, 5, 10):
+    dt = cv2.ml.DTrees_create()
+    dt.setMaxDepth(depth)
+    dt.setCVFolds(0)                                   # no built-in pruning cross-validation, for this comparison
+    dt.train(X, cv2.ml.ROW_SAMPLE, y)
+    acc = (dt.predict(X)[1].ravel() == y).mean()
+    print(f"depth {depth}: training accuracy {acc:.3f}")
+```
+
+Output:
+
+```text
+split at 1.5: weighted Gini = 0.333
+split at 5: weighted Gini = 0.000
+split at 8.5: weighted Gini = 0.333
+depth 1: training accuracy 0.667
+depth 2: training accuracy 0.815
+depth 3: training accuracy 0.959
+depth 5: training accuracy 0.984
+depth 10: training accuracy 0.992
+```
+
+### 2. cv2.ml.RTrees and the out-of-bag error
+
+```python
+rt = cv2.ml.RTrees_create()
+rt.setMaxDepth(10)
+rt.train(X, cv2.ml.ROW_SAMPLE, y)
+forest_acc = (rt.predict(X)[1].ravel() == y).mean()
+n_trees = rt.getTermCriteria()[1]
+print(f"forest ({n_trees} trees): training accuracy {forest_acc:.3f}, OOB error {rt.getOOBError():.3f}")
+```
+
+Output:
+
+```text
+forest (50 trees): training accuracy 0.947, OOB error 0.088
+```
+
+## OpenCV API notes
+
+- **`cv2.ml.DTrees_create()`**: `.setMaxDepth(d)`, `.setMinSampleCount(n)` (stop splitting a node with fewer than `n` samples), `.setCVFolds(k)` (k-fold cross-validation for pruning; `0` disables it, used above for a clean depth comparison). `.train(samples, cv2.ml.ROW_SAMPLE, responses)`, `.predict(samples)`.
+- **`cv2.ml.RTrees_create()`**: same depth/sample-count controls, plus `.setActiveVarCount(m)` (random features considered per split; `0` defaults to √(number of features), the classic random-forest choice) and `.getTermCriteria()` (returns `(type, maxCount, epsilon)`; `maxCount` is the number of trees — 50 by default here).
+- **`.getOOBError()`**: available only on `RTrees` (not `DTrees`, which has no bagging and therefore nothing held out per tree) — the fraction of training points misclassified when each is predicted only by the trees that did *not* include it in their bootstrap sample.
+- **`.getVarImportance()`** (RTrees only): a score per feature for how much it contributed to reducing impurity across the forest — a built-in, if rough, feature-importance measure.
+- **Both are classifiers *and* regressors**: `isClassifier()` reflects how the response data was given; this chapter only uses the classification mode.
+
+## Where it fails
+
+- **A single deep tree overfits easily** (Section 4: depth 10 nearly memorises 243 points) — its training accuracy should never be trusted as a generalisation estimate on its own.
+- **Axis-aligned splits only**: every split is a threshold on one feature, so a tree's boundary is always a staircase of rectangles (visible in the lab) — it cannot represent a diagonal boundary efficiently, unlike an SVM (36.4) with a suitable kernel.
+- **Small changes in training data can produce a very different tree** (trees are notoriously high-variance) — this instability is exactly what random forests exist to reduce, by averaging many differently-trained trees.
+- **Random forests lose the single tree's easy interpretability** — a forest's prediction is a vote across (here) 50 trees, not one readable sequence of questions.
+- Superseded for many large, complex problems today by gradient boosting (closely related, covered next in 36.6) or deep learning (Part J), though both single trees and forests remain fast, robust, and genuinely interpretable (for single trees) choices.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Trusting a single deep tree's training accuracy**: Section 4's depth-10 tree hit 99.2% on training data with no indication of how it performs elsewhere; always check held-out or OOB performance.
+- **Ignoring the OOB error a random forest gives you for free**: it costs nothing extra to compute and is a genuine (if slightly optimistic in some settings) estimate of generalisation — a better number to report than training accuracy.
+- **Setting max depth very high "to be safe"** without checking for overfitting — exactly backwards; an unconstrained depth is the overfitting risk, not the safety margin.
+- **Expecting a tree or forest to find a diagonal boundary efficiently**: axis-aligned splits can approximate one with many small steps, but it takes far more splits (and more risk of overfitting) than a method built for curved or diagonal boundaries would need.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Other impurity measures
+
+**Entropy** (Σ −p꜀·log₂ p꜀, from information theory) is an alternative to Gini impurity, usually giving very similar splits in practice; the resulting measure of "information gain" (impurity before minus weighted impurity after a split) is mathematically the same idea as Gini's impurity reduction, expressed differently (Quinlan's ID3/C4.5 algorithms use entropy; CART, the algorithm behind `cv2.ml.DTrees`, uses Gini by default).
+
+### Pruning
+
+Rather than limiting depth upfront, some tree algorithms grow a large tree first and then **prune** it back, removing splits that don't improve performance on held-out (often cross-validated) data — `cv2.ml.DTrees`'s `setCVFolds` and `setUse1SERule` control this kind of pruning, disabled in Section 4's comparison to show the raw effect of depth alone.
+
+### Bagging and random feature subsets
+
+A random forest's two sources of randomness — **bagging** (each tree trains on a bootstrap resample, roughly 63% of the data on average, with replacement) and **random feature subsets per split** — both push the individual trees to make different mistakes on different parts of the data, so their *combined* vote averages those mistakes out. This is why a forest's variance is lower than any single tree's, even though each individual tree, trained on less information, may be slightly worse on its own.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "How does a decision tree choose which feature and threshold to split on?",
+      options: ["Randomly", "It tries candidates and picks the one minimising weighted impurity (e.g. Gini) of the resulting groups", "Always the first feature in the data", "By asking the user"],
+      answer: 1,
+      explanation: "Section 2-3: every candidate split is scored by its weighted Gini impurity; the lowest wins.",
+    },
+    {
+      question: "In Section 4, why did training accuracy keep rising with tree depth, up to 99.2% at depth 10?",
+      options: ["Deeper trees are always better", "With enough splits, a tree can carve out a separate region for almost every training point, approaching perfect memorisation", "A bug in cv2.ml.DTrees", "Depth does not affect accuracy"],
+      answer: 1,
+      explanation: "This is the overfitting risk the chapter warns about -- high training accuracy from memorisation, not necessarily a good general rule.",
+    },
+    {
+      question: "What does a random forest's out-of-bag (OOB) error estimate?",
+      options: ["The training accuracy", "How well the forest performs on data each tree did not see during its own training -- a free generalisation check", "The number of trees needed", "The best possible Gini impurity"],
+      answer: 1,
+      explanation: "Section 4: OOB error (8.8%) is a more honest number than training accuracy (94.7%) here.",
+    },
+    {
+      question: "Why does a decision tree's decision boundary always look like a staircase of rectangles?",
+      options: ["A rendering limitation", "Every split is a threshold on a single feature (axis-aligned), so boundaries can only be horizontal or vertical segments", "Trees cannot have more than 2 leaves", "It is a bug"],
+      answer: 1,
+      explanation: "Where it fails: this makes diagonal boundaries inefficient for trees, unlike a suitably-kernelled SVM.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A group of 8 points: 4 class A, 4 class B. A candidate split divides it into a left group of 5 (4 A, 1 B) and a right group of 3 (0 A, 3 B). Compute the weighted Gini impurity of this split.
+
+<Solution>
+
+Left: p_A=4/5, p_B=1/5. Gini = 1 − (16/25 + 1/25) = 1 − 17/25 = 8/25 = 0.32.
+Right: pure (all B). Gini = 0.
+Weighted: (5/8)·0.32 + (3/8)·0 = 0.2.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using the Code section's `gini` function and the texture dataset, compute the weighted Gini impurity of splitting the *whole* dataset (all 243 points) at mean grey level = 140, versus at mean grey level = 160. Which is the better split, by this one feature alone?
+
+<Solution>
+
+```python
+def weighted_gini_split(X, y, feature_idx, threshold):
+    mask = X[:, feature_idx] < threshold
+    left, right = y[mask], y[~mask]
+    return len(left) / len(y) * gini(left) + len(right) / len(y) * gini(right)
+
+for t in (140, 160):
+    wg = weighted_gini_split(X, y, 0, t)
+    print(f"mean < {t}: weighted Gini = {wg:.3f}")
+```
+
+Output:
+
+```text
+mean < 140: weighted Gini = 0.559
+mean < 160: weighted Gini = 0.630
+```
+
+140 is the better of the two (lower weighted Gini, 0.559 vs 0.630) — but neither is anywhere near 0, confirming that a single split on mean grey level alone cannot cleanly separate all three classes (consistent with 36.4's finding that this data isn't even linearly separable); a real tree needs several splits, likely using both features, to do much better (Section 4's depth-3 tree already reached 95.9%).
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague wants a classifier they can explain to a factory floor supervisor in one sentence ("if X then Y"). Which of this module's classifiers so far (36.1-36.5) best fits that requirement, and why?
+
+<Solution>
+
+A **shallow decision tree** (Section 2, perhaps depth 1-3) is the clear choice: its rule is literally a short sequence of readable yes/no questions on named features, unlike nearest-centroid or kNN's "closest to which average/points" (less concrete to explain in one sentence), Bayes' probability machinery, or an SVM's abstract margin and (for RBF) kernel. A random forest trades this readability away for better generalisation (Section 4) — the right choice depends on whether explainability or accuracy matters more for this particular use.
+
+</Solution>
+
+## References
+
+1. L. Breiman, J. Friedman, R. Olshen, C. Stone, *Classification and Regression Trees*, Wadsworth, 1984 (the CART algorithm, the basis for `cv2.ml.DTrees`).
+2. L. Breiman, "Random forests," *Machine Learning* 45(1), 2001, pp. 5–32.
+3. OpenCV 4.13.0 documentation: `cv2.ml.DTrees`, `cv2.ml.RTrees`. https://docs.opencv.org/4.13.0/
