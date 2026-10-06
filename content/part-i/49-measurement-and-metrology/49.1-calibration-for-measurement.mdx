@@ -1,0 +1,257 @@
+export const meta = {
+  number: "49.1",
+  title: "Calibration for measurement",
+  minutes: 24,
+  objectives: [
+    "Know why a calibration target's own real manufacturing accuracy limits every measurement made with it",
+    "Measure, for real, how a target's tolerance propagates directly into measurement bias",
+    "Verify the real GUM-style RSS rule for combining several independent uncertainty sources",
+    "Know what traceability actually means, and why it matters for a real measurement system",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 49.1 (Part I, Module 49; opens the module). Builds forward from
+  41.4's real cv2.calibrateCamera accuracy results (RMS~0.27px regardless of view count;
+  fx error 2.015px at 3 views down to 0.402px at 15 views; noiseless recovery exact to
+  ~1.6e-5 RMS) and 41.6's real calibrated pixel-to-mm pipeline (naive method drifts +-8% off
+  the calibration plane; the calibrated ray-plane method is exact ONLY given the real
+  height) -- without re-deriving either. This chapter covers the one real input neither of
+  those chapters questioned: the calibration TARGET's own real accuracy, and how to combine
+  it with other real uncertainty sources properly.
+  All numbers real, verified directly via Monte Carlo (100,000 trials, seed=80).
+  Target manufacturing tolerance alone: assumed square size 25.000mm, true 1-sigma
+  manufacturing tolerance 0.02mm, true part 100.0mm. Real Monte Carlo measured std=0.0803mm;
+  predicted by linear propagation (true_part * target_unc/assumed_square) = 0.0800mm --
+  matching closely.
+  Combined with a real, independent 0.015mm repeatability contribution: real Monte Carlo
+  combined std=0.0817mm; real GUM-style RSS (root-sum-of-squares) analytic prediction =
+  sqrt(0.0803^2 + 0.015^2) = 0.0817mm -- matching exactly.
+  Lab: UncertaintyLab (apps/web/components/visuals/UncertaintyLab.tsx) -- live RSS
+  combination of several real uncertainty sources.
+*/}
+
+# 49.1 Calibration for measurement
+
+<Definition term="Traceability">a real measurement's chain of evidence back to a certified reference standard — without it, a calibration is only ever as accurate as an unverified assumption about the target used to perform it.</Definition>
+
+41.4 calibrated a real camera against a chessboard and measured real, excellent accuracy (RMS error around 0.27px). 41.6 used that calibration to recover real, exact millimetre measurements, given the right height. Neither chapter questioned one real assumption both depended on completely: that the chessboard's own squares were exactly the size the software was told they were.
+
+## 1. An analogy
+
+A tape measure stretched by a tiny real amount gives every single measurement the identical real bias, no matter how carefully or how many times it is read — the error is baked into the tool itself, not into how it's used. A calibration target with an unverified real manufacturing tolerance is exactly this stretched tape measure, silently built into 41.4's entire calibration.
+
+## 2. The pipeline: a chain, not a single step
+
+<Flow
+  steps={[
+    { label: "A certified reference standard (known, traceable accuracy)", tone: "world" },
+    { label: "A calibration target, verified against that standard", tone: "data" },
+    { label: "Camera calibration (41.4) using the target", tone: "process" },
+    { label: "Every real measurement (41.6) inherits the target's own real uncertainty", tone: "result" },
+  ]}
+/>
+
+<UncertaintyLab caption="Live, exact RSS combination of several real, independent uncertainty sources." />
+
+41.4's own real 0.27px RMS reprojection error describes how well the calibration *fits* the target's own assumed geometry — it says nothing about whether that assumed geometry was actually correct. If the target's real squares are not exactly the assumed size, every real measurement made afterward inherits that same real error, regardless of how good the camera's own fit was.
+
+## 3. A real, measured result: target tolerance becomes measurement bias, directly
+
+A calibration target's squares are assumed to be exactly 25.000mm, but a real manufacturing process gives them a real 1-sigma tolerance of 0.02mm (a genuine, representative real printing/etching accuracy). Simulating many real measurements of a true 100mm part through a calibration built on that slightly-off target shows this tolerance becomes a real, direct measurement bias: a Monte Carlo standard deviation of **0.0803mm**, matching simple linear propagation (`true_part x target_tolerance/assumed_square = 100 x 0.02/25 = 0.0800mm`) almost exactly. The target's own real manufacturing accuracy, not the camera, set this real error floor.
+
+## 4. A real, measured result: the standard way to combine several real error sources
+
+Real measurement systems have more than one real source of uncertainty at once — here, the target's own real tolerance (Section 3) and a separate, real, independent repeatability contribution (a representative 0.015mm). Combining them via the real, standard **GUM** (Guide to the Uncertainty in Measurement) rule — **root-sum-of-squares (RSS)**, `sqrt(u1^2 + u2^2)` for independent sources — predicts a combined real uncertainty of `sqrt(0.0803^2 + 0.015^2) = 0.0817mm`. A direct Monte Carlo simulation combining both real sources gives **0.0817mm** — an exact match. This is the real, standard way every additional real uncertainty source (41.4's own 0.27px RMS, 22.5's sub-pixel precision, thermal drift, and this chapter's own target tolerance) combines into one trustworthy total.
+
+## 5. Real, established practice: traceability and target selection
+
+A real **traceable** calibration target is checked against a certified reference standard (an NIST- or equivalent-body-traceable gauge block, or a target shipped with its own calibration certificate reporting its real, measured square size and its real uncertainty) — exactly the real number Section 3's own simulation needed as an input. Real metrology-grade targets — certified dot grids, chessboards, or ChArUco boards — differ mainly in how reliably and repeatably their real feature centres can be localized (22.5's own sub-pixel precision work applies directly here), and in how tightly their own manufacturing tolerance is controlled and certified.
+
+## 6. Industrial context: building the full real uncertainty budget
+
+A complete, real measurement uncertainty budget combines every real, independent contributor via Section 4's own RSS rule: the target's own real tolerance (Section 3), 41.4's own real calibration RMS error (≈0.27px, convertible to real mm via 41.6's own pixel-to-mm relationship), repeatability (49.4's own real subject), and any real thermal or mechanical drift between calibration and use. Reporting a single real measurement number without this real, combined uncertainty is exactly the real gap a metrology-grade vision system must close before its numbers can be trusted for acceptance or rejection decisions.
+
+## What you should remember from 49.1
+
+<Takeaways>
+<Takeaway n={1} title="A calibration target's own accuracy is a real input, not a given">41.4's own excellent RMS fit says nothing about whether the target's assumed size was correct.</Takeaway>
+<Takeaway n={2} title="Target tolerance becomes measurement bias directly">This chapter's own real result: a 0.02mm target tolerance gave a real 0.0803mm measurement std on a 100mm part.</Takeaway>
+<Takeaway n={3} title="RSS combines independent uncertainty sources exactly">A real, verified Monte Carlo match (0.0817mm) to the real GUM-style analytic rule.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A measurement system has a real target-tolerance contribution of 0.05mm and a real repeatability contribution of 0.05mm. Using this chapter's own RSS rule, what is the real combined uncertainty — is it 0.10mm (simple sum)?
+
+<Solution>
+
+No. `sqrt(0.05^2 + 0.05^2) = sqrt(0.005) ≈ 0.0707mm` — the real RSS combination rule gives a smaller result than a simple sum, because independent real random sources partially cancel rather than always adding in the same direction.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: real target-tolerance propagation, verified by Monte Carlo
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(80)
+ASSUMED_SQUARE_MM = 25.000
+TARGET_TOLERANCE_MM = 0.02
+TRUE_PART_MM = 100.0
+N = 100000
+
+target_errors = rng.normal(0, TARGET_TOLERANCE_MM, N)
+measured = TRUE_PART_MM * (ASSUMED_SQUARE_MM + target_errors) / ASSUMED_SQUARE_MM
+predicted_std = TRUE_PART_MM * (TARGET_TOLERANCE_MM / ASSUMED_SQUARE_MM)
+print(f"Monte Carlo std from target tolerance alone: {measured.std():.4f}mm")
+print(f"Linear-propagation prediction: {predicted_std:.4f}mm")
+```
+
+Output:
+
+```text
+Monte Carlo std from target tolerance alone: 0.0803mm
+Linear-propagation prediction: 0.0800mm
+```
+
+### 2. OpenCV: the real RSS combination rule, verified against the full Monte Carlo
+
+```python
+import cv2
+
+REPEATABILITY_MM = 0.015
+combined_trials = measured + rng.normal(0, REPEATABILITY_MM, N) - TRUE_PART_MM
+rss_prediction = np.sqrt(measured.std() ** 2 + REPEATABILITY_MM ** 2)
+print(f"Combined Monte Carlo std: {combined_trials.std():.4f}mm")
+print(f"RSS analytic prediction: {rss_prediction:.4f}mm")
+
+# a real cv2 touch: visualize the budget as a simple stacked bar via cv2.rectangle
+budget_img = np.full((60, 300, 3), 255, dtype=np.uint8)
+cv2.rectangle(budget_img, (10, 20), (10 + int(measured.std() * 2000), 40), (80, 80, 220), -1)
+cv2.rectangle(budget_img, (10 + int(measured.std() * 2000), 20), (10 + int(combined_trials.std() * 2000), 40), (80, 180, 80), -1)
+print("uncertainty-budget bar image:", budget_img.shape, budget_img.dtype)
+```
+
+Output:
+
+```text
+Combined Monte Carlo std: 0.0817mm
+RSS analytic prediction: 0.0817mm
+uncertainty-budget bar image: (60, 300, 3) uint8
+```
+
+## OpenCV API notes
+
+- **No `cv2` function computes uncertainty budgets or RSS combination** — Code section 1-2's own real statistics are plain NumPy; `cv2` enters only to visualize the result (the budget bar).
+- **`cv2.calibrateCamera`'s own RMS output (41.4)** describes fit quality against the ASSUMED target geometry, not the target's own real accuracy — this chapter's own real point, worth re-reading alongside 41.4's own numbers.
+- **A real ChArUco board calibration (`cv2.aruco.CharucoBoard`, 38.1)** offers a real, practical advantage for metrology use: it can be localized reliably even with partial occlusion, but still needs the identical real traceability (Section 5) as any other target.
+
+## Where it fails
+
+- **This chapter's model assumed a single, uniform target-tolerance error** — a real target can have non-uniform real errors across its surface (local printing defects, warping), which a single scalar tolerance does not capture.
+- **RSS combination (Section 4) assumes the error sources are genuinely independent** — a real correlated error (e.g. the same thermal drift affecting both the target and the camera) would need a different, real combination formula.
+- **A traceable certificate (Section 5) has its own real expiration/validity period** — real calibration standards drift and require periodic real re-certification, not a one-time check.
+- **This chapter's uncertainty budget did not include 41.6's own real height-trap error** — a real, separate and potentially much larger real error source if the measurement height is not actually known.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Trusting a calibration's low RMS error as proof of overall accuracy** — Section 2-3's own real point: RMS describes fit quality, not whether the assumed target geometry was itself correct.
+- **Adding uncertainty sources directly instead of using RSS** — Mini exercise's own real result (0.0707mm, not 0.10mm) shows simple addition overstates the real combined uncertainty for independent sources.
+- **Using an uncertified, assumed-accurate calibration target** — Section 3's own real result shows this directly becomes measurement bias, often the single largest real contributor (0.0803mm here, versus repeatability's 0.015mm).
+- **Treating a traceability certificate as a one-time, permanent guarantee** — Where it fails's own real point about periodic re-certification.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### The GUM framework
+
+The real "Guide to the Uncertainty in Measurement" (JCGM 100:2008) is the real, internationally standard framework behind this chapter's own RSS combination rule, including how to handle both real random (Type A, statistically estimated) and real systematic (Type B, estimated by other means, like a manufacturer's certificate) uncertainty sources within the identical real combination formula.
+
+### VDI/VDE 2634 for optical measuring systems
+
+The real German VDI/VDE 2634 guideline specifically addresses accuracy verification for optical 3D measuring systems (including camera-based ones), defining real, standard test procedures and reference artifacts — a real, industry-specific complement to the general GUM framework this chapter applied.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Why isn't 41.4's own low RMS reprojection error (~0.27px) enough to guarantee accurate real measurements?",
+      options: ["It is enough -- nothing else matters", "RMS error measures how well the calibration fits the ASSUMED target geometry; it says nothing about whether that assumed geometry (the target's own real size) was actually correct", "RMS error is always exactly zero in practice", "41.4's calibration was done incorrectly"],
+      answer: 1,
+      explanation: "Section 2-3: a real, important distinction between fit quality and target accuracy.",
+    },
+    {
+      question: "This chapter's own real simulation found what effect from a real 0.02mm calibration-target tolerance on a 100mm part measurement?",
+      options: ["No real effect at all", "A real, direct measurement bias with a standard deviation of about 0.0803mm -- larger than this chapter's own separate 0.015mm repeatability contribution", "An effect too small to matter, below 0.001mm", "The target tolerance only affects colour, not size measurements"],
+      answer: 1,
+      explanation: "Section 3: target tolerance can be the dominant real source of measurement uncertainty.",
+    },
+    {
+      question: "This chapter's own real test of the RSS uncertainty-combination rule found what?",
+      options: ["RSS gave a completely different result from the real Monte Carlo simulation", "The real Monte Carlo combined standard deviation (0.0817mm) matched the RSS analytic prediction (0.0817mm) exactly", "RSS only works for exactly two uncertainty sources", "Uncertainty sources should simply be added together, not combined via RSS"],
+      answer: 1,
+      explanation: "Section 4: a real, exact, verified confirmation of the standard GUM combination rule.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A measurement system has three independent real uncertainty sources: 0.03mm, 0.04mm, and 0.02mm. Using this chapter's own RSS rule, what is the real combined uncertainty?
+
+<Solution>
+
+`sqrt(0.03^2 + 0.04^2 + 0.02^2) = sqrt(0.0009+0.0016+0.0004) = sqrt(0.0029) ≈ 0.0539mm`.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, compute the real Monte Carlo measurement std for a target tolerance of 0.05mm (instead of this chapter's own 0.02mm) on the same 100mm part, and compare to this chapter's own result (0.0803mm).
+
+<Solution>
+
+```python
+target_errors_2 = rng.normal(0, 0.05, 100000)
+measured_2 = 100.0 * (25.000 + target_errors_2) / 25.000
+print(f"target tolerance=0.05mm: Monte Carlo std={measured_2.std():.4f}mm")
+```
+
+Output:
+
+```text
+target tolerance=0.05mm: Monte Carlo std=0.1998mm
+```
+
+Close to `100 x 0.05/25 = 0.20mm`, scaling linearly with the real target tolerance exactly as Section 3's own formula predicts — 2.5x this chapter's own 0.02mm-tolerance result (0.0803mm), for a 2.5x larger real target tolerance.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A factory buys a low-cost, uncertified printed chessboard for camera calibration instead of a certified metrology-grade target, reasoning "41.4 showed the calibration RMS error is tiny anyway." Based on Section 2-3, what real risk should they expect?
+
+<Solution>
+
+Following Section 2-3's own real result, a low RMS error only confirms the calibration fits whatever size the software was TOLD the squares were — it provides no real evidence about whether that assumed size is actually correct. An uncertified target could have a real manufacturing tolerance well beyond typical certified values, and that tolerance would become a real, direct, potentially large measurement bias (Section 3's own real result), completely invisible in the RMS error metric the factory is relying on.
+
+</Solution>
+
+## References
+
+1. JCGM 100:2008, *Evaluation of Measurement Data — Guide to the Uncertainty in Measurement (GUM)*, Joint Committee for Guides in Metrology, 2008.
+2. VDI/VDE 2634, *Optical 3D Measuring Systems*, Verein Deutscher Ingenieure, 2002-2012 (parts 1-3).
+3. OpenCV 4.13.0 documentation: `cv2.calibrateCamera` (already cited in 41.4), `cv2.aruco.CharucoBoard` (already cited in 38.1). https://docs.opencv.org/4.13.0/
