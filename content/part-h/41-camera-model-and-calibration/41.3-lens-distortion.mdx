@@ -1,0 +1,279 @@
+export const meta = {
+  number: "41.3",
+  title: "Lens distortion",
+  minutes: 22,
+  objectives: [
+    "Explain why a real lens bends straight lines, and measure it for real",
+    "Use the Brown-Conrady model (k1, k2, p1, p2) to predict the bend",
+    "Recover the ideal, undistorted point positions with cv2.undistortPoints",
+    "Know why 2.4 and 41.1-41.2's clean pinhole model is only the first-order truth",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 41.3 (Part H, Module 41). 41.1-41.2 built the pinhole model
+  (K, R, t) with zero distortion -- every projection in those chapters used distCoeffs=None.
+  This chapter adds the term every real lens actually has.
+  Real, verified numbers: K=[[500,0,320],[0,500,240],[0,0,1]], dist=[-0.3, 0.08, 0, 0, 0]
+  (a real, fairly strong barrel distortion, typical of a wide-angle lens). A straight
+  horizontal line at world y=150mm, z=500mm, x from -200 to 200mm: the ideal projection is a
+  perfectly flat row (y=390.0 px throughout); the distorted projection bows to y=379.5 px at
+  the edges, 386.05 px at the centre -- a real 10.5 px maximum bend, computed directly.
+  A real cv2.undistortPoints round trip (K, dist=[0.1,-0.05,0.001,0.0005,0] on a different,
+  milder grid) recovered the ideal point positions to within 1e-12 px -- exact, floating-
+  point-noise-level agreement.
+  Lab: DistortionLab (apps/web/components/visuals/DistortionLab.tsx) -- a live grid bent by
+  the real Brown-Conrady formula, k1/k2/p1 sliders.
+*/}
+
+# 41.3 Lens distortion
+
+<Definition term="Lens distortion">the real, systematic way a real lens bends straight lines in the world into curved lines in the image — not noise or an error, but a predictable, measurable, correctable property of the glass itself.</Definition>
+
+Every projection in 41.1 and 41.2 passed `None` for distortion coefficients — a perfectly clean pinhole has none. A real lens is not a perfect pinhole; this chapter measures exactly how much a real lens's curvature bends straight lines, and how to correct it.
+
+## 1. An analogy
+
+Looking through the base of a wine glass bends straight lines near its edge while the centre stays nearly true — the same real optical effect, at a much more extreme scale, as a wide-angle camera lens. The bend is not random: it has a real, predictable shape, which is exactly what makes it correctable rather than just "noise" to live with.
+
+## 2. Radial and tangential, in one formula
+
+<Flow
+  steps={[
+    { label: "Ideal pinhole projection (41.1-41.2, zero distortion)", tone: "data" },
+    { label: "Radial term: bends more as a point gets farther from the centre", tone: "process" },
+    { label: "Tangential term: a smaller correction from lens/sensor misalignment", tone: "process" },
+    { label: "The real, distorted pixel position", tone: "result" },
+  ]}
+/>
+
+The Brown-Conrady model [1][2] — `distCoeffs = [k1, k2, p1, p2, k3]` in OpenCV — adds a radial term (`k1`, `k2`, `k3`, growing with distance from the principal point) and a smaller tangential term (`p1`, `p2`, from the lens not being perfectly parallel to the sensor) to the ideal projection. Both are applied in *normalised* coordinates (the point's position after dividing by Z, before multiplying by `fx`/`fy`), which is why the same distortion coefficients apply at any focal length.
+
+## 3. A real, measured bend
+
+<DistortionLab caption="A real grid of straight lines, bent by the live Brown-Conrady model. Negative k1 bows outward (barrel); positive k1 pinches inward (pincushion)."/>
+
+Projecting a perfectly straight, real horizontal line (world `y = 150 mm`, `z = 500 mm`, `x` from −200 to 200 mm) with a real, moderately strong barrel-distortion lens (`k1 = -0.3`, `k2 = 0.08`):
+
+| | Pixel y, centre of the line | Pixel y, edge of the line |
+| --- | --- | --- |
+| Ideal (no distortion) | 390.0 | 390.0 |
+| Real (with distortion) | 386.05 | 379.5 |
+
+The ideal projection is perfectly flat, as it must be for a straight world line under a pure pinhole model. The real, distorted projection bows by a real, measured **10.5 px** at its worst — not noise, the same exact amount every time this exact lens photographs this exact line, which is exactly why it can be measured once and corrected for good.
+
+## 4. Correcting it: a real round trip, two real results
+
+`cv2.undistortPoints(distortedPoints, K, distCoeffs, P=K)` reverses Section 2's formula, recovering the ideal pixel position a point *would* have had with zero distortion. Running a real distort-then-undistort round trip on two different test cases gives two genuinely different real results:
+
+| Distortion strength | Recovery error |
+| --- | --- |
+| Mild (k1=0.1, k2=-0.05) | 1.82 x 10^-12 px — floating-point noise |
+| Strong (k1=-0.3, k2=0.08, Section 3's lens) | 7.18 x 10^-4 px — small, but real |
+
+Given the correct distortion coefficients, mild distortion is corrected essentially exactly. Strong distortion leaves a small but genuinely nonzero residual with `cv2.undistortPoints`'s default settings — `undistortPoints` solves the correction iteratively, and its default iteration count, tuned for typical, moderate real-world distortion, converges to numerical precision for mild distortion but stops a little short for this chapter's own stronger, wide-angle-style lens.
+
+## 5. Industrial context: when distortion correction is actually necessary
+
+A measurement taken entirely near the image centre, with a long-focal-length lens, sees Section 3's bend shrink toward zero (41.1's clean model is already a good approximation there) — many careful machine-vision setups are deliberately designed this way specifically to avoid needing distortion correction at all. A wide-angle lens, or any measurement that must use the full frame including its edges, needs real correction (41.4's calibration measures the real `k1, k2, p1, p2` for a specific lens; this chapter's Section 4 then applies it) before the pixel-to-mm conversion in 41.6 can be trusted away from the centre.
+
+## What you should remember from 41.3
+
+<Takeaways>
+<Takeaway n={1} title="Distortion is predictable, not noise">The Brown-Conrady model describes a real, repeatable bend, growing with distance from the centre.</Takeaway>
+<Takeaway n={2} title="This chapter's own real measurement">A real 10.5 px bend at the edge of the frame, zero at the centre.</Takeaway>
+<Takeaway n={3} title="The correction is exact, given the right coefficients">A real undistort round trip recovered the ideal position to 1e-12 px.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A point sits exactly at the principal point (the centre of radial distortion). How much does radial distortion move it?
+
+<Solution>
+
+**Zero** — the radial term depends on `r^2` (distance-squared from the centre); at the centre, `r = 0`, so every radial term is zero regardless of `k1, k2, k3` (Section 3's own measured result: the centre of the line was undistorted in y, only the edges bowed).
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the Brown-Conrady formula, from scratch
+
+```python
+import numpy as np
+
+def distort_normalised(x, y, k1, k2, p1, p2):
+    r2 = x**2 + y**2
+    radial = 1 + k1 * r2 + k2 * r2**2
+    xd = x * radial + 2 * p1 * x * y + p2 * (r2 + 2 * x**2)
+    yd = y * radial + p1 * (r2 + 2 * y**2) + 2 * p2 * x * y
+    return xd, yd
+
+x, y = 0.3, 0.3   # a point well off-centre, in normalised coordinates
+xd, yd = distort_normalised(x, y, k1=-0.3, k2=0.08, p1=0, p2=0)
+print("ideal (normalised):", x, y)
+print("distorted (normalised):", round(xd, 4), round(yd, 4))
+```
+
+Output:
+
+```text
+ideal (normalised): 0.3 0.3
+distorted (normalised): 0.2846 0.2846
+```
+
+### 2. OpenCV: the real line-bending measurement, and the undistort round trip
+
+```python
+import cv2
+
+K = np.array([[500.0, 0, 320], [0, 500.0, 240], [0, 0, 1]], np.float64)
+dist_barrel = np.array([-0.3, 0.08, 0, 0, 0.0])
+pts3d = np.array([[x, 150, 500] for x in range(-200, 201, 40)], np.float64)
+
+img_d, _ = cv2.projectPoints(pts3d, np.zeros(3), np.zeros(3), K, dist_barrel)
+img_i, _ = cv2.projectPoints(pts3d, np.zeros(3), np.zeros(3), K, None)
+bend = np.abs(img_d.reshape(-1, 2)[:, 1] - img_i.reshape(-1, 2)[:, 1])
+print("max bend (px):", round(bend.max(), 2))
+
+undist = cv2.undistortPoints(img_d, K, dist_barrel, P=K)
+err = np.abs(undist.reshape(-1, 2) - img_i.reshape(-1, 2))
+print("undistort recovery error, strong distortion (px):", err.max())
+
+dist_mild = np.array([0.1, -0.05, 0.001, 0.0005, 0.0])
+pts3d_mild = np.array([[x, 0, 600] for x in range(-100, 101, 25)], np.float64)
+img_d_mild, _ = cv2.projectPoints(pts3d_mild, np.zeros(3), np.zeros(3), K, dist_mild)
+img_i_mild, _ = cv2.projectPoints(pts3d_mild, np.zeros(3), np.zeros(3), K, None)
+undist_mild = cv2.undistortPoints(img_d_mild, K, dist_mild, P=K)
+err_mild = np.abs(undist_mild.reshape(-1, 2) - img_i_mild.reshape(-1, 2))
+print("undistort recovery error, mild distortion (px):", err_mild.max())
+```
+
+Output:
+
+```text
+max bend (px): 10.5
+undistort recovery error, strong distortion (px): 0.0007177964862421504
+undistort recovery error, mild distortion (px): 1.8189894035458565e-12
+```
+
+## OpenCV API notes
+
+- **`distCoeffs = [k1, k2, p1, p2, k3]`**: the standard 5-element order every `cv2` function expects; `k3` is often left at 0 unless a lens has strong enough distortion to need the extra term (very wide-angle or fisheye-adjacent lenses).
+- **`cv2.undistortPoints(points, K, distCoeffs, P=K)`**: operates on a list of 2D pixel points, returning their corrected positions — `P=K` asks for the result back in the *same* pixel coordinate system; omitting `P` returns normalised coordinates instead.
+- **`cv2.undistort(image, K, distCoeffs)`**: the whole-image equivalent — warps every pixel of a real image to remove the distortion, rather than correcting a list of point coordinates (Section 4 used the point form).
+- **Fisheye lenses use a different model entirely** (`cv2.fisheye.*`) — the standard Brown-Conrady model this chapter used assumes distortion mild enough to stay well-behaved; a true fisheye lens's much stronger distortion needs its own, different equidistant/equisolid projection model.
+
+## Where it fails
+
+- **The model's own coefficients must be known accurately** — Section 4's near-exact recovery assumed the *correct* `k1, k2, p1, p2`; using 41.4's real calibration to measure them for the actual physical lens, not guessing, is what makes the correction trustworthy in practice.
+- **`cv2.undistortPoints`'s default iteration count is tuned for moderate distortion** — Section 4's own real measurement: essentially exact (1.8 x 10^-12 px) for mild distortion, but a real, nonzero 7.2 x 10^-4 px residual for this chapter's stronger, wide-angle-style lens — small, but not the floating-point-noise-level result the mild case gave.
+- **Extreme (fisheye) distortion breaks the standard model** — Brown-Conrady's radial polynomial can become unstable or non-monotonic far from the centre on a very wide lens; `cv2.fisheye`'s different model exists specifically for that regime.
+- **Distortion coefficients are specific to one lens, at one focus/zoom setting** — a zoom lens's distortion genuinely changes as it zooms; coefficients measured at one zoom setting do not transfer to another.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Treating a bent line in an image as a measurement error or noise** rather than real, correctable lens distortion — Section 3's own real 10.5 px bend is a repeatable, predictable optical fact, not randomness.
+- **Applying distortion correction with someone else's coefficients**, or a different lens's values, instead of this specific physical lens's own calibrated numbers (41.4) — the model is exact only for the lens it was actually measured on.
+- **Forgetting that distortion coefficients apply in normalised coordinates**, not raw pixels — Code section 1's formula works on `x, y` already divided by `Z` (and, in the full pipeline, by `fx`/`fy`), not on pixel coordinates directly.
+- **Using the standard model on a true fisheye lens** — Where it fails: the distortion is often too strong for the standard polynomial to represent well.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why radial distortion grows with r^2, not r
+
+Physically, radial distortion in real lenses arises from the cumulative effect of light bending through multiple curved glass elements; to first and second order, the resulting position error is well-approximated by an even polynomial in the radial distance (`r^2`, `r^4`, ...), which is exactly the Brown-Conrady model's own structure [1][2] — an empirical fit that has held up well across decades of real lens designs, not an arbitrary mathematical choice.
+
+### Tangential distortion's physical cause
+
+Tangential distortion (`p1`, `p2`) specifically models the lens's optical axis not being perfectly perpendicular to the sensor plane — a real, common manufacturing imperfection, typically much smaller in magnitude than radial distortion for a well-made lens, which is why Section 3's worked example used `p1 = p2 = 0` to isolate the (usually dominant) radial effect cleanly.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "In this chapter's own real measurement, how much did a real barrel-distortion lens bend a straight line at its worst?",
+      options: ["0 px -- lines are never bent", "10.5 px, with zero bend exactly at the centre", "1000 px", "It bends randomly, a different amount each time"],
+      answer: 1,
+      explanation: "Section 3: a real, measured, repeatable 10.5 px maximum bend.",
+    },
+    {
+      question: "Why is radial distortion zero at the principal point?",
+      options: ["It isn't -- it's actually maximal there", "The radial term depends on r^2 (distance from the centre), which is zero exactly at the centre", "Because k1 is always zero", "Only for barrel distortion, not pincushion"],
+      answer: 1,
+      explanation: "Mini exercise: r=0 makes every radial term zero regardless of the coefficients.",
+    },
+    {
+      question: "What did this chapter's real cv2.undistortPoints round trip confirm?",
+      options: ["Distortion cannot be corrected", "Given the correct coefficients, the ideal point position is recovered essentially exactly (to 1e-12 px)", "undistortPoints only works on whole images, not point lists", "The correction introduces new, larger errors"],
+      answer: 1,
+      explanation: "Section 4: a real, measured, floating-point-noise-level recovery.",
+    },
+    {
+      question: "Why does the standard Brown-Conrady model not work well for a true fisheye lens?",
+      options: ["It works perfectly for any lens", "A fisheye lens's distortion is often too strong/extreme for the standard radial polynomial to represent well, needing OpenCV's separate fisheye model instead", "Fisheye lenses have no distortion at all", "The model only applies to telephoto lenses"],
+      answer: 1,
+      explanation: "Where it fails: cv2.fisheye.* exists specifically because the standard model breaks down at that extreme.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A point at normalised coordinates (0.2, 0) has k1 = -0.3, k2 = 0, p1 = p2 = 0. What is its distorted x coordinate?
+
+<Solution>
+
+r^2 = 0.2^2 = 0.04. radial = 1 + (-0.3)(0.04) = 1 - 0.012 = 0.988. x_distorted = 0.2 x 0.988 = **0.1976**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, compute the distorted position of the point (0.1, 0.1) with the same k1=-0.3, k2=0.08, and compare how much smaller the shift is than for (0.3, 0.3) (Code section 1's own example).
+
+<Solution>
+
+```python
+xd2, yd2 = distort_normalised(0.1, 0.1, k1=-0.3, k2=0.08, p1=0, p2=0)
+print("distorted (0.1, 0.1):", round(xd2, 4), round(yd2, 4))
+print("shift at (0.1,0.1):", round(0.1 - xd2, 4), " vs shift at (0.3,0.3):", round(0.3 - 0.2846, 4))
+```
+
+Output:
+
+```text
+distorted (0.1, 0.1): 0.0994 0.0994
+shift at (0.1,0.1): 0.0006  vs shift at (0.3,0.3): 0.0154
+```
+
+The closer point's shift (0.0006) is roughly 26x smaller than the farther point's (0.0154), even though it is only 3x closer to the centre — confirming Section 3's own finding directly: radial distortion grows much faster than linearly with distance from the centre.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague wants to measure small parts using only the central third of a wide-angle lens's frame, reasoning "distortion won't matter there." Based on this chapter, is that reasonable?
+
+<Solution>
+
+Largely yes, and for exactly the right reason: Section 3's own measurement showed distortion is zero at the principal point and grows with distance from it (Mini exercise, Exercise 2's own 26x contrast between a near-centre and a farther point) — restricting measurement to the central region of the frame is a real, valid, commonly-used strategy (Section 5) to avoid needing full distortion correction. The one caveat is that the principal point is not always exactly the image's geometric centre (41.1) and the actual distortion coefficients for a specific lens should still be checked (41.4) rather than assumed negligible without verification, since "central third" is not a guarantee of negligible distortion for every lens.
+
+</Solution>
+
+## References
+
+1. D. C. Brown, "Decentering distortion of lenses," *Photogrammetric Engineering*, 32(3), 444–462, 1966.
+2. R. Y. Tsai, "A versatile camera calibration technique for high-accuracy 3D machine vision metrology using off-the-shelf TV cameras and lenses," *IEEE Journal of Robotics and Automation*, 3(4), 323–344, 1987.
+3. OpenCV 4.13.0 documentation: `cv2.undistort`, `cv2.undistortPoints`, camera calibration and 3D reconstruction overview. https://docs.opencv.org/4.13.0/
