@@ -75,3 +75,7 @@ Customer-site images only after anonymisation and written approval.
 | generated/sample-poster.png | Textured "poster" (320 × 240): random discs, rectangles, triangles and ellipses in grey levels 20–235 with printed words ("LOT 4471", "QC OK", …), blur σ 0.7, noise σ 3 (seed 34) | Project-owned | 34.1–34.5 |
 | generated/sample-poster-b.png | The poster seen again: homography `POSTER_H` (rotation 25°, scale 0.75, perspective), gain 0.7, offset +30, new noise σ 3 | Project-owned | 34.1–34.5 |
 | generated/sample-pano-left.png, sample-pano-right.png | Two overlapping views (300 × 220) of a wider 440 × 220 poster (seed 35); the right one is warped by a mild homography, gain 0.9, offset +18; about 160 px overlap | Project-owned | 34.6 |
+| generated/sample-texture-woven.png | 72 × 72 synthetic crosshatch weave, period 9 px, noise σ 5 (seed 101) | Project-owned | 35.1–35.3 |
+| generated/sample-texture-smooth.png | 72 × 72 smooth low-frequency shading, noise σ 4 (seed 102) | Project-owned | 35.1–35.2 |
+| generated/sample-texture-blotchy.png | 72 × 72 random Gaussian-blurred discs, grey 20–235, noise σ 4 (seed 103) | Project-owned | 35.1–35.2 |
+| generated/sample-texture-defect.png | sample-texture-woven.png with a 24×24 "missing weave" patch at rows/cols 24:48, replaced by the patch's own mean grey level plus noise σ 5 (seed 104): same brightness as the surrounding fabric, no weave texture | Project-owned | 35.1–35.2, 15.3 |

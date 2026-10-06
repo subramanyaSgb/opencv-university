@@ -670,6 +670,51 @@ images["sample-poster-b.png"] = po_b
 images["sample-pano-left.png"] = L
 images["sample-pano-right.png"] = R
 
+# Module 35: texture samples (72x72, 8-bit grey). Three textures with matched mean brightness but
+# different local structure, plus a "missing weave" defect patch with nearly the same mean as its
+# surroundings but a very different texture, for LBP, GLCM and texture-based defect detection.
+def texture_woven(size, period, seed):
+    rng = np.random.default_rng(seed)
+    img = np.full((size, size), 170.0)
+    for x in range(0, size, period):
+        img[:, x:x + 2] -= 70
+    for y in range(0, size, period):
+        img[y:y + 2, :] -= 40
+    img = np.clip(img, 0, 255)
+    img += rng.normal(0, 5, img.shape)
+    return np.clip(np.rint(img), 0, 255).astype(np.uint8)
+
+def texture_smooth(size, seed):
+    rng = np.random.default_rng(seed)
+    xs = np.linspace(0, 2 * np.pi, size)
+    base = 140 + 15 * np.sin(xs)[None, :] + 10 * np.cos(0.5 * xs)[:, None]
+    img = base + rng.normal(0, 4, (size, size))
+    return np.clip(np.rint(img), 0, 255).astype(np.uint8)
+
+def texture_blotchy(size, seed, n=45):
+    rng = np.random.default_rng(seed)
+    img = np.full((size, size), 128.0)
+    for _ in range(n):
+        x, y = int(rng.integers(0, size)), int(rng.integers(0, size))
+        s = int(rng.integers(3, 9))
+        g = float(rng.integers(20, 235))
+        cv2.circle(img, (x, y), s, g, -1)
+    img = cv2.GaussianBlur(img, (0, 0), 0.6)
+    img += rng.normal(0, 4, img.shape)
+    return np.clip(np.rint(img), 0, 255).astype(np.uint8)
+
+tex_woven = texture_woven(72, 9, 101)
+tex_smooth = texture_smooth(72, 102)
+tex_blotchy = texture_blotchy(72, 103)
+tex_defect = tex_woven.copy().astype(np.float64)
+defect_region = (slice(24, 48), slice(24, 48))     # same mean as the rest of the fabric, but the weave is missing
+tex_defect[defect_region] = tex_defect[defect_region].mean() + np.random.default_rng(104).normal(0, 5, (24, 24))
+tex_defect = np.clip(np.rint(tex_defect), 0, 255).astype(np.uint8)
+images["sample-texture-woven.png"] = tex_woven
+images["sample-texture-smooth.png"] = tex_smooth
+images["sample-texture-blotchy.png"] = tex_blotchy
+images["sample-texture-defect.png"] = tex_defect
+
 for name, img in images.items():
     ok = cv2.imwrite(str(OUT / name), img)
     assert ok, f"could not write {name}"

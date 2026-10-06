@@ -1,0 +1,350 @@
+export const meta = {
+  number: "35.1",
+  title: "LBP",
+  minutes: 24,
+  objectives: [
+    "Compute the Local Binary Pattern code of a pixel by hand from its 8 neighbours",
+    "Explain what a 'uniform' pattern is and why LBP histograms describe texture, not brightness",
+    "Build an LBP image and histogram with NumPy, and the same thing faster with cv2.compare",
+    "Use an LBP histogram to catch a texture defect that has the same average grey level as its surroundings",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 35.1 (Part F, Module 35: Texture, global descriptors and retrieval).
+  Lab: LbpLab (apps/web/components/visuals/LbpLab.tsx) — click a pixel of sample-texture-{woven,smooth,blotchy,defect}.png
+  for its 3x3 neighbours, the 8 bits (TL,T,TR,R,BR,B,BL,L, weights 128..1) and the LBP code, plus the uniform-pattern
+  fraction of the image (and of the defect patch for the "defect" source).
+  All numbers below were computed by assets/images/generate_samples.py + the verifier venv (opencv-python-headless
+  4.13.0.92) on sample-texture-woven.png, sample-texture-smooth.png, sample-texture-blotchy.png, sample-texture-defect.png.
+*/}
+
+# 35.1 LBP
+
+<Definition term="Local Binary Pattern (LBP)">a texture code for a pixel: compare it with its 8 neighbours, write a 1 where the neighbour is at least as bright as the centre and a 0 otherwise, and read the 8 bits as a number from 0 to 255. The histogram of these numbers over a region describes its texture, almost independently of the region's overall brightness.</Definition>
+
+So far every descriptor in this course has described a *point*: a corner (Module 33) or a small patch around one (Module 34). LBP describes *texture* instead — the fine pattern of light and dark that repeats across a surface, such as weave, grain, brushed metal or skin. Two patches of fabric can have the same average grey level and look completely different to the eye; LBP is built to tell them apart.
+
+## 1. An analogy
+
+Imagine standing on one tile of a floor and looking at the 8 tiles around you, saying "lighter" or "darker" for each one compared with the tile you are standing on. Walk to the next tile and do it again. If the floor is a uniform colour, you will say almost the same thing everywhere. If the floor has a woven or chequered pattern, your sequence of "lighter/darker" answers will itself have a repeating pattern — and that repeating pattern, not the tile colour, is what tells you it's woven.
+
+## 2. How a code is built
+
+<Flow
+  steps={[
+    { label: "Grey image", tone: "data" },
+    { label: "For each pixel: compare with its 8 neighbours", tone: "process" },
+    { label: "1 if neighbour ≥ centre, else 0 (8 bits)", tone: "process" },
+    { label: "Read the bits as a number 0–255", tone: "process" },
+    { label: "Histogram of codes over a region = texture descriptor", tone: "result" },
+  ]}
+/>
+
+The 8 neighbours are read in a fixed order around the pixel — here, clockwise starting at the top-left: TL, T, TR, R, BR, B, BL, L. The bit for each neighbour gets a fixed weight, like place values in binary: 128, 64, 32, 16, 8, 4, 2, 1. The order itself is an arbitrary convention (any fixed order works, as long as it is applied consistently); what matters is that the same neighbour always gets the same weight.
+
+## 3. A worked example by hand
+
+Take this 3×3 patch, centre value 5:
+
+```text
+6  5  2
+7  5  3
+9  4  8
+```
+
+Compare each neighbour with the centre (5), "≥ 5 → 1, else 0", in the order TL, T, TR, R, BR, B, BL, L:
+
+| Neighbour | TL=6 | T=5 | TR=2 | R=3 | BR=8 | B=4 | BL=9 | L=7 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ≥ 5 ? | 1 | 1 | 0 | 0 | 1 | 0 | 1 | 1 |
+| weight | 128 | 64 | 32 | 16 | 8 | 4 | 2 | 1 |
+
+Code = 128 + 64 + 8 + 2 + 1 = **203** (binary `11001011`).
+
+Now check how many times the bit sequence *changes* as you go around the circle (including wrapping from the last bit back to the first): 1,1,0,0,1,0,1,1 → changes at positions 2→3 (1→0), 4→5 (0→1), 5→6 (1→0), 6→7 (0→1), 7→8(wrap, 1→1 is no change)… counting carefully there are **4 transitions**. A pattern with at most 2 transitions is called **uniform** (Ojala, Pietikäinen and Mäenpää [2]); this one, with 4, is **not** uniform — this pixel sits where the local brightness does not simply rise then fall once around the circle, which usually means a corner, a spot or noise rather than a smooth edge.
+
+## 4. Three textures, three different histograms
+
+<LbpLab initialSource="woven" caption="Click any pixel to see its 3×3 neighbours, the 8 bits and the LBP code. Switch the texture to compare a woven fabric, smooth shading, a blotchy pattern, and a fabric with a hidden defect."/>
+
+Computing the LBP code at every interior pixel of three 72×72 textures and counting how many are **uniform** (≤ 2 transitions):
+
+| Texture | Mean grey | Std. dev. | Uniform patterns |
+| --- | --- | --- | --- |
+| Woven fabric | 145.5 | 33.9 | 65.9% |
+| Smooth shading | 139.9 | 13.3 | 57.0% |
+| Blotchy | 136.6 | 49.6 | 69.3% |
+
+The three means are close (136–146) — a plain brightness check could not separate them — but their **texture** differs, and the uniform-pattern fraction picks that up. The smooth image is the surprise: it has almost no real structure, yet it has the *lowest* uniform fraction. Why? Its local contrast is tiny (neighbours differ from the centre by only a few grey levels), so the ±4 grey-level sensor noise added when the image was generated is often enough to flip a comparison. LBP's "≥" test has no idea of "roughly equal" — a near-tie decided by noise produces a scrambled, non-uniform code. **LBP is noise-sensitive exactly where contrast is lowest** (Tan and Triggs [3], see Go deeper).
+
+## 5. Catching a defect that brightness alone would miss
+
+<PixelGrid values={[[170, 100, 170, 100, 170], [170, 100, 170, 100, 170], [143, 148, 139, 146, 141], [143, 137, 149, 144, 138], [170, 100, 170, 100, 170]]} />
+
+That is a sketch of the idea: a regular woven pattern (top and bottom rows) with a patch in the middle where the weave is simply missing — flattened to roughly the same average as the rest, plus a little noise. In the real 72×72 test image, a 24×24 patch of the weave was replaced this way:
+
+| Region | Mean grey | Std. dev. | Uniform patterns |
+| --- | --- | --- | --- |
+| Defect patch (24×24) | 142.6 | 5.1 | 58.0% |
+| Normal fabric elsewhere | 142.3 | 35.4 | 66.3% |
+
+The means, 142.6 and 142.3, are almost identical — `cv2.threshold` or a simple mean filter would see nothing. The standard deviation (5.1 vs 35.4) and the LBP uniform fraction (58.0% vs 66.3%) both show the difference clearly, because they describe *pattern*, not brightness. Comparing the full 256-bin LBP histograms of the two regions with a chi-squared distance gives **0.184** (0 = identical, larger = more different) — a clear separation for a defect invisible to a brightness check.
+
+## 6. Industrial use
+
+- **Fabric and textile inspection**: missing threads, misweaves and stains that don't change the average colour.
+- **Wood, leather, paper, laminate grading**: sorting by surface grain/roughness class.
+- **Surface finish on machined or cast parts**: distinguishing a rough-cast from a machined patch.
+- **Face recognition** (historically): OpenCV's `cv2.face.LBPHFaceRecognizer` (Section "OpenCV API notes") compares LBP histograms computed over a grid of face regions.
+
+## What you should remember from 35.1
+
+<Takeaways>
+<Takeaway n={1} title="The code">8 neighbours, "≥ centre → 1", fixed order and weights (128…1) → one number 0–255 per pixel.</Takeaway>
+<Takeaway n={2} title="The descriptor">The *histogram* of codes over a region, not any single code, describes its texture.</Takeaway>
+<Takeaway n={3} title="Uniform patterns">At most 2 circular bit transitions; they dominate smooth edges and are the basis of compact LBP histograms.</Takeaway>
+<Takeaway n={4} title="Weakness">Low-contrast regions are noise-sensitive — a near-tie comparison is decided by sensor noise, not structure.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** Centre = 10, neighbours in order TL,T,TR,R,BR,B,BL,L = 10, 9, 11, 12, 8, 7, 10, 11. What is the LBP code?
+
+<Solution>
+
+≥ 10? → TL:10≥10→1, T:9≥10→0, TR:11≥10→1, R:12≥10→1, BR:8≥10→0, B:7≥10→0, BL:10≥10→1, L:11≥10→1.
+Code = 128 + 32 + 16 + 2 + 1 = **179**.
+
+</Solution>
+
+**Q2.** If every pixel in a patch has exactly the same grey value, what is the LBP code everywhere inside it, and is it uniform?
+
+<Solution>
+
+Every neighbour is "≥ centre" (equal counts as ≥), so every bit is 1: code = 255 (binary `11111111`). Going around the circle there are 0 transitions, so it is uniform — a perfectly flat patch gives the single code 255 everywhere.
+
+</Solution>
+
+### Next: 35.2 GLCM
+
+## Code
+
+### 1. LBP from scratch with NumPy
+
+```python
+import numpy as np
+import cv2
+
+def lbp_numpy(img):
+    H, W = img.shape
+    im = img.astype(np.int16)                         # avoid uint8 wraparound in comparisons
+    offsets = [(-1, -1), (-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1)]  # TL,T,TR,R,BR,B,BL,L
+    weights = [128, 64, 32, 16, 8, 4, 2, 1]
+    centre = im[1:H - 1, 1:W - 1]
+    code = np.zeros_like(centre, dtype=np.uint8)
+    for (dy, dx), w in zip(offsets, weights):
+        neighbour = im[1 + dy:H - 1 + dy, 1 + dx:W - 1 + dx]
+        bit = (neighbour >= centre).astype(np.uint8)
+        code |= bit * w
+    return code                                        # shape (H-2, W-2): no code at the 1-pixel border
+
+patch = np.array([[6, 5, 2], [7, 5, 3], [9, 4, 8]], dtype=np.uint8)
+print("by-hand check, code at the centre pixel:", int(lbp_numpy(patch)[0, 0]))
+
+woven = cv2.imread("sample-texture-woven.png", cv2.IMREAD_GRAYSCALE)
+codes = lbp_numpy(woven)
+hist = np.bincount(codes.ravel(), minlength=256)
+
+def n_transitions(v):
+    bits = [(v >> k) & 1 for k in range(8)]
+    return sum(bits[k] != bits[(k + 1) % 8] for k in range(8))
+
+uniform = np.array([n_transitions(v) <= 2 for v in range(256)])
+print("woven.png:", codes.size, "pixels, mean", round(float(woven.mean()), 1),
+      "std", round(float(woven.std()), 1), "uniform fraction", round(float(hist[uniform].sum() / hist.sum()), 3))
+```
+
+Output:
+
+```text
+by-hand check, code at the centre pixel: 203
+woven.png: 4900 pixels, mean 145.5 std 33.9 uniform fraction 0.659
+```
+
+### 2. The same thing, vectorised with cv2.compare
+
+```python
+def lbp_cv2(img):
+    bordered = cv2.copyMakeBorder(img, 1, 1, 1, 1, cv2.BORDER_REPLICATE)
+    H, W = bordered.shape
+    offsets = [(-1, -1), (-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1)]
+    weights = [128, 64, 32, 16, 8, 4, 2, 1]
+    centre = bordered[1:H - 1, 1:W - 1]
+    code = np.zeros_like(centre, dtype=np.uint8)
+    for (dy, dx), w in zip(offsets, weights):
+        neighbour = bordered[1 + dy:H - 1 + dy, 1 + dx:W - 1 + dx]
+        ge = cv2.compare(neighbour, centre, cv2.CMP_GE)       # 255 where neighbour >= centre, else 0
+        code = cv2.bitwise_or(code, (ge // 255).astype(np.uint8) * w)
+    return code                                                # same size as img: border pixels use replicated neighbours
+
+codes_cv2 = lbp_cv2(woven)
+print("identical to the NumPy version on the interior:", np.array_equal(codes_cv2[1:-1, 1:-1], codes))
+```
+
+Output:
+
+```text
+identical to the NumPy version on the interior: True
+```
+
+`cv2.copyMakeBorder` with `BORDER_REPLICATE` gives every pixel, including the border, a full set of 8 neighbours (the border pixels borrow the edge value), so `lbp_cv2` returns a code for the whole image instead of leaving a 1-pixel gap.
+
+## OpenCV API notes
+
+- **No single `cv2.LBP(...)` function exists** in core OpenCV for a plain LBP image or histogram; build it from `cv2.compare` and shifted slices as above (or `cv2.ximgproc` for related texture operators in `opencv-contrib-python`).
+- **`cv2.face.LBPHFaceRecognizer_create([radius[, neighbors[, grid_x[, grid_y[, threshold]]]]])`** — needs `opencv-contrib-python(-headless)`, module `cv2.face`. Defaults: `radius=1, neighbors=8, grid_x=8, grid_y=8, threshold=DBL_MAX`. It computes a **circular** LBP (neighbours sampled on a circle of radius `radius`, not just the 8 surrounding pixels) per cell of an `grid_x`×`grid_y` grid over the face, concatenates the per-cell histograms, and compares them with chi-squared distance at `predict()` time.
+- **`cv2.compare(a, b, cv2.CMP_GE)`**: elementwise `a >= b`, returns `0` or `255` (`uint8`), any matching shape/dtype arrays.
+- **`cv2.copyMakeBorder(src, top, bottom, left, right, borderType)`**: adds a border so every pixel has a full neighbourhood; `BORDER_REPLICATE` repeats the edge pixel (used here), `BORDER_REFLECT`/`BORDER_REFLECT_101` mirror it (see 17.3 for the full set).
+- **Speed**: the loop above does 8 passes over the whole image with NumPy/OpenCV vector ops, not a Python per-pixel loop — this is the normal way to vectorise a small fixed neighbourhood in NumPy/OpenCV.
+
+```python
+# Needs opencv-contrib: cv2.face
+recognizer = cv2.face.LBPHFaceRecognizer_create(radius=1, neighbors=8, grid_x=8, grid_y=8)
+print(recognizer.getRadius(), recognizer.getNeighbors(), recognizer.getGridX(), recognizer.getGridY())
+```
+
+Typical output (needs `opencv-contrib-python-headless`, not installed by default):
+
+```text
+1 8 8 8
+```
+
+## Where it fails
+
+- **Low-contrast, noisy regions**: a near-tie comparison is decided by sensor noise, producing scrambled non-uniform codes where there is no real texture (Section 4).
+- **Not rotation-invariant** as defined here: rotating the image by 90° relabels which neighbour is "TL", changing most codes. A *rotation-invariant* version exists (take the minimum code over all 8 circular bit-rotations) but discards the orientation information along with it.
+- **Fixed 3×3 scale**: only sees texture at the 1-pixel neighbour spacing. Coarser texture needs a larger radius (`cv2.face.LBPHFaceRecognizer`'s circular sampling, or compute LBP on a downsampled image — compare with the Gaussian pyramid, Module 20).
+- **No colour**: LBP as shown works on a single (grey) channel; colour texture needs LBP per channel or on a converted space.
+- For texture *classification* with a strong statistical foundation rather than a hand-built histogram feature, grey-level co-occurrence (35.2) or a learned CNN feature (Part J) are often preferred today.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Using `uint8` directly in the comparison** without a wider dtype: `uint8` subtraction wraps, but `>=` comparisons on `uint8` arrays are safe in NumPy — however, mixing `uint8` arrays with Python ints or doing arithmetic *before* the comparison can wrap unexpectedly (6.3). Compare first, arithmetic after.
+- **Changing the neighbour order between training and testing**: the order is an arbitrary convention, but it must be the *same* arbitrary convention every time, or codes computed at different times are not comparable.
+- **Forgetting the 1-pixel border** with the plain NumPy version: `lbp_numpy` returns an image 2 pixels smaller in each dimension; indexing it as if it matched the input size is an off-by-one bug.
+- **Expecting LBP to be rotation-invariant** by default — it is not (see Where it fails).
+- **Comparing raw 256-bin histograms of regions of very different sizes** without normalising first (divide by the pixel count) — larger regions simply have larger counts, not necessarily different texture.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### From LBP to uniform and rotation-invariant LBP
+
+The original LBP, with the fixed 3×3 neighbourhood used here, is from Ojala, Pietikäinen and Harwood [1]. Ojala, Pietikäinen and Mäenpää [2] generalised it to `P` neighbours sampled on a circle of radius `R` (notation `LBP(P, R)`; what this chapter builds is `LBP(8, 1)` with square instead of circular sampling, the common simplified case), defined the **uniform** patterns (at most 2 circular 0/1 transitions) as the ones that carry most of the texture information, and defined a **rotation-invariant** code `LBP(P, R)^ri` as the minimum value over all `P` circular bit-rotations of a code — so a pattern and its rotated copy map to the same code.
+
+### Noise sensitivity and Local Ternary Patterns
+
+Because "≥" is a hard threshold, pixels with centre and neighbour almost equal are effectively comparing noise, not signal (Section 4 measured this directly). Tan and Triggs [3] introduced **Local Ternary Patterns (LTP)**: a 3-valued comparison (+1 if neighbour > centre + a tolerance $t$, −1 if neighbour < centre − $t$, 0 otherwise) that ignores differences smaller than $t$, trading some resolution for noise robustness, originally for face recognition under difficult lighting.
+
+### LBP histograms as a texture feature vector
+
+For classification (Module 36), the 256-bin histogram of codes over a patch (or just the 59 bins that correspond to uniform patterns, since the rest are usually lumped into one "non-uniform" bin) becomes the feature vector; two regions are compared with a histogram distance (chi-squared or histogram intersection, as in Module 12's back-projection).
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "Centre = 8, one neighbour = 8. Is that neighbour's bit 0 or 1?",
+      options: ["0", "1", "Undefined", "Depends on the other neighbours"],
+      answer: 1,
+      explanation: "The rule is 'neighbour ≥ centre', and 8 ≥ 8, so the bit is 1.",
+    },
+    {
+      question: "What does the LBP histogram of a region describe?",
+      options: ["Its average brightness", "Its exact shape and size", "The frequency of each local pattern of lighter/darker neighbours", "Its colour"],
+      answer: 2,
+      explanation: "Section 4: three textures with similar means had very different LBP statistics.",
+    },
+    {
+      question: "In Section 4, why did the 'smooth' texture have the lowest uniform-pattern fraction, even though it had no real structure?",
+      options: ["It was the darkest image", "Low local contrast let sensor noise decide many of the ≥ comparisons", "Uniform patterns only exist in woven textures", "The image was too small"],
+      answer: 1,
+      explanation: "Where true contrast is small, a near-tie comparison is decided by noise, producing scrambled, non-uniform codes.",
+    },
+    {
+      question: "The defect patch and the rest of the fabric had mean grey levels 142.6 and 142.3 — almost identical. What caught the defect?",
+      options: ["Nothing could catch it", "A simple cv2.threshold on the mean", "The standard deviation and the LBP uniform-pattern fraction, which describe texture rather than brightness", "Converting to colour"],
+      answer: 2,
+      explanation: "Std. dev. 5.1 vs 35.4, and uniform fraction 58.0% vs 66.3% — both texture measures, both clearly different.",
+    },
+    {
+      question: "Is plain LBP (as defined in this chapter) rotation-invariant?",
+      options: ["Yes, always", "No — rotating the image changes which neighbour is 'TL' and so changes most codes", "Only for uniform patterns", "Only in colour images"],
+      answer: 1,
+      explanation: "A separate rotation-invariant variant exists (minimum over circular bit-rotations) but is not what was built here.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+Centre = 20, neighbours TL,T,TR,R,BR,B,BL,L = 18, 22, 25, 20, 15, 10, 19, 21. Find the LBP code and say whether it is uniform.
+
+<Solution>
+
+≥ 20? → TL:18→0, T:22→1, TR:25→1, R:20→1, BR:15→0, B:10→0, BL:19→0, L:21→1.
+Code = 64 + 32 + 16 + 1 = **113** (binary `01110001`).
+Transitions around the circle (0,1,1,1,0,0,0,1 → back to 0): 0→1 (1), 1→1, 1→1, 1→0 (1), 0→0, 0→0, 0→1 (1), 1→0 (1, wrap) = **4 transitions**, so **not uniform**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using `lbp_numpy` from the Code section, compute the LBP histogram of `sample-texture-blotchy.png` and report its uniform-pattern fraction. Does it match the 69.3% stated in Section 4?
+
+<Solution>
+
+```python
+blotchy = cv2.imread("sample-texture-blotchy.png", cv2.IMREAD_GRAYSCALE)
+codes_b = lbp_numpy(blotchy)
+hist_b = np.bincount(codes_b.ravel(), minlength=256)
+print("uniform fraction:", round(float(hist_b[uniform].sum() / hist_b.sum()), 3))
+```
+
+Output:
+
+```text
+uniform fraction: 0.693
+```
+
+Yes: 69.3%, matching Section 4 (computed the same way on the same file).
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A colleague suggests comparing two patches of fabric by their *mean* LBP code (averaging the 0–255 numbers) instead of the full histogram. Why is that a bad idea?
+
+<Solution>
+
+The LBP code is a categorical label (which of 256 local patterns occurred), not a quantity where arithmetic is meaningful — code 0 (all neighbours darker) and code 255 (all neighbours brighter or equal) are *opposite* patterns, yet averaging codes near 0 and near 255 gives something near 127, which is yet another, unrelated pattern. Two very different textures can easily share the same mean code while having completely different histograms, defeating the purpose of using LBP at all. Compare histograms (with a histogram distance), not mean codes.
+
+</Solution>
+
+## References
+
+1. T. Ojala, M. Pietikäinen, D. Harwood, "A comparative study of texture measures with classification based on feature distributions," *Pattern Recognition* 29(1), 1996, pp. 51–59.
+2. T. Ojala, M. Pietikäinen, T. Mäenpää, "Multiresolution gray-scale and rotation invariant texture classification with local binary patterns," *IEEE Transactions on Pattern Analysis and Machine Intelligence* 24(7), 2002, pp. 971–987.
+3. X. Tan, B. Triggs, "Enhanced local texture feature sets for face recognition under difficult lighting conditions," *IEEE Transactions on Image Processing* 19(6), 2010, pp. 1635–1650.
+4. OpenCV 4.13.0 documentation: `cv2.face.LBPHFaceRecognizer`, `cv2.compare`, `cv2.copyMakeBorder`. https://docs.opencv.org/4.13.0/
