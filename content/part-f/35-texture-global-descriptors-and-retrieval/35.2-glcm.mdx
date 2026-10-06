@@ -1,0 +1,321 @@
+export const meta = {
+  number: "35.2",
+  title: "GLCM",
+  minutes: 24,
+  objectives: [
+    "Build a grey-level co-occurrence matrix (GLCM) for a given direction and distance",
+    "Compute the Haralick features contrast, homogeneity, energy, correlation and entropy from it",
+    "Explain why a texture's GLCM features can differ by direction, and what that reveals",
+    "Use a drop in GLCM contrast to catch a texture defect that is invisible to a brightness check",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 35.2 (Part F, Module 35).
+  Lab: GlcmLab (apps/web/components/visuals/GlcmLab.tsx) — texture x direction (0/45/90/135 deg, distance 1) on
+  sample-texture-{woven,smooth,blotchy,defect}.png; shows the 16x16 co-occurrence matrix (log-scaled heatmap) and
+  live Haralick features, plus defect-patch vs rest-of-fabric for the "defect" source.
+  All numbers below from running the Code section on opencv-python-headless 4.13.0.92 (cv2.calcHist, verified
+  against a pure-NumPy GLCM).
+*/}
+
+# 35.2 GLCM
+
+<Definition term="Grey-level co-occurrence matrix (GLCM)">a table that counts, over a whole region, how often grey level *i* occurs at a chosen distance and direction from grey level *j*. Statistics computed from this table (contrast, homogeneity, energy, correlation, entropy) are a classic texture descriptor, introduced by Haralick, Shanmugam and Dinstein.</Definition>
+
+LBP (35.1) asks "what pattern of lighter/darker surrounds this pixel?" GLCM asks a related but different question: "across the whole region, when I see grey level *i*, how often is the pixel one step away grey level *j*?" It is one of the oldest texture descriptors in image processing (1973) and still a standard baseline.
+
+## 1. An analogy
+
+Imagine recording, for every pair of adjacent houses on a street, "house 1 is this colour, house 2 (one door further along) is that colour" — for every pair, not just the colour of each house alone. A street painted in alternating black and white has pairs that are almost always (black, white) or (white, black); a street painted in one flat grey has pairs that are almost always (grey, grey). The *pairs* reveal the pattern that the paint alone does not.
+
+## 2. Building the matrix
+
+<Flow
+  steps={[
+    { label: "Grey image", tone: "data" },
+    { label: "Quantize to L grey levels (e.g. 16)", tone: "process" },
+    { label: "Pick a direction and distance (e.g. 1 pixel, 0°)", tone: "process" },
+    { label: "Count every (pixel, neighbour) grey-level pair → L×L matrix", tone: "process" },
+    { label: "Haralick features from the matrix", tone: "result" },
+  ]}
+/>
+
+Why quantize first? With 256 grey levels the matrix would be 256×256 = 65 536 cells, and a small region would spread a few thousand pixel pairs so thinly across them that almost every cell would be 0 or 1 — too sparse to say anything. Reducing to `L` = 16 levels (dividing each grey value by 256/16 = 16) gives a 16×16 = 256-cell matrix with enough pairs per cell to be meaningful.
+
+## 3. A worked example by hand
+
+A tiny 1×4 strip of quantized grey levels (L = 4 levels: 0, 1, 2, 3), reading left to right: `0, 0, 2, 3`. Count every adjacent pair at distance 1, direction "right" (i, j) = (left pixel, right pixel):
+
+| Pair (i → j) | Occurs at |
+| --- | --- |
+| (0, 0) | pixels 1→2 |
+| (0, 2) | pixels 2→3 |
+| (2, 3) | pixels 3→4 |
+
+The 4×4 matrix has a 1 at (0,0), a 1 at (0,2), a 1 at (2,3), and 0 everywhere else (3 pairs total, matching 4 pixels − 1). Normalising by the total (divide by 3) gives the probabilities P(i,j) used in the formulas below. **Contrast** = Σ (i−j)² P(i,j) = (0−0)²·⅓ + (0−2)²·⅓ + (2−3)²·⅓ = 0 + 4/3 + 1/3 = **5/3 ≈ 1.67**: most of the "energy" in this tiny strip comes from the big (0, 2) jump.
+
+## 4. The features, and why direction matters
+
+<GlcmLab initialSource="woven" initialAngle="0" caption="Choose a texture and a direction. The woven fabric's matrix and features change noticeably between 0° and 90° — try both. Switch to 'fabric with a defect' to compare the defect patch with the rest."/>
+
+Computing the GLCM at distance 1 in two directions (16 grey levels) on the three 72×72 textures from 35.1:
+
+| Texture | Contrast (0°, horizontal) | Contrast (90°, vertical) | Correlation (0°) |
+| --- | --- | --- | --- |
+| Woven fabric | 4.31 | 1.58 | 0.51 |
+| Smooth shading | 0.29 | 0.29 | 0.82 |
+| Blotchy | 1.55 | 1.47 | 0.92 |
+
+The woven fabric's contrast is **nearly 3× higher horizontally than vertically** (4.31 vs 1.58): this texture was built with stronger vertical lines (bigger brightness drop) than horizontal ones, so stepping sideways crosses a bigger jump more often than stepping downward does. Smooth and blotchy, which have no preferred direction, score almost the same both ways. **This is the point of computing a GLCM at several angles**: a big difference between directions is itself a measurement — it says the texture is anisotropic (directional), and roughly how strongly.
+
+## 5. Catching a defect with contrast, not brightness
+
+Reusing the "missing weave" patch from 35.1 (same mean grey level, 142.6 vs 142.3, as its surroundings): computing the horizontal (0°) GLCM separately inside the 24×24 defect patch and in a same-size normal patch elsewhere in the fabric —
+
+| Region | Contrast | Homogeneity |
+| --- | --- | --- |
+| Defect patch (missing weave) | 0.49 | 0.76 |
+| Normal fabric | 4.33 | 0.67 |
+
+Contrast falls to about a ninth of its normal value, and homogeneity rises, because the patch is close to uniform noise: adjacent quantized levels are usually equal or one step apart, never the large jumps the weave produces elsewhere. A region with this GLCM signature can be flagged automatically, with no brightness threshold involved.
+
+## 6. Industrial use
+
+- **Textile and leather grading**: contrast and homogeneity by direction separate weave classes.
+- **Wood and laminate inspection**: grain direction shows up directly as a directional contrast difference.
+- **Satellite and aerial imagery**: classic use for classifying terrain (forest, farmland, urban) by texture.
+- **Medical imaging**: GLCM features of tissue regions (e.g. in CT/MRI) have long been used as hand-built features for tissue classification, before CNN features became common (Part J).
+
+## What you should remember from 35.2
+
+<Takeaways>
+<Takeaway n={1} title="The matrix">Count every (pixel, neighbour-at-distance-d-direction-θ) grey-level pair into an L×L table.</Takeaway>
+<Takeaway n={2} title="The features">Contrast, homogeneity, energy, correlation, entropy — all computed from that one table.</Takeaway>
+<Takeaway n={3} title="Direction matters">Computing the GLCM at several angles reveals and measures anisotropic (directional) texture.</Takeaway>
+<Takeaway n={4} title="Defects">A drop in contrast can flag a region where a texture is locally missing, even at the same brightness.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A 1×5 quantized strip (4 levels): `1, 1, 1, 1, 1`. What is the contrast, computed the way Section 3 did?
+
+<Solution>
+
+Every adjacent pair is (1, 1), so (i−j)² = 0 for all of them: contrast = **0**. A perfectly flat region always has zero GLCM contrast, whatever its grey level.
+
+</Solution>
+
+**Q2.** Why use 16 grey levels instead of 256 for a small region?
+
+<Solution>
+
+With 256 levels the matrix has 65 536 cells; a small region's handful of pixel pairs would be spread almost one-per-cell, giving a matrix too sparse for the statistics to mean anything. Quantizing to 16 (or similar) levels concentrates enough pairs per cell to compute stable contrast/homogeneity/energy numbers (Section 2).
+
+</Solution>
+
+### Next: 35.3 HOG
+
+## Code
+
+### 1. GLCM from scratch with NumPy
+
+```python
+import numpy as np
+import cv2
+
+LEVELS = 16
+
+def quantize(img, levels=LEVELS):
+    return (img.astype(np.int32) * levels // 256).astype(np.uint8)   # 0..255 -> 0..levels-1
+
+def glcm_numpy(img, dx, dy, levels=LEVELS):
+    q = quantize(img, levels)
+    H, W = q.shape
+    a = q[max(0, -dy):H - max(0, dy), max(0, -dx):W - max(0, dx)]     # the "i" pixel
+    b = q[max(0, dy):H - max(0, -dy), max(0, dx):W - max(0, -dx)]     # the "j" pixel, offset by (dx, dy)
+    idx = a.ravel().astype(np.int64) * levels + b.ravel().astype(np.int64)
+    return np.bincount(idx, minlength=levels * levels).reshape(levels, levels).astype(np.float64)
+
+def haralick(mat):
+    P = mat / mat.sum()
+    L = P.shape[0]
+    i, j = np.arange(L).reshape(-1, 1), np.arange(L).reshape(1, -1)
+    contrast = float(np.sum((i - j) ** 2 * P))
+    homogeneity = float(np.sum(P / (1 + (i - j) ** 2)))
+    energy = float(np.sum(P ** 2))
+    mu_i, mu_j = float(np.sum(i * P)), float(np.sum(j * P))
+    sd_i, sd_j = float(np.sqrt(np.sum((i - mu_i) ** 2 * P))), float(np.sqrt(np.sum((j - mu_j) ** 2 * P)))
+    correlation = float(np.sum((i - mu_i) * (j - mu_j) * P) / (sd_i * sd_j)) if sd_i > 0 and sd_j > 0 else 1.0
+    entropy = float(-np.sum(P[P > 0] * np.log2(P[P > 0])))
+    return dict(contrast=contrast, homogeneity=homogeneity, energy=energy, correlation=correlation, entropy=entropy)
+
+strip = np.array([[0, 0, 170, 255]], dtype=np.uint8)            # quantizes to levels 0,0,2,3 at L=4 (Section 3)
+print("by-hand check, contrast:", round(haralick(glcm_numpy(strip, 1, 0, levels=4))["contrast"], 3))
+
+woven = cv2.imread("sample-texture-woven.png", cv2.IMREAD_GRAYSCALE)
+for name, (dx, dy) in [("0 deg (horizontal)", (1, 0)), ("90 deg (vertical)", (0, 1))]:
+    feats = haralick(glcm_numpy(woven, dx, dy))
+    print(f"woven, {name}: contrast={feats['contrast']:.2f}  correlation={feats['correlation']:.2f}")
+```
+
+Output:
+
+```text
+by-hand check, contrast: 1.667
+woven, 0 deg (horizontal): contrast=4.31  correlation=0.51
+woven, 90 deg (vertical): contrast=1.58  correlation=0.82
+```
+
+### 2. The joint histogram is the GLCM: cv2.calcHist
+
+A GLCM is a 2-D joint histogram of (pixel value, shifted-neighbour value) — exactly what `cv2.calcHist` computed for hue and saturation in 12.6, here computed for an image and a shifted copy of itself:
+
+```python
+def glcm_cv2(img, dx, dy, levels=LEVELS):
+    q = quantize(img, levels).astype(np.float32)
+    H, W = q.shape
+    a = q[max(0, -dy):H - max(0, dy), max(0, -dx):W - max(0, dx)]
+    b = q[max(0, dy):H - max(0, -dy), max(0, dx):W - max(0, -dx)]
+    return cv2.calcHist([a, b], [0, 1], None, [levels, levels], [0, levels, 0, levels])
+
+m1 = glcm_numpy(woven, 1, 0)
+m2 = glcm_cv2(woven, 1, 0)
+print("cv2.calcHist matches the NumPy GLCM:", np.allclose(m1, m2), " total pairs:", int(m2.sum()))
+```
+
+Output:
+
+```text
+cv2.calcHist matches the NumPy GLCM: True  total pairs: 5112
+```
+
+5112 = 72 × 71: one column fewer than the image width, because a horizontal pair needs a pixel to its right.
+
+## OpenCV API notes
+
+- **No `cv2.GLCM(...)` or `cv2.graycomatrix(...)`** exists in OpenCV (the name `graycomatrix` is scikit-image's, a different, non-pinned library) — build the matrix with `cv2.calcHist` on the image and a shifted view of itself, as above.
+- **`cv2.calcHist(images, channels, mask, histSize, ranges)`**: `images` is a *list* of arrays (here two single-channel `float32` arrays of the same shape, one shifted); `channels=[0,1]` takes channel 0 from each; `histSize=[levels,levels]`; `ranges=[0,levels,0,levels]`. Returns a `(levels, levels)` `float32` array (row = value from the first image, column = value from the second) — see 12.6 for the general 2-D form.
+- **Quantization**: `cv2.calcHist`'s own `histSize`/`ranges` can bin raw 0–255 values directly (`ranges=[0,256,0,256]`, `histSize=[16,16]`) instead of quantizing first — both give the same 16-level matrix; quantizing first (as above) makes the Haralick formulas' grey-level indices explicit.
+- **Speed**: computing the matrix is one `cv2.calcHist` call per direction; the Haralick statistics are a handful of elementwise sums over a 16×16 (or similar) array — negligible compared to almost anything else in this course.
+
+## Where it fails
+
+- **Choice of `L` (grey levels) and distance matter a lot**: too few levels (e.g. 4) loses detail; too many (e.g. 64+) on a small region gives a sparse, noisy matrix. There is no single correct choice — it depends on region size and the texture scale you care about.
+- **A single direction can miss anisotropic texture** (Section 4) — compute several angles, or average them, for a texture whose orientation is unknown or irrelevant.
+- **Still a hand-built statistic**, like LBP: it summarises *some* texture structure, not all of it, and two visually different textures can occasionally share similar Haralick numbers.
+- **No position information**: like any one global matrix, it describes the whole region as one texture; a region straddling two different textures gives a GLCM that is a meaningless mixture of both (always compute it over a region you believe is one texture).
+- For a principled, learned alternative, see CNN texture/feature classification in Part J.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Comparing GLCM features computed with different `L` or different distances**: contrast and the other features scale with the grey-level range and the pixel step; only compare like with like.
+- **Computing one direction only** for a texture that might be directional, then being surprised the feature doesn't separate two classes — try multiple angles (Section 4).
+- **Running GLCM across a region boundary** (e.g. half background, half object): the result describes neither region correctly.
+- **Forgetting to normalise the matrix** (divide by its total) before computing the Haralick formulas — unnormalised counts give contrast/energy/entropy values that depend on region size, not just texture.
+- **Confusing `cv2.calcHist`'s `ranges` upper bound**: it is *exclusive* like a NumPy slice (`ranges=[0, levels, ...]` covers values 0 to levels−1), matching the already-quantized 0..levels−1 range used here.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Haralick's original features
+
+Haralick, Shanmugam and Dinstein's 1973 paper [1] defined 14 statistics from the GLCM, for classifying aerial photographs into terrain types; contrast, homogeneity (inverse difference moment), energy (angular second moment), correlation and entropy, used in Sections 4–5, are five of the most commonly used today. The remaining nine (sum/difference statistics, cluster shade and prominence, maximum probability, and others) are less used but defined the same way: a sum over the normalised matrix P(i,j).
+
+### Distance and direction as parameters
+
+A GLCM is defined for one (distance, direction) pair; multi-angle or rotation-invariant texture analysis typically averages or otherwise combines the GLCMs (or their features) from several directions (0°, 45°, 90°, 135° is a common minimal set) — exactly what Section 4's lab lets you explore by hand.
+
+### GLCM vs LBP
+
+Both are hand-built texture descriptors from the same era of image processing. LBP (35.1) encodes a *local* 3×3 neighbourhood pattern per pixel and histograms the codes; GLCM encodes *pairwise* grey-level co-occurrence over a whole region directly, without an intermediate per-pixel code. Both are still used as fast, interpretable baselines, often alongside or instead of CNN features (Part J) when data is scarce or interpretability matters.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "A GLCM counts pairs of what?",
+      options: ["Pairs of pixel coordinates", "Pairs of (grey level at a pixel, grey level at a fixed offset from it)", "Pairs of images", "Pairs of edges"],
+      answer: 1,
+      explanation: "Section 1-2: for a chosen distance and direction, every (i, j) grey-level pair is counted.",
+    },
+    {
+      question: "In Section 4, why was the woven fabric's contrast so different between 0° and 90°?",
+      options: ["A bug in the quantization", "The fabric's vertical lines were a stronger brightness drop than its horizontal lines, making it anisotropic", "Contrast is always direction-dependent for any texture", "The image was not square"],
+      answer: 1,
+      explanation: "Smooth and blotchy, with no preferred direction, had nearly equal contrast both ways; the woven fabric did not.",
+    },
+    {
+      question: "Why quantize to e.g. 16 grey levels before building the matrix, instead of using all 256?",
+      options: ["256 levels is slower to display", "With 256 levels a small region's pixel pairs spread too thinly across 65 536 cells to be statistically meaningful", "OpenCV does not support 256 levels", "It makes the image smaller"],
+      answer: 1,
+      explanation: "Section 2: fewer, coarser levels concentrate enough pairs per cell for stable statistics.",
+    },
+    {
+      question: "In Section 5, what happened to contrast inside the 'missing weave' defect patch?",
+      options: ["It increased sharply", "It fell to about a ninth of its normal value, because the patch was close to uniform noise", "It stayed exactly the same", "Energy and homogeneity both fell"],
+      answer: 1,
+      explanation: "Contrast: 4.33 (normal) -> 0.49 (defect); homogeneity rose from 0.67 to 0.76.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A 1×4 strip, 4 grey levels: `3, 1, 3, 1`. Build the distance-1, direction-"right" GLCM (as a 4×4 table of counts) and compute its contrast.
+
+<Solution>
+
+Adjacent pairs: (3,1), (1,3), (3,1) — three pairs, two of them identical. The matrix has a 2 at (3,1) and a 1 at (1,3), zero elsewhere.
+Normalised: P(3,1) = 2/3, P(1,3) = 1/3.
+Contrast = (3−1)²·(2/3) + (1−3)²·(1/3) = 4·(2/3) + 4·(1/3) = 8/3 + 4/3 = **4**.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using `glcm_numpy` and `haralick` from the Code section, compute the 0° contrast of `sample-texture-blotchy.png` at distance 2 instead of distance 1 (hint: scale `dx` to 2). Is it higher or lower than the distance-1 value (1.55) from Section 4, and does that make sense for a texture made of discs several pixels wide?
+
+<Solution>
+
+```python
+blotchy = cv2.imread("sample-texture-blotchy.png", cv2.IMREAD_GRAYSCALE)
+feats_d2 = haralick(glcm_numpy(blotchy, 2, 0))
+print("distance-2 contrast:", round(feats_d2["contrast"], 3))
+```
+
+Output:
+
+```text
+distance-2 contrast: 4.034
+```
+
+Higher than the distance-1 value (1.55) — more than double. The blotches are several pixels wide, so adjacent pixels (distance 1) are usually still inside the same blotch (small jump), while pixels 2 apart are more likely to straddle a blotch edge (bigger jump) — contrast grows with distance until the distance approaches the blotch size.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+Two completely different textures happen to have the same contrast, homogeneity and energy at 0°, distance 1. Does that mean a classifier using only these three numbers at this one (angle, distance) will always confuse them?
+
+<Solution>
+
+Very likely yes, for *that* classifier with *those* features — three numbers cannot separate two classes that produce the same three numbers. The fix is not to abandon GLCM but to add more features to the vector: other angles (Section 4), other distances (Exercise 2), correlation and entropy, or combine with a different descriptor entirely (LBP, 35.1, or a learned feature, Part J). A hand-built descriptor is only as good as the specific statistics chosen from it.
+
+</Solution>
+
+## References
+
+1. R. M. Haralick, K. Shanmugam, I. Dinstein, "Textural features for image classification," *IEEE Transactions on Systems, Man, and Cybernetics* SMC-3(6), 1973, pp. 610–621.
+2. Gonzalez, Woods, *Digital Image Processing*, 4th ed., Section 11.3.4 (gray-level co-occurrence matrices).
+3. OpenCV 4.13.0 documentation: `cv2.calcHist`. https://docs.opencv.org/4.13.0/

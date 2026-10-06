@@ -140,3 +140,4 @@ export { MatchLab } from "./MatchLab";
 export { FeatureLab } from "./FeatureLab";
 export { DescLab } from "./DescLab";
 export { LbpLab } from "./LbpLab";
+export { GlcmLab } from "./GlcmLab";
