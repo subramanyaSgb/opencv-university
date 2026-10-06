@@ -1,0 +1,1 @@
+{"width":128,"bits":7,"results":[{"noise_std":10,"error_rate":0.0},{"noise_std":20,"error_rate":0.0},{"noise_std":40,"error_rate":0.004},{"noise_std":60,"error_rate":0.086},{"noise_std":80,"error_rate":0.308},{"noise_std":100,"error_rate":0.516},{"noise_std":127,"error_rate":0.716},{"noise_std":150,"error_rate":0.744}]}

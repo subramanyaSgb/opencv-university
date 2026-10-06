@@ -187,3 +187,4 @@ export { HandEyeLab } from "./HandEyeLab";
 export { StereoLab } from "./StereoLab";
 export { EpipolarLab } from "./EpipolarLab";
 export { DisparityLab } from "./DisparityLab";
+export { StructuredLightLab } from "./StructuredLightLab";
