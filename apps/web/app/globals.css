@@ -159,23 +159,28 @@ code, pre { font-family: var(--mono); font-size: 0.88em; font-variant-numeric: t
   border: 1px solid var(--line);
 }
 .topbar-breadcrumb {
-  display: flex; align-items: center; gap: 0.4rem; min-width: 0; overflow: hidden;
+  display: flex; align-items: center; gap: 0.4rem; flex: 1; min-width: 0; overflow: hidden;
   font-size: 0.85rem; color: var(--fg-faint); white-space: nowrap;
 }
+.tb-part-group { display: flex; align-items: center; gap: 0.4rem; min-width: 0; flex: 0 1 auto; }
 .tb-crumb { overflow: hidden; text-overflow: ellipsis; }
-.tb-crumb-chapter { color: var(--fg-soft); }
+.tb-crumb-chapter { color: var(--fg-soft); flex: 1 1 auto; min-width: 3rem; }
 .tb-sep { flex: none; }
 .topbar-spacer { flex: 1; }
 .badge-preview {
+  flex: none;
   font-size: 0.72rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em;
   color: var(--fg-faint); border: 1px solid var(--line); border-radius: 999px; padding: 0.15rem 0.6rem;
 }
-@media (max-width: 720px) {
+@media (max-width: 1023px) {
   .topbar-menu { display: inline-flex; }
-  .tb-crumb-part { display: none; }
+}
+@media (max-width: 720px) {
+  .tb-part-group { display: none; }
 }
 @media (max-width: 480px) {
   .badge-preview { display: none; }
+  .brand-text { display: none; }
 }
 
 /* ---- Sidebar (course tree): drawer under 1024px, fixed column from 1024px ---- */
