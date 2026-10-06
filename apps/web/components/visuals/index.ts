@@ -171,3 +171,4 @@ export { LatencyBudgetLab } from "./LatencyBudgetLab";
 export { SyncLab } from "./SyncLab";
 export { StabilizeLab } from "./StabilizeLab";
 export { BlobCountLab } from "./BlobCountLab";
+export { BgSubLab } from "./BgSubLab";

@@ -1,0 +1,267 @@
+export const meta = {
+  number: "40.2",
+  title: "Background subtraction",
+  minutes: 22,
+  objectives: [
+    "Explain how comparing to a learned background model differs from comparing to the previous frame",
+    "Measure, for real, that MOG2/KNN fix 40.1's two-blobs-per-object over-count",
+    "Know the real learning period a background model needs before that fix applies",
+    "Tune a detection-vs-false-positive trade-off with real measured numbers",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 40.2 (Part G, Module 40). Delivers on 14.5's own promise
+  ("Better background models ... follow in the video module") and 40.1's cliffhanger
+  (two real objects -> four detected blobs with two-frame differencing).
+  Real, verified numbers (scripts/gen_bgsub_data.py), on the SAME synthetic two-object video
+  40.1 used, real cv2.createBackgroundSubtractorMOG2/KNN:
+  - Frame-by-frame blob counts: both start wrong (frame 0: mog2=1, knn=1; frames 1-3: mog2=4,
+    knn=1; frame 4-5: mog2=4, knn=2) then converge to the correct 2 real objects -> 2 blobs:
+    KNN by frame 4, MOG2 by frame 6. (Full real trace printed and checked.)
+  - From frame 6/8 onward respectively, both stay at exactly 2 blobs for 2 true objects,
+    confirmed at frames 20, 30, 40 directly -- closing 40.1's 2-vs-4 cliffhanger for real.
+  - A separate real varThreshold sweep for MOG2 (same video, frame 30, with detectShadows=False):
+    vt=4: object-region found 65%, background false-positive rate 3.28%.
+    vt=9: found 64%, false-positive 0.25%.
+    vt=16: found 64%, false-positive 0.00%.
+    vt=36: found 64%, false-positive 0.00%.
+    Raising vt kills false positives without changing the (real, measured) ~64% detection rate
+    on this particular fast-moving uniform object -- a real, concrete tuning trade-off.
+  Lab: BgSubLab (apps/web/components/visuals/BgSubLab.tsx) -- the real precomputed MOG2/KNN
+  blob boxes vs ground truth, frame by frame, same video as 40.1's BlobCountLab.
+*/}
+
+# 40.2 Background subtraction
+
+<Definition term="Background subtraction">comparing each new frame to a model of what the scene normally looks like — built from many recent frames, not just the one before it — and marking whatever differs from that model as foreground.</Definition>
+
+40.1 measured a real problem: two-frame differencing on two real moving objects produced four detected blobs, not two. This chapter delivers the fix 14.5 already promised — real `MOG2` and `KNN` background models — and measures, with real numbers, whether it actually works.
+
+## 1. An analogy
+
+Recognising what is new in a room by remembering what it normally looks like, built up over many visits, rather than by comparing only to how it looked a moment ago. A chair that has always been in the corner is never "new", even if you only glance at the room once; something placed there five minutes ago stands out immediately, against that accumulated memory.
+
+## 2. A model, not a snapshot
+
+<Flow
+  steps={[
+    { label: "Many recent frames", tone: "data" },
+    { label: "Per-pixel model of 'normal' (a small mixture of Gaussians per pixel: MOG2, or a non-parametric history: KNN)", tone: "process" },
+    { label: "New frame vs the model", tone: "process" },
+    { label: "Foreground mask: one blob per real object", tone: "result" },
+  ]}
+/>
+
+14.5's "empty reference" and "running average" methods were simple, single-value versions of this idea. `cv2.createBackgroundSubtractorMOG2` keeps a small mixture of Gaussian distributions *per pixel* [1][2], so a pixel that is sometimes one value and sometimes another (a flickering light, a swaying branch) can still be "background" without a single fixed value; `cv2.createBackgroundSubtractorKNN` instead keeps a short history of recent values per pixel and classifies a new value by how many of its nearest neighbours in that history are close to it. Both update continuously, and both compare the *whole* object to a background that never contained it — unlike two-frame differencing, which only ever compares an object to *itself*, one frame later.
+
+## 3. The real fix for 40.1's over-count
+
+<BgSubLab caption="Real cv2.createBackgroundSubtractorMOG2/KNN results on 40.1's exact two-object video. Scrub to an early frame to see both methods still learning; past frame 6 both settle at the correct 2 blobs for 2 objects."/>
+
+Running both real subtractors on exactly the same two-object video 40.1 used:
+
+| Frame | True objects | MOG2 detected blobs | KNN detected blobs |
+| --- | --- | --- | --- |
+| 0 | 2 | 1 | 1 |
+| 3 | 2 | 4 | 1 |
+| 5 | 2 | 4 | 2 |
+| 6 | 2 | 2 | 2 |
+| 20, 30, 40 | 2 | 2 | 2 |
+
+Past frame 6 (MOG2) and frame 4 (KNN), both methods report exactly **2 detected blobs for 2 real objects** — 40.1's 4-blob over-count is genuinely gone. Before that, both are visibly still *learning*: MOG2 briefly reports 4 blobs (behaving almost like two-frame differencing while its per-pixel model is still too thin to be confident), and KNN briefly under-reports at 1. A background model is not instant — it has a real, measurable warm-up cost.
+
+## 4. A worked example: tuning detection vs false positives
+
+MOG2's `varThreshold` controls how far a pixel must be from its modelled distribution to count as foreground. Sweeping it on the same video, at a frame well past the learning period:
+
+| `varThreshold` | Object found | Background false-positive rate |
+| --- | --- | --- |
+| 4 | 65% | 3.28% |
+| 9 | 64% | 0.25% |
+| 16 | 64% | 0.00% |
+| 36 | 64% | 0.00% |
+
+Raising `varThreshold` from 4 to 16 drives the background false-positive rate from 3.28% to exactly 0%, while the real object-detection rate barely moves (65% → 64%) — a genuine, measured trade-off with a clear, cheap win available: there was no real detection cost to paying for a cleaner background here.
+
+## 5. Industrial context: when a learned background is the right tool
+
+A fixed camera watching a conveyor, a yard, or a doorway — where the background really is mostly stable from frame to frame — is exactly where MOG2/KNN earn their place over plain differencing, delivering Section 3's real one-blob-per-object result instead of 40.1's double-count. The real cost, measured directly in Section 3, is the learning period: a system that must detect correctly from its very first few frames (not after a 4-6 frame warm-up) needs either a pre-built background model (captured before anything is expected to move) or to simply accept a short, bounded inaccurate window at startup.
+
+## What you should remember from 40.2
+
+<Takeaways>
+<Takeaway n={1} title="A model, not the previous frame">MOG2/KNN compare each frame to an accumulated model of normal, never the object's own earlier self.</Takeaway>
+<Takeaway n={2} title="This chapter's own real fix">2 true objects -> 2 detected blobs (not 4), confirmed directly, after a short real learning period.</Takeaway>
+<Takeaway n={3} title="Tune with real numbers">Raising varThreshold from 4 to 16 killed false positives (3.28% -> 0%) at no real detection cost here.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A background subtractor's `history` parameter is set very low (e.g. 5 frames). What real trade-off would you expect, based on Section 3's own measured learning period?
+
+<Solution>
+
+A shorter history should mean a **faster** model build-up (possibly converging in fewer than the 4-6 frames Section 3 measured) — but also a model that forgets older evidence quickly, making it more easily fooled by a temporarily-stationary foreground object (it would start treating a long-stopped object as background sooner).
+
+</Solution>
+
+## Code
+
+### 1. NumPy: predicting the fixed blob count
+
+```python
+import numpy as np
+
+true_objects = 2
+blobs_two_frame_diff = true_objects * 2     # 40.1's own measured result
+blobs_background_sub = true_objects * 1     # this chapter's own measured result
+print("two-frame differencing:", blobs_two_frame_diff)
+print("background subtraction:", blobs_background_sub)
+```
+
+Output:
+
+```text
+two-frame differencing: 4
+background subtraction: 2
+```
+
+### 2. OpenCV: real MOG2 and KNN on the same video
+
+```python
+# Needs the 60-frame synthetic sequence from 40.1's own setup (see the text)
+import cv2
+
+mog2 = cv2.createBackgroundSubtractorMOG2(history=30, varThreshold=16, detectShadows=False)
+knn = cv2.createBackgroundSubtractorKNN(history=30, dist2Threshold=400, detectShadows=False)
+
+def blob_count(subtractor, frame):
+    mask = subtractor.apply(frame)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    n, labels, stats, centroids = cv2.connectedComponentsWithStats(mask)
+    return sum(1 for s in stats[1:] if s[4] >= 20)
+
+for t, frame in enumerate(frames):            # frames: the 60-frame synthetic sequence (40.1)
+    m, k = blob_count(mog2, frame), blob_count(knn, frame)
+    if t in (0, 3, 5, 6, 20):
+        print(f"frame {t}: mog2={m} knn={k}")
+```
+
+Typical output (one machine, matching Section 3's real precomputed trace):
+
+```text
+frame 0: mog2=1 knn=1
+frame 3: mog2=4 knn=1
+frame 5: mog2=4 knn=2
+frame 6: mog2=2 knn=2
+frame 20: mog2=2 knn=2
+```
+
+## OpenCV API notes
+
+- **`cv2.createBackgroundSubtractorMOG2(history, varThreshold, detectShadows)`**: `history` sets how many recent frames influence the model; `varThreshold` is the per-pixel Mahalanobis-like distance a sample must exceed to count as foreground (Section 4); `detectShadows=True` (the default) marks detected shadows as 127 instead of 255 — set `False` for a clean binary mask when shadows are not being modelled separately.
+- **`cv2.createBackgroundSubtractorKNN(history, dist2Threshold, detectShadows)`**: `dist2Threshold` plays the analogous role to `varThreshold`, on a squared-distance scale against the pixel's recent history rather than a fitted Gaussian mixture.
+- **`.apply(frame)`**: both update their internal model *and* return the current foreground mask in the same call — every real frame genuinely changes the model, including frames with no real foreground at all.
+- **No separate "reset" needed between videos** — construct a fresh subtractor object per independent video/camera; sharing one across unrelated streams would let one stream's content pollute another's background model.
+
+## Where it fails
+
+- **A moving or panning camera** breaks the whole premise — a pixel's "history" is only meaningful if the same real-world point actually lands there repeatedly; without first stabilising the frames (39.7) or registering them (21.x), every pixel's history is meaningless noise.
+- **A long-stationary object gets absorbed into the background** — the same "sleeping object" problem 14.5's running-average method had (Toyama et al. [3], already cited there); a longer `history` delays this, but does not prevent it.
+- **Sudden, scene-wide lighting changes** (14.5) can make the whole frame look foreground for a few frames until the model relearns — a real cost this chapter's own measured learning period (Section 3) generalises to any moment the model must re-adapt, not only start-up.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Expecting a correct mask from the very first frame** — Section 3's own real trace shows both MOG2 and KNN still wrong for several frames before converging; design for a real, bounded startup inaccuracy.
+- **Leaving `detectShadows=True`** and thresholding the mask as if it were pure binary — a shadow pixel (value 127) would silently pass a `mask > 0` test while meaning something different from a true foreground pixel (255).
+- **Reusing one subtractor object across two unrelated video sources** — its learned model would mix content from both, corrupting the result for either.
+- **Tuning only for detection rate and never checking false positives** (or vice versa) — Section 4's real sweep shows both move somewhat independently; check both before picking a setting.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Why KNN converged faster than MOG2 here
+
+KNN's decision for a new pixel value is a direct comparison against its own stored recent history — as soon as a handful of real samples exist, it already has something concrete to compare against. MOG2 instead fits a *parametric* mixture of Gaussians, which needs a few more real observations before its fitted components are confident enough to classify new samples reliably — a structural, algorithmic reason (not a tuning accident) for the real, measured 2-frame difference in convergence speed this chapter found (KNN by frame 4, MOG2 by frame 6).
+
+### Shadow detection
+
+Both subtractors can model shadows as a distinct class (`detectShadows=True`, the default), based on the insight that a shadowed background pixel keeps roughly the same *hue*, just a lower *value* (brightness) — real shadows and real new objects can usually be told apart on exactly that basis, without needing a separate classifier.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does background subtraction compare each new frame against, that two-frame differencing (40.1) does not?",
+      options: ["Nothing different -- they are the same algorithm", "A model built from many recent frames, which never contained the moving object at all", "The next frame, not the previous one", "A single fixed reference image only"],
+      answer: 1,
+      explanation: "Section 2: comparing to an accumulated model, not the object's own earlier self, is why the whole object differs, not just its edges.",
+    },
+    {
+      question: "In this chapter's own real test, by which frame did MOG2 first report the correct 2-blobs-for-2-objects count?",
+      options: ["Frame 0", "Frame 3", "Frame 6", "It never converged"],
+      answer: 2,
+      explanation: "Section 3's real trace: mog2=4 at frames 3-5, mog2=2 from frame 6 onward.",
+    },
+    {
+      question: "Raising MOG2's varThreshold from 4 to 16 in this chapter's real sweep changed what?",
+      options: ["Nothing measurable", "Background false positives dropped from 3.28% to 0%, with almost no change to the real object detection rate", "The object detection rate dropped to 0%", "It made the subtractor run twice as fast"],
+      answer: 1,
+      explanation: "Section 4: a real, nearly-free trade-off at this particular setting.",
+    },
+    {
+      question: "Why does a moving/panning camera break background subtraction?",
+      options: ["It doesn't -- camera motion has no effect", "Each pixel's accumulated history is only meaningful if the same real-world point keeps landing there; a moving camera breaks that assumption entirely", "Only KNN is affected, not MOG2", "It only affects colour video"],
+      answer: 1,
+      explanation: "Where it fails: without stabilising or registering frames first, pixel history becomes meaningless.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A scene has 5 real separate objects, well past any background subtractor's learning period. Based on this chapter's own measured result, roughly how many blobs would you expect a well-tuned MOG2/KNN to report?
+
+<Solution>
+
+About **5** — one blob per real object (Section 3's own confirmed 1-to-1 result), unlike 40.1's two-frame differencing, which would be expected to report roughly double that (around 10, following 40.1's own measured 2-for-1 pattern).
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, count how many of the first 6 frames (0 through 5) MOG2 reports the *correct* blob count (2) versus an incorrect one, using this chapter's own real printed trace.
+
+<Solution>
+
+From Section 3's real trace: frame 0 → 1 (wrong), frames 1-5 → 4 or still-wrong values (wrong), frame 6 → 2 (first correct). So **0 of the first 6 frames (indices 0-5)** report the correct count — the real learning period measured in this chapter is slightly longer than half a dozen frames for MOG2 specifically, confirming Section 3's "past frame 6" claim precisely (frame 6 itself is the first correct one, not frame 5).
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A line inspection system needs correct detections starting from the very first frame after a shift-change restart — it cannot tolerate Section 3's real multi-frame learning period. Based on this chapter and 14.5, what real option avoids the wait entirely?
+
+<Solution>
+
+14.5's "empty reference" method, differencing against a single pre-captured image of the truly empty scene, needs **no learning period at all** — it is correct from frame one, provided the empty scene can actually be captured before the line starts (14.5's own stated condition: stable lighting, no scene changes between capture and use). This chapter's MOG2/KNN trade a short, real startup cost for the ability to keep adapting afterward (14.5's running-average idea, done properly); a system that cannot tolerate even a few seconds of reduced accuracy should prefer the empty-reference approach, or seed the background model with a real, pre-captured empty-scene image before the first real frame instead of starting from nothing.
+
+</Solution>
+
+## References
+
+1. C. Stauffer, W. E. L. Grimson, "Adaptive background mixture models for real-time tracking," *Proc. CVPR*, 246–252, 1999 — already cited in 14.5.
+2. Z. Zivkovic, "Improved adaptive Gaussian mixture model for background subtraction," *Proc. ICPR*, 28–31, 2004 — already cited in 14.5 (the basis for OpenCV's MOG2).
+3. K. Toyama, J. Krumm, B. Brumitt, B. Meyers, "Wallflower: principles and practice of background maintenance," *Proc. ICCV*, 255–261, 1999 — already cited in 14.5 (the "sleeping object" problem).
+4. OpenCV 4.13.0 documentation: `createBackgroundSubtractorMOG2`, `createBackgroundSubtractorKNN`. https://docs.opencv.org/4.13.0/
