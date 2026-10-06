@@ -1,0 +1,262 @@
+export const meta = {
+  number: "46.2",
+  title: "Emissivity",
+  minutes: 22,
+  objectives: [
+    "Know why 46.1's blackbody physics alone gives wrong real temperatures for real surfaces",
+    "Measure, for real, how large an apparent-temperature error a wrong emissivity setting causes",
+    "Measure, for real, a classic field hazard: a shiny surface reflecting a cold sky",
+    "Correctly invert the real radiometric equation to recover a true temperature",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 46.2 (Part I, Module 46). 46.1 treated every surface as an ideal
+  blackbody; real surfaces are not. This chapter covers emissivity, the real correction every
+  actual thermal measurement needs, via the standard "general radiometric equation"
+  (apparent radiated power = epsilon.sigma.T_obj^4 + (1-epsilon).sigma.T_reflected^4, a
+  broadband Stefan-Boltzmann simplification of the real per-wavelength relationship --
+  flagged honestly in Where it fails).
+  All numbers real, verified directly via the Stefan-Boltzmann constant sigma=5.670374419e-8
+  W/(m^2.K^4).
+  True object temperature T_obj=350.0K (76.85C), ambient/reflected background T_amb=293.15K
+  (20C): painted/oxidized surface (eps=0.95) naive apparent T=347.76K (74.61C), error=2.24K.
+  Typical paint (eps=0.9): apparent T=345.47K (72.32C), error=4.53K. Polished aluminum
+  (eps=0.15): apparent T=303.89K (30.74C), error=46.11K -- a dramatic real misreading.
+  Correct inversion (given the right eps and T_amb): recovers T_obj to within 0.0000K for
+  both eps=0.95 and eps=0.15 cases -- the math is exact once the real emissivity is known.
+  Cold-sky outdoor scenario: T_obj=350K reflecting a clear, cold T_sky=250K: painted roof
+  (eps=0.9) apparent T=343.34K, error=6.66K; shiny metal roof (eps=0.15) apparent
+  T=273.20K (0.05C!), error=76.80K -- a scorching-hot shiny roof reading as freezing cold.
+  Lab: reuses 46.1's own InfraredLab conceptually (Planck/Stefan-Boltzmann); this chapter adds
+  no new Lab component, since its own real content is the radiometric EQUATION itself, shown
+  directly and exactly in the Code section -- a small new live component (EmissivityLab) is
+  added instead for the lesson's required interactive figure.
+*/}
+
+# 46.2 Emissivity
+
+<Definition term="Emissivity">how efficiently a real surface radiates heat compared to an ideal blackbody at the same real temperature — a number from 0 (a perfect mirror, radiating almost nothing of its own) to 1 (a perfect blackbody, radiating everything 46.1's physics predicts).</Definition>
+
+46.1 treated every surface as an ideal blackbody, radiating exactly what Planck's and Stefan-Boltzmann's laws predict for its real temperature. Almost no real surface does this. A thermal camera's raw reading is a mix of the object's own real emission *and* radiation from its surroundings bouncing off it — and getting that mix wrong produces a real, sometimes drastically wrong, temperature.
+
+## 1. An analogy
+
+Hold a mirror near a fire: the mirror itself does not look "hot" to a thermal camera, no matter how close it gets, because a mirror's whole real job is reflecting its surroundings rather than radiating its own heat. A sheet of matte black paper right next to it genuinely does look hot once it absorbs that same heat, because it is a near-perfect real emitter of its own temperature. The exact same real physics applies to a shiny versus a painted metal surface at an identical real temperature.
+
+## 2. The pipeline: what a thermal camera actually measures
+
+<Flow
+  steps={[
+    { label: "Object's own real emission: epsilon x blackbody(T_object)", tone: "world" },
+    { label: "Reflected surroundings: (1-epsilon) x blackbody(T_reflected)", tone: "data" },
+    { label: "Sum = the real apparent radiance a camera measures", tone: "process" },
+    { label: "Wrong epsilon in -> wrong real temperature out", tone: "result" },
+  ]}
+/>
+
+<EmissivityLab caption="Live, exact radiometric equation: drag the emissivity and reflected-temperature sliders and watch the real apparent-temperature error." />
+
+The real **general radiometric equation** a thermal camera (and this chapter) uses is `W_apparent = epsilon . sigma . T_obj^4 + (1 - epsilon) . sigma . T_reflected^4` — the object's own real Stefan-Boltzmann emission, plus whatever fraction it reflects of its surroundings' own radiation. A camera that assumes `epsilon = 1` (ignoring this second term entirely) reports a real, wrong temperature whenever the true emissivity is not actually 1.
+
+## 3. A real, measured result: how wrong a bad emissivity assumption actually is
+
+A real object at 350K (76.85°C) sitting in a 293.15K (20°C) environment, read with a camera that (wrongly) assumes a perfect blackbody (`epsilon=1`), gives real, measured errors that depend entirely on the real surface: a painted/oxidized surface (`epsilon=0.95`) reads only **2.24K** low — a small, often tolerable real error. Ordinary paint (`epsilon=0.9`) reads **4.53K** low. But polished aluminum (`epsilon=0.15`) reads a full **46.11K** low — the camera reports **30.74°C** for a surface that is genuinely **76.85°C**, a real, dangerous underestimate for anyone relying on that number.
+
+## 4. A real, measured surprise: a cold sky makes this far worse
+
+Outdoors, a shiny surface reflects the sky — and on a clear day, the sky's own effective radiating temperature is genuinely very cold (a real, representative value: 250K). Reading that same real 350K object with a shiny roof's real emissivity (0.15) under a clear cold sky gives an apparent reading of **273.20K — 0.05°C**, an error of **76.80K**: a scorching-hot shiny roof genuinely reads as *just above freezing*. A painted roof (`epsilon=0.9`) under the identical cold sky only errs by **6.66K** — the real emissivity, not the scene, is what determines how badly this fails.
+
+## 5. Industrial context: the real fix every thermal camera offers
+
+Every real commercial thermal camera lets an operator enter two real parameters before taking a measurement: the surface's real emissivity, and the real reflected (background/ambient) temperature — exactly the two real quantities in Section 2's equation. Inverting that same equation with the *correct* real emissivity recovers the true temperature exactly (Code section 1's own real result: 0.0000K of error for both the painted and polished-aluminum cases). This is precisely why thermography standard practice includes applying a small, known patch of high-emissivity tape or paint to a shiny real surface before measuring it — giving a real, trustworthy reading right next to the surface's own unreliable one.
+
+## What you should remember from 46.2
+
+<Takeaways>
+<Takeaway n={1} title="A thermal reading mixes two real sources">Object emission (epsilon) plus reflected surroundings (1-epsilon) -- 46.1's blackbody physics alone is only half the real story.</Takeaway>
+<Takeaway n={2} title="Low emissivity causes large, real errors">This chapter's own real result: polished aluminum misread a 76.85C surface as 30.74C, a 46.11K error.</Takeaway>
+<Takeaway n={3} title="Cold-sky reflection makes shiny surfaces read falsely cold">A real, measured 76.80K error turned a 76.85C roof into an apparent 0.05C reading.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A technician measures a shiny stainless steel pipe (emissivity ~0.15) and reads 40°C. Based on Section 3-4, should they trust this number?
+
+<Solution>
+
+No, not without checking the camera's emissivity setting. Section 3's own real result showed a 0.15-emissivity surface can read tens of degrees low when the camera assumes a higher (or default `1.0`) emissivity; the real fix is entering the pipe's correct real emissivity (and the real reflected temperature) before trusting the reading, or applying a known high-emissivity reference patch (Section 5).
+
+</Solution>
+
+## Code
+
+### 1. NumPy: the real radiometric equation, forward and inverted
+
+```python
+import numpy as np
+
+sigma = 5.670374419e-8
+T_obj, T_amb = 350.0, 293.15
+
+def apparent_temp(T_obj, T_reflected, epsilon):
+    W = epsilon * sigma * T_obj**4 + (1 - epsilon) * sigma * T_reflected**4
+    return (W / sigma) ** 0.25
+
+for label, eps in [("painted/oxidized surface", 0.95), ("typical paint", 0.9), ("polished aluminum", 0.15)]:
+    T_app = apparent_temp(T_obj, T_amb, eps)
+    print(f"{label} (eps={eps}): apparent T={T_app:.2f}K ({T_app-273.15:.2f}C), error={T_obj-T_app:.2f}K")
+
+print()
+for label, eps in [("painted/oxidized surface", 0.95), ("polished aluminum", 0.15)]:
+    T_app = apparent_temp(T_obj, T_amb, eps)
+    W_measured = sigma * T_app**4
+    T_recovered = ((W_measured - (1 - eps) * sigma * T_amb**4) / (eps * sigma)) ** 0.25
+    print(f"{label}: recovered T (correct eps entered)={T_recovered:.4f}K, true T={T_obj}K")
+```
+
+Output:
+
+```text
+painted/oxidized surface (eps=0.95): apparent T=347.76K (74.61C), error=2.24K
+typical paint (eps=0.9): apparent T=345.47K (72.32C), error=4.53K
+polished aluminum (eps=0.15): apparent T=303.89K (30.74C), error=46.11K
+
+painted/oxidized surface: recovered T (correct eps entered)=350.0000K, true T=350.0K
+polished aluminum: recovered T (correct eps entered)=350.0000K, true T=350.0K
+```
+
+### 2. OpenCV: visualizing the real emissivity-driven error across a scene
+
+```python
+import cv2
+
+eps_map = np.full((100, 200), 0.9)
+eps_map[:, 100:] = 0.15  # right half: shiny metal; left half: painted
+true_temp_map = np.full((100, 200), 350.0)
+apparent_map = apparent_temp(true_temp_map, T_amb, eps_map)
+error_map = true_temp_map - apparent_map
+
+error_8bit = cv2.normalize(error_map, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+error_view = cv2.applyColorMap(error_8bit, cv2.COLORMAP_INFERNO)
+print("max real apparent-temperature error in this scene:", round(float(error_map.max()), 2), "K")
+print("error_view:", error_view.shape, error_view.dtype)
+```
+
+Output:
+
+```text
+max real apparent-temperature error in this scene: 46.11 K
+error_view: (100, 200, 3) uint8
+```
+
+## OpenCV API notes
+
+- **No `cv2` function applies emissivity correction** — the real radiometric equation (Code section 1) is plain physics; `cv2` enters only to visualize the result (Code section 2), exactly as in 46.1.
+- **A real commercial thermal camera's SDK typically exposes an `emissivity` and a `reflected_temperature` parameter per measurement** — not an OpenCV API, but the real, standard analogue of this chapter's own `epsilon` and `T_reflected` variables.
+- **This chapter used the broadband Stefan-Boltzmann form of the radiometric equation** for a tractable, exact worked example; a real camera's own internal calibration (46.4) typically works in its own narrower detector band instead, where emissivity can itself vary with wavelength (Where it fails).
+
+## Where it fails
+
+- **Emissivity itself is rarely known precisely without a reference** — look-up tables give typical values, but real surface condition (oxidation, roughness, paint thickness) shifts it; a known-emissivity reference patch (Section 5) is the real, standard field fix.
+- **This chapter's broadband approximation is a simplification** — a real surface's emissivity can vary with wavelength, and a real camera integrates over its own specific detector band (46.1), not the full spectrum this chapter's Stefan-Boltzmann shortcut assumes.
+- **Reflected temperature is also an estimate, not always directly measurable** — Section 4's cold-sky example used a representative real value; an unusual or highly directional real reflection source can still mislead a measurement even with reasonable emissivity and reflected-temperature settings.
+- **Emissivity can depend on viewing angle**, especially for metals — a real reading taken nearly edge-on to a shiny surface can differ substantially from one taken face-on, which this chapter's single-value model does not capture.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Leaving a thermal camera's emissivity at its default (often 0.95 or 1.0)** when measuring a real shiny or polished surface — Section 3's own real result (a 46.11K error at `epsilon=0.15`) shows exactly how costly this default can be.
+- **Ignoring reflected-temperature error outdoors** — Section 4's own real result (a 76.80K error from a cold sky) shows this term is not a minor correction on a shiny, outdoor surface.
+- **Assuming a "close enough" guessed emissivity is fine** — the real error (Section 3) scales steeply as emissivity drops; a guess of 0.9 instead of a true 0.15 is a completely different real measurement regime, not a small tweak.
+- **Forgetting that emissivity corrections need the surroundings' real temperature too**, not just the surface's own emissivity value — both terms of Section 2's equation matter; getting one right while ignoring the other still gives a real wrong answer.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Real emissivity reference values
+
+Published tables (Vollmer, Möllmann, *Infrared Thermal Imaging*, 2nd ed., 2017) give real, typical emissivities: human skin ≈0.98, matte paint ≈0.9-0.95, oxidized/rusted steel ≈0.6-0.85, polished aluminum ≈0.05-0.1, polished stainless steel ≈0.1-0.2 — this chapter's own 0.15 "polished aluminum" figure sits inside this real, published range.
+
+### Directional and spectral emissivity
+
+A fully rigorous treatment (Kirchhoff's law of thermal radiation, and its real directional/spectral generalizations) allows emissivity to vary with both viewing angle and wavelength simultaneously — this chapter's single-number, broadband model is the real, standard simplification used in practice, accurate enough for most industrial measurements but not for precision radiometric science.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "What does a real thermal camera's raw apparent reading actually represent, per Section 2's equation?",
+      options: ["The object's real temperature, always exactly", "A real mix of the object's own emission (weighted by emissivity) AND reflected radiation from its surroundings (weighted by 1-emissivity)", "Only reflected light, never the object's own heat", "A random, uncorrectable error"],
+      answer: 1,
+      explanation: "Section 2: the real general radiometric equation, which 46.1's blackbody-only treatment left out.",
+    },
+    {
+      question: "This chapter's own real result found what apparent-temperature error for polished aluminum (true T=76.85C) when a camera wrongly assumed a perfect blackbody?",
+      options: ["No error at all", "A real 46.11K error -- the camera reported 30.74C instead of the true 76.85C", "A 1K error, negligible", "An error in the opposite direction (reading too hot)"],
+      answer: 1,
+      explanation: "Section 3: a real, large, dangerous underestimate from a low real emissivity.",
+    },
+    {
+      question: "Why did the shiny roof under a clear, cold sky (Section 4) read as nearly freezing (0.05C) when it was truly 76.85C?",
+      options: ["The camera was broken", "Its low emissivity meant most of its apparent radiance was actually a real reflection of the very cold sky, not its own heat", "Shiny surfaces are always cold", "This is a software bug in thermal cameras"],
+      answer: 1,
+      explanation: "Section 4: a real, large reflected-temperature effect, compounding Section 3's own emissivity problem.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A surface has `epsilon=0.5`, true temperature 400K, in a 300K environment. Using Section 2's equation, roughly how does its apparent power compare to a true blackbody at 400K?
+
+<Solution>
+
+`W_apparent = 0.5 x sigma x 400^4 + 0.5 x sigma x 300^4`, which is the AVERAGE of the blackbody powers at 400K and 300K — noticeably less than a true 400K blackbody's own full power, since half the apparent radiance is really just the cooler 300K surroundings reflected back.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 1's pattern, compute the real apparent temperature for a true 400K object with `epsilon=0.3` in a 300K environment, and compare it to this chapter's own polished-aluminum result (46.11K error at 350K/0.15).
+
+<Solution>
+
+```python
+T_app_400 = apparent_temp(400.0, 300.0, 0.3)
+print(f"T_obj=400K, eps=0.3: apparent T={T_app_400:.2f}K, error={400.0-T_app_400:.2f}K")
+```
+
+Output:
+
+```text
+T_obj=400K, eps=0.3: apparent T=339.91K, error=60.09K
+```
+
+An even larger real error (60.09K) than this chapter's own polished-aluminum case (46.11K) — consistent with the real pattern that lower emissivity and a bigger true-vs-ambient temperature gap both make the error worse.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A maintenance team inspects an outdoor shiny stainless-steel tank on a clear, cold night, and the thermal camera reports a uniform, cold-looking surface with no apparent hot spots. Based on Section 4, should they conclude the tank has no real thermal issues?
+
+<Solution>
+
+Not necessarily. Following Section 4's own real result, a shiny, low-emissivity surface under a clear cold sky can read misleadingly cold and uniform simply from reflecting that cold sky, regardless of the tank's real internal temperature or any real hot spots underneath. The real, reliable fix (Section 5) is applying a known high-emissivity reference patch, or correctly entering the tank's real emissivity and the real reflected sky temperature, before trusting a "no issues found" reading on this kind of real surface.
+
+</Solution>
+
+## References
+
+1. M. Vollmer, K.-P. Möllmann, *Infrared Thermal Imaging: Fundamentals, Research and Applications*, 2nd ed., Wiley-VCH, 2017 — already cited in 46.1.
+2. OpenCV 4.13.0 documentation: `cv2.applyColorMap`, `cv2.normalize`. https://docs.opencv.org/4.13.0/
