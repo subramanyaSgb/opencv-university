@@ -90,3 +90,4 @@ Customer-site images only after anonymisation and written approval.
 | generated/sample-texture-smooth.png | 72 × 72 smooth low-frequency shading, noise σ 4 (seed 102) | Project-owned | 35.1–35.2 |
 | generated/sample-texture-blotchy.png | 72 × 72 random Gaussian-blurred discs, grey 20–235, noise σ 4 (seed 103) | Project-owned | 35.1–35.2 |
 | generated/sample-texture-defect.png | sample-texture-woven.png with a 24×24 "missing weave" patch at rows/cols 24:48, replaced by the patch's own mean grey level plus noise σ 5 (seed 104): same brightness as the surrounding fabric, no weave texture | Project-owned | 35.1–35.2, 15.3 |
+| generated/sample-chessboard.png | A flat, 9×6-inner-corner chessboard pattern (10×7 squares, 60 px each), for real `cv2.findChessboardCorners` detection | Project-owned | 41.4 |

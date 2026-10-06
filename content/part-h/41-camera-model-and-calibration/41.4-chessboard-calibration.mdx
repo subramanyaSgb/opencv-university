@@ -1,0 +1,262 @@
+export const meta = {
+  number: "41.4",
+  title: "Chessboard calibration",
+  minutes: 24,
+  objectives: [
+    "Detect a real chessboard's corners with cv2.findChessboardCorners",
+    "Recover a known camera's real K and distortion from multiple synthetic views",
+    "Measure, for real, why calibration needs more than one or two views",
+    "Know what RMS reprojection error actually measures, and what it does not",
+  ],
+};
+
+{/*
+  Lesson content for Chapter 41.4 (Part H, Module 41). Delivers the real measurement that
+  41.1-41.3 only estimated from datasheet values.
+  Real, verified numbers:
+  - cv2.findChessboardCorners on a real, rendered flat 9x6-inner-corner chessboard image
+    (sample-chessboard.png) found all 54 corners correctly, first corner at (119.5, 119.5)px,
+    last at (599.5, 419.5)px.
+  - A known synthetic camera (K_true: fx=fy=800, cx=320, cy=240; dist_true=[0.1,-0.05,0.001,
+    0.0005,0]) observed from 15 random poses, with realistic 0.2 px corner-detection noise,
+    then calibrated with cv2.calibrateCamera using 3, 5, 10 and 15 of those views
+    (scripts/gen_calib_data.py):
+    3 views:  RMS=0.2754, fx=802.02, error=2.015 px
+    5 views:  RMS=0.2704, fx=798.82, error=1.184 px
+    10 views: RMS=0.2748, fx=799.22, error=0.783 px
+    15 views: RMS=0.2720, fx=799.60, error=0.402 px
+  - A separate, noiseless version of the same test recovered K_true and dist_true to
+    displayed precision exactly (RMS ~1.6e-5) -- confirming the method itself is exact; the
+    0.2-15 views test's residual error comes entirely from the simulated corner noise.
+  Lab: CalibLab (apps/web/components/visuals/CalibLab.tsx) -- the real precomputed fx error
+  at each view count.
+*/}
+
+# 41.4 Chessboard calibration
+
+<Definition term="Chessboard calibration">measuring a real camera's actual K and distortion coefficients (41.1-41.3) from real photographs of a known pattern — not estimating them from a lens datasheet, but recovering the true values a specific physical camera actually has.</Definition>
+
+41.1's `fx = 2318.84 px` was computed from nominal lens and sensor specifications. This chapter measures the real thing: a real chessboard pattern, a real corner detector, and `cv2.calibrateCamera` recovering the true, physical values from real image data.
+
+## 1. An analogy
+
+A thermometer's datasheet says it should read accurately; calibrating it against a known reference (boiling water, ice water) tells you what it actually reads, including its own real quirks. A lens datasheet says its focal length is 8mm; calibrating against a known chessboard pattern tells you what this specific physical lens and sensor actually produce, including their own real manufacturing tolerances.
+
+## 2. A real chessboard, a real corner detector
+
+<Flow
+  steps={[
+    { label: "A real chessboard, several real photographs from different angles", tone: "world" },
+    { label: "cv2.findChessboardCorners: locate every inner corner, in pixels", tone: "process" },
+    { label: "A known 3D model of the same board (flat, known square size)", tone: "data" },
+    { label: "cv2.calibrateCamera: solve for K and distortion that explain every view at once", tone: "result" },
+  ]}
+/>
+
+`cv2.findChessboardCorners(image, (cols, rows))` locates every inner corner of a real chessboard pattern in a real image. On a real, rendered flat chessboard (9×6 inner corners), it found all **54 corners** correctly, the first at pixel `(119.5, 119.5)`, the last at `(599.5, 419.5)` — real, sub-pixel-precise pixel coordinates, from real pixel data.
+
+## 3. A real, known camera — recovered from multiple views
+
+<CalibLab caption="Real cv2.calibrateCamera results recovering a known fx=800px camera, from 3/5/10/15 synthetic chessboard views with realistic corner noise."/>
+
+A known synthetic camera (true `fx = fy = 800 px`), observing a real chessboard from 15 different random poses, with realistic 0.2 px corner-detection noise added to every corner. Calibrating with different numbers of those views:
+
+| Views used | Recovered fx | Error vs true fx (800) |
+| --- | --- | --- |
+| 3 | 802.02 | 2.015 px |
+| 5 | 798.82 | 1.184 px |
+| 10 | 799.22 | 0.783 px |
+| 15 | 799.60 | 0.402 px |
+
+More views make the recovered `fx` genuinely more accurate — real, measured, monotonically shrinking error from 2.0 px down to 0.4 px. With no corner noise at all, the identical method recovers the true `K` and distortion coefficients to displayed precision exactly, confirming this isn't a limitation of the method itself — the noisy-case residual error comes entirely from the simulated, realistic corner-detection noise, and more views genuinely average more of it out.
+
+## 4. What RMS reprojection error does and does not tell you
+
+Every one of Section 3's four calibrations reported an RMS reprojection error of roughly **0.27 px**, regardless of how many views were used — this number reflects the real, per-corner noise level (0.2 px, close to what was simulated), *not* how accurate the recovered camera parameters are. A calibration with few views can have a deceptively low RMS error while its recovered `fx` is still real-world-meaningfully wrong (Section 3's own 3-view, 2.015 px error) — RMS error alone does not tell you whether you used enough views.
+
+## 5. Industrial context: a real calibration checklist
+
+A practical calibration session uses many real photographs of the board (OpenCV's own tutorials typically recommend at least 10–20) from genuinely different angles and distances, not just repeated shots from the same spot — Section 3's own result shows exactly why more, varied views genuinely improve the real accuracy, not just the reported RMS number. This measured `K` and distortion then feed directly into 41.5's pose estimation and 41.6's real pixel-to-mm conversion.
+
+## What you should remember from 41.4
+
+<Takeaways>
+<Takeaway n={1} title="Calibrate, don't estimate">41.4 measures the real K/distortion a specific physical camera has, not a datasheet guess.</Takeaway>
+<Takeaway n={2} title="More views, more accurate parameters">This chapter's own real result: fx error shrank from 2.0 to 0.4 px as views grew from 3 to 15.</Takeaway>
+<Takeaway n={3} title="RMS error is not the same as parameter accuracy">All four of this chapter's calibrations had similar RMS error; only the recovered fx's real accuracy differed.</Takeaway>
+</Takeaways>
+
+## Mini exercise
+
+**Q1.** A calibration with 20 views reports a low RMS error of 0.1 px. Does that alone guarantee the recovered fx is accurate?
+
+<Solution>
+
+**Not alone** — Section 4's own finding: RMS error reflects per-corner noise, not whether enough, sufficiently varied views were used. A low RMS error with few or very similar-angle views could still leave the recovered parameters real-world inaccurate.
+
+</Solution>
+
+## Code
+
+### 1. NumPy: predicting the noise-driven RMS level
+
+```python
+import numpy as np
+
+corner_noise_std_px = 0.2
+# RMS error from independent x,y noise of this std is close to the std itself
+print("expected RMS reprojection error (px):", round(corner_noise_std_px * np.sqrt(2) / np.sqrt(2), 2))
+```
+
+Output:
+
+```text
+expected RMS reprojection error (px): 0.2
+```
+
+### 2. OpenCV: real corner detection and real multi-view calibration
+
+```python
+import cv2
+
+img = cv2.imread("sample-chessboard.png", cv2.IMREAD_GRAYSCALE)
+found, corners = cv2.findChessboardCorners(img, (9, 6))
+print("found:", found, " corners:", len(corners))
+
+K_true = np.array([[800.0, 0, 320], [0, 800.0, 240], [0, 0, 1]])
+dist_true = np.array([0.1, -0.05, 0.001, 0.0005, 0.0])
+cols, rows, sq = 9, 6, 25.0
+objp = np.zeros((rows * cols, 3), np.float64)
+objp[:, :2] = np.mgrid[0:cols, 0:rows].T.reshape(-1, 2) * sq
+
+rng = np.random.default_rng(3)
+objpoints, imgpoints = [], []
+for _ in range(15):
+    rvec = rng.normal(0, 0.3, 3)
+    tvec = np.array([rng.normal(0, 60), rng.normal(0, 40), 400 + rng.normal(0, 80)])
+    img_pts, _ = cv2.projectPoints(objp, rvec, tvec, K_true, dist_true)
+    img_pts = img_pts.reshape(-1, 2) + rng.normal(0, 0.2, (len(objp), 2))
+    objpoints.append(objp.astype(np.float32))
+    imgpoints.append(img_pts.reshape(-1, 1, 2).astype(np.float32))
+
+ret, K_est, dist_est, _, _ = cv2.calibrateCamera(objpoints, imgpoints, (640, 480), None, None)
+print(f"RMS: {ret:.4f}, fx: {K_est[0,0]:.2f} (true 800)")
+```
+
+Output:
+
+```text
+found: True  corners: 54
+RMS: 0.2720, fx: 799.60 (true 800)
+```
+
+## OpenCV API notes
+
+- **`cv2.findChessboardCorners(image, patternSize)`**: `patternSize` is `(cols, rows)` of *inner* corners, not squares — a board with 10×7 squares has 9×6 inner corners, exactly this chapter's own example.
+- **`cv2.calibrateCamera(objectPoints, imagePoints, imageSize, K, distCoeffs)`**: pass `None` for `K`/`distCoeffs` to solve for both from scratch; returns `(rms, K, distCoeffs, rvecs, tvecs)` — one `rvec`/`tvec` pair *per view*, since each photograph was taken from a genuinely different, separately-unknown pose.
+- **`cv2.cornerSubPix`**: commonly run after `findChessboardCorners` on real (non-synthetic) images, to refine each corner to sub-pixel accuracy — this chapter's synthetic test already places corners at sub-pixel-accurate float coordinates directly, skipping that refinement step.
+- **`cv2.drawChessboardCorners`**: draws the detected corners and their connecting pattern on an image, the standard way to visually confirm a real detection succeeded before trusting it in a calibration.
+
+## Where it fails
+
+- **Too few views, or views that are too similar to each other**, genuinely limit real accuracy even with a low reported RMS error (Section 4) — the fix is more views from *different* angles and distances, not just more views from the same spot.
+- **A board that is not actually flat**, or whose real square size differs from the value given to `objp`, biases every recovered parameter systematically — the method assumes the 3D model is exactly correct.
+- **Poor lighting or blur on the real board** degrades real corner-detection accuracy directly, which this chapter's simulated 0.2 px noise stands in for; worse real conditions give a worse real noise level, and Section 3's own view-count lesson applies even more strongly.
+
+## ⚠️ Common mistakes
+
+<Callout kind="mistake">
+
+- **Trusting a low RMS reprojection error as proof of an accurate calibration** — Section 4's own measured result: similar RMS across very different real parameter accuracy.
+- **Using `patternSize` = number of squares instead of inner corners** — `cv2.findChessboardCorners` expects inner-corner counts (9×6 for a 10×7-square board, this chapter's own example), and the wrong count simply fails to find anything.
+- **Calibrating from views taken from nearly the same position** — Section 3's real lesson: genuinely different views are what actually reduces real parameter error, not merely a larger view count.
+- **Skipping `cv2.cornerSubPix` on real images** (OpenCV API notes) — real corner detection without sub-pixel refinement is noisier than it needs to be, directly worsening exactly the kind of error Section 3 measured.
+
+</Callout>
+
+## 🔍 Go deeper
+
+<GoDeeper>
+
+### Zhang's calibration method
+
+`cv2.calibrateCamera` implements a version of Zhang's widely-used planar calibration method [1], which solves for a camera's intrinsics using multiple views of a single flat pattern at different, unknown orientations — a major practical advance over earlier methods that needed a precisely-known 3D calibration object, since a flat printed chessboard is vastly easier to produce accurately than a precise 3D structure.
+
+### Why views at different angles specifically help
+
+A chessboard photographed dead-on, repeatedly, provides very little information to separate the focal length from the board's unknown distance — both explain the observed corner spacing almost equally well. Genuinely different viewing angles and distances break that ambiguity, which is exactly why Section 5's practical advice (varied angles, not just more repeats) matters more than view count alone.
+
+</GoDeeper>
+
+## ✅ Check yourself
+
+<Quiz
+  questions={[
+    {
+      question: "In this chapter's own real test, what happened to the recovered fx's accuracy as the number of calibration views grew from 3 to 15?",
+      options: ["No change at all", "The error shrank from 2.015 px to 0.402 px -- a real, measured improvement", "The error grew larger", "RMS error and fx accuracy always move together"],
+      answer: 1,
+      explanation: "Section 3: a real, measured, monotonic improvement with more views.",
+    },
+    {
+      question: "What does cv2.findChessboardCorners's patternSize argument actually count?",
+      options: ["The number of squares", "The number of INNER corners (where four squares meet), not squares", "The image's pixel dimensions", "The number of calibration views needed"],
+      answer: 1,
+      explanation: "OpenCV API notes: a 10x7-square board has 9x6 inner corners -- this chapter's own real example.",
+    },
+    {
+      question: "This chapter's four calibrations (3/5/10/15 views) all had RMS reprojection error around 0.27 px. What does that similarity actually mean?",
+      options: ["All four calibrations were equally accurate", "RMS error reflects the per-corner noise level, not whether enough views were used -- the recovered fx's real accuracy still varied a lot between them", "The simulation had a bug", "RMS error always equals exactly the corner noise std"],
+      answer: 1,
+      explanation: "Section 4: a real, measured dissociation between RMS error and actual parameter accuracy.",
+    },
+  ]}
+/>
+
+## Exercises
+
+### Exercise 1 (by hand)
+
+A chessboard has 8x5 squares. What patternSize should be passed to cv2.findChessboardCorners?
+
+<Solution>
+
+**(7, 4)** — inner corners are one fewer than squares in each direction: 8-1=7, 5-1=4.
+
+</Solution>
+
+### Exercise 2 (coding)
+
+Using Code section 2's pattern, calibrate with only the first 2 views instead of 15, and compare the recovered fx error to this chapter's own 3-view result (2.015 px).
+
+<Solution>
+
+```python
+ret2, K2, dist2, _, _ = cv2.calibrateCamera(objpoints[:2], imgpoints[:2], (640, 480), None, None)
+print(f"2 views: RMS={ret2:.4f}, fx={K2[0,0]:.2f}, error={abs(K2[0,0]-800):.3f}")
+```
+
+Typical output (one machine, matching this chapter's own real data generation):
+
+```text
+2 views: RMS=0.2703, fx=797.73, error=2.269
+```
+
+Worse than the 3-view result (2.015 px error) — following Section 3's own trend directly: fewer views, less accurate recovered parameters, even though the RMS error itself stays in the same general range.
+
+</Solution>
+
+### Exercise 3 (thinking)
+
+A technician calibrates a camera using 15 photographs of a chessboard, but all taken from directly in front of the board at the same distance, just shifted slightly left and right. Based on Section 5's "Go deeper," would you expect this to calibrate as well as this chapter's own 15-view result?
+
+<Solution>
+
+No — Section 5's "Go deeper" explains specifically that views taken from very similar angles and distances do not resolve the real ambiguity between focal length and distance nearly as well as genuinely varied viewing angles do, regardless of how many such similar views are taken. Even with 15 photographs, if they are all nearly the same view repeated, the real accuracy would likely be closer to this chapter's few-view results (2 px or more of fx error) than its real 15-varied-view result (0.4 px) — the number of views alone, without genuine variation in angle and distance, is not what drove this chapter's own measured improvement.
+
+</Solution>
+
+## References
+
+1. Z. Zhang, "A flexible new technique for camera calibration," *IEEE Transactions on Pattern Analysis and Machine Intelligence*, 22(11), 1330–1334, 2000.
+2. OpenCV 4.13.0 documentation: `cv2.findChessboardCorners`, `cv2.calibrateCamera`, `cv2.cornerSubPix`, `cv2.drawChessboardCorners`. https://docs.opencv.org/4.13.0/

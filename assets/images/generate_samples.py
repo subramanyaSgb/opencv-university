@@ -882,6 +882,20 @@ images["sample-texture-smooth.png"] = tex_smooth
 images["sample-texture-blotchy.png"] = tex_blotchy
 images["sample-texture-defect.png"] = tex_defect
 
+# Module 41.4: a flat 9x6-inner-corner chessboard pattern (10x7 squares), for real
+# cv2.findChessboardCorners detection.
+_cb_cols, _cb_rows, _cb_sq = 9, 6, 60
+_cb_margin = 60
+_cb_w = (_cb_cols + 1) * _cb_sq + 2 * _cb_margin
+_cb_h = (_cb_rows + 1) * _cb_sq + 2 * _cb_margin
+_chessboard = np.full((_cb_h, _cb_w), 255, np.uint8)
+for _r in range(_cb_rows + 1):
+    for _c in range(_cb_cols + 1):
+        if (_r + _c) % 2 == 0:
+            _y0, _x0 = _cb_margin + _r * _cb_sq, _cb_margin + _c * _cb_sq
+            _chessboard[_y0:_y0 + _cb_sq, _x0:_x0 + _cb_sq] = 0
+images["sample-chessboard.png"] = _chessboard
+
 for name, img in images.items():
     ok = cv2.imwrite(str(OUT / name), img)
     assert ok, f"could not write {name}"

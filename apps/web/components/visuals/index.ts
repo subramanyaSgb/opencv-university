@@ -179,3 +179,4 @@ export { ParticleLab } from "./ParticleLab";
 export { CountLab } from "./CountLab";
 export { CameraMatrixLab } from "./CameraMatrixLab";
 export { DistortionLab } from "./DistortionLab";
+export { CalibLab } from "./CalibLab";
